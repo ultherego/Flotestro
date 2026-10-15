@@ -1,8 +1,9 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import { goDuration } from "../lib/format";
-import type { Settings as SettingsView, SettingsArea, SettingsFact } from "../lib/types";
+import type { Settings as SettingsView, SettingsArea, SettingsFact, Whoami } from "../lib/types";
 import { Empty, ErrorBox, Pair, Pairs, Time } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
 import { useToast } from "../components/Toast";
@@ -10,11 +11,116 @@ import { Board } from "../components/board";
 import { useT } from "../i18n";
 
 /**
- * The configuration of this panel: what the process was started with, and the
- * monitoring retentions the installation itself holds.
+ * What one configurable resource of the installation is showing right now.
+ *
+ * A hub that counts has to keep the product's first rule: a number nobody
+ * could take is not a count of nothing. A viewer who may not read the roles
+ * must see that they are not visible to them, not "0 roles" - which would
+ * read as an installation with nobody in it.
+ */
+export type HubState =
+  | { kind: "count"; n: number }
+  | { kind: "forbidden" }
+  | { kind: "unknown" };
+
+export function hubState(data: unknown, error: unknown, loading: boolean): HubState {
+  if (error instanceof ApiError && error.forbidden) return { kind: "forbidden" };
+  if (error) return { kind: "unknown" };
+  if (loading || data === undefined || data === null) return { kind: "unknown" };
+  const payload = data as { count?: unknown; items?: unknown };
+  if (typeof payload.count === "number") return { kind: "count", n: payload.count };
+  // Some collections answer with the items alone. Counting them is right only
+  // because these are the configuration of one installation and are never
+  // paged; a paged collection counted this way would under-report.
+  if (Array.isArray(payload.items)) return { kind: "count", n: payload.items.length };
+  return { kind: "unknown" };
+}
+
+/**
+ * The resources this installation configures, each owned by the screen that
+ * holds its list.
+ *
+ * Deliberately not a copy of those screens. A section says the state set now
+ * and gives the way to change it: the control here when it is small, the
+ * screen that owns the resource when the resource is a list. A page of links
+ * is not management; a state with a way in is. Decision of 15.10.
+ */
+type HubEntry = {
+  key: string;
+  title: string;
+  /** What the resource decides, in one line. */
+  what: string;
+  to: string;
+  path: string;
+  /** The permission the owning screen is behind, so a tile never offers a way in that refuses. */
+  permission: string;
+  open: string;
+};
+
+const CONFIGURED: HubEntry[] = [
+  {
+    key: "channels",
+    title: "Notification channels",
+    what: "Where an alert, a finished campaign or a failed delivery is sent.",
+    to: "/notifications", path: "/api/v1/notifications/channels",
+    permission: "notification.read", open: "Open the channels",
+  },
+  {
+    key: "relays",
+    title: "Relays",
+    what: "The hosts that carry traffic for a network this panel cannot reach.",
+    to: "/relays", path: "/api/v1/relays",
+    permission: "host.enroll.read", open: "Open the relays",
+  },
+  {
+    key: "roles",
+    title: "Roles",
+    what: "What a sign-in is allowed to see and to order.",
+    to: "/access?tab=roles", path: "/api/v1/roles",
+    permission: "principal.manage", open: "Open the roles",
+  },
+  {
+    key: "mappings",
+    title: "Group mappings",
+    what: "Which group of the identity provider is granted which role.",
+    to: "/access?tab=mappings", path: "/api/v1/group-mappings",
+    permission: "principal.manage", open: "Open the mappings",
+  },
+  {
+    key: "budgets",
+    title: "Budgets",
+    what: "How much of the fleet one campaign may touch, and how fast.",
+    to: "/budgets", path: "/api/v1/budgets",
+    permission: "budget.read", open: "Open the budgets",
+  },
+  {
+    key: "policies",
+    title: "Policies",
+    what: "What every host is held to, and what counts as a drift from it.",
+    to: "/policies", path: "/api/v1/policies",
+    permission: "policy.read", open: "Open the policies",
+  },
+];
+
+/**
+ * The configuration of this panel: the resources the installation holds and
+ * can change, the retentions it stores itself, and - told apart from both -
+ * what the process was started with.
  */
 export function Settings() {
   const t = useT();
+  // What this sign-in holds, asked once for every tile. A tile is behind the
+  // same permission as the screen that owns its resource, so the hub never
+  // offers a way in that refuses on arrival.
+  const whoami = useQuery({
+    queryKey: ["whoami"],
+    queryFn: () => api.get<Whoami>("/api/v1/whoami"),
+    staleTime: 5 * 60 * 1000,
+  });
+  const permissions = new Set(whoami.data?.permissions ?? []);
+  // Until the answer is here the set is empty, which is not the same as a
+  // sign-in that holds nothing: a tile waits rather than claiming a refusal.
+  const principalKnown = whoami.data !== undefined;
   const { data, error } = useQuery({
     queryKey: ["settings"],
     queryFn: () => api.get<SettingsView>("/api/v1/settings"),
@@ -40,16 +146,26 @@ export function Settings() {
       <PageHeader
         icon="settings"
         title={t("Settings")}
-        description={t("What this panel was started with.")}
+        description={t("What this installation is configured with, and what it was started with.")}
         help={
           <>
-            <p>{t("The values come from {source} and are read when the panel starts, so a change to them needs a restart.", { source: t(data?.source ?? "the environment of the control plane process") })}</p>
-            <p>{t("The monitoring retentions are the exception: they belong to the installation, are stored by this screen and take effect without a restart.")}</p>
+            <p>{t("The top of the screen is the configuration the installation holds: what is set now, and the way to change it. A count is a link into the screen that owns the resource; the retentions are changed here.")}</p>
+            <p>{t("Below it are the values that come from {source} and are read when the panel starts, so a change to them needs a restart.", { source: t(data?.source ?? "the environment of the control plane process") })}</p>
+            <p>{t("A resource this sign-in may not read says so. It is never shown as none: an installation with no channels and one whose channels are not yours to see are different things.")}</p>
           </>
         }
       />
       {error && <ErrorBox error={error} />}
       {!error && !data && <Card><Empty>{t("Loading…")}</Empty></Card>}
+      <div className="parts-head">
+        <h2>{t("What this installation configures")}</h2>
+        <span className="source">{t("Stored by the panel; a change takes effect without a restart.")}</span>
+      </div>
+      <div className="parts" data-testid="settings-hub">
+        {CONFIGURED.map((entry) => (
+          <HubTile key={entry.key} entry={entry} permissions={permissions} known={principalKnown} />
+        ))}
+      </div>
       <div className="widgets">
         <MonitoringSettingsCard />
       </div>
@@ -60,6 +176,7 @@ export function Settings() {
               colour is a tile nobody can see the edge of. */}
           <div className="parts-head">
             <h2>{t("What the process was started with")}</h2>
+            <span className="source">{t("Read at start, changed where the deployment is defined.")}</span>
             <input
               type="search"
               className="settings-search"
@@ -83,6 +200,80 @@ export function Settings() {
       )}
     </>
   );
+}
+
+/* ---------------------------------------------------------------------- */
+/* The hub: one configurable resource each, with the way in.               */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * One resource of the installation: what it decides, how much of it is set
+ * now, and the screen that changes it.
+ *
+ * The count is asked for here rather than taken from a screen that holds the
+ * list, because this tile has to say three different things and only the
+ * answer to its own request tells them apart: a number, a refusal, and not
+ * knowing. A tile that cannot count still names the resource and still opens
+ * it - a hub that hides what it could not count is a hub that lies about what
+ * the installation has.
+ */
+function HubTile({
+  entry, permissions, known,
+}: {
+  entry: HubEntry;
+  permissions: Set<string>;
+  /** Whether the sign-in's permissions have arrived. */
+  known: boolean;
+}) {
+  const t = useT();
+  const allowed = permissions.has(entry.permission);
+  const collection = useQuery({
+    queryKey: ["settings", "hub", entry.key],
+    queryFn: () => api.get<{ count?: number; items?: unknown[] }>(entry.path),
+    enabled: known && allowed,
+    retry: false,
+    staleTime: 30 * 1000,
+  });
+  const state: HubState = known && !allowed
+    ? { kind: "forbidden" }
+    : hubState(collection.data, collection.error, collection.isPending);
+
+  return (
+    <section className={`part${state.kind === "count" ? "" : " unknown"}`} data-testid={`hub-${entry.key}`}>
+      <h3 className="part-head">
+        <span className="part-name">{t(entry.title)}</span>
+        <span className="part-summary" data-testid={`hub-${entry.key}-state`}>
+          <HubSummary state={state} />
+        </span>
+      </h3>
+      <div className="part-body">
+        <p className="part-reason">{t(entry.what)}</p>
+        <Actions>
+          {state.kind === "forbidden" && known
+            ? <span className="source">{t("Whoever administers this installation changes it.")}</span>
+            : <Link className="button secondary" to={entry.to}>{t(entry.open)}</Link>}
+        </Actions>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The one line that says how much is set - or that the number is not to be had.
+ *
+ * The count is written after a colon rather than before a noun on purpose: the
+ * panel has two languages, and one of them declines the noun by the number.
+ */
+function HubSummary({ state }: { state: HubState }) {
+  const t = useT();
+  if (state.kind === "forbidden") {
+    return <span className="badge unknown">{t("not yours to read")}</span>;
+  }
+  if (state.kind === "unknown") {
+    return <span className="badge unknown">{t("not known")}</span>;
+  }
+  if (state.n === 0) return <span>{t("none set")}</span>;
+  return <span className="num">{t("set: {n}", { n: state.n })}</span>;
 }
 
 /* ---------------------------------------------------------------------- */

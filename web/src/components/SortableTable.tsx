@@ -231,7 +231,7 @@ export function ColumnChooser({ columns }: { columns: Columns }) {
     };
   }, [open]);
   return (
-    <span ref={container} className="column-chooser" style={{ position: "relative", display: "inline-block" }}>
+    <span ref={container} className="column-chooser">
       <button
         type="button"
         className="secondary"

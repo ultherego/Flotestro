@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Roles and permissions &middot; Flotestro documentation</title>
-<meta name="description" content="The six roles, the permissions each one holds and does not hold, the five categories of a scope, and what needs more than a role: fresh authentication and a second person.">
+<meta name="description" content="The six built-in roles and the ones an installation defines for itself, the permissions each one holds and does not hold, the five categories of a scope, and what needs more than a role: fresh authentication and a second person.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
@@ -86,13 +86,14 @@
         <li><a href="api.html">8. API</a></li>
         <li><a href="roles.html" aria-current="page">9. Roles and permissions</a>
           <ul class="sidebar__sections">
-            <li><a href="#roles">The six roles</a></li>
+            <li><a href="#roles">The six built-in roles</a></li>
             <li><a href="#viewer">viewer</a></li>
             <li><a href="#auditor">auditor</a></li>
             <li><a href="#operator">operator</a></li>
             <li><a href="#approver">approver</a></li>
             <li><a href="#identity-admin">identity_admin</a></li>
             <li><a href="#platform-admin">platform_admin</a></li>
+            <li><a href="#own-roles">A role of your own</a></li>
             <li><a href="#scope">The scope of a binding</a></li>
             <li><a href="#grant">The shape of a grant</a></li>
             <li><a href="#escalation">Nobody grants what they do not hold</a></li>
@@ -118,17 +119,27 @@
     role, the role is bound to an identity within a scope, and the scope says
     which part of the fleet the role reaches. This chapter is the catalogue of
     the six roles, what each may and may not do, how a scope narrows a binding,
-    and what an operation asks for beyond a role.</p>
+    and what an operation asks for beyond a role. The six are not the whole
+    catalogue: an installation defines roles of its own, and
+    <a href="#own-roles">A role of your own</a> is how.</p>
 
 
-    <h2 id="roles">The six roles</h2>
+    <h2 id="roles">The six built-in roles</h2>
 
-    <p>The catalogue is fixed: the panel knows these six roles and no others,
-    and a request naming another is refused with
-    <code class="refusal">unknown_role</code>. A role is a list of permissions,
-    not a rank &mdash; the lists overlap, but none of them contains another.
-    The whole catalogue is served at <code>GET /api/v1/roles</code>, role by
-    role with the permissions it carries.</p>
+    <p>These six come with the product. Their permissions are in the code, not
+    in the database, so nobody &mdash; no administrator, no script, nobody with
+    the database password &mdash; can change what one of them carries; the panel
+    refuses an edit with <code class="refusal">built_in_role</code>. A role is a
+    list of permissions, not a rank: the lists overlap, but none of them
+    contains another.</p>
+
+    <p>An installation adds roles of its own beside them, described under
+    <a href="#own-roles">A role of your own</a>. Whichever kind it is, a request
+    naming a role this installation does not have is refused with
+    <code class="refusal">unknown_role</code>, and
+    <code>GET /api/v1/roles</code> serves the whole catalogue &mdash; both
+    kinds, each with the permissions it carries and a <code>built_in</code>
+    flag that says which kind it is.</p>
 
 <div class="table-scroll">
 <table>
@@ -307,6 +318,100 @@
     reason and a fresh authentication &mdash; both are described under
     <a href="#beyond">When a role is not enough</a>.</p>
 
+    <h2 id="own-roles">A role of your own</h2>
+
+    <p>The six above are a guess at how a fleet is run, and for many of the
+    people who need access they are either too wide or too narrow. &ldquo;Restart
+    a service and read the journal, nothing else&rdquo; is a real job on a real
+    rota; before roles of your own it could only be had by handing somebody
+    <code>operator</code>, which also reboots hosts, installs packages and
+    decommissions machines. So an installation defines the role the job
+    actually is.</p>
+
+    <p>Where the permissions live is the difference between the two kinds, and
+    it is deliberate:</p>
+
+    <ul>
+      <li><strong>A built-in role keeps its permissions in the code,</strong>
+      where they are read in review and cannot be edited at run time. The
+      database says nothing about what one carries, so the two can never
+      disagree.</li>
+      <li><strong>A role you define keeps its permissions in the
+      database,</strong> as rows. They are read in the same query as the
+      binding that names them, on every request, so a change reaches every
+      replica at once &mdash; there is no catalogue cached anywhere to go
+      stale.</li>
+    </ul>
+
+    <p>The vocabulary a role is written in is served, so nothing has to keep a
+    copy of it:</p>
+
+<pre><code>GET /api/v1/permissions
+
+{
+  "items": [
+    { "permission": "host.read",     "group": "host" },
+    { "permission": "unit.restart",  "group": "unit" }
+  ],
+  "count": 188
+}</code></pre>
+
+    <p>A role is then defined whole &mdash; name, what it is for, and every
+    permission it carries:</p>
+
+<pre><code>POST /api/v1/roles
+
+{
+  "role":        "shift_lead",
+  "description": "Restarts services on the night shift.",
+  "permissions": ["host.read", "job.read", "job.create", "unit.restart"],
+  "reason":      "the night rota needs restarts and nothing else"
+}</code></pre>
+
+    <p><code>PUT /api/v1/roles/{role}</code> replaces the definition, and
+    replaces it <em>whole</em>: what is left out is taken away from everybody
+    bound to the role, on their next request. The panel&rsquo;s screen names
+    those permissions before the change is saved, and the audit trail records
+    both the old definition and the new one, with a <code>removed</code> list
+    that says what the holders lost. <code>DELETE /api/v1/roles/{role}</code>
+    removes a role nobody holds.</p>
+
+    <p>The rules the panel holds a definition to:</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Refusal</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code class="refusal">unknown_permission</code></td><td>The role names something this product does not define. A role carrying an invented permission would read as a right nobody can grant and nobody can take away.</td></tr>
+<tr><td><code class="refusal">empty_role</code></td><td>The role carries nothing. Such a role appears on every screen as a role somebody holds while granting nothing at all.</td></tr>
+<tr><td><code class="refusal">role_exists</code></td><td>The name is taken &mdash; by one of the six, or by a role already defined here.</td></tr>
+<tr><td><code class="refusal">invalid_role</code></td><td>The name is not lower-case letters, digits and underscores, 2 to 63 of them, starting with a letter. It is what every binding, mapping and audit line carries, so it is held to a spelling those can be read back from, and it cannot be changed afterwards.</td></tr>
+<tr><td><code class="refusal">built_in_role</code></td><td>The role is one of the six. They are the product&rsquo;s and are neither editable nor removable.</td></tr>
+<tr><td><code class="refusal">role_in_use</code></td><td>Somebody is bound to the role, or a group maps to it. Revoke those first; the database holds to this with a foreign key, so it is refused for a script and a hand at <code>psql</code> as well as for this endpoint.</td></tr>
+<tr><td><code class="refusal">scope_escalation</code></td><td>The role would carry a permission the caller does not hold <em>everywhere</em>. See below.</td></tr>
+</tbody></table></div>
+
+    <p>That last one is stricter than the rule for granting a role, and on
+    purpose. A role is a global object: once it exists, anybody with
+    <code>principal.manage</code> may bind it anywhere. A definition written by
+    somebody who holds those powers on one site only would therefore be a way
+    of handing them out on every other site, so defining a role requires
+    holding every permission in it in the global scope. Granting one is checked
+    separately, against what the role really carries &mdash; see
+    <a href="#escalation">Nobody grants what they do not hold</a>.</p>
+
+    <p>Both kinds of role are bound, mapped and revoked exactly the same way;
+    nothing else in this chapter treats them differently.</p>
+
+    <div class="note">
+      <p class="note__title">This one does not go back</p>
+      <p>The schema change that made roles rows cannot be undone by a later
+      migration. Going back would mean dropping every role an installation
+      defined and, with it, every binding and group mapping that names one
+      &mdash; somebody&rsquo;s access, deleted to satisfy a schema. The step
+      down does not exist, deliberately.</p>
+    </div>
+
     <h2 id="scope">The scope of a binding</h2>
 
     <p>A binding is a role <em>within a scope</em>. The scope has five
@@ -394,7 +499,7 @@
 <table>
 <thead><tr><th>Refusal</th><th>When</th></tr></thead>
 <tbody>
-<tr><td><code class="refusal">unknown_role</code></td><td>The role is not one of the six.</td></tr>
+<tr><td><code class="refusal">unknown_role</code></td><td>The role is neither one of the six nor one this installation defined.</td></tr>
 <tr><td><code class="refusal">invalid_binding</code></td><td><code>team_scope</code> is missing. It is required, and the refusal says what to write: <code>{"mode":"any"}</code> or <code>{"mode":"exact","team_id":"&hellip;"}</code>. A team omitted by accident would widen the grant in silence.</td></tr>
 <tr><td><code class="refusal">invalid_binding</code></td><td><code>team_scope</code> is malformed: a mode that is neither <code>any</code> nor <code>exact</code>, a <code>team_id</code> given with mode <code>any</code>, or mode <code>exact</code> with no <code>team_id</code>.</td></tr>
 <tr><td><code class="refusal">invalid_binding</code></td><td><code>valid_until</code> is not an RFC 3339 moment. Leaving it out means the binding lasts until somebody revokes it.</td></tr>
@@ -465,10 +570,14 @@ site=waw env=prod team=* owner=* tag=*</code></pre>
 
     <ul>
       <li><strong>The group grants a role; the scope stays the panel&rsquo;s
-      policy.</strong> A mapping narrows by site and environment and by nothing
-      else, and it says so in every category: the team is any, the owners and
-      the tags are <code>*</code>. Filling two fields and leaving three empty
-      would grant nothing at all.</li>
+      policy.</strong> A mapping narrows by site, environment, owner and tag.
+      Since 0.63 the last two are expressible here as they always were in a
+      binding made by hand: before that, every role arriving through the
+      provider was wider than one granted locally, which is the opposite of
+      what a directory is for. A category left out means every value of it; a
+      category sent as an empty list reaches nothing and is refused where it is
+      written. The team is always any: a mapping has never narrowed by
+      team.</li>
       <li><strong>The mapping is read on every request,</strong> so removing one
       takes the role away on the user&rsquo;s next request rather than at their
       next login.</li>

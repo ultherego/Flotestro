@@ -493,6 +493,10 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/access/review", s.handleAccessReview)
 	s.route(mux, "GET /api/v1/whoami", s.handleWhoami)
 	s.route(mux, "GET /api/v1/roles", s.handleListRoles)
+	s.route(mux, "POST /api/v1/roles", s.handleCreateRole)
+	s.route(mux, "PUT /api/v1/roles/{role}", s.handleReplaceRole)
+	s.route(mux, "DELETE /api/v1/roles/{role}", s.handleDeleteRole)
+	s.route(mux, "GET /api/v1/permissions", s.handleListPermissions)
 	// The effective configuration, secrets masked: what this panel was
 	// started with, for whoever administers it.
 	s.route(mux, "GET /api/v1/settings", s.handleSettings)

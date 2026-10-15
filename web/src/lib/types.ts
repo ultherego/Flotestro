@@ -237,6 +237,12 @@ export type Unresolved = {
   hostname: string;
   action: string;
   kind: UnresolvedKind;
+  /**
+   * Which of the three the row says: the change did not hold, the host could
+   * not be read, or the outcome is unknown. Decided on the server, because
+   * the list is paged and counted there.
+   */
+  reading?: "did_not_hold" | "could_not_read" | "outcome_unknown";
   reason?: string;
   /** What the verifier expected and what it found; absent for an unknown outcome. */
   verification?: unknown;
@@ -247,6 +253,11 @@ export type Unresolved = {
 };
 
 export type UnresolvedCounts = {
+  /** The two inside "did it hold?", counted apart because they call for different work. */
+  did_not_hold_operations?: number;
+  did_not_hold_hosts?: number;
+  could_not_read_operations?: number;
+  could_not_read_hosts?: number;
   outcome_unknown_operations: number;
   outcome_unknown_hosts: number;
   applied_unverified_operations: number;
@@ -956,6 +967,14 @@ export type GroupMapping = {
   role: string;
   site: string;
   environment: string;
+  /**
+   * The owners and tags the mapping reaches. A single "*" is every one of that
+   * category; an empty list reaches none. The server documented these and
+   * threw them away until 15.10, so a rule narrowed to one owner was stored
+   * as one reaching every owner.
+   */
+  owners: string[];
+  tags: string[];
   created_by: string;
   created_at: string;
 };

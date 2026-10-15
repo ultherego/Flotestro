@@ -201,16 +201,24 @@ func (d *resultDelivery) acknowledge(ack *agentv1.TaskResultAck) {
 			"consequence", "the task was carried out on this host and the panel does not record it")
 	case agentv1.TaskResultAck_STATUS_DUPLICATE:
 		d.log.Info("the panel already held this result", "task_id", ack.GetTaskId())
-	default:
+	case agentv1.TaskResultAck_STATUS_SETTLED:
 		d.log.Debug("the panel took the result", "task_id", ack.GetTaskId())
+	default:
+		// A status this agent does not know does not free the only durable
+		// copy of work already carried out on the host. It used to: the switch
+		// chose a log line and every answer fell through to the release, so an
+		// acknowledgement of STATUS_UNSPECIFIED - the zero value, which is
+		// also what a field nobody set looks like - read as "the panel took
+		// it". Keeping it costs a duplicate delivery, which the idempotency
+		// key makes harmless; releasing it costs the result.
+		d.log.Warn("the panel answered with a status this agent does not know; the result is kept for a resend",
+			"task_id", ack.GetTaskId(), "status", ack.GetStatus().String())
+		return
 	}
 	// The spool decides whether this acknowledgement is about the answer it
 	// holds. What this session remembers about the send is only dropped when
 	// it is: otherwise the answer stays spooled and the retry interval still
 	// applies to it, instead of being offered on every tick.
-	// The spool decides whether this acknowledgement is about the answer it
-	// holds. When it is not, nothing is freed and this session goes on
-	// remembering the send, so the answer keeps its place in the queue.
 	if err := d.spool.Acknowledge(ack); err != nil {
 		d.log.Warn("an acknowledgement was refused and the answer is kept for a resend",
 			"task_id", ack.GetTaskId(), "err", err)

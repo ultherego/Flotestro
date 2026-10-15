@@ -1214,6 +1214,10 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
   font-size: 12px;
 }
 .bulk-steps .step .reason { font-size: 11px; color: var(--text-faint); font-weight: 400; }
+/* The step's own name. In a flex row a label with no minimum of zero cannot
+   be made smaller than its longest word, so it pushes the reason out of the
+   button instead of wrapping. */
+.bulk-steps .step .title { min-width: 0; overflow-wrap: anywhere; }
 
 /*
  * A windowed table: the container scrolls, the header stays in view, and
@@ -1649,6 +1653,24 @@ a.count-tile:hover { background: var(--bg-hover); text-decoration: none; color: 
 .count-tile.info { --segment: var(--blue); }
 .count-tile.neutral { --segment: var(--border-strong); }
 
+/* Choosing the permissions of a role: 188 of them, so they are grouped by the
+   part of the name before the first dot and the box scrolls rather than
+   pushing the save button off the screen. */
+.permission-picker { max-height: 360px; overflow-y: auto; margin: 0 0 12px; }
+.permission-group {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.permission-group legend { font-size: 12px; color: var(--text-muted); padding: 0 4px; }
+.permission-group label { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; }
+.permission-group label .mono { overflow-wrap: anywhere; }
+
 /* The states with nothing in them: named, not drawn. A zero is news as a
    word and noise as an area. */
 .status-bar-quiet { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
@@ -1666,6 +1688,11 @@ a.count-tile:hover { background: var(--bg-hover); text-decoration: none; color: 
    the unknown, because unknown is not zero. */
 .status-bar-quiet-item.unset .status-bar-value { color: var(--unknown-text, var(--text-muted)); }
 .status-bar-quiet-item.unset .status-bar-label { font-style: italic; }
+/* The states that were never counted, with the sentence that says what the
+   bar above is a share of. Not among the zeros: a number nobody took and a
+   number that came back empty are different news. */
+.status-bar-uncounted { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.status-bar-uncounted-note { font-size: 12px; color: var(--unknown-text, var(--text-muted)); }
 a.status-bar-quiet-item:hover { color: var(--text); text-decoration: underline; }
 a.status-bar-segment:hover { filter: brightness(1.08); text-decoration: none; color: var(--segment-text, var(--text)); }
 .status-bar-value { font-size: 28px; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
@@ -2095,3 +2122,40 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 .card-description { margin-top: 2px; }
 .card.warn > .card-head { box-shadow: inset 3px 0 0 var(--warn); }
 .card.error > .card-head { box-shadow: inset 3px 0 0 var(--error); }
+
+/* ----------------------------------------------------------------------- *
+ * The classes that drew nothing.
+ *
+ * Each of these named something in the markup and had no rule anywhere, so
+ * the browser drew its default; several carried their appearance in a
+ * style={{...}} beside the name, which is the same defect with the evidence
+ * attached. The declarations are here now, where the rest of the panel's
+ * appearance is, and web/src/components/styles.test.ts keeps the list of
+ * exceptions at nothing.
+ * ----------------------------------------------------------------------- */
+
+/* A control somebody may not use: the reason is in the title, and once more
+   under the control for whoever does not hover. */
+.action-guard { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.action-guard-denied > fieldset { border: 0; margin: 0; padding: 0; }
+.action-guard-hint { font-size: 12px; }
+
+/* The chooser of a table's columns: a button with a popover hanging off it. */
+.column-chooser { position: relative; display: inline-block; }
+
+/* The tags of a host in the fleet list, as many as the row can hold. */
+.fp-host-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* What somebody wrote down about a host, their line breaks kept. */
+.hm-notes { white-space: pre-wrap; margin: 0; }
+
+/* The row of a table that holds an open panel instead of a record: it belongs
+   to the row above it, and the shade says so. */
+.hm-panel-row > td { background: var(--bg-raised); }
+
+/* The mark of what kind of thing a suggestion is, in the host picker. */
+.host-picker-kind { grid-area: dot; display: inline-flex; color: var(--text-muted); }
+
+/* A paragraph meant to be read rather than scanned: the measure is what makes
+   that possible. */
+.prose { max-width: 70ch; line-height: 1.6; }

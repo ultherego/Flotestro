@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Role i uprawnienia &middot; Dokumentacja Flotestro</title>
-<meta name="description" content="Sześć ról, uprawnienia, które każda z nich ma i których nie ma, pięć kategorii zakresu oraz to, co wymaga czegoś więcej niż roli: świeżego uwierzytelnienia i drugiej osoby.">
+<meta name="description" content="Sześć ról wbudowanych i role, które instalacja definiuje sama, uprawnienia każdej z nich, pięć kategorii zakresu oraz to, co wymaga czegoś więcej niż roli: świeżego uwierzytelnienia i drugiej osoby.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
@@ -81,13 +81,14 @@
         <li><a href="api.html">8. API</a></li>
         <li><a href="roles.html" aria-current="page">9. Role i uprawnienia</a>
           <ul class="sidebar__sections">
-            <li><a href="#roles">Sześć ról</a></li>
+            <li><a href="#roles">Sześć ról wbudowanych</a></li>
             <li><a href="#viewer">viewer</a></li>
             <li><a href="#auditor">auditor</a></li>
             <li><a href="#operator">operator</a></li>
             <li><a href="#approver">approver</a></li>
             <li><a href="#identity-admin">identity_admin</a></li>
             <li><a href="#platform-admin">platform_admin</a></li>
+            <li><a href="#own-roles">Rola własna</a></li>
             <li><a href="#scope">Zakres powiązania</a></li>
             <li><a href="#grant">Jak wygląda nadanie</a></li>
             <li><a href="#escalation">Nikt nie nada tego, czego sam nie ma</a></li>
@@ -113,18 +114,26 @@
     powiązana z tożsamością w konkretnym zakresie, a zakres mówi, do której
     części floty ta rola sięga. Ten rozdział to wykaz sześciu ról: co każda
     z nich może i czego nie może, jak zakres zawęża powiązanie i czego
-    operacja wymaga ponad samą rolę.</p>
+    operacja wymaga ponad samą rolę. Te sześć nie jest całym wykazem:
+    instalacja definiuje własne role, a jak &mdash; mówi
+    <a href="#own-roles">Rola własna</a>.</p>
 
 
-    <h2 id="roles">Sześć ról</h2>
+    <h2 id="roles">Sześć ról wbudowanych</h2>
 
-    <p>Wykaz jest zamknięty: panel zna te sześć ról i żadnej innej, a żądanie
-    z inną nazwą kończy się odmową
-    <code class="refusal">unknown_role</code>. Rola to lista uprawnień, a nie
-    stopień w hierarchii &mdash; listy zachodzą na siebie, ale żadna nie
-    zawiera się w drugiej. Cały wykaz zwraca
-    <code>GET /api/v1/roles</code>, rola po roli, razem z uprawnieniami każdej
-    z nich.</p>
+    <p>Te sześć przychodzi z produktem. Ich uprawnienia są w kodzie, nie
+    w bazie, więc nikt &mdash; żaden administrator, żaden skrypt, nikt z hasłem
+    do bazy &mdash; nie zmieni tego, co niesie któraś z nich; panel odmawia
+    edycji przez <code class="refusal">built_in_role</code>. Rola to lista
+    uprawnień, a nie stopień w hierarchii: listy zachodzą na siebie, ale żadna
+    nie zawiera się w drugiej.</p>
+
+    <p>Obok nich instalacja dokłada role własne, opisane w
+    <a href="#own-roles">Rola własna</a>. Niezależnie od rodzaju: żądanie
+    z nazwą roli, której ta instalacja nie ma, kończy się odmową
+    <code class="refusal">unknown_role</code>, a <code>GET /api/v1/roles</code>
+    zwraca cały wykaz &mdash; oba rodzaje, każdy z uprawnieniami i flagą
+    <code>built_in</code>, która mówi, który to rodzaj.</p>
 
 <div class="table-scroll">
 <table>
@@ -300,6 +309,99 @@
     świeżego uwierzytelnienia &mdash; jedno i drugie opisuje
     <a href="#beyond">Kiedy sama rola nie wystarczy</a>.</p>
 
+    <h2 id="own-roles">Rola własna</h2>
+
+    <p>Sześć ról powyżej to domysł, jak prowadzi się flotę, i dla wielu osób,
+    które potrzebują dostępu, są albo za szerokie, albo za wąskie.
+    &bdquo;Zrestartować usługę i przeczytać dziennik, nic więcej&rdquo; to
+    prawdziwa robota na prawdziwej zmianie; przed rolami własnymi dało się ją
+    dać tylko razem z rolą <code>operator</code>, która restartuje też maszyny,
+    instaluje pakiety i wycofuje hosty z floty. Dlatego instalacja definiuje
+    rolę, którą ta robota faktycznie jest.</p>
+
+    <p>Różnica między rodzajami leży w tym, gdzie mieszkają uprawnienia, i jest
+    celowa:</p>
+
+    <ul>
+      <li><strong>Rola wbudowana trzyma uprawnienia w kodzie,</strong> gdzie są
+      czytane przy przeglądzie i nie da się ich zmienić w trakcie pracy. Baza
+      nie mówi o takiej roli nic, więc nigdy nie mogą się rozejść.</li>
+      <li><strong>Rola własna trzyma uprawnienia w bazie,</strong> jako wiersze.
+      Są czytane tym samym zapytaniem co powiązanie, które je wskazuje, przy
+      każdym żądaniu &mdash; więc zmiana dociera do wszystkich replik naraz
+      i nie ma nigdzie wykazu w pamięci, który mógłby się zestarzeć.</li>
+    </ul>
+
+    <p>Słownik, w którym pisze się rolę, jest udostępniony, żeby nikt nie musiał
+    trzymać jego kopii:</p>
+
+<pre><code>GET /api/v1/permissions
+
+{
+  "items": [
+    { "permission": "host.read",     "group": "host" },
+    { "permission": "unit.restart",  "group": "unit" }
+  ],
+  "count": 188
+}</code></pre>
+
+    <p>Rolę definiuje się w całości &mdash; nazwa, do czego służy i każde
+    uprawnienie, jakie niesie:</p>
+
+<pre><code>POST /api/v1/roles
+
+{
+  "role":        "shift_lead",
+  "description": "Restartuje usługi na nocnej zmianie.",
+  "permissions": ["host.read", "job.read", "job.create", "unit.restart"],
+  "reason":      "nocna zmiana potrzebuje restartów usług i niczego więcej"
+}</code></pre>
+
+    <p><code>PUT /api/v1/roles/{role}</code> zastępuje definicję &mdash;
+    i zastępuje ją <em>w całości</em>: to, czego nie ma na liście, zostaje
+    odebrane każdemu, kto ma tę rolę, przy jego następnym żądaniu. Ekran panelu
+    nazywa te uprawnienia przed zapisem, a ślad audytowy zapisuje obie
+    definicje, starą i nową, z listą <code>removed</code>, która mówi, co
+    posiadacze stracili. <code>DELETE /api/v1/roles/{role}</code> usuwa rolę,
+    której nikt nie ma.</p>
+
+    <p>Reguły, do których panel trzyma definicję:</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Odmowa</th><th>Kiedy</th></tr></thead>
+<tbody>
+<tr><td><code class="refusal">unknown_permission</code></td><td>Rola nazywa coś, czego ten produkt nie definiuje. Rola z wymyślonym uprawnieniem czytałaby się jako prawo, którego nikt nie może nadać ani odebrać.</td></tr>
+<tr><td><code class="refusal">empty_role</code></td><td>Rola nie niesie niczego. Taka rola na każdym ekranie wygląda jak rola, którą ktoś ma, a nie nadaje nic.</td></tr>
+<tr><td><code class="refusal">role_exists</code></td><td>Nazwa jest zajęta &mdash; przez jedną z sześciu albo przez rolę już tu zdefiniowaną.</td></tr>
+<tr><td><code class="refusal">invalid_role</code></td><td>Nazwa to nie małe litery, cyfry i podkreślenia, od 2 do 63 znaków, zaczynając od litery. Tę nazwę niesie każde powiązanie, mapowanie i wpis audytu, więc trzyma się pisowni, z której da się ją odczytać z powrotem &mdash; i później się jej nie zmienia.</td></tr>
+<tr><td><code class="refusal">built_in_role</code></td><td>Rola jest jedną z sześciu. Należą do produktu i nie da się ich ani edytować, ani usunąć.</td></tr>
+<tr><td><code class="refusal">role_in_use</code></td><td>Ktoś jest przypisany do roli albo mapuje się do niej grupa. Najpierw cofnij jedno i drugie; baza pilnuje tego kluczem obcym, więc odmowa dotyczy też skryptu i ręki przy <code>psql</code>, nie tylko tego punktu API.</td></tr>
+<tr><td><code class="refusal">scope_escalation</code></td><td>Rola niosłaby uprawnienie, którego wołający nie ma <em>wszędzie</em>. Patrz niżej.</td></tr>
+</tbody></table></div>
+
+    <p>Ta ostatnia reguła jest surowsza niż reguła nadawania roli &mdash;
+    i celowo. Rola jest obiektem globalnym: gdy już istnieje, każdy
+    z <code>principal.manage</code> może ją powiązać gdziekolwiek. Definicja
+    napisana przez kogoś, kto ma te uprawnienia tylko na jednym site, byłaby
+    więc sposobem na rozdanie ich na każdym innym &mdash; dlatego definiowanie
+    roli wymaga posiadania każdego jej uprawnienia w zakresie globalnym.
+    Nadanie roli sprawdza się osobno, wobec tego, co rola naprawdę niesie
+    &mdash; zob. <a href="#escalation">Nikt nie nada tego, czego sam nie
+    ma</a>.</p>
+
+    <p>Oba rodzaje ról powiązuje się, mapuje i cofa dokładnie tak samo; nic
+    innego w tym rozdziale ich nie rozróżnia.</p>
+
+    <div class="note">
+      <p class="note__title">Tej zmiany się nie cofa</p>
+      <p>Zmiany schematu, która zrobiła z ról wiersze, nie cofnie żadna
+      późniejsza migracja. Powrót oznaczałby usunięcie każdej roli
+      zdefiniowanej przez instalację, a z nią każdego powiązania i mapowania
+      grupy, które ją wskazuje &mdash; czyjegoś dostępu, usuniętego po to, żeby
+      zadowolić schemat. Kroku w dół nie ma, celowo.</p>
+    </div>
+
     <h2 id="scope">Zakres powiązania</h2>
 
     <p>Powiązanie to rola <em>w zakresie</em>. Zakres ma pięć kategorii, a cel
@@ -388,7 +490,7 @@
 <table>
 <thead><tr><th>Odmowa</th><th>Kiedy</th></tr></thead>
 <tbody>
-<tr><td><code class="refusal">unknown_role</code></td><td>Rola nie jest jedną z sześciu.</td></tr>
+<tr><td><code class="refusal">unknown_role</code></td><td>Rola nie jest ani jedną z sześciu, ani żadną zdefiniowaną w tej instalacji.</td></tr>
 <tr><td><code class="refusal">invalid_binding</code></td><td>Brakuje <code>team_scope</code>. Jest wymagane, a odmowa mówi, co wpisać: <code>{"mode":"any"}</code> albo <code>{"mode":"exact","team_id":"&hellip;"}</code>. Zespół pominięty przez przypadek poszerzyłby nadanie po cichu.</td></tr>
 <tr><td><code class="refusal">invalid_binding</code></td><td><code>team_scope</code> jest źle zbudowane: tryb inny niż <code>any</code> i <code>exact</code>, <code>team_id</code> podane przy trybie <code>any</code> albo tryb <code>exact</code> bez <code>team_id</code>.</td></tr>
 <tr><td><code class="refusal">invalid_binding</code></td><td><code>valid_until</code> nie jest momentem w formacie RFC 3339. Pominięcie go znaczy, że powiązanie trwa, dopóki ktoś go nie odbierze.</td></tr>
@@ -457,10 +559,14 @@ site=waw env=prod team=* owner=* tag=*</code></pre>
 
     <ul>
       <li><strong>Grupa nadaje rolę; zakres pozostaje polityką panelu.</strong>
-      Mapowanie zawęża po site i środowisku, i po niczym więcej, i mówi to w
-      każdej kategorii: zespół dowolny, właściciele i tagi jako <code>*</code>.
-      Wypełnienie dwóch pól i zostawienie trzech pustych nie nadałoby
-      niczego.</li>
+      Mapowanie zawęża po site, środowisku, właścicielu i tagu. Te dwa ostatnie
+      da się tu wyrazić od 0.63, tak jak od zawsze dało się w powiązaniu
+      zrobionym ręcznie: wcześniej każda rola przychodząca od dostawcy
+      tożsamości była szersza niż nadana lokalnie, czyli odwrotnie, niż katalog
+      jest do tego, żeby robić. Kategoria pominięta znaczy każdą jej wartość;
+      kategoria wysłana jako pusta lista nie sięga nikogo i dostaje odmowę już
+      przy zapisie. Zespół jest zawsze dowolny: mapowanie nigdy nie zawężało po
+      zespole.</li>
       <li><strong>Mapowanie jest czytane przy każdym żądaniu,</strong> więc
       usunięcie go zabiera rolę przy następnym żądaniu użytkownika, a nie przy
       jego następnym logowaniu.</li>

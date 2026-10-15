@@ -381,10 +381,13 @@ func (s *Store) MappedBindings(ctx context.Context, issuer string, groups []stri
 	if issuer == "" || len(groups) == 0 {
 		return nil, nil
 	}
-	const query = `
-		select role, site, environment
-		from group_role_mappings
-		where issuer = $1 and group_name = any($2)`
+	// The role's own permissions come with the row, for the same reason they
+	// come with a binding: a session decided by a catalogue read earlier is a
+	// session decided by what was true earlier.
+	query := `
+		select m.role, m.site, m.environment, m.owners, m.tags, coalesce(rp.granted, '{}')
+		from group_role_mappings m` + fmt.Sprintf(grantedByRole, "m") + `
+		where m.issuer = $1 and m.group_name = any($2)`
 	rows, err := s.pool.Query(ctx, query, issuer, groups)
 	if err != nil {
 		return nil, err
@@ -395,14 +398,17 @@ func (s *Store) MappedBindings(ctx context.Context, issuer string, groups []stri
 	for rows.Next() {
 		var binding Binding
 		var site, environment string
-		if err := rows.Scan(&binding.Role, &site, &environment); err != nil {
+		var owners, tags, granted []string
+		if err := rows.Scan(&binding.Role, &site, &environment, &owners, &tags, &granted); err != nil {
 			return nil, err
 		}
-		// A mapping narrows by site and environment and by nothing else, and
-		// Placement says so in every category. Filling two fields of a scope and
-		// leaving three empty would grant nothing at all: an empty category
-		// reaches no host, which is the safe way round and the wrong answer here.
-		binding.Scope = Placement(site, environment)
+		binding.Granted = permissionsOf(granted)
+		// The row's own lists, not a nil standing in for them: a mapping may
+		// narrow by owner and by tag since 15.10, and filling those categories
+		// with a wildcard here would widen every such rule back out. Team is
+		// still left open, because a mapping has never narrowed by team and
+		// an empty category reaches no host.
+		binding.Scope = PlacementWithin(site, environment, owners, tags)
 		bindings = append(bindings, binding)
 	}
 	return bindings, rows.Err()

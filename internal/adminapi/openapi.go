@@ -86,6 +86,7 @@ func (s *Server) openAPI() map[string]any {
 	register("CVESummary", vuln.CVESummary{})
 	register("CVE", cveReport{})
 	register("Binding", authz.Binding{})
+	register("Role", authz.RoleDefinition{})
 	register("BulkHostMetadataResult", hostsBulkMetadataResponse{})
 	register("BackupDefinition", backup.Definition{})
 	register("CertificateTarget", certificates.Target{})
@@ -537,6 +538,7 @@ var queryParameters = map[string][]queryParameter{
 	"GET /api/v1/unresolved": {
 		{"kind", "string", "outcome_unknown or applied_unverified; both when left out. They are different questions and are never summed."},
 		{"host_id", "string", "One host's unconfirmed operations."},
+		{"reading", "string", "did_not_hold, could_not_read or outcome_unknown. It narrows inside the question rather than beside it: a host that answered with something other than what was ordered is a conclusion, and a host the verifier could not read is the absence of one. The two call for different work and are counted apart."},
 		{"q", "string", "A fragment of the host's name or of the operation; case-insensitive. Not the reason: that is the host's own sentence in the host's own words, and a search over it would answer differently for two hosts that did the same thing."},
 		{"limit", "integer", "Rows on this page. The default is 100 and the most is 500; a larger number is served 500 rather than dropped to the default."},
 		{"offset", "integer", "Where the page starts. The order is total, so no row appears on two pages."},
@@ -1018,11 +1020,20 @@ var responseSchemas = map[string]map[string]any{
 	"GET /api/v1/roles": map[string]any{
 		"type": "object",
 		"properties": map[string]any{
+			"items": map[string]any{"type": "array", "items": ref("Role")},
+			"count": count(),
+		},
+	},
+	"POST /api/v1/roles":       ref("Role"),
+	"PUT /api/v1/roles/{role}": ref("Role"),
+	"GET /api/v1/permissions": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
 			"items": map[string]any{"type": "array", "items": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"role":        map[string]any{"type": "string", "enum": roleNames()},
-					"permissions": map[string]any{"type": "array", "items": str()},
+					"permission": str(),
+					"group":      map[string]any{"type": "string", "description": "The part of the name before the first dot, which is how a screen groups them."},
 				},
 			}},
 			"count": count(),
@@ -1136,7 +1147,7 @@ var responseSchemas = map[string]map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"principal_id": str(), "subject": str(),
-			"role":        map[string]any{"type": "string", "enum": roleNames()},
+			"role":        roleField(),
 			"scope":       scopeSchema(),
 			"valid_until": nullableTime(),
 		},
@@ -1145,7 +1156,7 @@ var responseSchemas = map[string]map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"principal_id": str(), "subject": str(),
-			"role":        map[string]any{"type": "string", "enum": roleNames()},
+			"role":        roleField(),
 			"scope":       scopeSchema(),
 			"team":        ref("Team"),
 			"valid_until": nullableTime(),
@@ -1165,7 +1176,7 @@ var responseSchemas = map[string]map[string]any{
 			"id": str(), "subject": str(),
 			"roles": map[string]any{"type": "array", "items": map[string]any{
 				"type": "object", "properties": mergedProperties(bindingScope(), map[string]any{
-					"role":        map[string]any{"type": "string", "enum": roleNames()},
+					"role":        roleField(),
 					"valid_until": nullableTime(),
 				}),
 			}},
@@ -1488,8 +1499,7 @@ func reasonOnlyBody(what string) map[string]any {
 	}
 }
 
-// roleNames lists the roles a binding may name, so a caller reads the
-// vocabulary from the contract instead of guessing at the strings.
+// roleNames lists the roles the product itself defines.
 func roleNames() []string {
 	names := make([]string, 0, len(authz.AllRoles()))
 	for _, role := range authz.AllRoles() {
@@ -1498,8 +1508,38 @@ func roleNames() []string {
 	return names
 }
 
+// roleField is the role in a request or an answer.
+//
+// It was an enum of the six names the product defines, and that stopped being
+// true when an installation could define roles of its own: a request naming
+// one would have been valid and off-contract at the same time, and a reader
+// generating a client from this document would have got a type that refuses
+// half of what the panel accepts. The pattern is the constraint the database
+// actually holds the name to, and the description says where the list is.
+func roleField() map[string]any {
+	return map[string]any{
+		"type":    "string",
+		"pattern": "^[a-z][a-z0-9_]{1,62}$",
+		"description": "A role of this installation: one of the product's own (" +
+			strings.Join(roleNames(), ", ") + ") or one defined here. GET /api/v1/roles lists them all.",
+	}
+}
+
 // bindingScope is the scope half of a role binding: a site and an environment,
 // each of which may be the wildcard.
+// withoutTeamScope is bindingScope for an endpoint that does not read the
+// team, so the document says what the code does.
+func withoutTeamScope(scope map[string]any) map[string]any {
+	kept := make(map[string]any, len(scope))
+	for name, schema := range scope {
+		if name == "team_scope" {
+			continue
+		}
+		kept[name] = schema
+	}
+	return kept
+}
+
 func bindingScope() map[string]any {
 	return map[string]any{
 		"site":        map[string]any{"type": "string", "maxLength": hosts.MaxPlacementLength, "description": "The site the role is held over; '*' means every site."},
@@ -1783,6 +1823,7 @@ var emptyAnswers = map[string]string{
 	"DELETE /api/v1/policies/{id}":                            "the policy is gone; the campaigns it made stay",
 	"DELETE /api/v1/principals/{id}":                          "the principal is disabled, not removed",
 	"DELETE /api/v1/principals/{id}/roles/{role}":             "the role is no longer granted",
+	"DELETE /api/v1/roles/{role}":                             "the role is gone; a role somebody is bound to is refused instead",
 	"DELETE /api/v1/principals/{id}/sessions/{sid}":           "the session is revoked",
 	"DELETE /api/v1/principals/{id}/team-roles/{role}":        "the role in that team is no longer granted",
 	"DELETE /api/v1/principals/{id}/tokens/{token}":           "the token is revoked",
@@ -1926,10 +1967,15 @@ var requestSchemas = map[string]map[string]any{
 		"Why the relay loses the right to mediate; kept in the audit trail."),
 	"POST /api/v1/group-mappings": {
 		"type": "object",
-		"properties": mergedProperties(bindingScope(), map[string]any{
+		// bindingScope without team_scope: a mapping has never narrowed by
+		// team and this endpoint does not read that field. It was advertised
+		// here all the same, and a document that promises a narrowing the code
+		// drops is worse than one that offers none - the caller believes the
+		// role is held over less than it is.
+		"properties": mergedProperties(withoutTeamScope(bindingScope()), map[string]any{
 			"issuer":     map[string]any{"type": "string", "description": "The identity provider the group comes from."},
 			"group_name": map[string]any{"type": "string", "description": "The group as that provider names it."},
-			"role":       map[string]any{"type": "string", "enum": roleNames()},
+			"role":       roleField(),
 			"reason":     map[string]any{"type": "string", "description": "Kept in the audit trail; the mapping grants the role to everyone the provider puts in that group."},
 		}),
 		"required": []string{"issuer", "group_name", "role"},
@@ -2027,7 +2073,7 @@ var requestSchemas = map[string]map[string]any{
 			"kind":         map[string]any{"type": "string", "enum": []string{"user", "service"}, "description": "Left out, the store's own default decides."},
 			"roles": map[string]any{"type": "array", "description": "The bindings to grant at once.",
 				"items": map[string]any{"type": "object", "properties": mergedProperties(bindingScope(), map[string]any{
-					"role":        map[string]any{"type": "string", "enum": roleNames()},
+					"role":        roleField(),
 					"valid_until": map[string]any{"type": "string", "format": "date-time", "description": "An RFC 3339 moment the binding ends at; empty means until revoked."},
 				}), "required": []string{"role"}},
 			},
@@ -2204,10 +2250,34 @@ var requestSchemas = map[string]map[string]any{
 			"reason":          map[string]any{"type": "string", "description": "Kept in the audit trail."},
 		},
 	},
+	// A role of this installation's own. The permissions are written whole on
+	// every call: an edit that could only add would be a strange thing to
+	// offer on a screen about access.
+	"POST /api/v1/roles": {
+		"type": "object",
+		"properties": map[string]any{
+			"role":        roleField(),
+			"description": map[string]any{"type": "string", "description": "What the role is for, as the access screen shows it."},
+			"permissions": map[string]any{"type": "array", "items": str(), "minItems": 1,
+				"description": "Every permission the role carries; GET /api/v1/permissions is the vocabulary. You may only name permissions you hold everywhere yourself."},
+			"reason": map[string]any{"type": "string", "description": "Kept in the audit trail."},
+		},
+		"required": []string{"role", "permissions"},
+	},
+	"PUT /api/v1/roles/{role}": {
+		"type": "object",
+		"properties": map[string]any{
+			"description": map[string]any{"type": "string", "description": "What the role is for, as the access screen shows it."},
+			"permissions": map[string]any{"type": "array", "items": str(), "minItems": 1,
+				"description": "The whole definition, not an addition to it: what is left out is taken away from everybody bound to the role."},
+			"reason": map[string]any{"type": "string", "description": "Kept in the audit trail."},
+		},
+		"required": []string{"permissions"},
+	},
 	"POST /api/v1/principals/{id}/roles": {
 		"type": "object",
 		"properties": mergedProperties(bindingScope(), map[string]any{
-			"role":        map[string]any{"type": "string", "enum": roleNames()},
+			"role":        roleField(),
 			"valid_until": map[string]any{"type": "string", "format": "date-time", "description": "An RFC 3339 moment the binding ends at; empty means it holds until revoked."},
 			"reason":      map[string]any{"type": "string", "description": "Kept in the audit trail."},
 		}),
@@ -2218,7 +2288,7 @@ var requestSchemas = map[string]map[string]any{
 	"POST /api/v1/principals/{id}/team-roles": {
 		"type": "object",
 		"properties": map[string]any{
-			"role":        map[string]any{"type": "string", "enum": roleNames()},
+			"role":        roleField(),
 			"team":        map[string]any{"type": "string", "description": "The identifier of the team the role is held over."},
 			"valid_until": map[string]any{"type": "string", "format": "date-time", "description": "An RFC 3339 moment the binding ends at; empty means it holds until revoked."},
 			"reason":      map[string]any{"type": "string", "description": "Kept in the audit trail."},

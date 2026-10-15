@@ -570,7 +570,8 @@ func TestAgentReplacementEndsWithTheHostComingBack(t *testing.T) {
 }
 
 // newestAgentVersion reads the highest version of the agent package from the
-// test fleet repository.
+// test fleet repository, and skips the test when the repository cannot answer.
+// A test whose subject IS the upgrade has nothing to measure without it.
 func (h *harness) newestAgentVersion() string {
 	h.t.Helper()
 	address := envOr("FLOTESTRO_TEST_REPO", defaultRepo)
@@ -919,4 +920,44 @@ func TestBatchTokenNeedsItsOwnPermission(t *testing.T) {
 	if batch.MaxUses != 3 {
 		t.Errorf("the administrator's batch admits %d machines, expected 3", batch.MaxUses)
 	}
+}
+
+// publishedAgentVersion is newestAgentVersion for a test that can carry on
+// without it: it answers false rather than skipping.
+//
+// The difference is not stylistic. A skip reads like a pass and has hidden a
+// product defect here before, so a test that only wants the published version
+// to make its order more realistic must not disappear because a repository
+// index could not be read.
+func (h *harness) publishedAgentVersion() (string, bool) {
+	h.t.Helper()
+	address := envOr("FLOTESTRO_TEST_REPO", defaultRepo)
+	response, err := h.client.Get(address + "/deb/dists/stable/main/binary-amd64/Packages")
+	if err != nil {
+		h.t.Logf("the test fleet repository is unavailable (%s): %v", address, err)
+		return "", false
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		h.t.Logf("the test fleet repository answered %s", response.Status)
+		return "", false
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		h.t.Logf("the repository index is unreadable: %v", err)
+		return "", false
+	}
+	var pkg, newest string
+	for _, line := range strings.Split(string(body), "\n") {
+		switch {
+		case strings.HasPrefix(line, "Package: "):
+			pkg = strings.TrimSpace(strings.TrimPrefix(line, "Package: "))
+		case strings.HasPrefix(line, "Version: ") && pkg == "flotestro-agent":
+			candidate := strings.TrimSpace(strings.TrimPrefix(line, "Version: "))
+			if newest == "" || version.CompareDeb(candidate, newest) > 0 {
+				newest = candidate
+			}
+		}
+	}
+	return newest, newest != ""
 }

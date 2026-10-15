@@ -13,6 +13,22 @@ import { useTeams } from "./Teams";
 import { useT } from "../i18n";
 
 /** A scope part that names no site or environment: an asterisk, as the server keeps it, or nothing. */
+/**
+ * A comma-separated list as a form takes it. Nothing typed returns undefined,
+ * which the caller leaves OUT of the request - a missing category is every one
+ * of them and an empty list is none, and sending the wrong one of those two
+ * either widens a rule or makes it reach nobody.
+ */
+export function listFromText(text: string): string[] | undefined {
+  const values = text.split(",").map((one) => one.trim()).filter(Boolean);
+  return values.length > 0 ? values : undefined;
+}
+
+/** A mapping's category that names every value: absent, empty of narrowing, or a lone asterisk. */
+export function anyMappingList(values: string[] | undefined): boolean {
+  return !values || values.length === 0 || values.includes("*");
+}
+
 function anyScope(value: string | undefined): boolean {
   return !value || value === "*";
 }
@@ -155,9 +171,54 @@ export function valueList(value: string | undefined): string[] {
   return (value ?? "").split(",").map((part) => part.trim()).filter((part) => part !== "");
 }
 
-const ROLES = [
-  "viewer", "auditor", "operator", "approver", "identity_admin", "platform_admin",
-];
+/**
+ * One role of the installation, as the catalogue lists it.
+ *
+ * built_in tells the two kinds apart: the product's six, whose permissions
+ * are in the code and which nobody here may edit, and the ones this
+ * installation defined, whose permissions are rows in its database.
+ */
+export type RoleInfo = {
+  role: string;
+  built_in?: boolean;
+  description?: string;
+  permissions: string[];
+  bindings?: number;
+  mappings?: number;
+  created_by?: string;
+  created_at?: string;
+};
+
+/**
+ * The roles this installation has, read from the server.
+ *
+ * It used to be a constant here - the same six names the server compiled in -
+ * and that stopped being true the day an installation could define one of its
+ * own: every form offering roles would have offered six of however many there
+ * are. A list of choices copied from somewhere else is the shape of defect
+ * this product has been caught by before, so the choices are read from the
+ * one place that knows.
+ */
+function useRoles() {
+  return useQuery({
+    queryKey: ["roles"],
+    queryFn: () => api.get<Collection<RoleInfo>>("/api/v1/roles"),
+    retry: false,
+    staleTime: 60 * 1000,
+  });
+}
+
+/**
+ * The names for a form that has to offer a choice of role.
+ *
+ * While the catalogue is still being read this is empty, and a form with no
+ * choices is disabled rather than filled with a guess: offering six names
+ * that may not be this installation's is how somebody picks a role that does
+ * not exist and is refused on submit.
+ */
+export function roleNames(roles: RoleInfo[] | undefined): string[] {
+  return (roles ?? []).map((role) => role.role);
+}
 
 /** The reason every change of the access rules is recorded with. */
 const REASON_MIN_LENGTH = 8;
@@ -273,12 +334,19 @@ function ConfirmCard({ title, text, action, danger = false, busy = false, disabl
 function Mappings() {
   const t = useT();
   const queryClient = useQueryClient();
+  // The roles on offer, and the roles the breakdown counts by: read, not
+  // assumed. An installation's own role grants access like any other, so a
+  // screen that counted only the product's six would under-report who has
+  // what.
+  const catalogue = useRoles();
   const [warning, setWarning] = useState<ApiError | null>(null);
   const [form, setForm] = useState(false);
   const [group, setGroup] = useState("");
   const [role, setRole] = useState("viewer");
   const [site, setSite] = useState("");
   const [environment, setEnvironment] = useState("");
+  const [owners, setOwners] = useState("");
+  const [tags, setTags] = useState("");
   const [reason, setReason] = useState("");
   // The mapping about to be removed; the reason is asked beside the list.
   const [removing, setRemoving] = useState<GroupMapping | null>(null);
@@ -296,8 +364,15 @@ function Mappings() {
       api.post<GroupMapping>("/api/v1/group-mappings", {
         group_name: group.trim(), role,
         site: site.trim(), environment: environment.trim(), reason: reason.trim(),
+        // Left out rather than sent empty: the server reads a missing category
+        // as every one of them and an empty list as none, and those are two
+        // different rules.
+        ...(listFromText(owners) ? { owners: listFromText(owners) } : {}),
+        ...(listFromText(tags) ? { tags: listFromText(tags) } : {}),
       }),
-    onSuccess: () => { setForm(false); setGroup(""); setReason(""); refresh(); },
+    onSuccess: () => {
+      setForm(false); setGroup(""); setReason(""); setOwners(""); setTags(""); refresh();
+    },
     onError: (error) => setWarning(error instanceof ApiError ? error : null),
   });
 
@@ -317,10 +392,16 @@ function Mappings() {
   const listed = t("among the {n} listed", { n: mappings.length });
   // The mappings by role and by reach: how many hand out which role, and how
   // many of them reach the whole fleet rather than one site or environment.
-  const byRole = ROLES.map((role) => ({ role, count: mappings.filter((mapping) => mapping.role === role).length }));
+  const choices = roleNames(catalogue.data?.items);
+  const byRole = choices.map((role) => ({ role, count: mappings.filter((mapping) => mapping.role === role).length }));
   // The server keeps "any" as an asterisk and older records as an empty
   // string; both reach the whole fleet.
-  const fleetWide = mappings.filter((mapping) => anyScope(mapping.site) && anyScope(mapping.environment)).length;
+  const fleetWide = mappings.filter((mapping) =>
+    anyScope(mapping.site) && anyScope(mapping.environment) &&
+    // A rule narrowed to an owner or a tag does not reach the fleet, and
+    // counting it as one was the same mistake the server made with these two
+    // categories: it read a narrowing as nothing at all.
+    anyMappingList(mapping.owners) && anyMappingList(mapping.tags)).length;
   const aside = form || removing !== null;
 
   return (
@@ -346,7 +427,10 @@ function Mappings() {
                   <tr key={mapping.id}>
                     <td className="mono">{mapping.group_name}</td>
                     <td>{mapping.role}</td>
-                    <td className="source"><ScopeText scope={{ site: mapping.site, environment: mapping.environment }} /></td>
+                    <td className="source"><ScopeText scope={{
+                      site: mapping.site, environment: mapping.environment,
+                      owners: mapping.owners, tags: mapping.tags,
+                    }} /></td>
                     <td className="source">{mapping.created_by}</td>
                     <td><Time value={mapping.created_at} /></td>
                     <td className="actions-cell">
@@ -386,8 +470,9 @@ function Mappings() {
                 <input value={group} onChange={(e) => setGroup(e.target.value)} placeholder="flotestro-operators" />
               </Field>
               <Field label={t("Role")}>
-                <select value={role} onChange={(e) => setRole(e.target.value)}>
-                  {ROLES.map((name) => <option key={name} value={name}>{name}</option>)}
+                <select value={role} onChange={(e) => setRole(e.target.value)}
+                        disabled={choices.length === 0}>
+                  {choices.map((name) => <option key={name} value={name}>{name}</option>)}
                 </select>
               </Field>
               <Field label={t("Site (empty = all)")}>
@@ -395,6 +480,21 @@ function Mappings() {
               </Field>
               <Field label={t("Environment (empty = all)")}>
                 <input value={environment} onChange={(e) => setEnvironment(e.target.value)} placeholder="test" />
+              </Field>
+              {/* The two categories a mapping could not express until 15.10.
+                  Empty means every one of them, which is what every mapping
+                  made before today holds. */}
+              <Field
+                label={t("Owners (empty = all)")}
+                hint={t("Comma-separated. The role is held only over hosts of these owners.")}
+              >
+                <input value={owners} onChange={(e) => setOwners(e.target.value)} placeholder="team-a, team-b" />
+              </Field>
+              <Field
+                label={t("Tags (empty = all)")}
+                hint={t("Comma-separated. A host carrying any one of them is in scope.")}
+              >
+                <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="db" />
               </Field>
               <Field label={t("Reason for the change")} wide>
                 <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("e.g. new on-call team")} />
@@ -491,6 +591,8 @@ type Pending =
 
 function Identities({ initialSearch }: { initialSearch: string }) {
   const t = useT();
+  // What roles there are to grant, from the installation rather than a copy.
+  const catalogue = useRoles();
   const queryClient = useQueryClient();
   const [warning, setWarning] = useState<ApiError | null>(null);
   const [issued, setIssued] = useState<IssuedToken | null>(null);
@@ -820,8 +922,9 @@ function Identities({ initialSearch }: { initialSearch: string }) {
           >
             <FieldGrid>
               <Field label={t("Role")}>
-                <select value={grantRole} onChange={(e) => setGrantRole(e.target.value)}>
-                  {ROLES.map((name) => <option key={name} value={name}>{name}</option>)}
+                <select value={grantRole} onChange={(e) => setGrantRole(e.target.value)}
+                        disabled={roleNames(catalogue.data?.items).length === 0}>
+                  {roleNames(catalogue.data?.items).map((name) => <option key={name} value={name}>{name}</option>)}
                 </select>
               </Field>
               {/* One choice, not two sets of fields: a binding names a team
@@ -1087,6 +1190,7 @@ function CreateIdentity({ onCreated, onCancel, onError }: {
   onCancel: () => void;
   onError: (error: unknown) => void;
 }) {
+  const catalogue = useRoles();
   const t = useT();
   const [subject, setSubject] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -1140,7 +1244,7 @@ function CreateIdentity({ onCreated, onCancel, onError }: {
         <Field label={t("First role (empty = none yet)")}>
           <select value={role} onChange={(e) => setRole(e.target.value)}>
             <option value="">{t("none")}</option>
-            {ROLES.map((name) => <option key={name} value={name}>{name}</option>)}
+            {roleNames(catalogue.data?.items).map((name) => <option key={name} value={name}>{name}</option>)}
           </select>
         </Field>
         {role && (
@@ -1173,9 +1277,6 @@ function CreateIdentity({ onCreated, onCancel, onError }: {
   );
 }
 
-/** One role of the catalogue with what it may do. */
-type RoleInfo = { role: string; permissions: string[] };
-
 /**
  * The permissions of the catalogue as rows and the roles as columns, with
  * the rows in a fixed order: the matrix is read down a column to learn what
@@ -1191,59 +1292,332 @@ export function permissionMatrix(roles: RoleInfo[]): { roles: string[]; permissi
   };
 }
 
+/** The permissions this product defines, as the server lists them. */
+type PermissionInfo = { permission: string; group: string };
+
 /**
- * The role catalogue as a matrix.
+ * The roles: the product's own, the ones this installation defined, and the
+ * matrix of what each may do.
+ *
+ * The screen is in two halves on purpose. A role of the installation's own is
+ * something somebody here wrote and can change, so it is listed with what it
+ * carries, how many identities hold it and the way to edit it. The product's
+ * six are listed beside it and cannot be edited at all: their permissions are
+ * in the code, where they are read in review, and a copy in the database
+ * would be a second answer to the same question.
  */
-function Roles() {
+export function Roles() {
   const t = useT();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
-  const { data, error } = useQuery({
-    queryKey: ["roles"],
-    queryFn: () => api.get<Collection<RoleInfo>>("/api/v1/roles"),
+  const [warning, setWarning] = useState<ApiError | null>(null);
+  // The role being written: a new one, or one of the installation's own
+  // opened for editing.
+  const [editing, setEditing] = useState<RoleInfo | "new" | null>(null);
+  const [removing, setRemoving] = useState<RoleInfo | null>(null);
+
+  const catalogue = useRoles();
+  const vocabulary = useQuery({
+    queryKey: ["permissions"],
+    queryFn: () => api.get<Collection<PermissionInfo>>("/api/v1/permissions"),
     retry: false,
+    staleTime: 60 * 60 * 1000,
   });
-  if (error) return <ErrorBox error={error} />;
-  if (!data) return <Card><Empty>{t("Loading…")}</Empty></Card>;
-  const matrix = permissionMatrix(data.items);
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["roles"] });
+    queryClient.invalidateQueries({ queryKey: ["whoami"] });
+  };
+
+  const remove = useMutation({
+    mutationFn: ({ role, reason }: { role: string; reason: string }) =>
+      api.del(`/api/v1/roles/${encodeURIComponent(role)}?reason=${encodeURIComponent(reason)}`),
+    onSuccess: () => { setRemoving(null); refresh(); },
+    onError: (error) => setWarning(error instanceof ApiError ? error : null),
+  });
+
+  if (catalogue.error) return <ErrorBox error={catalogue.error} />;
+  if (!catalogue.data) return <Card><Empty>{t("Loading…")}</Empty></Card>;
+
+  const roles = catalogue.data.items;
+  const own = roles.filter((role) => !role.built_in);
+  const matrix = permissionMatrix(roles);
   const needle = search.trim().toLowerCase();
   const rows = matrix.permissions.filter((permission) => !needle || permission.toLowerCase().includes(needle));
+  const aside = editing !== null || removing !== null;
+
   return (
-    <div className="widgets">
-      <Card
-        className="span-12"
-        title={t("Roles")}
-        description={t("What each role may do. The roles are fixed; an identity gets one through a direct grant or a group mapping.")}
-        flush
-      >
-        <Toolbar end={<span>{t("{n} permissions", { n: rows.length })}</span>}>
-          <input placeholder={t("permission, e.g. job.create")} value={search} onChange={(e) => setSearch(e.target.value)} />
-        </Toolbar>
-        {rows.length === 0 ? (
-          <Empty>{t("No permission matches the search.")}</Empty>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">{t("Permission")}</th>
-                {matrix.roles.map((role) => <th scope="col" key={role}>{role}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((permission) => (
-                <tr key={permission}>
-                  <td className="mono">{permission}</td>
-                  {matrix.roles.map((role) => (
-                    <td key={role} title={`${role}: ${permission}`}>
-                      {matrix.has(role, permission) ? <span className="badge ok">{t("yes")}</span> : <span className="source">—</span>}
+    <>
+      <Warning error={warning} close={() => setWarning(null)} />
+      <div className="widgets">
+        <Card
+          className={aside ? "span-8" : "span-12"}
+          title={t("Roles of this installation")}
+          description={t("A role defined here carries exactly the permissions it was given. The product's own roles are below and cannot be changed.")}
+          actions={!aside && (
+            <button onClick={() => { setRemoving(null); setEditing("new"); }}>{t("Define a role")}</button>
+          )}
+          flush
+        >
+          {own.length === 0 ? (
+            <EmptyState action={!aside && <button onClick={() => setEditing("new")}>{t("Define a role")}</button>}>
+              {t("No role of this installation's own. The product's six are described below; define one when none of them is the job somebody actually does.")}
+            </EmptyState>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">{t("Role")}</th>
+                  <th scope="col">{t("What it is for")}</th>
+                  <th scope="col">{t("Permissions")}</th>
+                  <th scope="col">{t("In use")}</th>
+                  <th scope="col">{t("Defined by")}</th>
+                  <th scope="col" />
+                </tr>
+              </thead>
+              <tbody>
+                {own.map((role) => (
+                  <tr key={role.role}>
+                    <td className="mono">{role.role}</td>
+                    <td className="source">{role.description || "—"}</td>
+                    <td className="num">{role.permissions.length}</td>
+                    <td>
+                      <RoleUsage role={role} />
                     </td>
+                    <td className="source">{role.created_by || "—"}</td>
+                    <td className="actions-cell">
+                      <div className="row-actions">
+                        <button className="secondary" onClick={() => { setRemoving(null); setEditing(role); }}>
+                          {t("Edit")}
+                        </button>
+                        <button className="danger" onClick={() => { setEditing(null); setRemoving(role); }}>
+                          {t("Remove")}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+
+        {editing && (
+          <RoleEditor
+            key={editing === "new" ? "new" : editing.role}
+            role={editing === "new" ? null : editing}
+            vocabulary={vocabulary.data?.items}
+            onDone={() => { setEditing(null); refresh(); }}
+            onCancel={() => setEditing(null)}
+            onError={(error) => setWarning(error instanceof ApiError ? error : null)}
+          />
+        )}
+
+        {removing && (
+          <ConfirmCard
+            key={removing.role}
+            title={t("Remove the role {role}", { role: removing.role })}
+            text={removing.bindings || removing.mappings
+              ? t("This role is still granted, so the panel will refuse to remove it. Revoke the bindings and the group mappings that name it first.")
+              : t("The role is removed. Nothing is granted through it, so nobody loses access by this.")}
+            action={t("Remove")}
+            danger
+            busy={remove.isPending}
+            onConfirm={(reason) => remove.mutate({ role: removing.role, reason })}
+            onCancel={() => setRemoving(null)}
+          />
+        )}
+
+        <Card
+          className="span-12"
+          title={t("What each role may do")}
+          description={t("Read down a column to learn what a role may do, along a row to learn who may do a thing.")}
+          flush
+        >
+          <Toolbar end={<span>{t("{n} permissions", { n: rows.length })}</span>}>
+            <input placeholder={t("permission, e.g. job.create")} value={search} onChange={(e) => setSearch(e.target.value)} />
+          </Toolbar>
+          {rows.length === 0 ? (
+            <Empty>{t("No permission matches the search.")}</Empty>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">{t("Permission")}</th>
+                  {roles.map((role) => (
+                    <th scope="col" key={role.role}>
+                      {role.role}
+                      {!role.built_in && <> <span className="badge">{t("own")}</span></>}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((permission) => (
+                  <tr key={permission}>
+                    <td className="mono">{permission}</td>
+                    {roles.map((role) => (
+                      <td key={role.role} title={`${role.role}: ${permission}`}>
+                        {matrix.has(role.role, permission) ? <span className="badge ok">{t("yes")}</span> : <span className="source">—</span>}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      </div>
+    </>
+  );
+}
+
+/**
+ * How much a role is used.
+ *
+ * A count that was never read is not a zero, and the difference decides
+ * whether the next click is refused: the server will not delete a role
+ * somebody is bound to. An older panel answering without these fields says
+ * so rather than claiming nobody holds the role.
+ */
+function RoleUsage({ role }: { role: RoleInfo }) {
+  const t = useT();
+  if (role.bindings === undefined || role.mappings === undefined) {
+    return <span className="badge unknown">{t("not known")}</span>;
+  }
+  const total = role.bindings + role.mappings;
+  if (total === 0) return <span className="source">{t("nobody")}</span>;
+  return (
+    <span title={t("{bindings} direct, {mappings} through a group", { bindings: role.bindings, mappings: role.mappings })}>
+      {t("{n} grants", { n: total })}
+    </span>
+  );
+}
+
+/**
+ * Writing a role: its name, what it is for, and which permissions it carries.
+ *
+ * The permissions are written whole on every save rather than added to. An
+ * edit that could only widen a role would be a strange thing to offer on a
+ * screen about access - and what is taken away is what somebody bound to the
+ * role loses, so the form says so before it is saved.
+ */
+function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
+  role: RoleInfo | null;
+  vocabulary: PermissionInfo[] | undefined;
+  onDone: () => void;
+  onCancel: () => void;
+  onError: (error: unknown) => void;
+}) {
+  const t = useT();
+  const [name, setName] = useState(role?.role ?? "");
+  const [description, setDescription] = useState(role?.description ?? "");
+  const [chosen, setChosen] = useState<Set<string>>(new Set(role?.permissions ?? []));
+  const [filter, setFilter] = useState("");
+  const [reason, setReason] = useState("");
+
+  const save = useMutation({
+    mutationFn: () => {
+      const body = {
+        description: description.trim(),
+        permissions: Array.from(chosen).sort(),
+        reason: reason.trim(),
+      };
+      return role
+        ? api.put(`/api/v1/roles/${encodeURIComponent(role.role)}`, body)
+        : api.post("/api/v1/roles", { role: name.trim(), ...body });
+    },
+    onSuccess: () => onDone(),
+    onError: (error) => onError(error),
+  });
+
+  const toggle = (permission: string) => {
+    const next = new Set(chosen);
+    if (next.has(permission)) next.delete(permission);
+    else next.add(permission);
+    setChosen(next);
+  };
+
+  const needle = filter.trim().toLowerCase();
+  const offered = (vocabulary ?? []).filter((one) => !needle || one.permission.toLowerCase().includes(needle));
+  const groups = Array.from(new Set(offered.map((one) => one.group)));
+  // What an edit takes away from everybody who holds the role.
+  const losing = (role?.permissions ?? []).filter((permission) => !chosen.has(permission));
+  const nameValid = role !== null || /^[a-z][a-z0-9_]{1,62}$/.test(name.trim());
+
+  return (
+    <Card
+      className="span-4 fp-narrow"
+      title={role ? t("Edit the role {role}", { role: role.role }) : t("Define a role")}
+      footer={
+        <Actions>
+          <button
+            disabled={!nameValid || chosen.size === 0 || !reasonGiven(reason) || save.isPending || vocabulary === undefined}
+            onClick={() => save.mutate()}
+          >
+            {role ? t("Save the role") : t("Define the role")}
+          </button>
+          <button className="secondary" onClick={onCancel}>{t("Cancel")}</button>
+        </Actions>
+      }
+    >
+      <FieldGrid>
+        {!role && (
+          <Field
+            label={t("Name")}
+            hint={t("Lower case letters, digits and underscores. It is what every binding, mapping and audit line carries, and it cannot be changed later.")}
+            wide
+          >
+            <input className="mono" value={name} onChange={(e) => setName(e.target.value)} placeholder="shift_lead" />
+          </Field>
         )}
-      </Card>
-    </div>
+        <Field label={t("What it is for")} wide>
+          <input value={description} onChange={(e) => setDescription(e.target.value)}
+                 placeholder={t("e.g. restarts services on the night shift")} />
+        </Field>
+      </FieldGrid>
+
+      {vocabulary === undefined ? (
+        <Empty>{t("The permissions are still being read; a role cannot be written against a list that is not here.")}</Empty>
+      ) : (
+        <>
+          <Toolbar end={<span>{t("{n} chosen", { n: chosen.size })}</span>}>
+            <input placeholder={t("permission, e.g. unit.restart")} value={filter}
+                   onChange={(e) => setFilter(e.target.value)} />
+          </Toolbar>
+          <div className="permission-picker" data-testid="permission-picker">
+            {groups.map((group) => (
+              <fieldset className="permission-group" key={group}>
+                <legend>{group}</legend>
+                {offered.filter((one) => one.group === group).map((one) => (
+                  <label key={one.permission}>
+                    <input
+                      type="checkbox"
+                      checked={chosen.has(one.permission)}
+                      onChange={() => toggle(one.permission)}
+                      data-testid={`permission-${one.permission}`}
+                    />{" "}
+                    <span className="mono">{one.permission}</span>
+                  </label>
+                ))}
+              </fieldset>
+            ))}
+            {offered.length === 0 && <Empty>{t("No permission matches the search.")}</Empty>}
+          </div>
+        </>
+      )}
+
+      {losing.length > 0 && (
+        <p className="part-reason">
+          {t("Everybody holding this role loses: {permissions}", { permissions: losing.join(", ") })}
+        </p>
+      )}
+      <FieldGrid>
+        <Field label={t("Reason for the change")} wide>
+          <input value={reason} onChange={(e) => setReason(e.target.value)}
+                 placeholder={t("e.g. the night shift needs no reboots")} />
+        </Field>
+      </FieldGrid>
+    </Card>
   );
 }
 

@@ -377,8 +377,8 @@ type teamBindingRequest struct {
 // request.
 func (request teamBindingRequest) parse() (authz.Role, authz.Scope, *time.Time, string, error) {
 	role := authz.Role(request.Role)
-	if !authz.KnownRole(role) {
-		return "", authz.Scope{}, nil, "unknown_role", errors.New("unknown role " + request.Role)
+	if strings.TrimSpace(request.Role) == "" {
+		return "", authz.Scope{}, nil, "invalid_binding", errors.New("a binding names a role")
 	}
 	if strings.TrimSpace(request.Site) != "" || strings.TrimSpace(request.Environment) != "" {
 		return "", authz.Scope{}, nil, "scope_conflict",
@@ -458,7 +458,11 @@ func (s *Server) handleGrantTeamRole(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	if err := mayGrant(actor, role, scope); err != nil {
+	carried, ok := s.resolveRole(w, r, role)
+	if !ok {
+		return
+	}
+	if err := mayGrant(actor, role, carried, scope); err != nil {
 		s.refuseEscalation(w, r, actor, "principal.role.grant", target.ID, err)
 		return
 	}
@@ -510,8 +514,7 @@ func (s *Server) handleRevokeTeamRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	role := authz.Role(r.PathValue("role"))
-	if !authz.KnownRole(role) {
-		problem(w, http.StatusBadRequest, "unknown_role", "unknown role "+string(role))
+	if _, ok := s.resolveRole(w, r, role); !ok {
 		return
 	}
 	var request teamBindingRequest

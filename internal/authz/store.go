@@ -97,8 +97,12 @@ func (s *Store) EnsurePrincipal(ctx context.Context, tx pgx.Tx,
 // nil, until revoked.
 func (s *Store) GrantRole(ctx context.Context, tx pgx.Tx,
 	principalID string, role Role, scope Scope, validUntil *time.Time, createdBy string) error {
-	if !KnownRole(role) {
-		return fmt.Errorf("unknown role %q", role)
+	// Both kinds of role are bindable, so the question is asked of the table
+	// rather than of the compiled list - inside this transaction, so a role
+	// deleted between the check and the insert cannot slip through. The
+	// foreign key is the last word either way.
+	if err := roleBindable(ctx, tx, role); err != nil {
+		return err
 	}
 	// A binding names a team or a site, never both: the two are different
 	// vocabularies, and the insert follows the constraint rather than letting the
@@ -522,13 +526,28 @@ func (s *Store) allBindingsOf(ctx context.Context, principalID string) ([]Bindin
 	return s.readBindings(ctx, principalID, false)
 }
 
+// grantedByRole is the permissions of a role the installation defined, read
+// in the same query as the binding that names it.
+//
+// Not a catalogue held in memory and refreshed on a timer: a request is
+// decided by what the role carries now, and a cache would decide some of them
+// by what it carried a minute ago - on one replica and not the other. The
+// column is empty for a built-in role, whose permissions are compiled in.
+const grantedByRole = `
+	left join (
+		select role, array_agg(permission) as granted
+		from role_permissions group by role
+	) rp on rp.role = %s.role`
+
 func (s *Store) readBindings(ctx context.Context, principalID string, liveOnly bool) ([]Binding, error) {
-	query := `select role, site, environment, coalesce(team_id::text, ''), team_any, owners, tags, valid_until
-		from role_bindings where principal_id = $1`
+	query := `select b.role, b.site, b.environment, coalesce(b.team_id::text, ''), b.team_any,
+		       b.owners, b.tags, b.valid_until, coalesce(rp.granted, '{}')
+		from role_bindings b` + fmt.Sprintf(grantedByRole, "b") + `
+		where b.principal_id = $1`
 	if liveOnly {
-		query += ` and (valid_until is null or valid_until > now())`
+		query += ` and (b.valid_until is null or b.valid_until > now())`
 	}
-	rows, err := s.pool.Query(ctx, query+` order by role, site, environment`, principalID)
+	rows, err := s.pool.Query(ctx, query+` order by b.role, b.site, b.environment`, principalID)
 	if err != nil {
 		return nil, err
 	}
@@ -537,14 +556,30 @@ func (s *Store) readBindings(ctx context.Context, principalID string, liveOnly b
 	var bindings []Binding
 	for rows.Next() {
 		var binding Binding
+		var granted []string
 		if err := rows.Scan(&binding.Role, &binding.Scope.Site, &binding.Scope.Environment,
 			&binding.Scope.Team, &binding.Scope.TeamAny,
-			&binding.Scope.Owners, &binding.Scope.Tags, &binding.ValidUntil); err != nil {
+			&binding.Scope.Owners, &binding.Scope.Tags, &binding.ValidUntil, &granted); err != nil {
 			return nil, err
 		}
+		binding.Granted = permissionsOf(granted)
 		bindings = append(bindings, binding)
 	}
 	return bindings, rows.Err()
+}
+
+// permissionsOf turns the column into the model's type. A nil stays nil: a
+// binding to a built-in role carries no list, and an empty one would read the
+// same on the wire while meaning something else here.
+func permissionsOf(values []string) []Permission {
+	if len(values) == 0 {
+		return nil
+	}
+	permissions := make([]Permission, 0, len(values))
+	for _, value := range values {
+		permissions = append(permissions, Permission(value))
+	}
+	return permissions
 }
 
 // ListPrincipals returns the identities together with their roles.
@@ -603,21 +638,27 @@ func nullable(value string) any {
 
 // GroupMapping binds an external group to a role within a scope.
 type GroupMapping struct {
-	ID          string    `json:"id"`
-	Issuer      string    `json:"issuer"`
-	GroupName   string    `json:"group_name"`
-	Role        Role      `json:"role"`
-	Site        string    `json:"site"`
-	Environment string    `json:"environment"`
-	CreatedBy   string    `json:"created_by"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string `json:"id"`
+	Issuer      string `json:"issuer"`
+	GroupName   string `json:"group_name"`
+	Role        Role   `json:"role"`
+	Site        string `json:"site"`
+	Environment string `json:"environment"`
+	// Owners and Tags narrow the mapping further, as they narrow a binding
+	// made by hand. A single * is every one of that category; an empty list
+	// reaches none, which is why nothing given becomes the wildcard and not
+	// the empty list.
+	Owners    []string  `json:"owners"`
+	Tags      []string  `json:"tags"`
+	CreatedBy string    `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // CreateGroupMapping adds a mapping from a group to a role.
 func (s *Store) CreateGroupMapping(ctx context.Context, tx pgx.Tx,
 	issuer, groupName string, role Role, scope Scope, createdBy string) (*GroupMapping, error) {
-	if !KnownRole(role) {
-		return nil, fmt.Errorf("unknown role %q", role)
+	if err := roleBindable(ctx, tx, role); err != nil {
+		return nil, err
 	}
 	if issuer == "" || groupName == "" {
 		return nil, fmt.Errorf("a mapping requires an issuer and a group name")
@@ -625,16 +666,26 @@ func (s *Store) CreateGroupMapping(ctx context.Context, tx pgx.Tx,
 	mapping := &GroupMapping{
 		ID: uuid.NewString(), Issuer: issuer, GroupName: groupName, Role: role,
 		Site: orWildcard(scope.Site), Environment: orWildcard(scope.Environment),
+		Owners: orWildcardList(scope.Owners), Tags: orWildcardList(scope.Tags),
 		CreatedBy: createdBy,
 	}
+	// A mapping that reaches nobody is not a mapping, it is a rule somebody
+	// will read as granting something. Nothing given means every one of that
+	// category; a list emptied on purpose is refused here rather than written.
+	if len(mapping.Owners) == 0 || len(mapping.Tags) == 0 {
+		return nil, fmt.Errorf("a mapping with an empty list of owners or tags reaches no host; " +
+			"leave the category out to mean every one of them")
+	}
 	const query = `
-		insert into group_role_mappings (id, issuer, group_name, role, site, environment, created_by)
-		values ($1, $2, $3, $4, $5, $6, $7)
-		on conflict (issuer, group_name, role, site, environment) do update
+		insert into group_role_mappings
+			(id, issuer, group_name, role, site, environment, owners, tags, created_by)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		on conflict (issuer, group_name, role, site, environment, owners, tags) do update
 			set created_by = group_role_mappings.created_by
 		returning id, created_at`
 	if err := tx.QueryRow(ctx, query, mapping.ID, issuer, groupName, string(role),
-		mapping.Site, mapping.Environment, createdBy).Scan(&mapping.ID, &mapping.CreatedAt); err != nil {
+		mapping.Site, mapping.Environment, mapping.Owners, mapping.Tags,
+		createdBy).Scan(&mapping.ID, &mapping.CreatedAt); err != nil {
 		return nil, fmt.Errorf("saving the group mapping: %w", err)
 	}
 	return mapping, nil
@@ -643,7 +694,7 @@ func (s *Store) CreateGroupMapping(ctx context.Context, tx pgx.Tx,
 // ListGroupMappings returns the group mappings.
 func (s *Store) ListGroupMappings(ctx context.Context) ([]GroupMapping, error) {
 	const query = `
-		select id, issuer, group_name, role, site, environment, created_by, created_at
+		select id, issuer, group_name, role, site, environment, owners, tags, created_by, created_at
 		from group_role_mappings
 		order by issuer, group_name, role`
 	rows, err := s.pool.Query(ctx, query)
@@ -656,7 +707,8 @@ func (s *Store) ListGroupMappings(ctx context.Context) ([]GroupMapping, error) {
 	for rows.Next() {
 		var mapping GroupMapping
 		if err := rows.Scan(&mapping.ID, &mapping.Issuer, &mapping.GroupName, &mapping.Role,
-			&mapping.Site, &mapping.Environment, &mapping.CreatedBy, &mapping.CreatedAt); err != nil {
+			&mapping.Site, &mapping.Environment, &mapping.Owners, &mapping.Tags,
+			&mapping.CreatedBy, &mapping.CreatedAt); err != nil {
 			return nil, err
 		}
 		mappings = append(mappings, mapping)

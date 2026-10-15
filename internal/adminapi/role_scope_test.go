@@ -97,26 +97,47 @@ func TestMayGrantRefusesWideningTheActorsOwnAccess(t *testing.T) {
 		Subject:  "operator",
 		Bindings: []authz.Binding{{Role: authz.RoleOperator, Scope: authz.OfTeam(team)}},
 	}
-	if err := mayGrant(operatorOfTeam, authz.RoleOperator, authz.OfTeam(team)); err != nil {
+	carries := func(role authz.Role) []authz.Permission { return role.Permissions() }
+	if err := mayGrant(operatorOfTeam, authz.RoleOperator, carries(authz.RoleOperator), authz.OfTeam(team)); err != nil {
 		t.Errorf("the team it holds was refused: %v", err)
 	}
-	if err := mayGrant(operatorOfTeam, authz.RoleOperator, authz.OfTeam(other)); err == nil {
+	if err := mayGrant(operatorOfTeam, authz.RoleOperator, carries(authz.RoleOperator), authz.OfTeam(other)); err == nil {
 		t.Error("another team was granted")
 	}
 	// The case raw columns would pass: both bindings carry the same wildcards for
 	// site and environment, and differ only in what the team column means.
-	if err := mayGrant(operatorOfTeam, authz.RoleOperator,
+	if err := mayGrant(operatorOfTeam, authz.RoleOperator, carries(authz.RoleOperator),
 		authz.Placement(authz.Wildcard, authz.Wildcard)); err == nil {
 		t.Error("any team was granted by somebody bound to one team")
 	}
-	if err := mayGrant(operatorOfTeam, authz.RolePlatformAdmin, authz.OfTeam(team)); err == nil {
+	if err := mayGrant(operatorOfTeam, authz.RolePlatformAdmin, carries(authz.RolePlatformAdmin), authz.OfTeam(team)); err == nil {
 		t.Error("a role carrying more permissions than the actor holds was granted")
 	}
 	global := authz.Principal{
 		Subject:  "admin",
 		Bindings: []authz.Binding{{Role: authz.RolePlatformAdmin, Scope: authz.GlobalScope}},
 	}
-	if err := mayGrant(global, authz.RoleOperator, authz.OfTeam(team)); err != nil {
+	if err := mayGrant(global, authz.RoleOperator, carries(authz.RoleOperator), authz.OfTeam(team)); err != nil {
 		t.Errorf("a global administrator was refused one team: %v", err)
+	}
+
+	// A role of the installation's own, which carries nothing in the compiled
+	// map. The guard is given what the store read, so it compares the real
+	// thing - and the version of this that asked the role instead let a
+	// freshly defined role carrying system.reboot past an operator who holds
+	// it on one team only.
+	ownRole := authz.Role("shift_lead")
+	if err := mayGrant(operatorOfTeam, ownRole,
+		[]authz.Permission{authz.PermUnitRestart, authz.PermJournalRead}, authz.OfTeam(team)); err != nil {
+		t.Errorf("a role of the installation's own, within the actor's own team, was refused: %v", err)
+	}
+	if err := mayGrant(operatorOfTeam, ownRole,
+		[]authz.Permission{authz.PermUnitRestart}, authz.OfTeam(other)); err == nil {
+		t.Error("a role of the installation's own was granted over another team")
+	}
+	// And the shape that made this change necessary: nothing resolved. It is
+	// refused rather than read as a role with nothing to object to.
+	if err := mayGrant(operatorOfTeam, ownRole, nil, authz.OfTeam(team)); err == nil {
+		t.Error("a role that resolved to no permission at all was granted")
 	}
 }

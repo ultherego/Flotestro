@@ -417,7 +417,7 @@ export function HostPicker() {
                   {row.host ? (
                     <ConnectionDot state={row.host.connection_state} />
                   ) : (
-                    <span className="host-picker-kind" style={{ gridArea: "dot", display: "inline-flex", color: "var(--text-muted)" }}>
+                    <span className="host-picker-kind">
                       <Icon name={row.icon} />
                     </span>
                   )}

@@ -99,7 +99,25 @@ export function verifierReading(raw: unknown): VerifierReading | null {
  */
 export type ReadingKind = "did_not_hold" | "could_not_read" | "outcome_unknown";
 
-export function readingKind(kind: UnresolvedKind, reading: VerifierReading | null): ReadingKind {
+/**
+ * The reading the server decided, with the old rule as a fallback.
+ *
+ * This used to be the rule itself, computed here. It moved into SQL on 15.10
+ * because the list is paged and counted on the server: a screen that
+ * classified while the server counted would put numbers above a list that
+ * disagree with it, and an operator who sees that learns to trust neither.
+ * What is left here is reading the field - and, for a row from a panel that
+ * predates it, the old derivation, so an upgrade in progress shows rows rather
+ * than blanks.
+ */
+export function readingKind(
+  kind: UnresolvedKind,
+  reading: VerifierReading | null,
+  said?: string,
+): ReadingKind {
+  if (said === "did_not_hold" || said === "could_not_read" || said === "outcome_unknown") {
+    return said;
+  }
   if (kind === "outcome_unknown") return "outcome_unknown";
   if (!reading || !reading.observed || reading.observed === "unknown") return "could_not_read";
   return "did_not_hold";
@@ -142,6 +160,11 @@ export default function Unresolved() {
   const t = useT();
   const client = useQueryClient();
   const [kind, setKind] = useState<UnresolvedKind | "">("");
+  // Which of the three readings to show, or all of them. It narrows inside the
+  // question rather than beside it, so choosing one clears the other control:
+  // two narrowings that overlap would let an operator ask for a combination
+  // that cannot hold anything and read the empty answer as good news.
+  const [reading, setReading] = useState<ReadingKind | "">("");
   const [size, setSize] = useState(20);
   const [page, setPage] = useState(1);
   // What is typed, and what has been asked of the server. They are two states
@@ -163,10 +186,11 @@ export default function Unresolved() {
   }, [typed]);
 
   const { data, error, isPlaceholderData } = useQuery({
-    queryKey: ["unresolved", kind, size, page, search],
+    queryKey: ["unresolved", kind, reading, size, page, search],
     queryFn: () => {
       const query = new URLSearchParams({ limit: String(size), offset: String((page - 1) * size) });
       if (kind) query.set("kind", kind);
+      if (reading) query.set("reading", reading);
       if (search) query.set("q", search);
       return api.get<UnresolvedOperations>(`/api/v1/unresolved?${query}`);
     },
@@ -191,6 +215,12 @@ export default function Unresolved() {
   const items = data?.items ?? [];
   const show = (next: UnresolvedKind | "") => {
     setKind(next);
+    setReading("");
+    setPage(1);
+  };
+  const showReading = (next: ReadingKind | "") => {
+    setReading(next);
+    setKind("");
     setPage(1);
   };
 
@@ -253,6 +283,41 @@ export default function Unresolved() {
               );
             })}
           </div>
+          {/* Inside "did it hold?" there are two different situations, and
+              until 15.10 one label covered both: a host that answered with
+              something else - where the panel KNOWS the change did not hold -
+              and a host the verifier could not read. The first is a
+              conclusion, the second is the absence of one. Each gets its own
+              number and its own way in, which is what the owner asked for
+              when he said "readably". */}
+          <div className="segmented" role="group" aria-label={t("Which reading to show")}>
+            {([
+              ["did_not_hold", counts.did_not_hold_operations, counts.did_not_hold_hosts],
+              ["could_not_read", counts.could_not_read_operations, counts.could_not_read_hosts],
+            ] as const).map(([which, operations, hosts]) => (
+              <button
+                key={which}
+                type="button"
+                className={reading === which ? "active" : ""}
+                onClick={() => showReading(reading === which ? "" : which)}
+                aria-pressed={reading === which}
+                data-testid={`reading-${which}`}
+                title={which === "did_not_hold"
+                  ? t("The host answered and shows something other than what was ordered.")
+                  : t("The verifier could not read the host, so the state is unknown.")}
+              >
+                {which === "did_not_hold" ? t("Did not hold") : t("Could not be read")}{" "}
+                <span className="fp-chips">
+                  <span className={(operations ?? 0) > 0 ? "badge warn" : "badge"}>
+                    {t("{n} operations", { n: operations ?? 0 })}
+                  </span>
+                  <span className={(hosts ?? 0) > 0 ? "badge warn" : "badge"}>
+                    {t("on {n} hosts", { n: hosts ?? 0 })}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
           {total > 0 && (
             <button
               type="button"
@@ -270,6 +335,7 @@ export default function Unresolved() {
       {batch && (
         <BatchRulingForm
           kind={kind}
+          reading={reading}
           search={search}
           total={total}
           onClose={() => setBatch(false)}
@@ -465,7 +531,7 @@ export default function Unresolved() {
 function ReasonCell({ item }: { item: UnresolvedItem }) {
   const t = useT();
   const reading = verifierReading(item.verification);
-  const sort = readingKind(item.kind, reading);
+  const sort = readingKind(item.kind, reading, item.reading);
   return (
     <div className="reason">
       {sort === "did_not_hold" && (
@@ -506,12 +572,14 @@ function ReasonCell({ item }: { item: UnresolvedItem }) {
  */
 function BatchRulingForm({
   kind,
+  reading,
   search,
   total,
   onClose,
   onRuled,
 }: {
   kind: UnresolvedKind | "";
+  reading: ReadingKind | "";
   search: string;
   total: number;
   onClose: () => void;
@@ -529,6 +597,7 @@ function BatchRulingForm({
       // between this list being fetched and the button being pressed.
       const query = new URLSearchParams({ limit: String(BATCH_LIMIT), offset: "0" });
       if (kind) query.set("kind", kind);
+      if (reading) query.set("reading", reading);
       // The same narrowing the screen is showing: "all of them" means all of
       // what the operator is looking at, not all of the fleet's.
       if (search) query.set("q", search);

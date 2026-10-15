@@ -252,7 +252,7 @@ export function PlanChanges({ changes, shown = ROWS_SHOWN }: { changes?: (string
   const downgrades = packages.filter((change) => changeAction(change) === "downgrade").length;
   const folded = packages.length > shown;
   return (
-    <div className="plan-changes">
+    <div>
       <table className="plan-changes-table">
         <thead>
           <tr>
@@ -285,7 +285,7 @@ export function PlanChanges({ changes, shown = ROWS_SHOWN }: { changes?: (string
                   {change.protected && <span className="badge error">{t("protected")}</span>}
                   {change.blocked && <span className="badge error">{t("blocked")}</span>}
                   {change.origin && <span className="source plan-origin">{change.origin}</span>}
-                  {change.architecture && <span className="source plan-arch">{change.architecture}</span>}
+                  {change.architecture && <span className="source">{change.architecture}</span>}
                   {change.reason && change.reason !== "requested" && <span className="source">{t(change.reason)}</span>}
                   {delta !== undefined && delta !== 0 && (
                     <span className="source">{delta > 0 ? "+" : "−"}{bytes(Math.abs(delta))}</span>
@@ -304,7 +304,7 @@ export function PlanChanges({ changes, shown = ROWS_SHOWN }: { changes?: (string
           {downgrades > 0 && ` · ${t("{n} downgraded", { n: downgrades })}`}
         </span>
         {folded && (
-          <button type="button" className="secondary plan-toggle" onClick={() => setAll(!all)}>
+          <button type="button" className="secondary" onClick={() => setAll(!all)}>
             {all ? t("Show fewer") : t("Show all {n}", { n: packages.length })}
           </button>
         )}
@@ -393,7 +393,7 @@ export function PlanBlocked({ plan }: { plan: PackagePlanFacts }) {
   const unknown = blocked.filter((entry) => entry.kind === "unknown");
   const advisory = blocked.length - database.length - held.length - unknown.length;
   return (
-    <div className="plan-blocked">
+    <div>
       {/* Each kind is said in its own words: a broken database is a fault of the
           host, a hold is a decision on it, and a gap the resolution could not
           name is neither. */}

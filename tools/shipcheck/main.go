@@ -174,6 +174,25 @@ func selectChecks(names []string) ([]check, error) {
 	return selected, nil
 }
 
+// noteSigner records that a workflow signs an image. An image may be signed
+// by more than one, and then any of them satisfies a procedure that names it.
+func noteSigner(signed map[string]map[string]bool, image, workflow string) {
+	if signed[image] == nil {
+		signed[image] = map[string]bool{}
+	}
+	signed[image][workflow] = true
+}
+
+// signedNames is the set of images for a message.
+func signedNames(signed map[string]map[string]bool) []string {
+	names := make([]string, 0, len(signed))
+	for name := range signed {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 func sorted(set map[string]bool) []string {
 	names := make([]string, 0, len(set))
 	for name := range set {
