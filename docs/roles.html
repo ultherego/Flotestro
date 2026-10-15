@@ -561,8 +561,9 @@ site=waw env=prod team=* owner=* tag=*</code></pre>
 
     <p>Nobody is given a role by hand in the usual case. A group of the identity
     provider is mapped to a role within a scope, and whoever signs in carrying
-    that group gets that binding. The mapping is written with
-    <code>POST /api/v1/group-mappings</code> &mdash; see
+    that group gets that binding. In the panel the mappings are a tab of
+    <strong>Settings</strong>, beside the roles themselves; over the API the
+    mapping is written with <code>POST /api/v1/group-mappings</code> &mdash; see
     <a href="installation.html#admin">the first administrator</a> for the
     request and the order the steps are taken in.</p>
 
