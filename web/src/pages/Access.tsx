@@ -5,7 +5,7 @@ import { api, ApiError, type Collection } from "../lib/api";
 import { copyToClipboard } from "../lib/clipboard";
 import type { AccessReview, ApiToken, GroupMapping, Principal, ReviewFlag, ReviewedPrincipal } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
-import { toInstant } from "../lib/format";
+import { absoluteTime, toInstant } from "../lib/format";
 import { Actions, Card, EmptyState, Field, FieldGrid, StatGrid, Stat, Toolbar, Pager} from "../components/layout";
 import { Breakdown } from "../components/widgets";
 import { useTeams } from "./Teams";
@@ -532,8 +532,25 @@ export function Mappings() {
 /** A freshly issued token, shown once and never fetched again. */
 type IssuedToken = { subject: string; token: string; token_expires_at?: string };
 
-/** An identity as the list carries it, with the moment it was disabled when it was. */
-type ListedPrincipal = Principal & { disabled_at?: string };
+/** What the panel knows about an identity's password; never the password. */
+type PasswordState = {
+  set_at: string;
+  set_by: string;
+  must_change: boolean;
+  locked_until?: string;
+  failed_attempts: number;
+  last_used_at?: string;
+};
+
+/**
+ * An identity as the list carries it, with the moment it was disabled when
+ * it was and what is known about its password.
+ *
+ * `password` absent means this identity has none - it signs in through the
+ * provider, or not at all - which is a different thing from one whose
+ * password is empty.
+ */
+type ListedPrincipal = Principal & { disabled_at?: string; password?: PasswordState };
 
 /**
  * A page of identities: the rows, how many there are in all, and the counts
@@ -608,6 +625,7 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
   const [pending, setPending] = useState<Pending | null>(null);
   const [creating, setCreating] = useState(false);
   const [sessionsOf, setSessionsOf] = useState<ListedPrincipal | null>(null);
+  const [passwordFor, setPasswordFor] = useState<ListedPrincipal | null>(null);
   // Who to ask for, and which page of them. The search goes to the server:
   // an installation whose suites have been running for a month had 1803
   // identities, and the person looking for their own name could not find it
@@ -908,6 +926,16 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
                           >
                             {t("Sessions")}
                           </button>
+                          <button
+                            className={passwordFor?.id === principal.id ? "" : "secondary"}
+                            onClick={() => setPasswordFor(passwordFor?.id === principal.id ? null : principal)}
+                            data-testid={`password-${principal.subject}`}
+                            title={principal.password
+                              ? t("This identity signs in with a password here.")
+                              : t("This identity has no password here.")}
+                          >
+                            {principal.password ? t("Password set") : t("Set a password")}
+                          </button>
                           <button className="danger" disabled={disable.isPending} onClick={() => openPending({ kind: "disable", principal })}>
                             {t("Disable")}
                           </button>
@@ -916,6 +944,18 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
                     </div>
                   </td>
                 </tr>
+                {passwordFor?.id === principal.id && (
+                  <tr className="detail-row">
+                    <td colSpan={6}>
+                      <PasswordPanel
+                        principal={principal}
+                        onDone={() => { setPasswordFor(null); refresh(); }}
+                        onCancel={() => setPasswordFor(null)}
+                        onError={onError}
+                      />
+                    </td>
+                  </tr>
+                )}
                 {sessionsOf?.id === principal.id && (
                   <tr className="detail-row">
                     <td colSpan={6}>
@@ -1167,6 +1207,93 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
 /**
  * The live browser sessions of one identity, under its row.
  */
+/**
+ * The password of one identity, set or taken away by an administrator.
+ *
+ * What it will not do is show one. A password somebody else chose has to be
+ * replaced by its owner at their next sign-in, and the panel says so rather
+ * than leaving an administrator to decide whether it matters.
+ */
+function PasswordPanel({ principal, onDone, onCancel, onError }: {
+  principal: ListedPrincipal;
+  onDone: () => void;
+  onCancel: () => void;
+  onError: (error: unknown) => void;
+}) {
+  const t = useT();
+  const [password, setPassword] = useState("");
+  const [mustChange, setMustChange] = useState(true);
+  const [reason, setReason] = useState("");
+  const [refusal, setRefusal] = useState("");
+
+  const set = useMutation({
+    mutationFn: () => api.put(`/api/v1/principals/${principal.id}/password`, {
+      password, must_change: mustChange, reason: reason.trim(),
+    }),
+    onSuccess: () => onDone(),
+    onError: (error) => {
+      if (error instanceof ApiError && error.code === "weak_password") {
+        setRefusal(error.message);
+        return;
+      }
+      onError(error);
+    },
+  });
+  const clear = useMutation({
+    mutationFn: () => api.del(`/api/v1/principals/${principal.id}/password?reason=${encodeURIComponent(reason.trim())}`),
+    onSuccess: () => onDone(),
+    onError: (error) => onError(error),
+  });
+
+  return (
+    <div className="detail-panel">
+      <p className="source">
+        {principal.password
+          ? t("Set by {who} {when}.", {
+              who: principal.password.set_by,
+              when: absoluteTime(principal.password.set_at),
+            })
+          : t("This identity has no password here: it signs in through the identity provider, or not at all.")}
+        {principal.password?.must_change && <> {t("The owner has to replace it at their next sign-in.")}</>}
+        {principal.password?.locked_until && (
+          <> {t("Locked after {n} wrong passwords, until {when}.", {
+            n: principal.password.failed_attempts,
+            when: absoluteTime(principal.password.locked_until),
+          })}</>
+        )}
+      </p>
+      <FieldGrid>
+        <Field label={t("New password")} hint={t("At least 12 characters. Length is the rule; the identity's own name and the words on every list are refused.")}>
+          <input type="password" value={password} autoComplete="new-password"
+                 onChange={(event) => setPassword(event.target.value)} data-testid="set-password" />
+        </Field>
+        <Field label={t("Reason for the change")}>
+          <input value={reason} onChange={(event) => setReason(event.target.value)}
+                 placeholder={t("e.g. new operator on the rota")} data-testid="password-reason" />
+        </Field>
+        <label className="toggle">
+          <input type="checkbox" checked={mustChange} onChange={(event) => setMustChange(event.target.checked)} />
+          {t("The owner replaces it at their next sign-in")}
+        </label>
+      </FieldGrid>
+      {refusal !== "" && <p className="page-error" data-testid="weak-password">{refusal}</p>}
+      <Actions>
+        <button disabled={password === "" || !reasonGiven(reason) || set.isPending}
+                onClick={() => set.mutate()} data-testid="save-password">
+          {principal.password ? t("Replace the password") : t("Set the password")}
+        </button>
+        {principal.password && (
+          <button className="danger" disabled={!reasonGiven(reason) || clear.isPending}
+                  onClick={() => clear.mutate()} data-testid="clear-password">
+            {t("Remove the password")}
+          </button>
+        )}
+        <button className="secondary" onClick={onCancel}>{t("Cancel")}</button>
+      </Actions>
+    </div>
+  );
+}
+
 function Sessions({ principal, revoking, onRevoke }: {
   principal: ListedPrincipal;
   revoking: string | null;

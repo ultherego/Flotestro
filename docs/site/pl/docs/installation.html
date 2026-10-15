@@ -386,17 +386,21 @@ curl -fsS http://127.0.0.1:8080/readyz</code></pre>
 
     <ol class="steps">
       <li>Zaloguj się tokenem.</li>
-      <li>Podłącz dostawcę tożsamości: <code>FLOTESTRO_OIDC_ISSUER</code>,
-      <code>FLOTESTRO_OIDC_CLIENT_ID</code> (domyślnie
-      <code>flotestro-panel</code>) i <code>FLOTESTRO_OIDC_CLIENT_SECRET</code>.
-      Pusty issuer wyłącza logowanie z przeglądarki w całości i panel działa
-      wtedy wyłącznie na tokenach API. <code>FLOTESTRO_PUBLIC_URL</code>
+      <li>Zdecyduj, jak logują się ludzie. Albo podłącz dostawcę tożsamości —
+      <code>FLOTESTRO_OIDC_ISSUER</code>, <code>FLOTESTRO_OIDC_CLIENT_ID</code>
+      (domyślnie <code>flotestro-panel</code>) i
+      <code>FLOTESTRO_OIDC_CLIENT_SECRET</code>; <code>FLOTESTRO_PUBLIC_URL</code>
       rozstrzyga o przekierowaniu i o fladze <code>Secure</code> ciasteczek, więc
-      musi być adresem, którego naprawdę używa przeglądarka.</li>
-      <li><strong>Zmapuj co najmniej jedną grupę na rolę.</strong> Sama grupa nie
-      nadaje niczego. Bez mapowania ten, kto zaloguje się przez dostawcę, nie
-      dostaje żadnego uprawnienia - to najczęstszy powód, dla którego świeża
-      instalacja wygląda na zepsutą.</li>
+      musi być adresem, którego naprawdę używa przeglądarka — albo daj ludziom
+      <a href="roles.html#passwords">hasła w panelu</a>, co nie wymaga żadnego
+      dostawcy. Jedno i drugie działa naraz: administrator z hasłem wejdzie
+      także w dniu, w którym to dostawca jest tym, co nie działa.</li>
+      <li><strong>Nadaj komuś rolę.</strong> Z dostawcą: zmapuj co najmniej
+      jedną grupę na rolę — sama grupa nie nadaje niczego, a bez mapowania ten,
+      kto się zaloguje, nie dostaje żadnego uprawnienia, co jest najczęstszym
+      powodem, dla którego świeża instalacja wygląda na zepsutą. Bez dostawcy:
+      utwórz tożsamość w Ustawieniach → Użytkownicy, nadaj jej rolę i ustaw
+      hasło; właściciel wymieni je przy pierwszym logowaniu.</li>
       <li>Zaloguj się przez dostawcę i potwierdź, że masz to, co nadało
       mapowanie.</li>
       <li>Unieważnij token bootstrap i skasuj

@@ -38,12 +38,16 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 }
 
 // principalView is an identity as the access screen shows it: with the live
-// tokens, so that one of them can be revoked by its identifier, and with the
-// moment it was disabled when it was.
+// tokens, so that one of them can be revoked by its identifier, with the
+// moment it was disabled when it was, and with what is known about its
+// password - never the password itself, which no screen has a use for.
 type principalView struct {
 	authz.Principal
 	Tokens     []authz.Token `json:"tokens"`
 	DisabledAt *time.Time    `json:"disabled_at,omitempty"`
+	// Password is absent for an identity that has none: that identity signs
+	// in through the provider, or not at all. Absent is not "empty".
+	Password *authz.Credential `json:"password,omitempty"`
 }
 
 // handleListPrincipals lists the enabled identities, or with disabled=true the
@@ -87,13 +91,23 @@ func (s *Server) handleListPrincipals(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	credentials, err := s.authz.CredentialsOfMany(r.Context(), principalIDs(page.Items))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	items := make([]principalView, 0, len(page.Items))
 	for _, principal := range page.Items {
 		held := tokens[principal.ID]
 		if held == nil {
 			held = []authz.Token{}
 		}
-		items = append(items, principalView{Principal: principal, Tokens: held})
+		view := principalView{Principal: principal, Tokens: held}
+		if credential, has := credentials[principal.ID]; has {
+			kept := credential
+			view.Password = &kept
+		}
+		items = append(items, view)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": items, "count": len(items),

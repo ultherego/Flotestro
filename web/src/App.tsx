@@ -2,6 +2,7 @@ import { useEffect, useState, type MouseEvent } from "react";
 import { Navigate, Route, Routes, useLocation, useMatch } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, BEARER_TOKEN_KEY, ApiError } from "./lib/api";
+import { PasswordSignIn } from "./pages/SignIn";
 import type { Host, Whoami } from "./lib/types";
 import { useCapabilities } from "./lib/capabilities";
 import { useTheme } from "./lib/theme";
@@ -417,22 +418,26 @@ function LoginScreen({ provider }: { provider: boolean }) {
       <div>
         <h1 className="login-brand"><Logo size={40} /></h1>
         <p className="subtitle">{t("Linux fleet management")}</p>
-        {provider ? (
+
+        {/* The password door. An installation with no identity provider had
+            none until 16.10: the panel had roles and tokens and no way for a
+            person to sign in. It stands first because where there is no
+            provider it is the only way in, and where there is one an
+            administrator still keeps a local account for the day the
+            provider is the thing that is down. */}
+        <PasswordSignIn />
+
+        {provider && (
           <>
-            <button onClick={() => (window.location.href = "/auth/login?redirect=/dashboard")}>
+            <div className="login-or"><span>{t("or")}</span></div>
+            <button className="secondary" onClick={() => (window.location.href = "/auth/login?redirect=/dashboard")}>
               {t("Sign in with identity provider")}
             </button>
-            <p className="subtitle" style={{ marginTop: 14 }}>
+            <p className="subtitle">
               {t("Your identity provider may sign you in with an account you already have an open session for.")}{" "}
               <a href="/auth/login?force=1&redirect=/dashboard">{t("Sign in as a different user")}</a>
             </p>
           </>
-        ) : (
-          // Without a configured provider the login button would lead to an
-          // error.
-          <p className="subtitle">
-            {t("No identity provider is configured in this installation. Access to the panel uses an API token passed in the Authorization header.")}
-          </p>
         )}
         <BootstrapTokenEntry />
       </div>

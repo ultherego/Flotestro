@@ -89,6 +89,7 @@
             <li><a href="#identity-admin">identity_admin</a></li>
             <li><a href="#platform-admin">platform_admin</a></li>
             <li><a href="#own-roles">Rola własna</a></li>
+            <li><a href="#passwords">Logowanie bez dostawcy</a></li>
             <li><a href="#scope">Zakres powiązania</a></li>
             <li><a href="#grant">Jak wygląda nadanie</a></li>
             <li><a href="#escalation">Nikt nie nada tego, czego sam nie ma</a></li>
@@ -401,6 +402,46 @@
       grupy, które ją wskazuje &mdash; czyjegoś dostępu, usuniętego po to, żeby
       zadowolić schemat. Kroku w dół nie ma, celowo.</p>
     </div>
+
+    <h2 id="passwords">Logowanie bez dostawcy</h2>
+
+    <p>Instalacja nie potrzebuje dostawcy tożsamości, żeby wpuszczać ludzi. Do
+    0.64 potrzebowała: <code>/auth/login</code> bez niego odpowiadał
+    <code class="refusal">oidc_disabled</code>, a jedynym innym wejściem był
+    token bootstrap, który istnieje do pierwszego mapowania grup i jest po to,
+    żeby go zużyć i skasować. Panel z rolami, zakresami i tokenami, do którego
+    człowiek nie ma jak się zalogować, nie jest produktem, który da się
+    uruchomić — więc tożsamość może mieć własne hasło.</p>
+
+    <p>Co robi administrator w <strong>Ustawieniach &rarr; Użytkownicy</strong>:
+    tworzy tożsamość, nadaje jej rolę i ustawia hasło. Właściciel wymienia to
+    hasło przy pierwszym logowaniu — hasło, które zna dwoje ludzi, nie jest
+    hasłem, i panel mówi to wprost, zamiast zostawiać to czyjejś ocenie. Potem
+    osoba zmienia je sama, pod swoim nazwiskiem w prawym górnym rogu, podając
+    hasło obowiązujące: sesja zostawiona na biurku nie może wystarczyć do
+    przejęcia konta.</p>
+
+<div class="table-scroll">
+<table>
+<thead><tr><th>Reguła</th><th>Co nią jest i dlaczego</th></tr></thead>
+<tbody>
+<tr><td>Długość</td><td>Co najmniej 12 znaków. Reguły klas znaków celowo nie ma: uczy tylko <code>Password1!</code>.</td></tr>
+<tr><td>Nie nazwa</td><td>Hasło niosące własną nazwę tożsamości jest odrzucane, niezależnie od wielkości liter.</td></tr>
+<tr><td>Nie z pierwszej listy</td><td>Garść słów, od których zaczyna każdy atakujący, jest odrzucana, gdziekolwiek w haśle się pojawi.</td></tr>
+<tr><td>Hashowanie</td><td>argon2id, 64&nbsp;MiB i trzy przebiegi; parametry zapisane w każdym wierszu, więc koszt da się potem podnieść bez unieważniania wierszy zapisanych wcześniej.</td></tr>
+<tr><td>Błędne hasła</td><td>Dziesięć pod rząd blokuje konto na piętnaście minut. Blokada jest krótka, bo taka, która wymaga administratora, zamienia atak na jedno konto w niedostępność dla jego właściciela; poprawne hasło nie otwiera jej, póki trwa.</td></tr>
+<tr><td>Co mówi odmowa</td><td>Nazwa, której nikt nie ma, i błędne hasło to dla piszącego to samo zdanie — różnicę dostaje ślad audytowy. O zablokowanym koncie mówi się wprost, bo jego właściciel musi wiedzieć, że odpowiedzią jest poczekanie.</td></tr>
+</tbody></table></div>
+
+    <p>Oba wejścia działają naraz. Instalacja z dostawcą może dać swoim
+    administratorom hasła i to właśnie wpuszcza kogoś w dniu, w którym to
+    dostawca jest tym, co nie działa. Tam, gdzie step-up żąda świeżego
+    uwierzytelnienia, tożsamość lokalna jest pytana o hasło jeszcze raz — nie
+    ma dostawcy, do którego można ją odesłać — a czas uwierzytelnienia sesji
+    przesuwa się tylko wtedy, gdy hasło się zgadza. Jedyne, czego hasło nie
+    spełni, to wymagany poziom uwierzytelnienia
+    (<code>FLOTESTRO_STEPUP_ACR</code>): to słownik dostawcy, a instalacja,
+    która go ustawia, mówi tym samym, że te operacje wymagają dostawcy.</p>
 
     <h2 id="scope">Zakres powiązania</h2>
 

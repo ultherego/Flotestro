@@ -8,6 +8,29 @@ day the tag was published.
 
 ### Added
 
+- **A person can sign in without an identity provider.** The panel had roles,
+  scopes and tokens and no door for a human without Keycloak:
+  `/auth/login` answers `oidc_disabled` without one, and the bootstrap token
+  exists for the first group mapping. An identity can now carry a password of
+  its own - set by an administrator under Settings → Users, replaced by its
+  owner at their first sign-in, changed afterwards by giving the one in
+  force. argon2id with the parameters written into each row; at least twelve
+  characters, and refused when it carries the identity's own name or a word
+  from every attacker's first list; ten wrong passwords lock the account for
+  fifteen minutes, and the right one does not open it while the lock holds. A
+  name nobody has and a wrong password are the same sentence to whoever is
+  typing and two different lines in the audit trail. Where a step-up asks for
+  fresh authentication, a local identity is asked for its password again.
+  Both doors work at once, which is what gets an administrator in on the day
+  the provider is the thing that is down.
+- **A role can be granted to somebody the panel has not met.** The screen of
+  who may sign in lists the directory's people, and most of them have no
+  record here until their first sign-in. Granting one of them a role now
+  writes the record down in advance and marks the issuer it waits for, so
+  that first sign-in adopts it instead of making a second record under the
+  same name - which is what would have happened, and the role would have sat
+  on a record nobody used.
+
 - **An installation can define a role of its own.** A role used to be one of
   six names in a check constraint, so "restart a service and read the journal,
   nothing else" - a real job on a real rota - could only be had by handing

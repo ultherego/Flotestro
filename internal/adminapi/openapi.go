@@ -952,6 +952,28 @@ var responseSchemas = map[string]map[string]any{
 	"GET /api/v1/installation-profiles":           ref("InstallationProfile"),
 	"GET /api/v1/monitoring/alerts":               pagedCollection("Alert"),
 	"GET /api/v1/policies/{id}/campaigns":         collection("PolicyCampaignLink"),
+	"PUT /api/v1/principals/{id}/password": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"subject":     str(),
+			"must_change": map[string]any{"type": "boolean", "description": "Whether the owner has to replace it at their next sign-in. True by default for a password somebody else chose."},
+		},
+	},
+	"POST /api/v1/profile/password": map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"changed": flag()},
+	},
+	"POST /auth/password": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"subject":              str(),
+			"must_change_password": map[string]any{"type": "boolean", "description": "The session exists either way; the panel sends them to the change form first."},
+		},
+	},
+	"POST /auth/password/reauthenticate": map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"reauthenticated": flag()},
+	},
 	"POST /api/v1/access/holders/grant": map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -1869,6 +1891,7 @@ var emptyAnswers = map[string]string{
 	"DELETE /api/v1/policies/{id}":                            "the policy is gone; the campaigns it made stay",
 	"DELETE /api/v1/principals/{id}":                          "the principal is disabled, not removed",
 	"DELETE /api/v1/principals/{id}/roles/{role}":             "the role is no longer granted",
+	"DELETE /api/v1/principals/{id}/password":                 "the identity signs in with no password here any more",
 	"DELETE /api/v1/roles/{role}":                             "the role is gone; a role somebody is bound to is refused instead",
 	"DELETE /api/v1/principals/{id}/sessions/{sid}":           "the session is revoked",
 	"DELETE /api/v1/principals/{id}/team-roles/{role}":        "the role in that team is no longer granted",
@@ -2301,6 +2324,38 @@ var requestSchemas = map[string]map[string]any{
 	// offer on a screen about access.
 	// A role for somebody who has not signed in yet. The record is written
 	// down in advance and waits for the provider named in the answer.
+	"PUT /api/v1/principals/{id}/password": {
+		"type": "object",
+		"properties": map[string]any{
+			"password":    map[string]any{"type": "string", "description": "At least 12 characters; refused when it carries the identity's own name or a word from every attacker's first list."},
+			"must_change": map[string]any{"type": "boolean", "description": "Default true: a password two people know is not a password."},
+			"reason":      map[string]any{"type": "string", "description": "Kept in the audit trail."},
+		},
+		"required": []string{"password"},
+	},
+	"POST /api/v1/profile/password": {
+		"type": "object",
+		"properties": map[string]any{
+			"current": map[string]any{"type": "string", "description": "The password in force. Required even though the session is already yours: a session left open on a desk must not be enough to take the account over."},
+			"new":     map[string]any{"type": "string"},
+		},
+		"required": []string{"current", "new"},
+	},
+	"POST /auth/password": {
+		"type": "object",
+		"properties": map[string]any{
+			"subject":  map[string]any{"type": "string"},
+			"password": map[string]any{"type": "string"},
+		},
+		"required": []string{"subject", "password"},
+	},
+	"POST /auth/password/reauthenticate": {
+		"type": "object",
+		"properties": map[string]any{
+			"password": map[string]any{"type": "string", "description": "The same password again. For a local identity this is what fresh authentication means: there is no provider to be sent back to."},
+		},
+		"required": []string{"password"},
+	},
 	"POST /api/v1/access/holders/grant": {
 		"type": "object",
 		"properties": map[string]any{

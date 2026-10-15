@@ -170,6 +170,19 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 	return &principal, &session, nil
 }
 
+// RefreshAuthentication moves a session's authentication time to now.
+//
+// What re-authentication means for a local identity: there is no provider to
+// be sent back to, so the password is asked for again and this records that
+// it was given. A step-up reads the same field whichever way the session was
+// made.
+func (s *Store) RefreshAuthentication(ctx context.Context, sessionID string) error {
+	_, err := s.pool.Exec(ctx, `
+		update web_sessions set authenticated_at = now()
+		where id = $1 and revoked_at is null`, sessionID)
+	return err
+}
+
 // RevokeSession ends a session.
 func (s *Store) RevokeSession(ctx context.Context, sessionID, reason string) error {
 	_, err := s.pool.Exec(ctx, `
