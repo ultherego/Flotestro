@@ -345,7 +345,7 @@ export function Audit() {
                               digest above shows a few keys, and an incident
                               wants every one of them. */}
                           <div>
-                            <button className="secondary" style={{ padding: "0 6px", fontSize: 11 }} onClick={() => setExpanded(open ? null : event.id)}>
+                            <button className="secondary tiny" onClick={() => setExpanded(open ? null : event.id)}>
                               {open ? t("Hide JSON") : t("Show JSON")}
                             </button>
                           </div>
@@ -376,7 +376,7 @@ export function Audit() {
                       {open && (
                         <tr className="detail-row">
                           <td colSpan={7}>
-                            <pre style={{ margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(event, null, 2)}</pre>
+                            <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(event, null, 2)}</pre>
                           </td>
                         </tr>
                       )}

@@ -1753,7 +1753,7 @@ function ReviewRow({ principal }: { principal: ReviewedPrincipal }) {
       <td>
         {principal.flags.length === 0
           ? <span className="badge ok">{t("nothing to review")}</span>
-          : principal.flags.map((flag) => <span key={flag} className="badge warn" style={{ marginRight: 6 }}>{t(FLAG_LABELS[flag])}</span>)}
+          : principal.flags.map((flag) => <span key={flag} className="badge warn">{t(FLAG_LABELS[flag])}</span>)}
       </td>
     </tr>
   );

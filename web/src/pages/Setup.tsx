@@ -70,7 +70,7 @@ export function Setup() {
               text={t("{done} of {total}", { done: list.done, total: list.total })}
             />
             {list.bootstrap_live && (
-              <p className="source" style={{ marginTop: 10 }}>
+              <p className="source">
                 {tokensAlone(list.steps)
                   ? t("The bootstrap token still works, and nothing else administers this installation: issue an API token of your own, sign in with it, then revoke this one.")
                   : t("The bootstrap token still works. It is for the first mapping only: once an administrator signs in through the provider, revoke it.")}
@@ -91,7 +91,7 @@ export function Setup() {
                   <Link className="button" to={step.path}>{t(pageName(step.path))}</Link>
                 )}
               >
-                <p style={{ margin: 0 }}>
+                <p>
                   <strong>{t("Found:")}</strong> {readableDetail(step.detail)}
                 </p>
                 {step.key === "identity_provider" && capabilities.identity_provider && mayAct(permissions, step.key) && (
@@ -106,7 +106,7 @@ export function Setup() {
                 {step.key === "group_mapping" && (
                   mayAct(permissions, step.key)
                     ? <MappingForm open={step.state === "undone"} />
-                    : <p className="source" style={{ marginTop: 10 }}>{t("Only whoever manages access can add a mapping; ask an administrator.")}</p>
+                    : <p className="source">{t("Only whoever manages access can add a mapping; ask an administrator.")}</p>
                 )}
               </Card>
             );
@@ -131,7 +131,7 @@ function ConnectionTester({ path, label }: { path: string; label: string }) {
   });
   const result = test.data;
   return (
-    <div style={{ marginTop: 12 }}>
+    <div>
       <Actions>
         <button className="secondary" onClick={() => test.mutate()} disabled={test.isPending}>
           {test.isPending ? t("Testing…") : label}
@@ -144,7 +144,7 @@ function ConnectionTester({ path, label }: { path: string; label: string }) {
       </Actions>
       {test.error && <ErrorBox error={test.error} />}
       {result && (
-        <p className="source" style={{ marginTop: 8 }}>
+        <p className="source">
           {result.ok && result.provider && t("Issuer {issuer}, {keys} signing keys at {url}.", {
             issuer: result.provider.issuer, keys: result.provider.keys, url: result.provider.jwks_url,
           })}
@@ -190,14 +190,14 @@ function MappingForm({ open: initiallyOpen }: { open: boolean }) {
 
   if (!open) {
     return (
-      <div style={{ marginTop: 12 }}>
+      <div>
         <Actions><button className="secondary" onClick={() => setOpen(true)}>{t("Add a mapping here")}</button></Actions>
       </div>
     );
   }
   const ready = group.trim() !== "" && reason.trim().length >= REASON_MIN_LENGTH;
   return (
-    <div style={{ marginTop: 12 }}>
+    <div>
       <StepUpWarning error={warning} close={() => setWarning(null)} />
       <FieldGrid>
         <Field label={t("Identity provider group")} hint={t("The group name as it appears in the login token.")}>

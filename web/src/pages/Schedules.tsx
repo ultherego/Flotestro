@@ -629,14 +629,11 @@ function MonthView({ year, month, entries, loading }: { year: number; month: num
         const inMonth = date.getMonth() === month;
         const list = byDay.get(key) ?? [];
         return (
-          <div key={key} style={{
-            minHeight: 84, padding: 6, border: "1px solid var(--border)", borderRadius: 6,
-            opacity: inMonth ? 1 : 0.45, background: key === today ? "color-mix(in srgb, var(--text) 6%, transparent)" : undefined,
-          }}>
-            <div className="source" style={{ marginBottom: 4 }}>{date.getDate()}</div>
+          <div key={key} className={`calendar-day${inMonth ? "" : " other-month"}${key === today ? " today" : ""}`}>
+            <div className="source">{date.getDate()}</div>
             {loading && inMonth && list.length === 0 && <span className="source">…</span>}
             {list.map((entry, index) => (
-              <div key={`${entry.kind}-${entry.id}-${index}`} style={{ marginBottom: 2, fontSize: 11, lineHeight: "16px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+              <div key={`${entry.kind}-${entry.id}-${index}`} className="calendar-entry"
                 title={entryTitle(t, entry)}>
                 <span className={`badge ${entryTone(entry)}`}>{kindWord(t, entry.kind)}</span>{" "}
                 {/* A window shows the hour it opens on the day it opens;

@@ -1341,10 +1341,25 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
 .card-title { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.4; }
 .card-description { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; max-width: 80ch; }
 .card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* The body owns the rhythm of what is inside it.
+ *
+ * Forty-seven places in the pages wrote `style={{ margin: 0 }}` to cancel the
+ * browser's paragraph margin, and two dozen more wrote a marginTop of 6, 8,
+ * 10, 12, 14 or 16 to put it back - so the gap between two blocks depended on
+ * which screen you were looking at. The owner read the result as every
+ * subpage living its own life, which is what it was. One gap, decided here. */
 .card-body { padding: var(--card-pad-y) var(--card-pad-x); min-width: 0; }
+.card-body > p, .card-body > h3, .card-body > h4, .card-body > ul, .card-body > ol, .card-body > dl {
+  margin: 0;
+}
+.card-body > * + * { margin-top: 12px; }
 .card-body > :first-child { margin-top: 0; }
 .card-body > :last-child { margin-bottom: 0; }
 .card-body > h3:first-child { margin-top: 0; }
+/* The same inside a tile of a board, which is the other container. */
+.part-body > p, .part-body > h4, .part-body > ul, .part-body > ol { margin: 0; }
+.part-body > * + * { margin-top: 10px; }
+.part-body > :first-child { margin-top: 0; }
 .card-foot {
   padding: 12px var(--card-pad-x);
   border-top: 1px solid var(--border);
@@ -1371,6 +1386,96 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
 .card-body.flush > .virtual { border: none; border-radius: 0; background: transparent; }
 .card-body.flush > .warning { margin: 12px var(--card-pad-x); padding: 12px 16px; }
 .card-body.flush > table + .virtual, .card-body.flush > p + .virtual { border-top: 1px solid var(--border); }
+
+/* A menu hanging off a chip: the directory's "More" and the host bar's
+   "Actions" were the same object written twice, in two files, with two sets
+   of numbers. */
+.menu-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 5;
+  min-width: 220px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  white-space: normal;
+}
+.menu-popover.to-the-left { left: auto; right: 0; }
+.menu-popover > button { text-align: left; }
+.chip.has-menu { position: relative; }
+.chip.has-menu > summary { cursor: pointer; list-style: none; }
+
+/* One day of the maintenance calendar. */
+.calendar-day {
+  min-height: 84px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-width: 0;
+}
+.calendar-day.other-month { opacity: 0.45; }
+.calendar-day.today { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.calendar-entry {
+  font-size: 11px;
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The bar that appears under a list when rows are picked: what is selected
+   and what can be done with it, held at the bottom of the card. Written
+   inline, identically, on the host list and the group list - two copies of
+   one object, which is how two screens drift apart. */
+.selection-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px var(--card-pad-x, 16px);
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+}
+
+/* A block of prose or controls inside a flush card body, which has no
+   padding of its own to lend it. */
+.flush-block { padding: 14px var(--card-pad-x); }
+
+/* A button small enough to sit inside a table row without raising it. */
+.button.tiny, button.tiny { padding: 0 6px; font-size: 11px; }
+
+/* A badge in a row of badges, and one standing after a name. */
+.badge + .badge { margin-left: 6px; }
+.badge.after-name { margin-left: 6px; }
+
+/* A table in a card reaches the card's edges, whatever the body around it is
+   doing.
+ *
+ * Half the screens put their table in a flush card, where it did; the other
+ * half put it in a padded body beside a sentence or a heading, where it sat
+ * inset by sixteen pixels. Same product, same kind of list, two different
+ * gaps - which is what the owner was looking at on 15.10 when he said the
+ * tables keep to no norm. The body keeps its padding for the prose; the
+ * table steps back out of it. */
+.card-body:not(.flush) > table,
+.card-body:not(.flush) > * > table {
+  width: calc(100% + 2 * var(--card-pad-x));
+  margin-left: calc(-1 * var(--card-pad-x));
+  margin-right: calc(-1 * var(--card-pad-x));
+  max-width: none;
+}
+/* Prose and a table are different things and the gap above a table says so. */
+.card-body:not(.flush) > * + table, .card-body:not(.flush) > * > * + table { margin-top: 12px; }
 
 /* The table in a card: the header row on the page ground, the cells with
    room for the border of the card, no line under the last row. */

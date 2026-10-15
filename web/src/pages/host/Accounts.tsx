@@ -116,7 +116,7 @@ export function HostAccounts() {
       />
       <Section title={t("By source")} span={4} description={t("Where each account is defined.")}>
         {!known ? (
-          <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>
+          <p className="source">{t("Loading…")}</p>
         ) : (
           <Breakdown
             items={sources.map((source) => ({

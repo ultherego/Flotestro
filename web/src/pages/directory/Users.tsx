@@ -241,9 +241,9 @@ export function Users() {
                       {user.disabled
                         ? <button className="secondary" onClick={() => { setIntent({ kind: "enable", user }); setForm(null); }}>{t("Unlock")}</button>
                         : <button className="secondary" onClick={() => { setIntent({ kind: "disable", user }); setForm(null); }}>{t("Lock")}</button>}
-                      <details className="chip" style={{ position: "relative" }}>
-                        <summary style={{ cursor: "pointer", listStyle: "none" }}>{t("More")} ▾</summary>
-                        <div className="actions" style={{ position: "absolute", right: 0, zIndex: 5, flexDirection: "column", alignItems: "stretch", padding: 8, background: "var(--bg-raised)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "var(--shadow)", minWidth: 220 }}>
+                      <details className="chip has-menu">
+                        <summary>{t("More")} ▾</summary>
+                        <div className="menu-popover to-the-left">
                           <button className="link" style={{ textAlign: "left" }} title={t("Set or clear the expiry of the account and of the password")} onClick={() => { setIntent({ kind: "expire", user }); setForm(null); }}>{t("Expire")}</button>
                           <button className="link" style={{ textAlign: "left" }} title={t("Change the UID, GID, home directory or login shell")} onClick={() => { setIntent({ kind: "posix", user }); setForm(null); }}>{t("POSIX")}</button>
                           <button className="link" style={{ textAlign: "left" }} title={t("Issue a one-time password that expires at the first login")} onClick={() => { setIntent({ kind: "password", user }); setForm(null); }}>{t("Reset password")}</button>

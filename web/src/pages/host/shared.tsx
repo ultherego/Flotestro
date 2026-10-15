@@ -431,7 +431,7 @@ export function RequestOperation({
     <Section title={t("Request an operation")} description={description} span={span}>
       {/* The target repeated right at the button: the operator approves a
           specific machine, not "the host I think I have open". */}
-      <p className="source" style={{ margin: 0 }}>
+      <p className="source">
         {t("Target: {host}", { host: host.hostname })}
         {host.management_address ? ` · ${host.management_address}` : ` · ${t("address unknown")}`}
         {` · ${host.site} / ${host.environment}`}

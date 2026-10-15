@@ -194,7 +194,7 @@ export function Files() {
             )}
           </>
         ) : (
-          <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>
+          <p className="source">{t("Loading…")}</p>
         )}
       </Section>
       </>
