@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  campaignBody, clearDraft, DRAFT_KEY, emptyOrder, jobTimeoutValid, loadDraft, MIN_REASON,
+  campaignBody, clearDraft, DRAFT_KEY, emptyOrder, jobTimeoutValid, loadDraft, matchedState, MIN_REASON,
   orderForm, orderTargets, parseUnits, prefilledOrder, previewTokenOf, reasonValid,
   REVERSE_OPERATION, reversePayload,
   payloadSkeleton, saveDraft, startingPayloadText, selectorNames, windowInstant, windowProblem, wizardOperations, type Operation,
@@ -461,5 +461,35 @@ describe("what the wizard's payload field opens on", () => {
   it("offers nothing for an operation that reads no payload", () => {
     expect(startingPayloadText({ action: "host.reboot" } as Operation, false)).toBe("");
     expect(startingPayloadText(undefined, false)).toBe("");
+  });
+});
+
+describe("what the targets step can say about the selector", () => {
+  it("does not call an answer that has not arrived a count of nothing", () => {
+    // The defect the gate caught on 15.10: `preview?.count ?? 0` made the
+    // screen say "the selector matches 0 hosts" while the narrowed preview was
+    // still in flight. The browser test read it at that moment and failed -
+    // correctly, because an operator reading it then is told their selector
+    // hits nobody. Unknown is not zero.
+    expect(matchedState(true, undefined, true)).toEqual({ kind: "counting" });
+    expect(matchedState(true, undefined, false)).toEqual({ kind: "unknown" });
+    expect(matchedState(true, undefined, undefined)).toEqual({ kind: "unknown" });
+  });
+
+  it("says nothing about a count before the fleet is narrowed", () => {
+    // An empty selector is not an order on everything, and the screen says
+    // that rather than a number.
+    expect(matchedState(false, undefined, true)).toEqual({ kind: "unnarrowed" });
+    expect(matchedState(false, 4, false)).toEqual({ kind: "unnarrowed" });
+  });
+
+  it("carries the number the server gave, including a real zero", () => {
+    expect(matchedState(true, 4, false)).toEqual({ kind: "counted", n: 4 });
+    // A zero the server answered IS a count: the selector matches nobody, and
+    // that is a fact the operator needs. It is only the invented zero that was
+    // the lie.
+    expect(matchedState(true, 0, false)).toEqual({ kind: "counted", n: 0 });
+    // An answer that is in hand is not re-opened because a refresh is running.
+    expect(matchedState(true, 4, true)).toEqual({ kind: "counted", n: 4 });
   });
 });
