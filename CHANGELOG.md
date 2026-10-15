@@ -8,6 +8,27 @@ day the tag was published.
 
 ### Added
 
+- **The appearance of the panel was rewritten.** One stylesheet, laid out as
+  a system rather than grown as a pile: a reset, the tokens, the shell, the
+  primitives, the readings and the screens. Every margin, padding and gap is
+  a step of one scale; every responsive decision is taken on one ladder of
+  five widths, from a phone to 4k; no element is given a height, every grid
+  and flex child may shrink, and a table that cannot fit scrolls inside its
+  card instead of widening the page. A bar in a breakdown has a track of its
+  own beside its label rather than under it, which is what made Fleet
+  composition unreadable.
+- **A panel is taken hold of and put where it is wanted.** In the arrange
+  mode each panel grows a bar along its top and a corner at its bottom
+  right: the bar moves it anywhere on the twelve-column grid, the corner
+  sets its width and height together, both snapping to the grid, and the
+  keyboard does the same work. A screen nobody has dragged is still arranged
+  by order alone, and the first drag writes down the places that order
+  already had, so nothing jumps under the hand.
+- **A panel added by an upgrade appears on a screen somebody arranged long
+  ago**, beside the panels it ships next to, instead of staying invisible
+  for ever. One somebody removed stays removed: the arrangement records the
+  removal, so "removed" and "did not exist yet" are two different answers.
+
 - **Any panel of any screen can be moved, resized and put back.** The
   arrangement of a screen - which panels it shows, their order, their width
   in the twelve columns and their height in rows - is a setting of the

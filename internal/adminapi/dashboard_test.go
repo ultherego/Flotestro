@@ -72,6 +72,10 @@ func TestValidateDashboardWidgets(t *testing.T) {
 		{"a key that is not one", []DashboardWidget{{Key: "Host Availability", Width: 6}}, "key"},
 		{"a key with a path in it", []DashboardWidget{{Key: "../etc", Width: 6}}, "key"},
 		{"a width wider than the grid", []DashboardWidget{{Key: "a", Width: 13}}, "width"},
+		{"half a placement", []DashboardWidget{{Key: "a", Width: 6, X: ptr(0)}}, "place"},
+		{"placed off the right edge", []DashboardWidget{{Key: "a", Width: 6, X: ptr(8), Y: ptr(0)}}, "x"},
+		{"placed above the grid", []DashboardWidget{{Key: "a", Width: 6, X: ptr(0), Y: ptr(-1)}}, "y"},
+		{"placed past the last row", []DashboardWidget{{Key: "a", Width: 6, X: ptr(0), Y: ptr(201)}}, "y"},
 		{"a height taller than the board", []DashboardWidget{{Key: "a", Width: 6, Height: 17}}, "height"},
 		{"a height below zero", []DashboardWidget{{Key: "a", Width: 6, Height: -1}}, "height"},
 	}
@@ -108,5 +112,20 @@ func TestAWidgetWithoutAHeightIsValid(t *testing.T) {
 func TestADashboardKeyThisPanelDoesNotKnowIsStillValid(t *testing.T) {
 	if _, err := validateDashboardWidgets([]DashboardWidget{{Key: "a_widget_from_the_future", Width: 4}}); err != nil {
 		t.Fatalf("refused a key the catalogue has no entry for: %v", err)
+	}
+}
+
+func ptr(value int) *int { return &value }
+
+// A placement the grid can draw is accepted, because a validator that
+// refuses everything is not a validator.
+func TestAPlacedWidgetIsAccepted(t *testing.T) {
+	widgets := []DashboardWidget{
+		{Key: "left", Width: 8, Height: 4, X: ptr(0), Y: ptr(0)},
+		{Key: "right", Width: 4, Height: 2, X: ptr(8), Y: ptr(0)},
+		{Key: "under", Width: 12, Height: 3, X: ptr(0), Y: ptr(4)},
+	}
+	if field, err := validateDashboardWidgets(widgets); err != nil {
+		t.Fatalf("refused a placement the grid can draw: %s: %v", field, err)
 	}
 }

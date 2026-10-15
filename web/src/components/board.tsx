@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import { useToast } from "./Toast";
@@ -27,7 +27,54 @@ export type BoardWidget = {
    * added by an upgrade appear without undoing anybody's decision.
    */
   hidden?: boolean;
+  /**
+   * Where it stands, when somebody has placed it: the column it starts at
+   * (0..11) and the row (0 upwards). Absent for an arrangement made by
+   * ordering alone, which flows left to right and wraps - the two ways
+   * coexist, so an installation that never touched the grid keeps the
+   * arrangement it has.
+   */
+  x?: number;
+  y?: number;
 };
+
+/** The columns of the grid, which is also the widest a widget may be. */
+export const BOARD_COLUMNS = 12;
+/** A row of the free grid, in pixels. The step a height moves by. */
+export const BOARD_ROW = 80;
+
+/** True when this arrangement was placed on the grid rather than ordered. */
+export function isPlaced(widgets: BoardWidget[]): boolean {
+  return widgets.some((one) => one.x !== undefined && one.y !== undefined);
+}
+
+/**
+ * Every widget given a place, so an arrangement made by ordering can be
+ * picked up and moved. The flow is what the browser would have drawn:
+ * left to right, wrapping when the row is full, each row as tall as the
+ * tallest widget that started in it.
+ */
+export function placeAll(widgets: BoardWidget[]): BoardWidget[] {
+  if (isPlaced(widgets)) {
+    return widgets.map((one) => ({ ...one, x: one.x ?? 0, y: one.y ?? 0 }));
+  }
+  let x = 0;
+  let y = 0;
+  let tallest = 1;
+  return widgets.map((one) => {
+    const width = Math.min(Math.max(one.width, 1), BOARD_COLUMNS);
+    const height = Math.max(one.height ?? 2, 1);
+    if (x + width > BOARD_COLUMNS) {
+      x = 0;
+      y += tallest;
+      tallest = 1;
+    }
+    const placed = { ...one, x, y, width, height };
+    x += width;
+    tallest = Math.max(tallest, height);
+    return placed;
+  });
+}
 
 export type StoredBoard = {
   widgets: BoardWidget[];
@@ -188,6 +235,77 @@ export function Board({
   // in the saved record so the decision to remove them is not lost.
   const shown = current.filter((one) => !one.hidden);
   const titleOf = (key: string) => catalogue.find((one) => one.key === key)?.title ?? key;
+
+  /* ------------------------------------------------------------------
+     Taking hold of a panel.
+
+     The owner asked to grab a corner, set the width and the height, and
+     put the panel anywhere on the grid. That is a placed arrangement
+     rather than an ordered one, so the first drag of a screen that was
+     only ever ordered writes the places its flow already had - nothing
+     jumps, and from then on every panel has coordinates.
+
+     The arithmetic is deliberately plain: the grid's own box gives the
+     width of a column, a row is a constant, and a pointer position is
+     divided by them. No library, and nothing to go stale when the
+     stylesheet changes, because the stylesheet is asked.
+     ------------------------------------------------------------------ */
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const [grab, setGrab] = useState<
+    { key: string; mode: "move" | "size"; fromX: number; fromY: number; start: BoardWidget } | null
+  >(null);
+
+  const columnWidth = () => {
+    const box = gridRef.current?.getBoundingClientRect();
+    if (!box) return 0;
+    // Eleven gaps between twelve columns; the gap is the one the sheet uses.
+    const gap = parseFloat(getComputedStyle(gridRef.current as Element).columnGap || "20") || 20;
+    return (box.width - gap * (BOARD_COLUMNS - 1)) / BOARD_COLUMNS;
+  };
+
+  const takeHold = (event: React.PointerEvent, key: string, mode: "move" | "size") => {
+    if (editing === null) return;
+    const placed = placeAll(current.filter((one) => !one.hidden)).find((one) => one.key === key);
+    if (!placed) return;
+    // The first hold on an ordered arrangement fixes everybody's place.
+    if (!isPlaced(current)) {
+      const places = placeAll(current.filter((one) => !one.hidden));
+      setEditing([
+        ...places,
+        ...current.filter((one) => one.hidden),
+      ]);
+    }
+    (event.target as Element).setPointerCapture?.(event.pointerId);
+    setGrab({ key, mode, fromX: event.clientX, fromY: event.clientY, start: placed });
+    event.preventDefault();
+  };
+
+  const dragTo = (event: React.PointerEvent) => {
+    if (!grab || editing === null) return;
+    const column = columnWidth();
+    if (column <= 0) return;
+    const dx = Math.round((event.clientX - grab.fromX) / column);
+    const dy = Math.round((event.clientY - grab.fromY) / BOARD_ROW);
+    const start = grab.start;
+    const next = { ...start };
+    if (grab.mode === "move") {
+      next.x = Math.min(Math.max((start.x ?? 0) + dx, 0), BOARD_COLUMNS - start.width);
+      next.y = Math.max((start.y ?? 0) + dy, 0);
+    } else {
+      // The corner: wider or narrower, taller or shorter, never off the
+      // grid and never smaller than something a person can grab again.
+      next.width = Math.min(Math.max(start.width + dx, 1), BOARD_COLUMNS - (start.x ?? 0));
+      next.height = Math.min(Math.max((start.height ?? 2) + dy, 1), BOARD_HEIGHTS.max);
+    }
+    setEditing(current.map((one) => (one.key === grab.key ? { ...one, ...next } : one)));
+  };
+
+  const letGo = () => setGrab(null);
+
+  // Drawn on the grid as placed, or flowing as ordered. The editor turns
+  // the first into the second the moment somebody takes hold of a panel.
+  const placedNow = isPlaced(current);
+  const positions = placedNow ? placeAll(shown) : shown;
   const move = (index: number, by: number) => reorder(index, index + by);
   // The editor's indices are into what is on the screen; the record also
   // holds the hidden ones, so a change is applied by key rather than by
@@ -287,7 +405,12 @@ export function Board({
         </div>
       )}
       <div
-        className={["widgets", "arranged", dragging !== null ? "dragging-over" : ""].join(" ").trim()}
+        ref={gridRef}
+        onPointerMove={dragTo}
+        onPointerUp={letGo}
+        onPointerCancel={letGo}
+        style={placedNow ? { gridAutoRows: `${BOARD_ROW}px` } : undefined}
+        className={["widgets", "arranged", placedNow ? "placed" : "", dragging !== null || grab !== null ? "dragging-over" : ""].join(" ").trim()}
         /* The empty part of the board is a place to drop a tile too: dropped
            where nothing is, it goes to the end of the order, and the dense
            flow then pulls it into the first hole it fits. Without this a
@@ -301,10 +424,15 @@ export function Board({
         }}
         data-testid="board-grid"
       >
-        {shown.map((placed, index) => (
+        {positions.map((placed, index) => (
           <div
             key={placed.key}
-            style={{ gridRow: `span ${placed.height ?? 1}` }}
+            style={placedNow
+              ? {
+                  gridColumn: `${(placed.x ?? 0) + 1} / span ${placed.width}`,
+                  gridRow: `${(placed.y ?? 0) + 1} / span ${placed.height ?? 2}`,
+                }
+              : { gridRow: `span ${placed.height ?? 1}` }}
             /* A height somebody chose is a box of that height, and the
                content scrolls inside it: a list that grows by ten rows must
                not push every panel below it down the screen. A tile nobody
@@ -340,7 +468,11 @@ export function Board({
             data-testid={editing !== null ? "board-tile" : undefined}
           >
             {editing !== null && (
-              <div className="widget-handle" data-testid="widget-handle">
+              <div
+                className="widget-handle"
+                data-testid="widget-handle"
+                onPointerDown={(event) => takeHold(event, placed.key, "move")}
+              >
                 <span className="widget-grip" aria-hidden="true">⠿</span>
                 <span>{t(titleOf(placed.key))}</span>
                 {/* Wider and narrower, taller and shorter. A tile that holds
@@ -397,6 +529,33 @@ export function Board({
               </div>
             )}
             {drawn[placed.key]}
+            {editing !== null && (
+              /* The corner. Taking hold of it sets the width and the height
+                 together, which is how anybody expects to resize a box. */
+              <span
+                className="widget-corner"
+                data-testid={`widget-corner-${placed.key}`}
+                role="button"
+                tabIndex={0}
+                aria-label={t("Drag to resize")}
+                title={t("Drag to resize")}
+                onPointerDown={(event) => takeHold(event, placed.key, "size")}
+                onKeyDown={(event) => {
+                  // The keyboard resizes too, a step at a time.
+                  const step = (dw: number, dh: number) => {
+                    event.preventDefault();
+                    resize(index, {
+                      width: Math.min(Math.max(placed.width + dw, 1), BOARD_COLUMNS),
+                      height: Math.min(Math.max((placed.height ?? 2) + dh, 1), BOARD_HEIGHTS.max),
+                    });
+                  };
+                  if (event.key === "ArrowRight") step(1, 0);
+                  if (event.key === "ArrowLeft") step(-1, 0);
+                  if (event.key === "ArrowDown") step(0, 1);
+                  if (event.key === "ArrowUp") step(0, -1);
+                }}
+              />
+            )}
           </div>
         ))}
       </div>

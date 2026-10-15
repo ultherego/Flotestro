@@ -42,6 +42,12 @@ type DashboardWidget struct {
 	// was arranged" remain two different answers: the panel places a
 	// widget the record says nothing about, and leaves a hidden one off.
 	Hidden bool `json:"hidden,omitempty"`
+	// Where it stands, for an arrangement somebody placed on the grid
+	// rather than ordered: the column it starts at and the row. A widget
+	// without them flows, and a record may not mix the two - see the
+	// validation, which refuses half a placement.
+	X *int `json:"x,omitempty"`
+	Y *int `json:"y,omitempty"`
 }
 
 // DashboardLayout is the stored record, with who wrote it and when.
@@ -75,6 +81,11 @@ const dashboardColumns = 12
 // eight since 15.10: a widget holding a list scrolls inside its own box, and
 // a box worth scrolling is taller than half a screen.
 const dashboardMaxHeight = 16
+
+// How far down the grid a widget may be placed. Two hundred rows is a
+// screen nobody could scroll to the end of; the cap is here so one write
+// cannot make a page that never finishes laying out.
+const dashboardMaxRow = 200
 
 // A key is the panel's identifier for a widget, not free text: it reaches
 // the browser as a class and a React key.
@@ -163,7 +174,20 @@ func validateDashboardWidgets(widgets []DashboardWidget) (string, error) {
 			return "width", errors.New("a width is between 1 and 12 of the twelve columns")
 		}
 		if widget.Height < 0 || widget.Height > dashboardMaxHeight {
-			return "height", errors.New("a height is between 1 and 8 rows, or absent for the one the panel chooses")
+			return "height", errors.New("a height is between 1 and 16 rows, or absent for the one the panel chooses")
+		}
+		// A place is both coordinates or neither: half of one would leave
+		// the panel somewhere the screen has to guess at.
+		if (widget.X == nil) != (widget.Y == nil) {
+			return "place", errors.New("a widget is placed by both its column and its row, or by neither: " + widget.Key)
+		}
+		if widget.X != nil {
+			if *widget.X < 0 || *widget.X+widget.Width > dashboardColumns {
+				return "x", errors.New("a widget starts inside the twelve columns and ends inside them: " + widget.Key)
+			}
+			if *widget.Y < 0 || *widget.Y > dashboardMaxRow {
+				return "y", errors.New("a widget stands on a row of the grid: " + widget.Key)
+			}
 		}
 	}
 	return "", nil

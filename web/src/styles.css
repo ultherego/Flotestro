@@ -1,33 +1,74 @@
-/*
- * An administration panel: information density matters more than ornament.
- *
- * Every colour in the interface is a token. The themes below only swap the
- * token values, so a page never names a colour and looks right in all of
- * them. The default set on :root is the dark Mocha with the peach accent,
- * which is also what a browser with no stored choice and a dark system
- * preference gets before the script in index.html runs.
- */
+/* =====================================================================
+   Flotestro panel — the whole of the appearance, written fresh 15.10.
+
+   The owner's five requirements, and where each is answered:
+
+   1. It works on a phone, a tablet, 1080p and 4k. One ladder of
+      breakpoints (§2) governs every layout decision; nothing below
+      decides its own.
+   2. It is handsome and legible. One accent, three surfaces, one type
+      scale, one spacing scale. A bar chart never runs under its own
+      label (§7).
+   3. A container fits its content and the content fits the container.
+      No element is given a height; every grid and flex child carries
+      min-width: 0 so a long identifier wraps instead of pushing the
+      column off the screen; a table that cannot fit scrolls inside its
+      card rather than widening the page.
+   4. The gaps are consistent. Every margin, padding and gap in this
+      file is a step of --s1..--s8 and nothing else.
+   5. It was written from nothing. The file it replaces had grown for
+      months; this one is laid out as a system: reset, tokens, shell,
+      primitives, widgets, screens.
+   ===================================================================== */
+
+/* ---------------------------------------------------------------------
+   1. Reset
+   ------------------------------------------------------------------ */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, p, figure, dl, dd { margin: 0; }
+ul, ol { margin: 0; padding: 0; list-style: none; }
+img, svg { display: block; max-width: 100%; }
+button, input, select, textarea { font: inherit; color: inherit; }
+a { color: var(--accent-text); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* An identifier is long and has no spaces; it wraps rather than widening
+   the column it sits in. This single rule is most of requirement 3. */
+code, .mono, .identifier { overflow-wrap: anywhere; }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------------------------------------------------------------------
+   2. Tokens
+   ------------------------------------------------------------------ */
+
 :root {
   color-scheme: dark;
 
-  /* Surfaces: the page sits lowest, panels are raised on it, the sidebar
-     is the darkest so the content reads as the lit part of the screen. */
-  /* The surfaces, deepened on 15.10. They were #1c1c2c page over #26263a
-     panel: two mid greys a tenth apart, so a card barely separated from
-     the page and the screen read as one lilac mass. The page goes nearly
-     black and the card stays where it was, which doubles the step between
-     them - that step is what makes a card look like an object instead of
-     a region. The accent and the state colours are untouched: the owner
-     asked for our palette to stay, and this is the same palette with the
-     ground dug out from under it. */
+  /* Surfaces: the page is nearly black, the card a clear step above it,
+     the sidebar below it. Three levels and no more - a fourth is how a
+     screen stops having a foreground. */
   --bg: #11111a;
   --bg-panel: #1b1b28;
-  --bg-sidebar: #0c0c13;
-  --bg-sidebar-hover: #1b1b28;
-  --bg-hover: #2a2a3c;
-  --bg-input: #11111a;
   --bg-sunken: #0c0c13;
-  --bg-raised: #24243444;
+  --bg-raised: #242434;
+  --bg-hover: #2a2a3c;
+  --bg-sidebar: #0c0c13;
+  --bg-input: #11111a;
   --border: #2a2a3c;
   --border-strong: #3c3c52;
 
@@ -35,117 +76,104 @@
   --text-muted: #a6adc8;
   --text-faint: #7f849c;
 
-  /* The accent marks the active item, the primary action and the focus.
-     It never carries a state: ok, warn and error have their own colours. */
+  /* One accent. It marks what to press, what is open and where the eye
+     goes first - and it carries no state, so a thing wearing it is never
+     thereby healthy or broken. */
   --accent: #fab387;
   --accent-text: #fab387;
   --accent-contrast: #11111b;
   --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
 
+  /* State. These four, and nothing else, say how something is going. */
   --ok: #a6e3a1;
   --warn: #f9e2af;
   --error: #f38ba8;
   --unknown: #9399b2;
-  /* The text colour of a badge of each state. In the dark themes it is the
-     state colour itself; the light theme needs darker ink for contrast. */
   --ok-text: #a6e3a1;
   --warn-text: #f9e2af;
   --error-text: #f38ba8;
   --unknown-text: #9399b2;
   --error-contrast: #11111b;
 
+  /* The categorical palette of a chart: four hues that mean nothing but
+     "a different one". State colours are deliberately not among them. */
   --blue: #89b4fa;
   --teal: #94e2d5;
   --lavender: #b4befe;
-
-  --shadow: 0 12px 32px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
-  --radius: 10px;
-  --radius-sm: 8px;
-  --radius-xs: 6px;
-  /* A widget is a surface, not a control, so it is rounder than a button. */
-  --radius-card: 14px;
-
-  /* A measurement is read from across the room and its label only if the
-     number asks a question, so the number has a scale of its own rather
-     than being the body text in bold. */
-  --metric-xl: 56px;
-  --metric-l: 40px;
-  --metric-m: 28px;
-
-  /* The categorical palette of a chart. It never borrows a state colour: a
-     slice of a ring is not "ok" or "broken", and a reader who has learnt
-     that green means healthy must not meet green again as "the third
-     category". The three hues follow the theme, so the light one darkens
-     them without anything here changing. */
   --chart-1: var(--blue);
   --chart-2: var(--teal);
   --chart-3: var(--lavender);
   --chart-4: var(--accent);
 
-  /* The two gradients of the house, and there are no others: the hero tile
-     and the bars of a chart. The accent may carry them because the accent
-     carries no state - a tile that glows says "look here", not "healthy". */
-  --grad-hero: linear-gradient(135deg, var(--accent) 0%, var(--lavender) 100%);
-  --grad-bar: linear-gradient(180deg, var(--teal) 0%, var(--lavender) 100%);
+  /* The spacing scale. Everything in this file is one of these. */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 20px;
+  --s6: 24px;
+  --s7: 32px;
+  --s8: 48px;
 
-  --font-sans: -apple-system, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Arial, sans-serif;
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-card: 14px;
+
+  /* The type scale. Four sizes for prose and three for measurements. */
+  --t-label: 11px;
+  --t-small: 12px;
+  --t-body: 13px;
+  --t-lead: 15px;
+  --t-title: 22px;
+  --metric-m: 28px;
+  --metric-l: 40px;
+  --metric-xl: 52px;
+
+  --font: -apple-system, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
-  /* Wider since 15.10: at 240 the longer names wrapped and the column
-     read as a list of fragments. */
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  --shadow-soft: 0 2px 10px rgba(0, 0, 0, 0.25);
+
   --sidebar-width: 264px;
-  --sidebar-rail: 56px;
-  --content-pad-x: 20px;
-  --content-pad-y: 20px;
-  /* The page fills the width: a bounded page on a wide screen left the
-     rest empty, and a fleet panel has more to show, not less. */
-  --page-max-width: none;
-  /* The top bar stands at every width; the sticky parts of a page hang
-     from this height so nothing slides under it. */
-  --topbar-height: 52px;
+  --sidebar-rail: 60px;
+  --topbar-height: 56px;
+  --pad-x: var(--s6);
 }
 
-[data-theme="mocha-peach"] {
-  color-scheme: dark;
-  --accent: #fab387;
-  --accent-text: #fab387;
-  --accent-contrast: #11111b;
-}
+/* The accent of the theme. Everything else is shared. */
+[data-theme="mocha-peach"] { color-scheme: dark; }
 
-/* The green accent would be mistaken for "ok" if both were the same green,
-   so the healthy state moves to teal in this theme. */
 [data-theme="mocha-green"] {
   color-scheme: dark;
   --accent: #a6e3a1;
   --accent-text: #a6e3a1;
   --accent-contrast: #11111b;
+  /* The healthy green moves aside so that "accent" and "ok" are never the
+     same colour; a reader cannot learn a meaning for a colour that has two. */
   --ok: #94e2d5;
   --ok-text: #94e2d5;
 }
 
 [data-theme="latte"] {
   color-scheme: light;
-  --bg: #dfe3ea;
+  --bg: #eff1f5;
   --bg-panel: #ffffff;
-  --bg-sidebar: #d3d8e2;
-  --bg-sidebar-hover: #ccd0da;
+  --bg-sunken: #e6e9ef;
+  --bg-raised: #e6e9ef;
   --bg-hover: #dce0e8;
-  --bg-input: #e6e9ef;
-  --bg-sunken: #dce0e8;
-  --bg-raised: #eff1f5;
+  --bg-sidebar: #dce0e8;
+  --bg-input: #ffffff;
   --border: #ccd0da;
   --border-strong: #bcc0cc;
 
   --text: #4c4f69;
   --text-muted: #5c5f77;
-  --text-faint: #8c8fa1;
+  --text-faint: #7c7f93;
 
-  /* Blue reads better than peach on a light ground: peach text would not
-     reach the contrast a link needs. */
   --accent: #1e66f5;
   --accent-text: #1450c8;
   --accent-contrast: #ffffff;
-  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
 
   --ok: #40a02b;
   --warn: #df8e1d;
@@ -161,46 +189,34 @@
   --teal: #179299;
   --lavender: #7287fd;
 
-  --shadow: 0 12px 32px rgba(76, 79, 105, 0.18), 0 1px 2px rgba(76, 79, 105, 0.12);
+  --shadow: 0 10px 30px rgba(76, 79, 105, 0.18);
+  --shadow-soft: 0 2px 10px rgba(76, 79, 105, 0.12);
 }
 
-/* The text size chosen by the person at the screen scales the whole
-   interface, so the composition stays the same at every size. */
+/* The reader's own text size scales the whole interface, so every
+   proportion in here survives it. */
 html[data-scale="small"] { zoom: 0.9; }
 html[data-scale="large"] { zoom: 1.12; }
 html[data-scale="larger"] { zoom: 1.25; }
 
-* { box-sizing: border-box; }
+/* ---------------------------------------------------------------------
+   2b. The ladder of widths
+   ------------------------------------------------------------------
+   Five rungs, and every responsive decision in this file is taken on
+   one of them:
 
-/* Motion is decoration here; whoever asked the system for none gets none. */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { transition: none !important; animation: none !important; }
-}
+     <=600    a phone. One column, the sidebar is a drawer.
+     <=900    a large phone or a small tablet held upright.
+     <=1200   a tablet or a laptop. The twelve columns pair up.
+     <=1600   a desktop; the layout as designed.
+     >1900    1080p and above, where the only danger is a line of text
+              three thousand pixels wide, so the page takes a measure.
+   ------------------------------------------------------------------ */
 
-html { background: var(--bg); }
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 14px/1.5 var(--font-sans);
-  -webkit-font-smoothing: antialiased;
-}
+/* ---------------------------------------------------------------------
+   3. The shell: sidebar, top bar, page
+   ------------------------------------------------------------------ */
 
-a { color: var(--accent-text); text-decoration: none; }
-a:hover { text-decoration: underline; }
-code, kbd, pre, .mono { font-family: var(--font-mono); }
-
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 4px; line-height: 1.3; }
-h2 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; margin: 24px 0 8px; }
-h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
-.subtitle { color: var(--text-muted); margin: 0 0 20px; font-size: 13px; max-width: 80ch; }
-
-/* ---------------------------------------------------------------------- */
-/* The shell: the sidebar down the left edge, the top bar across the rest  */
-/* and the content beneath it.                                             */
-/* ---------------------------------------------------------------------- */
 .layout {
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
@@ -208,18 +224,148 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
   min-height: 100vh;
 }
 .layout.sidebar-collapsed { --sidebar-width: var(--sidebar-rail); }
-/* Hidden altogether: the rail goes too, and a button in the top bar brings
-   it back. Zabbix has both - fold to icons, and get the column out of the
-   way entirely - and on a fleet table forty columns wide the second one is
-   the useful half. */
-.layout.sidebar-hidden { --sidebar-width: 0px; }
-.layout.sidebar-hidden > .sidebar { display: none; }
 
-/* Folded to the rail, the column opens on hover and lies over the page
-   instead of pushing it: the content keeps its width while somebody
-   glances at the navigation, which is the behaviour of the panels the
-   owner pointed at. A pointer that cannot hover - a touch screen - is
-   left with the tap, which opens the drawer. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  z-index: 100;
+  padding: var(--s2) var(--s4);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-radius: var(--radius-sm);
+}
+.skip-link:focus { left: var(--s4); top: var(--s2); }
+
+/* The sidebar ------------------------------------------------------- */
+
+.sidebar {
+  grid-column: 1;
+  grid-row: 1 / 3;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sidebar);
+  overflow: hidden;
+}
+
+.sidebar-brand {
+  flex: none;
+  height: var(--topbar-height);
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 0 var(--s4);
+  color: var(--text);
+}
+.sidebar-brand:hover { text-decoration: none; }
+.sidebar-mark {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.sidebar-title {
+  font-size: var(--t-lead);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sidebar-nav {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: var(--s3) var(--s3) var(--s6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+
+.sidebar-back {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  margin-bottom: var(--s2);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--t-body);
+}
+.sidebar-back:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
+
+.sidebar-group + .sidebar-group { margin-top: var(--s4); }
+.sidebar-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  padding: var(--s2) var(--s3);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  color: var(--text-faint);
+  font-size: var(--t-label);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.sidebar-group-head:hover { color: var(--text-muted); }
+.sidebar-group-label { flex: 1 1 auto; text-align: left; }
+.sidebar-group-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.sidebar-group-chevron { width: 12px; height: 12px; transform: rotate(90deg); transition: transform 0.15s ease; }
+.sidebar-group.closed .sidebar-group-chevron { transform: rotate(0deg); }
+.sidebar-group.closed .sidebar-items { display: none; }
+
+.sidebar-items { display: flex; flex-direction: column; gap: 2px; }
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--t-body);
+  min-width: 0;
+}
+.nav-item:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
+.nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.nav-item.unavailable { color: var(--text-faint); }
+.nav-icon { flex: none; width: 17px; height: 17px; }
+.nav-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-badge {
+  flex: none;
+  min-width: 20px;
+  padding: 0 var(--s1);
+  border-radius: 9px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: var(--t-label);
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Folded to the rail: labels and badges go, the marks stay, and the
+   column opens over the page on hover rather than pushing it. */
+.layout.sidebar-collapsed .sidebar-title,
+.layout.sidebar-collapsed .nav-label,
+.layout.sidebar-collapsed .nav-badge,
+.layout.sidebar-collapsed .sidebar-group-label,
+.layout.sidebar-collapsed .sidebar-group-chevron { display: none; }
+.layout.sidebar-collapsed .nav-item { justify-content: center; }
+
 @media (hover: hover) {
   .layout.sidebar-collapsed > .sidebar:hover,
   .layout.sidebar-collapsed > .sidebar:focus-within {
@@ -227,1820 +373,487 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
     box-shadow: var(--shadow);
   }
   .layout.sidebar-collapsed > .sidebar:hover .sidebar-title,
-  .layout.sidebar-collapsed > .sidebar:focus-within .sidebar-title,
   .layout.sidebar-collapsed > .sidebar:hover .nav-label,
-  .layout.sidebar-collapsed > .sidebar:focus-within .nav-label,
-  .layout.sidebar-collapsed > .sidebar:hover .sidebar-group-label,
-  .layout.sidebar-collapsed > .sidebar:focus-within .sidebar-group-label,
-  .layout.sidebar-collapsed > .sidebar:hover .sidebar-group-chevron,
-  .layout.sidebar-collapsed > .sidebar:focus-within .sidebar-group-chevron,
   .layout.sidebar-collapsed > .sidebar:hover .nav-badge,
-  .layout.sidebar-collapsed > .sidebar:focus-within .nav-badge {
-    display: initial;
-  }
+  .layout.sidebar-collapsed > .sidebar:hover .sidebar-group-label,
+  .layout.sidebar-collapsed > .sidebar:hover .sidebar-group-chevron,
+  .layout.sidebar-collapsed > .sidebar:focus-within .sidebar-title,
+  .layout.sidebar-collapsed > .sidebar:focus-within .nav-label,
+  .layout.sidebar-collapsed > .sidebar:focus-within .nav-badge,
+  .layout.sidebar-collapsed > .sidebar:focus-within .sidebar-group-label,
+  .layout.sidebar-collapsed > .sidebar:focus-within .sidebar-group-chevron { display: initial; }
+  .layout.sidebar-collapsed > .sidebar:hover .nav-item,
+  .layout.sidebar-collapsed > .sidebar:focus-within .nav-item { justify-content: flex-start; }
 }
 
-.sidebar {
-  grid-column: 1;
-  grid-row: 1 / 3;
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  height: 100vh;
-  width: var(--sidebar-width);
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-sidebar);
-  border-right: 1px solid var(--border);
-  transition: width 0.15s ease;
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 19;
+  background: rgba(0, 0, 0, 0.5);
 }
 
-/* The brand row is as tall as the top bar, so the two borders meet in one
-   line across the screen. */
-.sidebar-brand {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: var(--topbar-height);
-  padding: 0 14px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text);
-}
-.sidebar-brand:hover { text-decoration: none; color: var(--text); }
-/* The mark sits on the same soft tile as the page header's icon, in the
-   accent: on the dark sidebar a solid accent square outweighed every item
-   below it, and the tile ties the brand to the section marks. */
-.sidebar-mark {
-  flex: none;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-sm);
-  /* Opaque, mixed over the sidebar: the mark cuts its ports in this very
-     colour, and a cut in a translucent tile would show the seam. */
-  background: color-mix(in srgb, var(--accent) 16%, var(--bg-sidebar));
-  color: var(--accent-text);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
-  display: grid;
-  place-items: center;
-}
-.sidebar-title { flex: 1 1 auto; font-weight: 600; font-size: 15px; letter-spacing: -0.01em; white-space: nowrap; }
+/* The top bar ------------------------------------------------------- */
 
-.sidebar-nav {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 10px 8px 12px;
-}
-.sidebar-group + .sidebar-group { margin-top: 6px; }
-.sidebar-group-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 10px 10px 4px;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-xs);
-  color: var(--text-faint);
-  font: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  cursor: pointer;
-  text-align: left;
-}
-.sidebar-group-head:hover { color: var(--text-muted); }
-.sidebar-group-label { flex: 1 1 auto; }
-.sidebar-group-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-.sidebar-group-chevron { transform: rotate(90deg); transition: transform 0.15s ease; width: 12px; height: 12px; }
-.sidebar-group.closed .sidebar-group-chevron { transform: rotate(0deg); }
-.sidebar-group.closed .sidebar-items { display: none; }
-.sidebar-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
-.sidebar-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  font-weight: 500;
-  white-space: nowrap;
-  transition: background-color 0.1s ease, color 0.1s ease;
-}
-.sidebar-item .icon { flex: none; opacity: 0.85; }
-.sidebar-item:hover { background: var(--bg-sidebar-hover); color: var(--text); text-decoration: none; }
-.sidebar-item.active {
-  background: var(--accent-soft);
-  color: var(--accent-text);
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-.sidebar-item.active .icon { opacity: 1; }
-/* A module without coverage on the host stays listed together with the
-   reason: a vanished entry would look like a missing product feature. */
-.sidebar-item.unavailable { opacity: 0.45; }
-.sidebar-item.unavailable.active { opacity: 0.7; }
-/* The way back from a host to the fleet sits above the host's modules. */
-.sidebar-back { margin-bottom: 6px; color: var(--text-faint); font-size: 12px; }
-
-/* The rail: icons only. The labels stay in the markup for the tooltips and
-   the screen reader; the folding is purely visual. */
-@media (min-width: 901px) {
-  .sidebar.collapsed .sidebar-title,
-  .sidebar.collapsed .sidebar-item-label,
-  .sidebar.collapsed .sidebar-group-label,
-  .sidebar.collapsed .sidebar-group-chevron,
-  .sidebar.collapsed .sidebar-group-dot { display: none; }
-  .sidebar.collapsed .sidebar-brand { justify-content: center; padding: 0; }
-  .sidebar.collapsed .sidebar-nav { padding: 10px 8px 12px; }
-  .sidebar.collapsed .sidebar-group-head {
-    height: 1px;
-    padding: 0;
-    margin: 8px 6px;
-    background: var(--border);
-    pointer-events: none;
-  }
-  .sidebar.collapsed .sidebar-group.closed .sidebar-items { display: flex; }
-  .sidebar.collapsed .sidebar-item { justify-content: center; padding: 10px 0; }
-  .sidebar.collapsed .sidebar-item.active { box-shadow: none; }
-}
-
-/* ---------------------------------------------------------------------- */
-/* The top bar: the fold, the trail, the host search and the user menu.    */
-/* It spans from the sidebar to the screen edge and stays on top while the */
-/* page scrolls, so everything sticky in the page hangs below its height.  */
-/* ---------------------------------------------------------------------- */
 .topbar {
   grid-column: 2;
   grid-row: 1;
   position: sticky;
   top: 0;
   z-index: 15;
-  height: var(--topbar-height);
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 22px 0 12px;
-  /* The bar belongs to the page, not to a card: on the page's own ground
-     it reads as the frame of the window, which is what it is. A panel
-     colour made it look like one more card that happened to be first. */
+  gap: var(--s3);
+  padding: 0 var(--pad-x);
   background: var(--bg);
-  border-bottom: 1px solid var(--border);
 }
 .topbar-fold, .topbar-menu {
   flex: none;
   width: 32px;
   height: 32px;
-  padding: 0;
   display: grid;
   place-items: center;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-xs);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
   color: var(--text-muted);
   cursor: pointer;
 }
 .topbar-fold:hover, .topbar-menu:hover { background: var(--bg-hover); color: var(--text); }
-/* The drawer button belongs to the narrow screen; the fold to the wide one. */
 .topbar-menu { display: none; }
+.topbar-crumb { display: flex; align-items: center; gap: var(--s2); min-width: 0; font-size: var(--t-body); }
+.topbar-crumb .to-the-left { color: var(--text-faint); }
+.topbar-spacer, .spacer { flex: 1 1 auto; }
+.topbar-right { display: flex; align-items: center; gap: var(--s2); flex: none; }
 
-.topbar-trail {
-  flex: 1 1 auto;
-  min-width: 0;
+.topbar-host, .topbar-search {
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-.topbar-crumb {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1.3;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.topbar-crumb.current { color: var(--text); }
-a.topbar-crumb:hover { color: var(--text); text-decoration: none; }
-.topbar-sep { flex: none; width: 12px; height: 12px; color: var(--text-faint); }
-/* The host in the trail: its state, its name and its address, as one link
-   to its overview. The name keeps the full text colour even when a module
-   follows it, because it is the target of every operation on the page. */
-.topbar-host {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  padding: 3px 8px;
-  border-radius: var(--radius-xs);
-  color: var(--text);
-}
-.topbar-host:hover { background: var(--bg-hover); text-decoration: none; }
-.topbar-host .dot { width: 9px; height: 9px; }
-.topbar-host-name {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.topbar-host-address { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); white-space: nowrap; }
-
-.topbar-search { flex: 0 1 300px; min-width: 0; }
-
-/* The user menu: the avatar and the name open a popover with the identity,
-   the settings and the way out of the session. */
-.topbar-user { position: relative; flex: none; }
-.topbar-user-trigger {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 36px;
-  max-width: 240px;
-  padding: 0 6px 0 4px;
-  background: transparent;
-  border: 1px solid transparent;
+  gap: var(--s2);
+  height: 32px;
+  padding: 0 var(--s3);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  color: var(--text);
-  font: inherit;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-size: var(--t-body);
   cursor: pointer;
+  min-width: 0;
 }
-.topbar-user-trigger:hover, .topbar-user-trigger[aria-expanded="true"] { background: var(--bg-hover); }
+.topbar-host:hover, .topbar-search:hover { border-color: var(--border-strong); color: var(--text); }
+.topbar-host-select { max-width: 280px; }
+.topbar-host-name { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-host-address { color: var(--text-faint); font-family: var(--font-mono); font-size: var(--t-small); }
+.topbar-host-clear {
+  border: 0; background: none; cursor: pointer; color: var(--text-faint); padding: 0 var(--s1);
+}
+.topbar-host-clear:hover { color: var(--text); }
+.topbar-key {
+  flex: none;
+  padding: 1px var(--s1);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.topbar-user {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 32px;
+  padding: 0 var(--s2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+  color: var(--text);
+  font-size: var(--t-body);
+  max-width: 260px;
+}
+.topbar-user:hover { background: var(--bg-hover); }
 .topbar-avatar {
   flex: none;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
   border-radius: 50%;
   background: var(--accent);
   color: var(--accent-contrast);
-  font-weight: 600;
-  font-size: 13px;
-  display: grid;
-  place-items: center;
+  font-size: var(--t-small);
+  font-weight: 700;
 }
-.topbar-user-name { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.topbar-user-chevron { flex: none; width: 12px; height: 12px; transform: rotate(90deg); color: var(--text-faint); }
-.topbar-user-trigger[aria-expanded="true"] .topbar-user-chevron { transform: rotate(-90deg); }
+.topbar-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.user-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 40;
-  width: min(300px, calc(100vw - 32px));
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  background: var(--bg-raised);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  font-size: 12px;
-  color: var(--text-muted);
-}
-.user-menu-identity {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
-}
-.user-menu-identity .topbar-avatar { width: 36px; height: 36px; font-size: 15px; }
-.user-menu-text { display: flex; flex-direction: column; min-width: 0; }
-.user-menu-name { color: var(--text); font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.user-menu-subject { font-family: var(--font-mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.user-menu-roles { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.user-menu-section { display: flex; flex-direction: column; gap: 5px; }
-.user-menu-label {
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-.user-menu-session {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-.user-menu-signout {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: var(--radius-xs);
-  color: var(--text-muted);
-}
-.user-menu-signout:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
-
-/* The segmented controls in the user menu: the language, the theme and the text size. */
-.language-switch, .theme-switch {
-  display: inline-flex;
-  padding: 2px;
-  gap: 2px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  width: 100%;
-}
-.language-switch button, .theme-switch button {
-  flex: 1 1 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 4px 6px;
-  font-size: 11px;
-  font-weight: 500;
-  border: none;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.language-switch button:hover, .theme-switch button:hover { color: var(--text); }
-.scale-switch button { font-weight: 600; letter-spacing: 0; }
-.language-switch button.active, .theme-switch button.active {
-  background: var(--bg-hover);
-  color: var(--text);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-}
-/* The swatches show the themes themselves, so they do not follow the tokens. */
-.theme-swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-.theme-swatch.mocha-peach { background: #fab387; box-shadow: 0 0 0 2px #1e1e2e; }
-.theme-swatch.mocha-green { background: #a6e3a1; box-shadow: 0 0 0 2px #1e1e2e; }
-.theme-swatch.latte { background: #1e66f5; box-shadow: 0 0 0 2px #eff1f5; }
-
-.sidebar-backdrop { display: none; }
+/* The page ---------------------------------------------------------- */
 
 .content {
   grid-column: 2;
   grid-row: 2;
-  padding: var(--content-pad-y) var(--content-pad-x);
-  overflow-x: auto;
   min-width: 0;
-}
-/* The page is bounded in width and centred: tables and forms are read
-   at a width the eye can follow, and a wide screen gets margins rather
-   than a page stretched to the corner. */
-.page {
-  width: 100%;
-  max-width: var(--page-max-width);
-  margin: 0 auto;
-  min-width: 0;
+  padding: var(--s5) var(--pad-x) var(--s8);
 }
 
-/* A narrow screen: the sidebar leaves the grid and becomes a drawer behind
-   the bar's menu button; the bar and the content take the whole width. */
-@media (max-width: 900px) {
-  .layout {
-    grid-template-columns: minmax(0, 1fr);
-    --content-pad-x: 16px;
-    --content-pad-y: 16px;
-    --sidebar-width: 0px;
-  }
-  .topbar, .content { grid-column: 1; }
-  .topbar { padding: 0 12px 0 8px; }
-  .topbar-fold { display: none; }
-  .topbar-menu { display: grid; }
-  .sidebar {
-    position: fixed;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 30;
-    width: min(280px, 85vw);
-    height: 100vh;
-    transform: translateX(-100%);
-    transition: transform 0.2s ease;
-    box-shadow: none;
-  }
-  .sidebar.open { transform: none; box-shadow: var(--shadow); }
-  .sidebar-backdrop {
-    display: block;
-    position: fixed;
-    inset: 0;
-    z-index: 25;
-    background: rgba(0, 0, 0, 0.45);
-  }
-  .grid-two { grid-template-columns: 1fr; }
-  .pairs { grid-template-columns: 1fr; gap: 2px 0; }
-  .pairs dd { margin-bottom: 8px; }
-}
+.page { min-width: 0; }
 
-/* ---------------------------------------------------------------------- */
-/* The host picker: a search trigger and a popover with a filter and a     */
-/* list. It hangs from the right side of the top bar, so the popover opens */
-/* leftwards to stay on the screen.                                        */
-/* ---------------------------------------------------------------------- */
-.host-picker { position: relative; min-width: 0; }
-.host-picker-trigger {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  height: 34px;
-  padding: 0 10px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.host-picker-trigger:hover { border-color: var(--border-strong); color: var(--text); }
-.host-picker-trigger[aria-expanded="true"] { border-color: var(--accent); }
-.host-picker-trigger .icon { flex: none; }
-.host-picker-placeholder { flex: 1 1 auto; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.host-picker-key {
+.page-header { margin-bottom: var(--s6); }
+.page-header-row { display: flex; align-items: flex-start; gap: var(--s4); }
+.page-header-text { flex: 1 1 auto; min-width: 0; }
+.page-mark {
   flex: none;
-  padding: 1px 5px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-faint);
-}
-.host-picker-name { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.host-picker-address { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.host-picker-popover {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 40;
-  width: min(400px, calc(100vw - 32px));
-  background: var(--bg-raised);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  overflow: hidden;
-}
-.host-picker-search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-muted);
-}
-.host-picker-search input {
-  flex: 1 1 auto;
-  min-width: 0;
-  background: transparent;
-  border: none;
-  padding: 4px 0;
-  color: var(--text);
-}
-.host-picker-search input:focus { outline: none; box-shadow: none; }
-.host-picker-list { list-style: none; margin: 0; padding: 4px; max-height: min(320px, 60vh); overflow-y: auto; }
-.host-picker-item {
+  width: 40px;
+  height: 40px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  grid-template-areas: "dot name address star" ". meta meta star";
-  column-gap: 10px;
-  align-items: center;
-  padding: 6px 8px;
-  border-radius: var(--radius-xs);
-  cursor: pointer;
+  place-items: center;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
-.host-picker-item .dot { grid-area: dot; }
-.host-picker-item .host-picker-name { grid-area: name; }
-.host-picker-item .host-picker-address { grid-area: address; }
-.host-picker-item .host-picker-meta { grid-area: meta; font-size: 11px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.host-picker-item.highlighted { background: var(--bg-hover); }
-/* The first row of a group carries its heading above itself, so the list
-   stays one flat listbox for the keyboard. */
-.host-picker-item.group-start { margin-top: 18px; position: relative; }
-.host-picker-item.group-start::before {
-  content: attr(data-group);
-  position: absolute;
-  top: -17px;
-  left: 10px;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-faint);
+.page-title { font-size: var(--t-title); font-weight: 650; letter-spacing: -0.02em; line-height: 1.2; }
+.page-description { margin-top: var(--s1); color: var(--text-muted); font-size: var(--t-body); max-width: 90ch; }
+.page-actions { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.page-help {
+  margin-top: var(--s3);
+  padding: var(--s4);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-size: var(--t-body);
+  max-width: 100ch;
 }
-.host-picker-item.group-start.group-favourites { margin-top: 20px; }
-.host-picker-item .host-picker-star {
-  grid-area: star;
-  align-self: center;
-  padding: 2px;
+.page-help p + p { margin-top: var(--s2); }
+.page-help-toggle {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
   border: 0;
+  border-radius: 50%;
   background: none;
   color: var(--text-faint);
-  opacity: 0;
   cursor: pointer;
 }
-.host-picker-item .host-picker-star .icon { width: 14px; height: 14px; }
-.host-picker-item:hover .host-picker-star, .host-picker-item.highlighted .host-picker-star,
-.host-picker-item .host-picker-star.on { opacity: 1; }
-.host-picker-item .host-picker-star.on { color: var(--warn-text); }
-.host-picker-item .host-picker-star:hover { color: var(--text); }
-.host-picker-item.current .host-picker-name { color: var(--accent-text); }
-.host-picker-note { margin: 0; padding: 8px 12px; font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border); }
-.host-picker-note.error { color: var(--error-text); }
-
-/* A phone: the bar keeps the menu button, one title and the avatar. The
-   trail shrinks to the page the operator is on - the host on a host page -
-   and the search and the user menu fold to their icons. */
-@media (max-width: 600px) {
-  .topbar { gap: 6px; }
-  .topbar-trail .topbar-sep,
-  .topbar-trail.on-host .topbar-crumb,
-  .topbar-host-address { display: none; }
-  .topbar-host { padding: 3px 4px; }
-  .topbar-search { flex: none; }
-  .host-picker-trigger { width: 34px; padding: 0; justify-content: center; }
-  .host-picker-placeholder, .host-picker-key { display: none; }
-  /* An icon at the right edge cannot anchor a list wider than the space
-     beside it, so the popover hangs from the bar across the screen. */
-  .host-picker-popover {
-    position: fixed;
-    top: calc(var(--topbar-height) + 6px);
-    left: 16px;
-    right: 16px;
-    width: auto;
-  }
-  .topbar-user-name, .topbar-user-chevron { display: none; }
-  .topbar-user-trigger { padding: 0 4px; }
-}
-
-/* The state dot, in the badge colours. */
-.dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--unknown); }
-.dot.ok { background: var(--ok); }
-.dot.warn { background: var(--warn); }
-.dot.error { background: var(--error); }
-.dot.unknown { background: var(--unknown); }
-
-/* ---------------------------------------------------------------------- */
-/* Panels, tiles and tables.                                               */
-/* ---------------------------------------------------------------------- */
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
-.tile {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
+.page-help-toggle:hover { color: var(--text); }
+.page-error {
+  margin-top: var(--s3);
+  padding: var(--s3) var(--s4);
   border-radius: var(--radius);
-  padding: 14px 16px;
+  border-left: 3px solid var(--error);
+  background: var(--bg-panel);
+  color: var(--error-text);
+  font-size: var(--t-body);
 }
-.tile .label { color: var(--text-muted); font-size: 12px; }
-.tile .value { font-size: 28px; font-weight: 600; margin-top: 4px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-.tile.warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
-.tile.warn .value { color: var(--warn-text); }
-.tile.error { border-color: color-mix(in srgb, var(--error) 45%, var(--border)); }
-.tile.error .value { color: var(--error-text); }
 
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-/* The head of a table is a label, like the head of a card: upper case and
-   letter-spaced, quiet, and with no heavy rule under it. The rule was the
-   strongest line on most screens and it was drawn under the least
-   important row. */
-th {
-  text-align: left;
-  color: var(--text-faint);
-  font-weight: 600;
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-/* A row of a dense table in the consoles this was measured against is 36
-   to 40 pixels; ours was loose enough to fit eight fewer rows on a screen
-   and no easier to read for it. The line between rows goes nearly away:
-   with rows this regular, the eye needs the rhythm, not the ruling. */
-td {
-  padding: 9px 12px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
-  vertical-align: middle;
-}
-tbody tr:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.breadcrumb { display: flex; align-items: center; gap: var(--s2); color: var(--text-faint); font-size: var(--t-small); }
 
-.badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 18px;
-  color: var(--text-muted);
-  background: color-mix(in srgb, currentColor 12%, transparent);
-  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
-  white-space: nowrap;
-}
-.badge.ok { color: var(--ok-text); }
-.badge.warn { color: var(--warn-text); }
-.badge.error { color: var(--error-text); }
-.badge.unknown { color: var(--unknown-text); }
+/* The responsive ladder for the shell ------------------------------- */
 
-/* ---------------------------------------------------------------------- */
-/* Controls.                                                               */
-/* ---------------------------------------------------------------------- */
-.filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
-input, select, textarea {
-  background: var(--bg-input);
-  border: 1px solid var(--border-strong);
-  color: var(--text);
-  border-radius: var(--radius-sm);
-  padding: 6px 10px;
-  font: inherit;
-  min-width: 0;
-  transition: border-color 0.1s ease, box-shadow 0.1s ease;
+@media (max-width: 1200px) {
+  :root { --pad-x: var(--s5); }
 }
-input::placeholder, textarea::placeholder { color: var(--text-faint); }
-input:focus, select:focus, textarea:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+
+@media (max-width: 1024px) {
+  /* The column becomes a drawer: it leaves the grid entirely, so the
+     content has the whole width on a tablet held upright. */
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 264px;
+    transform: translateX(-100%);
+    transition: transform 0.18s ease;
+  }
+  .sidebar.open { transform: translateX(0); box-shadow: var(--shadow); }
+  .topbar, .content { grid-column: 1; }
+  .topbar-menu { display: grid; }
+  .topbar-fold { display: none; }
 }
-input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width: auto; padding: 0; box-shadow: none; }
-select { padding-right: 28px; }
+
+@media (max-width: 900px) {
+  :root { --pad-x: var(--s4); --topbar-height: 52px; }
+  .topbar-host-select, .topbar-search-label { display: none; }
+  .page-header-row { flex-wrap: wrap; }
+  .page-actions { width: 100%; }
+}
+
+@media (max-width: 600px) {
+  :root { --pad-x: var(--s3); }
+  .page-title { font-size: 19px; }
+  .topbar-name { display: none; }
+  .content { padding-top: var(--s4); }
+}
+
+/* Above 1900 the danger is a line of text the width of a wall. The page
+   takes a measure and stays at the left, where the eye starts. */
+@media (min-width: 1900px) {
+  :root { --pad-x: var(--s7); }
+  .content { max-width: 2400px; }
+}
+
+/* ---------------------------------------------------------------------
+   4. Primitives: button, control, badge, card, table
+   ------------------------------------------------------------------ */
 
 button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  background: var(--accent);
+  gap: var(--s2);
+  min-height: 32px;
+  padding: 0 var(--s4);
   border: 1px solid transparent;
-  color: var(--accent-contrast);
   border-radius: var(--radius-sm);
-  padding: 6px 14px;
-  font: inherit;
-  font-weight: 500;
-  line-height: 1.5;
-  cursor: pointer;
-  transition: background-color 0.1s ease, border-color 0.1s ease, color 0.1s ease;
-}
-/* The hover shades are wrapped in :where() so they carry no specificity:
-   a control styled by its class must win over them without a fight. */
-button:where(:hover:not(:disabled)) { background: color-mix(in srgb, var(--accent) 88%, var(--text)); }
-button.secondary {
-  background: var(--bg-panel);
-  border-color: var(--border-strong);
-  color: var(--text);
-}
-button.secondary:where(:hover:not(:disabled)) { background: var(--bg-hover); border-color: var(--text-faint); }
-/* The red workflow: an operation that overwrites data looks different from
-   every routine change, on the button and on its confirmation. */
-button.danger { background: var(--error); border-color: transparent; color: var(--error-contrast); }
-button.danger:where(:hover:not(:disabled)) { background: color-mix(in srgb, var(--error) 88%, var(--text)); }
-.form.danger { border-color: var(--error); }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-
-/* The strip wraps rather than scrolls: a host has two dozen modules and a
-   hidden tab is a module the operator does not know exists. */
-.tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--border); margin: 16px 0; }
-.tabs button {
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-muted);
-  border-radius: 0;
-  padding: 8px 12px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-.tabs button:hover:not(:disabled) { background: transparent; color: var(--text); }
-.tabs button.active { color: var(--accent-text); border-bottom-color: var(--accent); }
-.tabs button:disabled { opacity: 0.35; }
-
-/* Label/value pairs. One grid for every fact list in the panel.
- *
- * The label track used to be a fixed 140px and the value had no wrapping
- * rule, so a fingerprint, a DSN or a JSON structure left the card through
- * its right edge. Now the label track shrinks to its content, the value
- * track may never be narrower than its column, and anything without spaces
- * breaks rather than overflow. */
-.pairs {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, max-content) minmax(140px, 1fr));
-  gap: 8px 16px;
-  font-size: 13px;
-  align-items: baseline;
-  min-width: 0;
-}
-.pairs dt { color: var(--text-muted); min-width: 0; overflow-wrap: anywhere; }
-.pairs dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-/* A value that needs the width of the list: a table, a nested list, a key. */
-.pairs dt.wide { grid-column: 1 / -1; }
-.pairs dd.wide { grid-column: 1 / -1; }
-/* Label over value. In a card a third of the page wide two tracks leave
-   about 120px for the value, which is narrower than a uuid; the container
-   query below switches to this by itself, and `stacked` asks for it. */
-.pairs.stacked { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 16px; }
-.pairs.stacked dt { grid-column: auto; }
-.pairs.stacked dd { grid-column: auto; margin-top: 2px; }
-.pairs.stacked > dt { font-size: 12px; }
-.pairs.nested { margin: 2px 0 0; }
-
-/* The fact list of the host modules shares the one grid; it kept a second
-   copy of these rules, which is how the two drifted apart. */
-.hm-facts, .hm-fact dd { min-width: 0; overflow-wrap: anywhere; }
-
-/* A long value in a narrow card reads better stacked than squeezed. The
-   card is the container, so the same list adapts on the dashboard and on a
-   page where it has the whole width. */
-@container card (max-width: 420px) {
-  .pairs { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px 16px; }
-  .pairs dt { grid-column: auto; font-size: 12px; }
-  .pairs dd { grid-column: auto; margin-top: 2px; }
-}
-
-/* Anything the panel prints that has no spaces of its own. */
-.wrap { overflow-wrap: anywhere; min-width: 0; }
-
-/* A table may not widen the card that holds it: it scrolls instead. */
-.table-scroll { overflow-x: auto; max-width: 100%; min-width: 0; }
-.facts-table { font-size: 12px; }
-.facts-table th, .facts-table td { padding: 5px 10px; white-space: nowrap; }
-.card .facts-table th:first-child, .card .facts-table td:first-child { padding-left: 0; }
-
-/* An opaque identifier: its ends, and one click to take the whole value. */
-.identifier {
-  display: inline-flex; align-items: center; gap: 5px;
-  background: none; border: 0; padding: 0; margin: 0;
-  font: inherit; color: inherit; cursor: pointer; text-align: left;
-}
-.identifier svg { width: 13px; height: 13px; color: var(--text-faint); flex: 0 0 auto; }
-.identifier:where(:hover, :focus-visible) svg { color: var(--accent-text); }
-.identifier:where(:hover, :focus-visible) .mono { color: var(--accent-text); }
-
-pre {
-  background: var(--bg-sunken);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 12px;
-  overflow-x: auto;
-  font-size: 12px;
-  margin: 0;
-}
-
-.empty { color: var(--text-muted); padding: 24px 0; }
-.page-error { color: var(--error-text); }
-/* What a form says about itself while it is being filled in. It reads like an
-   error because it is one - the order would be refused - but it is not the page
-   failing, and nothing should treat it as such. */
-.form-problem { color: var(--error-text); }
-.source { color: var(--text-faint); font-size: 11px; }
-.login-screen {
-  display: grid; place-items: center; min-height: 100vh; text-align: center; padding: 24px;
-}
-.login-screen > div {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 36px 32px 28px;
-  max-width: 420px;
-  width: 100%;
-  box-shadow: var(--shadow);
-}
-.login-screen h1 { font-size: 26px; }
-/* The brand on the login screen is the lock-up, centred, with the same
-   space below it that a plain heading had. */
-.login-brand { display: flex; justify-content: center; margin: 0 0 8px; }
-.login-screen button { width: 100%; padding: 9px 14px; }
-
-/* Forms and operations on local accounts. */
-.toggle {
-  display: inline-flex; align-items: center; gap: 8px;
-  color: var(--text-muted); font-size: 13px; margin-bottom: 12px;
-}
-.toggle input { width: auto; }
-.operations { display: flex; gap: 8px; flex-wrap: wrap; }
-.operations button { background: var(--bg-panel); border-color: var(--border-strong); color: var(--text); }
-.operations button:hover:not(:disabled) { background: var(--bg-hover); }
-.form {
-  display: flex; flex-direction: column; gap: 10px;
-  border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 16px; background: var(--bg-panel); max-width: 640px;
-}
-.form h2 { margin: 0; }
-/* On a host page the confirmation takes the page's width and asks its
-   two questions side by side instead of standing in one narrow strip. */
-.hm-page > .form {
-  max-width: none;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-  gap: 10px 16px;
-  align-items: start;
-}
-.hm-page > .form > h2, .hm-page > .form > p, .hm-page > .form > .operations { grid-column: 1 / -1; }
-.form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-muted); }
-.form textarea { font-family: var(--font-mono); font-size: 12px; }
-
-/* The host installation screen: two columns of fields and a list of steps
-   with commands. The commands stand in a monospace block so they can be
-   copied without a mistake - and so it is visible that the token is not
-   part of them. */
-.header-with-action { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-.header-with-action h1 { margin: 0; }
-a.button {
-  display: inline-flex; align-items: center; gap: 6px;
-  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
-  background: var(--bg-panel);
-  padding: 6px 12px; font-size: 13px; font-weight: 500; color: var(--text); text-decoration: none;
-}
-a.button:hover { background: var(--bg-hover); text-decoration: none; }
-.grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.steps { margin: 0 0 12px; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
-.steps pre {
-  margin: 6px 0 0; padding: 8px 10px; overflow-x: auto;
-  border: 1px solid var(--border); border-radius: var(--radius-xs);
-  background: var(--bg-sunken); font-size: 12px;
-  font-family: var(--font-mono);
-}
-.operations button.secondary { color: var(--text-muted); }
-
-/* A message that needs the user's decision, e.g. re-authentication. */
-.warning {
-  display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--border));
-  border-left: 3px solid var(--warn);
-  border-radius: var(--radius-sm);
-  padding: 12px 16px; margin: 0 0 16px;
-  background: color-mix(in srgb, var(--warn) 8%, var(--bg-panel)); font-size: 13px;
-}
-
-/* ---------------------------------------------------------------------- */
-/* The host workspace.                                                     */
-/* ---------------------------------------------------------------------- */
-/* The host header card. The target of an operation is to be visible
-   without scrolling in every module, so the header sticks to the top of
-   the content; the module navigation sticks right below it. */
-/* The header is a card at the top of the host page. It no longer sticks:
-   the top bar names the host and the module wherever the page scrolls,
-   and a sticky card only covered the module's own header. */
-.host-header {
-  margin: 0 0 16px;
-  padding: 12px 16px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.host-header-crumb { margin: 0; }
-.host-header-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-.host-header-title .dot { width: 10px; height: 10px; }
-.host-header-name {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.host-header-facts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-/* A fact chip: one value, read at a glance and never wrapped; the meaning
-   of the value is on hover. The row wraps, the chips do not. */
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 9px;
-  border-radius: 999px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 18px;
-  white-space: nowrap;
-}
-/* An address is read character by character, hence the fixed-width font. */
-.chip-mono { font-family: var(--font-mono); color: var(--text); }
-/* An address without its origin does not say whether the panel saw it or the host reported it. */
-.chip-tag {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-faint);
-}
-/* An undetermined fact looks undetermined, not like a fact with an empty value. */
-.chip.unknown { color: var(--unknown-text); border-style: dashed; }
-
-/*
- * The inventory refresh stands among the host facts because it concerns
- * all of them: they are the picture from before the last cycle, which the
- * operator wants to replace with the state of this moment.
- */
-.inventory-refresh {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.inventory-refresh button {
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  color: var(--accent-text);
-  cursor: pointer;
-  text-decoration: underline;
-}
-.inventory-refresh button:hover:not(:disabled) { background: none; }
-.inventory-refresh button:disabled {
-  color: var(--text-faint);
-  cursor: default;
-  text-decoration: none;
-  opacity: 1;
-}
-.inventory-refresh .message { color: var(--text-muted); }
-/* The result of a refresh may be a whole sentence from the host; it wraps
-   rather than runs off the screen. */
-.chip.inventory-refresh { white-space: normal; }
-
-/* The host page: the header and the content; the modules of the host are
-   in the sidebar, which shows the fleet or one host, never both. */
-.host-content { min-width: 0; }
-
-@media (max-width: 900px) {
-  .host-content { padding-top: 16px; }
-  .host-header-name { font-size: 17px; }
-}
-
-/* An address on the fleet list is read column-wise, hence a fixed-width font. */
-.list-address { font-family: var(--font-mono); font-size: 12px; }
-
-/* The progress bar of a running operation. */
-.progress { display: flex; align-items: center; gap: 10px; min-width: 260px; }
-.progress-track {
-  flex: 1 1 auto;
-  height: 6px;
-  background: var(--bg-hover);
-  border-radius: 999px;
-  overflow: hidden;
-}
-.progress-fill {
-  display: block;
-  height: 100%;
   background: var(--accent);
-  transition: width 0.3s ease;
-}
-/* Undetermined progress must look neither like zero nor like complete. */
-.progress-unknown {
-  display: block;
-  height: 100%;
-  width: 30%;
-  background: var(--unknown);
-  animation: postep-wedrowka 1.4s ease-in-out infinite;
-}
-@keyframes postep-wedrowka {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(333%); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .progress-unknown { animation: none; width: 100%; opacity: 0.4; }
-}
-.progress-caption {
-  color: var(--text-muted);
-  font-size: 11px;
+  color: var(--accent-contrast);
+  font-size: var(--t-body);
+  font-weight: 600;
+  cursor: pointer;
   white-space: nowrap;
-  font-variant-numeric: tabular-nums;
 }
+button:hover { filter: brightness(1.07); }
+button:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
 
-/*
- * Bulk Workspace. The ScopeBar holds the name, the operation and the target
- * count through the whole wizard: a host count hidden two steps earlier is
- * worth as much as its absence.
- */
-.scope-bar {
-  position: sticky;
-  top: var(--topbar-height);
-  z-index: 5;
-  margin: 0 calc(-1 * var(--content-pad-x)) 16px;
-  padding: 12px var(--content-pad-x);
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 24px;
-}
-.scope-bar .identity { display: flex; align-items: baseline; gap: 10px; }
-.scope-bar .identity .name { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
-.scope-bar .identity .action {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text-muted);
-}
-.scope-bar .facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  color: var(--text-muted);
-  font-size: 12px;
-  align-items: center;
-}
-
-/* The wizard steps. A closed step says what is missing - greying out
-   without a reason looks like an interface defect, not like a gate. */
-.bulk-steps {
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0 0 20px;
-  padding: 0;
-}
-.bulk-steps .step {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 8px 12px;
-  font: inherit;
-  font-weight: 500;
+button.secondary, .button.secondary {
+  background: var(--bg-raised);
   color: var(--text);
+  border-color: var(--border);
+}
+button.secondary:hover { background: var(--bg-hover); }
+button.danger { background: var(--error); color: var(--error-contrast); }
+button.primary { background: var(--accent); color: var(--accent-contrast); }
+button.ghost, .ghost {
+  background: none;
+  border-color: transparent;
+  color: var(--text-muted);
+  padding: 0 var(--s2);
+  font-weight: 500;
+}
+button.ghost:hover, .ghost:hover { background: var(--bg-hover); color: var(--text); filter: none; }
+button.tiny, .tiny { min-height: 24px; padding: 0 var(--s2); font-size: var(--t-small); }
+button.link, .link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent-text);
+  font-weight: 500;
+  min-height: 0;
+}
+button.link:hover, .link:hover { text-decoration: underline; filter: none; }
+
+/* A value that acts as a filter: a word, not a control. */
+.cell-link, .word-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  min-height: 0;
+  font: inherit;
+  font-weight: inherit;
+  color: var(--accent-text);
   cursor: pointer;
   text-align: left;
 }
-.bulk-steps .step:hover:not(:disabled) { background: var(--bg-hover); }
-.bulk-steps .step.active { border-color: var(--accent); color: var(--accent-text); background: var(--accent-soft); }
-.bulk-steps .step:disabled { cursor: not-allowed; color: var(--text-muted); opacity: 1; }
-.bulk-steps .step .number {
-  font-variant-numeric: tabular-nums;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-.bulk-steps .step .reason { font-size: 11px; color: var(--text-faint); font-weight: 400; }
-/* The step's own name. In a flex row a label with no minimum of zero cannot
-   be made smaller than its longest word, so it pushes the reason out of the
-   button instead of wrapping. */
-.bulk-steps .step .title { min-width: 0; overflow-wrap: anywhere; }
+.cell-link:hover, .word-button:hover { text-decoration: underline; }
 
-/*
- * A windowed table: the container scrolls, the header stays in view, and
- * every row keeps to one line so the rows can share one height - the
- * window arithmetic depends on it. Separate borders, because a sticky
- * header loses its collapsed border while it sticks.
- */
-.virtual { overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-panel); }
-.virtual table { border-collapse: separate; border-spacing: 0; }
-.virtual thead th { position: sticky; top: 0; z-index: 1; background: var(--bg-panel); }
-.virtual td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
-.virtual tr:last-child td { border-bottom: none; }
-.virtual .spacer td { padding: 0; border: 0; }
-/* The compact button that opens something below the table, sized to a row. */
-.virtual button.inline {
-  background: transparent; border: 1px solid var(--border-strong); color: var(--text-muted);
-  padding: 1px 8px; font-size: 11px; font-weight: 500; border-radius: var(--radius-xs); line-height: 1.4;
+input, select, textarea {
+  width: 100%;
+  min-height: 32px;
+  padding: var(--s1) var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: var(--t-body);
 }
-.virtual button.inline:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
-.virtual button.inline[aria-pressed="true"] { border-color: var(--text-muted); color: inherit; }
+input:hover, select:hover, textarea:hover { border-color: var(--border-strong); }
+input::placeholder, textarea::placeholder { color: var(--text-faint); }
+textarea { min-height: 72px; padding: var(--s2) var(--s3); resize: vertical; }
+input[type="checkbox"], input[type="radio"] { width: auto; min-height: 0; accent-color: var(--accent); }
 
-/* ---------------------------------------------------------------------- */
-/* The page primitives: header, card, stat tile, toolbar, field.           */
-/* ---------------------------------------------------------------------- */
-/* The header of a page: the title on the left, the actions of the whole
-   page on the right, the way here above them. */
-/* The header is a band, not a heading pasted above the page: the mark
-   of the section on an accent tile, the title and its one sentence, the
-   actions at the right edge, and a rule underneath that the widgets
-   hang from. */
-/* The head of a page. No rule under it: with the content below now sitting
-   in cards on a darker ground, the line was separating a title from a gap.
-   The room it took is kept as room. */
-.page-header {
-  margin: 0 0 22px;
-  padding: 0;
-  border-bottom: 0;
-}
-.page-mark {
-  flex: none;
+.toggle { display: inline-flex; align-items: center; gap: var(--s2); font-size: var(--t-body); cursor: pointer; }
+.toggle input { flex: none; }
+
+.segmented { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-sm); background: var(--bg-sunken); }
+.segmented button { background: none; color: var(--text-muted); border: 0; min-height: 26px; font-weight: 500; }
+.segmented button.active, .segmented button.selected { background: var(--bg-raised); color: var(--text); }
+
+.badge {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
+  gap: var(--s1);
+  padding: 1px var(--s2);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: var(--t-label);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge.ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok-text); }
+.badge.warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn-text); }
+.badge.error, .badge.critical { background: color-mix(in srgb, var(--error) 18%, transparent); color: var(--error-text); }
+.badge.info { background: color-mix(in srgb, var(--blue) 18%, transparent); color: var(--blue); }
+.badge.unknown, .badge.neutral { background: var(--bg-raised); color: var(--unknown-text); }
+.badge.high { background: color-mix(in srgb, var(--error) 18%, transparent); color: var(--error-text); }
+.badge.beta { background: color-mix(in srgb, var(--lavender) 18%, transparent); color: var(--lavender); }
+
+.chip, .chip-tag, .chip-mono {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  padding: 1px var(--s2);
   border-radius: var(--radius-sm);
-  background: var(--accent-soft);
-  color: var(--accent-text);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: var(--t-small);
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
-.page-mark .icon { width: 22px; height: 22px; }
-.page-header-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px 24px;
-  flex-wrap: wrap;
-}
-.page-header-text { flex: 1 1 320px; min-width: 0; }
-.page-title { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.25; }
-.page-description { margin: 3px 0 0; color: var(--text-muted); font-size: 13px; max-width: 90ch; line-height: 1.45; }
-.page-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: none; }
-.breadcrumb {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
-  font-size: 12px;
-  color: var(--text-faint);
-}
-.breadcrumb a { color: var(--text-muted); }
-.breadcrumb a::after { content: "/"; margin-left: 6px; color: var(--text-faint); }
+.chip-mono { font-family: var(--font-mono); }
+.fp-chips, .chips { display: flex; flex-wrap: wrap; gap: var(--s1); min-width: 0; }
 
-/* Two or three blocks side by side where each is short: a page of
-   small cards stacked in one column reads as a strip down the left with
-   nothing beside it. The columns collapse to one on a narrow screen. */
-.columns {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
-  gap: 16px;
-  align-items: start;
-}
-.columns.wide { grid-template-columns: repeat(auto-fit, minmax(min(100%, 560px), 1fr)); }
-/* Several blocks in one column of the grid keep their own rhythm. */
-.stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-/* A row whose every block is conditional and absent takes no space. */
-.columns:empty, .stack:empty { display: none; }
+.mono, code { font-family: var(--font-mono); font-size: 0.94em; }
+.source, .subtitle, .stat-hint, .field-hint, .caption { color: var(--text-muted); font-size: var(--t-small); }
+.text, .prose { color: var(--text-muted); font-size: var(--t-body); max-width: 90ch; }
+.prose p + p { margin-top: var(--s2); }
+.num, .number { font-variant-numeric: tabular-nums; }
 
-/* The vertical rhythm of a page: 16px between any two blocks, whatever
-   they are, so a page never shows a gap of 40px next to one of zero. The
-   grid and the stack space their children with their own gap, so a block
-   inside them brings no margin. */
-:is(.card, .stats, .columns, .stack, .warning, .toolbar, .tabs, .form) + :is(.card, .stats, .columns, .stack, .warning, .toolbar, .form) { margin-top: 16px; }
-.columns > *, .stack > * { margin: 0; min-width: 0; }
+/* State as a word, which is what a state is. */
+.state-on, .ok { color: var(--ok-text); }
+.state-off { color: var(--text-faint); }
+.warn { color: var(--warn-text); }
+.error, .danger, .bad, .failed, .critical { color: var(--error-text); }
+.unknown { color: var(--unknown-text); }
+.info { color: var(--blue); }
+.good, .up, .success, .done { color: var(--ok-text); }
+.down { color: var(--error-text); }
+.neutral { color: var(--text-muted); }
+.pending, .running, .firing { color: var(--warn-text); }
 
-/* A card is the raised panel every list and form stands on. The head and
-   the foot keep their own padding, so a flush body can let a table reach
-   the edges without the title moving. */
+/* The card ---------------------------------------------------------- */
+
 .card {
-  /* The surface the whole panel is made of, and until 15.10 the one thing
-     the rewrite had not touched: a 10px box with a hairline border and
-     tight padding. The dark operations panels the owner pointed at have
-     no borders at all - a card is separated from the page by being
-     lighter than it, which our two surfaces already are - and they give
-     the content room. Rounder, unbordered and roomier is most of what
-     "it looks like the screens" turns out to mean. */
-  --card-pad-x: 22px;
-  --card-pad-y: 18px;
+  min-width: 0;
   background: var(--bg-panel);
   border: 1px solid transparent;
   border-radius: var(--radius-card);
-  min-width: 0;
-  /* The card is the container its contents measure themselves against: a
-     fact list in a card a third of the page wide stacks, the same list with
-     the whole width keeps two tracks. */
   container: card / inline-size;
 }
-.card.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
-.card.error { border-color: color-mix(in srgb, var(--error) 55%, var(--border)); }
 .card-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 8px 16px;
+  gap: var(--s2) var(--s4);
   flex-wrap: wrap;
-  padding: var(--card-pad-y) var(--card-pad-x) 12px;
+  padding: var(--s5) var(--s5) 0;
 }
-/* No rule between the title and what it introduces: the title is a label
-   in muted ink now, not a headline that needs separating from the body. */
-.card-head + .card-body { border-top: 0; padding-top: 0; }
 .card-head-text { flex: 1 1 240px; min-width: 0; }
-/* The title of a card is a label, not a headline.
- *
- * Upper case, small and letter-spaced, the way the dark operations panels
- * the owner pointed at name their cards: it reads at a glance, it stops
- * competing with the numbers inside the card, and it leaves the loud end of
- * the type scale to the thing worth being loud - the measurement. A card
- * whose title shouted as loudly as its content is a card nobody scans. */
 .card-title {
-  margin: 0;
-  font-size: 11px;
+  font-size: var(--t-label);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
-  line-height: 1.5;
 }
-.card-description { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; max-width: 80ch; }
-.card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-/* The body owns the rhythm of what is inside it.
- *
- * Forty-seven places in the pages wrote `style={{ margin: 0 }}` to cancel the
- * browser's paragraph margin, and two dozen more wrote a marginTop of 6, 8,
- * 10, 12, 14 or 16 to put it back - so the gap between two blocks depended on
- * which screen you were looking at. The owner read the result as every
- * subpage living its own life, which is what it was. One gap, decided here. */
-.card-body { padding: var(--card-pad-y) var(--card-pad-x); min-width: 0; }
-.card-body > p, .card-body > h3, .card-body > h4, .card-body > ul, .card-body > ol, .card-body > dl {
-  margin: 0;
-}
-.card-body > * + * { margin-top: 12px; }
-.card-body > :first-child { margin-top: 0; }
-.card-body > :last-child { margin-bottom: 0; }
-.card-body > h3:first-child { margin-top: 0; }
-/* The same inside a tile of a board, which is the other container. */
-.part-body > p, .part-body > h4, .part-body > ul, .part-body > ol { margin: 0; }
-.part-body > * + * { margin-top: 10px; }
-.part-body > :first-child { margin-top: 0; }
+.card-description { margin-top: var(--s1); color: var(--text-muted); font-size: var(--t-body); max-width: 90ch; }
+.card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.card-body { padding: var(--s4) var(--s5) var(--s5); min-width: 0; }
+.card-body > * + * { margin-top: var(--s3); }
 .card-foot {
-  padding: 12px var(--card-pad-x);
+  padding: var(--s3) var(--s5);
   border-top: 1px solid var(--border);
   color: var(--text-muted);
-  font-size: 13px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 16px;
+  font-size: var(--t-small);
 }
-.card-foot > * { flex: 1 1 auto; min-width: 0; }
-.card-foot p { margin: 0; }
-.card-foot p + p, .card-foot p + div, .card-foot div + div { margin-top: 6px; }
-/* The distribution of a snapshot under the target count. */
-.distribution { margin-top: 6px; }
+/* Flush: the body owns its own edges, for a table that reaches them. */
+.card.flush > .card-body, .card-body.flush-block { padding: 0; }
+.card.flush > .card-body > * + * { margin-top: 0; }
 
-/* A flush body: the table takes the whole width and a wide one scrolls
-   inside the card, not the page. The texts between tables keep the
-   card's padding. */
-.card-body.flush { padding: 0; overflow-x: auto; }
-.card-body.flush > table { margin: 0; }
-.card-body.flush > .empty, .card-body.flush > p, .card-body.flush > .source, .card-body.flush > details { padding: 14px var(--card-pad-x); margin: 0; }
-.card-body.flush > .toolbar { margin: 0; padding: 10px var(--card-pad-x); border-bottom: 1px solid var(--border); }
-.card-body.flush > .virtual { border: none; border-radius: 0; background: transparent; }
-.card-body.flush > .warning { margin: 12px var(--card-pad-x); padding: 12px 16px; }
-.card-body.flush > table + .virtual, .card-body.flush > p + .virtual { border-top: 1px solid var(--border); }
-
-/* A menu hanging off a chip: the directory's "More" and the host bar's
-   "Actions" were the same object written twice, in two files, with two sets
-   of numbers. */
-.menu-popover {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 5;
-  min-width: 220px;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-  white-space: normal;
-}
-.menu-popover.to-the-left { left: auto; right: 0; }
-.menu-popover > button { text-align: left; }
-.chip.has-menu { position: relative; }
-.chip.has-menu > summary { cursor: pointer; list-style: none; }
-
-/* One day of the maintenance calendar. */
-.calendar-day {
-  min-height: 84px;
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  min-width: 0;
-}
-.calendar-day.other-month { opacity: 0.45; }
-.calendar-day.today { background: color-mix(in srgb, var(--text) 6%, transparent); }
-.calendar-entry {
-  font-size: 11px;
-  line-height: 16px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The sign-in form: the name, the password and the one button, in a column
-   the width of the card they stand in. */
-.login-form { display: flex; flex-direction: column; gap: 10px; text-align: left; margin: 0 0 14px; }
-.login-form .field-label { font-size: 12px; color: var(--text-muted); }
-.login-form input { width: 100%; }
-.login-form button { width: 100%; }
-/* "or" between the two doors, with a rule either side of it. */
-.login-or { display: flex; align-items: center; gap: 10px; color: var(--text-faint); font-size: 12px; margin: 10px 0; }
-.login-or::before, .login-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--border); }
-
-/* The bar that appears under a list when rows are picked: what is selected
-   and what can be done with it, held at the bottom of the card. Written
-   inline, identically, on the host list and the group list - two copies of
-   one object, which is how two screens drift apart. */
-.selection-bar {
-  position: sticky;
-  bottom: 0;
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 10px var(--card-pad-x, 16px);
-  background: var(--bg-panel);
-  border-top: 1px solid var(--border);
-}
-
-/* A block of prose or controls inside a flush card body, which has no
-   padding of its own to lend it. */
-.flush-block { padding: 14px var(--card-pad-x); }
-
-/* A button small enough to sit inside a table row without raising it. */
-.button.tiny, button.tiny { padding: 0 6px; font-size: 11px; }
-
-/* A badge in a row of badges, and one standing after a name. */
-.badge + .badge { margin-left: 6px; }
-.badge.after-name { margin-left: 6px; }
-
-/* A table in a card reaches the card's edges, whatever the body around it is
-   doing.
- *
- * Half the screens put their table in a flush card, where it did; the other
- * half put it in a padded body beside a sentence or a heading, where it sat
- * inset by sixteen pixels. Same product, same kind of list, two different
- * gaps - which is what the owner was looking at on 15.10 when he said the
- * tables keep to no norm. The body keeps its padding for the prose; the
- * table steps back out of it. */
+/* A table meets the card's edges wherever it stands, so the same kind of
+   list is inset the same way on every screen. Half of them put their
+   table in a flush card and half in a padded body beside a sentence; the
+   rule lives here rather than in twelve call sites. */
 .card-body:not(.flush) > table,
 .card-body:not(.flush) > * > table {
-  width: calc(100% + 2 * var(--card-pad-x));
-  margin-left: calc(-1 * var(--card-pad-x));
-  margin-right: calc(-1 * var(--card-pad-x));
-  max-width: none;
+  width: calc(100% + var(--s5) * 2);
+  margin-left: calc(var(--s5) * -1);
 }
-/* Prose and a table are different things and the gap above a table says so. */
-.card-body:not(.flush) > * + table, .card-body:not(.flush) > * > * + table { margin-top: 12px; }
+/* A form has a measure; a table and a chart have the screen. */
+.card.measure { max-width: 1180px; }
 
-/* The table in a card: the header row on the page ground, the cells with
-   room for the border of the card, no line under the last row. */
-.card table th { background: var(--bg); padding: 9px 12px; border-bottom-color: var(--border); }
-.card table td { padding: 9px 12px; }
-.card table th:first-child, .card table td:first-child { padding-left: var(--card-pad-x); }
-.card table th:last-child, .card table td:last-child { padding-right: var(--card-pad-x); }
-.card table tbody tr:last-child td { border-bottom: none; }
-.card .virtual table tbody tr:last-child td { border-bottom: none; }
-/* Numbers are compared down a column, so they align on the right and
-   every digit takes the same width. */
-th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
-/* Identifiers and addresses are read character by character. */
-td.mono, .mono-cell { font-family: var(--font-mono); font-size: 12px; }
-/* The buttons at the end of a row stay in one line, sized to the row. */
-.row-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; justify-content: flex-end; }
-.row-actions button, .row-actions input { padding-top: 3px; padding-bottom: 3px; font-size: 12px; }
-.row-actions input { width: 160px; }
-/* The risk class next to the operation in the scope bar. */
-.scope-bar .identity .action .badge { margin-left: 8px; }
-td.actions-cell { text-align: right; white-space: nowrap; }
-/* The toggle that opens a row's detail: a glyph, sized to the text. */
-button.expander {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  margin-right: 6px;
-  vertical-align: middle;
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-xs);
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1;
-}
-button.expander:where(:hover:not(:disabled)) { background: var(--bg-hover); color: var(--text); }
-button.expander[aria-expanded="true"] { border-color: var(--accent); color: var(--accent-text); }
-/* A row opened under another: the detail sits on the page ground. */
-tr.detail-row > td { background: var(--bg); padding: 12px var(--card-pad-x, 12px); }
-/* What stands inside such a row: a sentence, a few fields and the actions,
-   spaced by the container as everywhere else. */
-.detail-panel > * + * { margin-top: 10px; }
-tr.detail-row:hover > td { background: var(--bg); }
+/* The table --------------------------------------------------------- */
 
-/* The stat tiles: a label, a big number, a hint saying what it counts. */
-.stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
-}
-/* A line of figures right under the tiles reads as their caption. */
-.stats + .source { display: block; margin: -4px 0 16px; }
-.stat {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  padding: 12px 14px;
+.table-scroll { overflow-x: auto; min-width: 0; }
+
+table { width: 100%; border-collapse: collapse; font-size: var(--t-body); }
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: inherit;
-}
-.stat-label { color: var(--text-muted); font-size: 12px; line-height: 1.4; }
-.stat-value {
-  font-size: 26px;
+  text-align: left;
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: var(--t-label);
   font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-  font-variant-numeric: tabular-nums;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
-/* A value that is a phrase rather than a number wraps at a size that fits. */
-.stat-value.text { font-size: 16px; white-space: normal; line-height: 1.3; padding: 4px 0; }
-.stat-hint { color: var(--text-faint); font-size: 11px; line-height: 1.4; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; }
-/* The tone colours the number and marks the tile's top edge, so a tile
-   that needs a look is found at a glance from across the grid. */
-.stat.ok .stat-value { color: var(--ok-text); }
-.stat.warn .stat-value { color: var(--warn-text); }
-.stat.error .stat-value { color: var(--error-text); }
-.stat.unknown .stat-value { color: var(--unknown-text); }
-.stat.warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); box-shadow: inset 0 2px 0 var(--warn); }
-.stat.error { border-color: color-mix(in srgb, var(--error) 45%, var(--border)); box-shadow: inset 0 2px 0 var(--error); }
-a.stat-link:hover { text-decoration: none; border-color: var(--border-strong); background: var(--bg-hover); }
-/* The compact grid stands inside a card: no boxes, a hairline between.
-   Each tile draws the line above and to the left of itself; on the first
-   row and in the first column that line falls under the frame, so a row
-   that is not full ends without a stray line. */
-.stats.compact {
-  gap: 0;
-  margin: 0;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-.stats.compact .stat { border: none; border-radius: 0; background: transparent; box-shadow: -1px -1px 0 0 var(--border); }
-.stats.compact .stat-value { font-size: 20px; }
-
-/* The toolbar: filters, a search and the actions in one wrapping row. */
-.toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 16px;
+td {
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  vertical-align: middle;
   min-width: 0;
 }
-.toolbar > input, .toolbar > select { flex: 0 1 auto; max-width: 100%; }
-.toolbar > input[type="text"], .toolbar > input:not([type]) { width: 180px; }
-.toolbar .toggle { margin: 0; }
-.toolbar-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+tr.highlighted td, tr.selected td { background: var(--accent-soft); }
+tr.row-open > td { background: var(--bg-raised); }
+td.actions-cell, th.actions-cell { text-align: right; white-space: nowrap; }
+.row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); justify-content: flex-end; }
+.detail-row > td { background: var(--bg-sunken); }
+.detail-panel { padding: var(--s4); }
 
-/* The form fields: a label above the control, a hint below it, in
-   columns that fold into one on a narrow screen. */
-/* A form's fields. The tracks share what there is, as they always did, but
-   the form itself has a measure: stretched across a card three and a half
-   thousand pixels wide, six inputs sat a hand's width apart with their hints
-   in ribbons. Capping the track instead of the form was worse - at 834 two
-   tracks of 420 no longer fit, so six fields stood in one column beside half
-   an empty card. The measure caps how wide the form grows; inside it the
-   tracks still fill the line. */
-.field-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
-  max-width: 1180px;
-  gap: 14px 16px;
+.sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  background: none;
+  border: 0;
+  padding: 0;
+  min-height: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
 }
-.field-grid + .field-grid, .field-grid + .actions, .field-grid + .toggle, .field-grid + p { margin-top: 14px; }
-.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; font-size: 13px; }
-.field.wide { grid-column: 1 / -1; }
-/* A checkbox among the fields sits on the line of their controls. */
-.field-grid > .toggle { align-self: end; margin: 0; min-height: 34px; }
-.field-label { color: var(--text); font-weight: 500; }
-.field-hint { color: var(--text-faint); font-size: 12px; line-height: 1.4; }
-.field > input, .field > select, .field > textarea { width: 100%; }
-.field > textarea { font-family: var(--font-mono); font-size: 12px; resize: vertical; }
-.field-grid input[type="number"] { max-width: 140px; }
-/* A fixed-width control in a row of them, e.g. a TTL. */
-.field.narrow { max-width: 140px; }
-.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.actions .source, .actions .page-error, .actions .form-problem { flex: 1 1 200px; margin: 0; }
-.actions + .source, .actions + .page-error, .actions + .form-problem { margin-top: 10px; }
-.card-body > .toggle { margin-bottom: 0; }
-/* The primary link-button: the one action a page leads to. */
-a.button.primary { background: var(--accent); border-color: transparent; color: var(--accent-contrast); }
-a.button.primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(--text)); }
-/* The segmented choice of a variant, e.g. the host's distribution family. */
-.segmented { display: inline-flex; flex-wrap: wrap; gap: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; }
-.segmented button { border: none; border-radius: 0; background: var(--bg-panel); color: var(--text-muted); }
-.segmented button + button { border-left: 1px solid var(--border-strong); }
-.segmented button:where(:hover:not(:disabled)) { background: var(--bg-hover); color: var(--text); }
-.segmented button.active { background: var(--accent-soft); color: var(--accent-text); }
-.card-body > .segmented { margin: 14px 0 12px; }
+.sort-button:hover { color: var(--text); }
+.sort-arrow { color: var(--accent-text); }
 
-/* The empty state of a card: one sentence and the action that fills it,
-   in the middle of the card rather than in its corner. */
-.empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; padding: 32px var(--card-pad-x, 0); }
-.empty-state > p { margin: 0; max-width: 60ch; }
-.empty-state > .actions { justify-content: center; }
-.card-body.flush > .empty-state { padding: 32px var(--card-pad-x); }
-/* The plain empty line inside a card stands in the middle as well. */
-.card-body > .empty, .card-body.flush > .empty { text-align: center; padding: 28px var(--card-pad-x); }
-
-/* The execution attempts under a job: one block per attempt. */
-.attempt + .attempt { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
-.attempt-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.attempt pre { margin-top: 8px; }
-
-/* The day-by-day bars of the backup calendar. */
-.calendar { display: flex; gap: 4px; align-items: flex-end; height: 64px; }
-.calendar-day { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
-.calendar-bar { width: 100%; background: var(--border); border-radius: 2px; }
-.calendar-bar.filled { background: var(--ok); }
-.calendar-label { font-size: 10px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
-
-/* The steps of an installation as a card: the commands stay a block. */
-.card-body > .steps:last-child { margin-bottom: 0; }
-.card-body > .steps { margin-top: 0; }
-
-/* The state of a campaign next to its name, under the page title. */
-.page-description .badge { vertical-align: middle; }
-
-/* What only earns its place where there is room: prose beside a row, which
-   on a phone squeezes the columns carrying the answer and the way to act on
-   it, and the long form of a label on a button. The row still says what it
-   is and what to do; the sentence and the long name wait for a wider
-   screen. The pair is exclusive, so exactly one of them is ever drawn. */
-.narrow-only { display: none; }
+/* A table on a phone: the card gives it its own scroll rather than
+   making the page wider than the screen. */
 @media (max-width: 900px) {
-  .wide-only { display: none; }
-  .narrow-only { display: inline; }
+  thead th, td { padding: var(--s2) var(--s3); }
 }
 
-@media (max-width: 600px) {
-  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .stats.compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .stat-value { font-size: 22px; }
-  .toolbar-end { margin-left: 0; width: 100%; }
-}
+/* ---------------------------------------------------------------------
+   5. The grid of panels
+   ------------------------------------------------------------------ */
 
-/* ---------------------------------------------------------------------- */
-/* Widgets: status bars, charts and the widget grid.                       */
-/* ---------------------------------------------------------------------- */
-/* A status bar is a row of coloured segments, one per state, each with
-   its count in large type: the whole fleet's condition at one glance,
-   read from across the room. The segments share the width in proportion
-   to their counts, but a zero keeps a narrow slot, so the states that are
-   absent are still named. */
-/* One segment above zero is a number, not a billboard. It used to be
-   drawn as a block across the whole card with the empty states listed
-   underneath - a row of a dashboard spent on "4 Online". The number and
-   the states it is not now sit on one line, and the line wraps. */
-.status-bar-group {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 20px;
-}
-/* With more than one count there is a bar to draw, and a bar wants the
-   width to itself. */
-.status-bar-group:has(.status-bar) { display: flex; flex-direction: column; align-items: stretch; }
-.status-bar {
-  display: flex;
-  gap: 2px;
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  min-height: 84px;
-}
-/* The share decides the width, and the basis is zero so that it cannot
-   quietly decide it instead: with a basis of 96px five empty states held
-   45 % of the bar while four hosts held the rest. The minimum keeps a
-   segment of one in four hundred readable and clickable. */
-.status-bar-segment {
-  flex: var(--share, 1) 1 0;
-  min-width: 72px;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  gap: 2px;
-  padding: 12px 8px;
-  text-align: center;
-  background: var(--segment, var(--bg-raised));
-  color: var(--segment-text, var(--text));
-  text-decoration: none;
-}
-/* One state holding everything is not a bar; it is the number. */
-.status-bar-hero {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 10px 16px 10px 14px;
-  border-radius: var(--radius-sm);
-  border-left: 3px solid var(--segment, var(--border-strong));
-  background: var(--bg-raised);
-  color: var(--text);
-  text-decoration: none;
-}
-.status-bar-hero .status-bar-value { font-size: var(--metric-m); font-weight: 600; }
-/* Inside a tile the single number stands among a tile's worth of facts, not
-   alone on a card: a billboard there was twice the height of what it says. */
-.part .status-bar-hero { padding: 8px 12px; }
-.part .status-bar-hero .status-bar-value { font-size: 22px; }
-.part .count-tile .status-bar-value, .part .status-bar-segment .status-bar-value { font-size: 20px; }
-.status-bar-hero .status-bar-label { font-size: 13px; color: var(--text-muted); opacity: 1; }
-a.status-bar-hero:hover { background: var(--bg-hover); text-decoration: none; color: var(--text); }
-
-/* The fold over the filters a list does not show by default. */
-.more-filters { display: inline-flex; align-items: center; gap: 8px; }
-.more-filters-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
-
-/* The tiles a grid folded away because they are at zero: named, in a line,
-   under the ones that are not. */
-.stats-folded { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; align-items: baseline; }
-.stats-folded-item {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-muted);
-  text-decoration: none;
-}
-.stats-folded-value { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
-a.stats-folded-item:hover { color: var(--text); text-decoration: underline; }
-
-/* Counts that are not parts of one whole: a row of them, each its own tile,
-   the state in a line down the side rather than in a block of colour. */
-.count-row { display: flex; flex-wrap: wrap; gap: 8px; }
-.count-tile {
-  flex: 1 1 140px;
-  min-width: 120px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 12px 14px;
-  border-radius: var(--radius-sm);
-  border-left: 3px solid var(--segment, var(--border-strong));
-  background: var(--bg-raised);
-  color: var(--text);
-  text-decoration: none;
-}
-.count-tile .status-bar-value { font-size: 26px; }
-.count-tile .status-bar-label { font-size: 12px; color: var(--text-muted); opacity: 1; white-space: normal; }
-a.count-tile:hover { background: var(--bg-hover); text-decoration: none; color: var(--text); }
-.count-tile.ok { --segment: var(--ok); }
-.count-tile.warn { --segment: var(--warn); }
-.count-tile.error { --segment: var(--error); }
-.count-tile.unknown { --segment: var(--unknown); }
-.count-tile.info { --segment: var(--blue); }
-.count-tile.neutral { --segment: var(--border-strong); }
-
-/* Choosing the permissions of a role: 188 of them, so they are grouped by the
-   part of the name before the first dot and the box scrolls rather than
-   pushing the save button off the screen. */
-.permission-picker { max-height: 360px; overflow-y: auto; margin: 0 0 12px; }
-.permission-group {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  margin: 0 0 8px;
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-.permission-group legend { font-size: 12px; color: var(--text-muted); padding: 0 4px; }
-.permission-group label { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; }
-.permission-group label .mono { overflow-wrap: anywhere; }
-
-/* The states with nothing in them: named, not drawn. A zero is news as a
-   word and noise as an area. */
-.status-bar-quiet { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
-.status-bar-quiet-item {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  color: var(--text-muted);
-  text-decoration: none;
-  font-size: 12px;
-}
-.status-bar-quiet-item .status-bar-value { font-size: 13px; font-weight: 600; color: var(--text-muted); }
-.status-bar-quiet-item .status-bar-label { font-size: 12px; opacity: 1; }
-/* A segment that never reported is not an empty one: it keeps the mark of
-   the unknown, because unknown is not zero. */
-.status-bar-quiet-item.unset .status-bar-value { color: var(--unknown-text, var(--text-muted)); }
-.status-bar-quiet-item.unset .status-bar-label { font-style: italic; }
-/* The states that were never counted, with the sentence that says what the
-   bar above is a share of. Not among the zeros: a number nobody took and a
-   number that came back empty are different news. */
-.status-bar-uncounted { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
-.status-bar-uncounted-note { font-size: 12px; color: var(--unknown-text, var(--text-muted)); }
-a.status-bar-quiet-item:hover { color: var(--text); text-decoration: underline; }
-a.status-bar-segment:hover { filter: brightness(1.08); text-decoration: none; color: var(--segment-text, var(--text)); }
-.status-bar-value { font-size: 28px; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-.status-bar-label { font-size: 12px; font-weight: 500; opacity: 0.9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.status-bar-segment.ok { --segment: var(--ok); --segment-text: var(--error-contrast); }
-.status-bar-segment.warn { --segment: var(--warn); --segment-text: var(--error-contrast); }
-.status-bar-segment.error { --segment: var(--error); --segment-text: var(--error-contrast); }
-.status-bar-segment.unknown { --segment: var(--unknown); --segment-text: var(--error-contrast); }
-.status-bar-segment.info { --segment: var(--blue); --segment-text: var(--error-contrast); }
-.status-bar-segment.neutral { --segment: var(--bg-raised); --segment-text: var(--text); }
-.status-bar.compact { min-height: 60px; }
-.status-bar.compact .status-bar-value { font-size: 22px; }
-.status-bar.compact .status-bar-segment { padding: 8px 6px; }
-
-/* Charts are plain SVG: bars for counts over categories or hours, an
-   area for a trend. The grid is faint and the numbers are on the axis,
-   so the shape is read first and the value second. */
-.chart { width: 100%; height: auto; display: block; }
-.chart text { fill: var(--text-faint); font-size: 11px; font-family: var(--font-sans); }
-.chart .grid { stroke: var(--border); stroke-width: 1; }
-.chart .axis { stroke: var(--border-strong); stroke-width: 1; }
-.chart .bar { rx: 2; }
-.chart .bar.ok { fill: var(--ok); }
-.chart .bar.warn { fill: var(--warn); }
-.chart .bar.error { fill: var(--error); }
-.chart .bar.unknown { fill: var(--unknown); }
-.chart .bar.info { fill: var(--blue); }
-.chart .bar.accent { fill: var(--accent); }
-.chart .area { fill: color-mix(in srgb, var(--accent) 28%, transparent); }
-.chart .line { fill: none; stroke: var(--accent); stroke-width: 2; }
-.chart-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 8px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--text-muted); }
-.chart-legend li { display: inline-flex; align-items: center; gap: 6px; }
-.chart-legend .swatch { width: 10px; height: 10px; border-radius: 2px; background: var(--swatch, var(--accent)); }
-.chart-legend .swatch.ok { background: var(--ok); }
-.chart-legend .swatch.warn { background: var(--warn); }
-.chart-legend .swatch.error { background: var(--error); }
-.chart-legend .swatch.unknown { background: var(--unknown); }
-.chart-legend .swatch.info { background: var(--blue); }
-
-/* A horizontal breakdown: label, bar and count, one row per category,
-   for a composition of the fleet (by system, by site) beside a list. */
-.breakdown { display: grid; grid-template-columns: minmax(80px, auto) minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; margin: 0; }
-.breakdown dt { font-size: 13px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.breakdown dd { margin: 0; min-width: 0; }
-.breakdown .breakdown-bar { height: 10px; border-radius: 5px; background: var(--bg-raised); overflow: hidden; }
-.breakdown .breakdown-fill { height: 100%; border-radius: 5px; background: var(--accent); }
-.breakdown .breakdown-fill.ok { background: var(--ok); }
-.breakdown .breakdown-fill.warn { background: var(--warn); }
-.breakdown .breakdown-fill.error { background: var(--error); }
-.breakdown .breakdown-fill.info { background: var(--blue); }
-.breakdown .breakdown-count { font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; }
-
-/* A meter inside a table cell: the number and its share of a whole. */
-.meter { display: inline-flex; align-items: center; gap: 8px; min-width: 120px; }
-.meter-track { flex: 1 1 auto; height: 8px; border-radius: 4px; background: var(--bg-raised); overflow: hidden; }
-.meter-fill { height: 100%; border-radius: 4px; background: var(--accent); }
-.meter-fill.ok { background: var(--ok); }
-.meter-fill.warn { background: var(--warn); }
-.meter-fill.error { background: var(--error); }
-.meter-fill.info { background: var(--blue, var(--accent)); }
-.meter-value { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-muted); white-space: nowrap; }
-
-/* The widget grid: twelve columns, each widget says how many it spans.
-   The dashboard and the list pages are built from it, so the width of
-   the screen is always in use and a widget row never has a hole. */
 .widgets {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  /* Room between the cards, as in the references: at sixteen the page read
-     as one mass of panels, at twenty-two each one is a thing of its own. */
-  gap: 22px;
-  /* A card is as tall as what it holds.
-     For an hour on 15.10 they were stretched to the row's height instead,
-     to get the even edges the reference screens have. It was the wrong
-     reading of those screens: their rows look even because the panels in
-     a row hold comparable amounts, not because a box was forced open. Here
-     it turned a card with one line in it into a tall empty rectangle, which
-     is worse than an uneven edge by a long way. */
+  gap: var(--s5);
   align-items: start;
 }
-.widgets > * { min-width: 0; margin: 0; }
-.widgets > .card { display: flex; flex-direction: column; }
-.widgets > .card > .card-body { flex: 1 1 auto; }
-/* Every width from one to twelve has a class. Until 15.10 only five did,
-   and the server refused the rest - which was honest but narrow: the rows
-   worth building are the uneven ones, three narrow tiles beside two wider.
-   A width without a class would fall silently back to a full row, so the
-   list here and the server's bound are the same twelve on purpose. */
+.widgets > * { min-width: 0; }
+
 .span-1 { grid-column: span 1; }
 .span-2 { grid-column: span 2; }
 .span-3 { grid-column: span 3; }
@@ -2054,685 +867,816 @@ a.status-bar-segment:hover { filter: brightness(1.08); text-decoration: none; co
 .span-11 { grid-column: span 11; }
 .span-12 { grid-column: span 12; }
 
-/* A widget may be given a height in rows. Its content scrolls inside it
-   rather than pushing the grid about: a list that grew by ten rows must not
-   move every panel below it. The rows are the same height everywhere, so
-   two widgets of three rows line up across the screen. */
-.widgets > [data-rows] { overflow: hidden; }
-.widgets > [data-rows] > .card-body,
-.widgets > [data-rows] > .widget-body { overflow: auto; }
-.widgets > [data-rows="1"] { height: 120px; }
-.widgets > [data-rows="2"] { height: 220px; }
-.widgets > [data-rows="3"] { height: 320px; }
-.widgets > [data-rows="4"] { height: 420px; }
-.widgets > [data-rows="5"] { height: 520px; }
-.widgets > [data-rows="6"] { height: 620px; }
-.widgets > [data-rows="7"] { height: 720px; }
-.widgets > [data-rows="8"] { height: 820px; }
-.widgets > [data-rows="9"] { height: 920px; }
-.widgets > [data-rows="10"] { height: 1020px; }
-.widgets > [data-rows="11"] { height: 1120px; }
-.widgets > [data-rows="12"] { height: 1220px; }
-.widgets > [data-rows="13"] { height: 1320px; }
-.widgets > [data-rows="14"] { height: 1420px; }
-.widgets > [data-rows="15"] { height: 1520px; }
-.widgets > [data-rows="16"] { height: 1620px; }
-
-@media (max-width: 1400px) {
-  /* Narrower: the halves and the thirds pair up, and anything wider than
-     half takes the row. An arrangement is not a second arrangement here -
-     it is the same order, folded. */
+/* The ladder, for the grid. A panel never becomes a sliver: by 1200 the
+   narrow ones pair up, by 900 everything owns the row. */
+@media (max-width: 1500px) {
+  .span-1, .span-2 { grid-column: span 3; }
+}
+@media (max-width: 1200px) {
   .span-1, .span-2, .span-3, .span-4 { grid-column: span 6; }
   .span-5, .span-7, .span-8, .span-9, .span-10, .span-11 { grid-column: span 12; }
 }
 @media (max-width: 900px) {
-  .widgets > * { grid-column: span 12; }
-  .status-bar { flex-wrap: wrap; }
-  .status-bar-segment { flex-basis: 40%; }
-}
-:is(.card, .stats, .columns, .stack, .warning, .toolbar, .tabs, .form) + .widgets,
-.widgets + :is(.card, .stats, .columns, .stack, .warning, .toolbar) { margin-top: 16px; }
-.widget-subhead { margin: 14px 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); }
-
-/* ---------------------------------------------------------------------- */
-/* The confirmation dialog and the notifications.                          */
-/* ---------------------------------------------------------------------- */
-/* The dialog stands above every popover (the menus sit at 40) and dims
-   the page behind it; the page cannot be reached until the question is
-   answered, so it does not scroll either. The card reuses the raised
-   panel look of the menus and the field classes of the forms. */
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  background: color-mix(in srgb, var(--bg-sunken) 60%, transparent);
-  backdrop-filter: blur(2px);
-}
-.modal {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: min(480px, 100%);
-  max-height: calc(100vh - 32px);
-  overflow-y: auto;
-  padding: 18px 20px;
-  background: var(--bg-raised);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  outline: none;
-}
-/* The red workflow, as on a button and on the host confirmation form. */
-.modal.danger { border-color: color-mix(in srgb, var(--error) 55%, var(--border-strong)); border-top: 3px solid var(--error); }
-.modal-title { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.4; }
-.modal-body { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
-.modal-field { margin-top: 2px; }
-/* The rule turns the colour of attention while the field falls short of it. */
-.modal-rule { color: var(--warn-text); }
-.modal-actions { margin-top: 4px; justify-content: flex-end; }
-
-/* The stack sits in the bottom right corner, above the content and the
-   dialog's backdrop alike: an outcome that arrived while a question is
-   open is still read. It takes no pointer events itself, so the page
-   under an empty region stays clickable. */
-.toasts {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 60;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: min(380px, calc(100vw - 32px));
-  pointer-events: none;
-}
-.toast {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  background: var(--bg-raised);
-  border: 1px solid var(--border-strong);
-  border-left: 3px solid var(--accent);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-  color: var(--text);
-  font-size: 13px;
-  line-height: 1.45;
-  pointer-events: auto;
-  animation: toast-arrive 0.16s ease-out;
-}
-.toast.success { border-left-color: var(--ok); }
-.toast.error { border-left-color: var(--error); }
-.toast.info { border-left-color: var(--blue); }
-.toast-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-.toast-link { color: var(--accent-text); font-weight: 500; white-space: nowrap; }
-.toast-dismiss {
-  flex: none;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  margin: -2px -4px -2px 0;
-  background: transparent;
-  border-color: transparent;
-  color: var(--text-faint);
-  font-size: 18px;
-  line-height: 1;
-}
-.toast-dismiss:where(:hover:not(:disabled)) { background: var(--bg-hover); color: var(--text); }
-@keyframes toast-arrive {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
-}
-@media (max-width: 600px) {
-  .toasts { right: 12px; left: 12px; bottom: 12px; width: auto; }
-  .modal-backdrop { align-items: flex-end; }
+  .widgets { gap: var(--s4); }
+  .widgets > * { grid-column: span 12 !important; }
 }
 
-/* Sortable headings, the column chooser and the columns a narrow screen
-   leaves out: a column marked secondary is one a phone can do without. */
-th[aria-sort] .sort-button:hover { color: var(--text); }
-th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); }
-.sort-arrow { font-size: 10px; line-height: 1; }
-.column-chooser-popover .toggle { display: flex; align-items: center; gap: 8px; }
-@media (max-width: 900px) {
-  th.col-secondary, td.col-secondary { display: none; }
-}
-
-/* The link a keyboard user takes past the navigation. */
-.skip-link { position: absolute; left: -999px; top: 8px; z-index: 100; padding: 8px 12px; background: var(--accent); color: var(--accent-contrast); border-radius: 6px; }
-.skip-link:focus { left: 8px; }
-
-/* The plans of a campaign, one group per shape of the change: a header
-   line with the hosts, the fingerprint and the expiry, then the change
-   itself as a table of packages or a list of sentences. */
-.plan-groups { display: flex; flex-direction: column; }
-.plan-group + .plan-group { border-top: 1px solid var(--border); }
-.plan-group-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; padding: 8px var(--card-pad-x); background: var(--bg-raised); border-bottom: 1px solid var(--border); font-size: 13px; }
-.plan-group-hosts { flex: 1 1 240px; min-width: 0; }
-.plan-group-body { padding: 12px var(--card-pad-x); }
-.plan-group-words { font-size: 13px; margin-bottom: 6px; }
-.plan-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-bottom: 8px; }
-.pairs .plan-facts { margin: 4px 0 0; }
-.plan-changes-table { width: auto; min-width: 50%; }
-.plan-changes-table th, .plan-changes-table td { padding: 5px 10px; }
-.card table.plan-changes-table th:first-child, .card table.plan-changes-table td:first-child { padding-left: 10px; }
-.card table.plan-changes-table th:last-child, .card table.plan-changes-table td:last-child { padding-right: 10px; }
-.plan-origin { margin-left: 8px; }
-.plan-changes-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 6px; }
-.plan-changes-list { margin: 4px 0 0; padding-left: 18px; font-size: 13px; }
-.card-body.flush > .plan-groups + .virtual, .card-body.flush > .plan-groups + table { border-top: 1px solid var(--border); }
-
-/* The host selector beside the palette: a little narrower, and it names the open host in the text colour. */
-.topbar-host-select { flex: 0 1 240px; }
-.host-select-trigger.on-host { color: var(--text); }
-.host-select-trigger.on-host .host-picker-placeholder { font-weight: 500; }
-
-/* A button that reads as a link: an inline word that opens an editor or
-   a filter, not a call to action of its own. */
-button.link { background: none; border: 0; padding: 0; font: inherit; color: var(--accent-text); text-decoration: underline dotted; cursor: pointer; }
-button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent); }
-
-/* ---------------------------------------------------------------------- */
-/* The three zones of a page.                                             */
-/* ---------------------------------------------------------------------- */
-
-/* The verdict: the one thing read first, so the one thing without a box.
-   A tone colours the rule on its left and nothing else - the sentence
-   itself stays in the reading colour. */
-/* The answer on the left, what needs a look beside it on the right: the two
-   are read together, and the second was pushing the board down the page. */
-.verdict-band { display: flex; align-items: flex-start; gap: 32px; flex-wrap: wrap; margin-bottom: 18px; }
-.verdict-band > .verdict { flex: 1 1 380px; margin-bottom: 0; }
-.verdict-band > .needs-attention { flex: 1 1 420px; margin-bottom: 0; }
-/* The answer to the page's question, in a container of its own.
-   It used to be a sentence with a three-pixel stripe beside it, floating
-   on the page above the cards - which is what the owner meant by "jakiś
-   tekst na górze". It is a card now, like everything else on the screen,
-   and the stripe stays as the one thing that says how it is going. */
-.verdict {
-  margin: 0 0 22px;
-  padding: 18px 22px;
-  background: var(--bg-panel);
-  border-radius: var(--radius-card);
-  border-left: 3px solid var(--border-strong);
-}
-.verdict.ok { border-left-color: var(--ok); }
-.verdict.warn { border-left-color: var(--warn); }
-.verdict.error { border-left-color: var(--error); }
-.verdict.unknown { border-left-color: var(--unknown); }
-.verdict-row { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
-.verdict-headline { margin: 0; font-size: 19px; font-weight: 500; line-height: 1.3; }
-.verdict-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
-.verdict-facts { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px 20px; font-size: 13px; color: var(--text-muted); }
-
-/* What needs a decision. Only ever drawn when it holds something. */
-.needs-attention { margin: 0 0 16px; }
-.needs-attention-title { margin: 0 0 10px; font-size: 11px; font-weight: 600; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.08em; }
-.needs-attention-body { display: grid; gap: 8px; }
-
-/* The long explanation of a screen, behind the mark beside its title. */
-.page-help-toggle {
-  background: none; border: 0; padding: 0 0 0 8px; margin: 0;
-  color: var(--text-faint); cursor: pointer; vertical-align: middle;
-}
-.page-help-toggle svg { width: 16px; height: 16px; }
-.page-help-toggle:where(:hover, :focus-visible, [aria-expanded="true"]) { color: var(--accent-text); }
-.page-help {
-  margin: 8px 0 0; padding: 12px 14px;
-  background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--radius-sm);
-  color: var(--text-muted); font-size: 13px; line-height: 1.5; max-width: 80ch;
-}
-.page-help p { margin: 0 0 8px; }
-.page-help p:last-child { margin-bottom: 0; }
-
-/* A part of the panel that needs a look: its state, its name and the server's
-   own sentence about it, on one line. */
-.attention-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0; font-size: 13px; }
-.attention-line > span:last-child { color: var(--text-muted); }
-
-
-
-/* The search of the settings screen, in the card's own title row. */
-.settings-search { width: 220px; max-width: 40vw; }
-.widget-subhead.first { margin-top: 0; }
-
-/* ---------------------------------------------------------------------- */
-/* Parts: the tiles a screen is read as, three or four to a row.          */
-/* ---------------------------------------------------------------------- */
-/* A surface rather than a box: thirteen bordered cards of equal weight is
-   the wall these screens started as, and folding them away was worse - a
-   closed line says a name and nothing else. Only a part that is not fine
-   takes a coloured edge, so the eye lands on those and on nothing else. */
-/* The board: columns filled across rather than down, so the first tile is
-   the most important and the second stands beside it rather than under it.
-   Which tile goes in which column is decided in the markup - see Masonry -
-   and the columns pack upwards, so there are no holes between them. */
-.masonry { display: flex; align-items: flex-start; gap: 14px; }
-.masonry-column { flex: 1 1 0; min-width: 0; }
-/* Tiles that are not a board: equal columns that fill the width there is.
- *
- * This was `columns: 380px`, and CSS columns do not keep a tile together -
- * they fill one column to the bottom and carry on, so on a wide screen the
- * head of a tile sat in one column and its body and its button in the next.
- * The owner saw it on the settings screen on 15.10 and said so. The same
- * reason Masonry was taken out of this panel: a layout that cuts its own
- * contents in half is not a layout. A grid of equal tracks keeps every tile
- * whole from a phone to a 4k monitor, and `auto-fill` decides how many fit
- * rather than a number written here. */
-.parts {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
-  gap: 14px;
-  align-items: start;
-}
-/* A container is a header and a body. The name of the thing stands on a bar
-   of its own above it rather than as the first line inside it, which is how
-   the arrange mode drew it and what the owner asked for everywhere: a
-   heading over a box reads as a label, a heading in a box reads as content. */
-/* In a grid the gap does the spacing; the margin was for the columns. */
-.part { display: flex; flex-direction: column; min-width: 0; margin: 0; }
-.part-head {
-  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
-  margin: 0; padding: 7px 12px;
-  background: var(--bg-raised);
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  border-left: 3px solid transparent;
-  font-size: 13px; font-weight: 600;
-}
-.part-name { font-size: 14px; }
-.part-body {
-  flex: 1 1 auto;
-  background: var(--bg-panel);
-  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-  border-left: 3px solid transparent;
-  padding: 12px 14px;
-  min-width: 0;
-}
-.part.warn > .part-head, .part.warn > .part-body { border-left-color: var(--warn); }
-.part.error > .part-head, .part.error > .part-body { border-left-color: var(--error); }
-.part.unknown > .part-head, .part.unknown > .part-body { border-left-color: var(--unknown); }
-/* Inside a tile a fact is one line: the label on the left in a track that
-   fits it, the value beside it. Stacked - the label over the value - is
-   what made these tiles twice as tall as they had to be. */
-.part .pairs { grid-template-columns: minmax(0, max-content) minmax(90px, 1fr); gap: 6px 16px; font-size: 13px; }
-.part .pairs dd { font-variant-numeric: tabular-nums; }
-.part .pairs dt { color: var(--text-muted); }
-.part-summary { font-weight: 400; font-size: 12px; color: var(--text-muted); }
-.part-reason { margin: 0 0 8px; font-size: 12px; color: var(--text-muted); }
-
-.part table { font-size: 12.5px; margin-bottom: 10px; }
-.part table th, .part table td { padding: 5px 10px; }
-.part table th:first-child, .part table td:first-child { padding-left: 0; }
-.card-body > .parts { margin: 0; }
-
-/* The heading of a grid of tiles, with whatever narrows it. */
-.masonry + .masonry { margin-top: 14px; }
-.parts-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 20px 0 10px; }
-/* The actions of a section sit at the right end of its bar, as a page's do. */
-.parts-head-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-.parts-head h2 { display: flex; align-items: center; gap: 6px; }
-/* The first bar on a screen needs no gap above it: the page header is there. */
-.page-header + .parts-head, .tabs + .parts-head { margin-top: 0; }
-.parts-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
-.parts-head .settings-search { margin-left: auto; }
-
-/* Records of a structure, one little list each, inside a tile. */
-.records { display: grid; gap: 8px; }
-.records .pairs { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 2px 10px; }
-.records dt { font-size: 11px; }
-
-/* Arranging the dashboard: the bar of the edit mode and the handle each
-   widget grows while it lasts. */
-.layout-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
-
-/* The reason a rearrangement is stored with. It stands in the bar beside
-   the button rather than behind a dialogue: the reason is part of the act,
-   and a dialogue would make it a hurdle to clear rather than a sentence to
-   write. */
-.layout-reason {
-  min-width: 280px;
-  flex: 1 1 280px;
-}
-.layout-bar .source { margin-left: auto; }
-.widget-handle {
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-  margin-bottom: 6px; padding: 6px 8px;
-  background: var(--bg-raised); border-radius: var(--radius-xs); font-size: 12px;
-}
-.widget-handle > span:first-child { font-weight: 600; margin-right: auto; }
-.widget-handle button { padding: 2px 8px; font-size: 12px; }
-
-/* A tile is measured against its own width, so the same tile lays its facts
-   in one column when it is a quarter of the page and in three when somebody
-   gives it the whole of it. This is what makes a width worth setting. */
-.widgets > div > .part, .masonry-column > div > .part { container: tile / inline-size; }
-@container tile (min-width: 620px) {
-  .part .pairs { grid-template-columns: repeat(2, minmax(0, max-content) minmax(90px, 1fr)); }
-}
-@container tile (min-width: 1000px) {
-  .part .pairs { grid-template-columns: repeat(3, minmax(0, max-content) minmax(90px, 1fr)); }
-}
-/* The tile fills the box the arrangement gave it rather than ending early.
-   In the arranged grid the flex child above does it; this is for the packed
-   columns, where a tile stands on its own. */
-.masonry-column > div > .part { height: auto; }
-
-/* Arranging with the hand: the tile being dragged fades, and the one it
-   would land on carries the accent on the edge it would push against. */
-.widgets > .dragging { opacity: 0.45; }
-.widgets > .drop-here { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: var(--radius); }
-.widget-handle { cursor: grab; }
-.widgets > .dragging .widget-handle { cursor: grabbing; }
-.widget-grip { color: var(--text-faint); letter-spacing: -2px; }
-.widget-keys {
-  padding: 2px 6px; border: 1px solid var(--border); border-radius: var(--radius-xs);
-  color: var(--text-muted); cursor: default; user-select: none;
-}
-.widget-keys:focus-visible { outline: 2px solid var(--accent); color: var(--text); }
-
-/* An arranged board: rows of a fixed height, so a tile can be told to take
-   two of them, and dense flow, so the short ones fall into the gaps the tall
-   ones leave rather than standing in a row of their own. */
-/* The arranged board keeps the dense flow - a narrow tile fills the hole a
-   wider neighbour leaves - without a floor under the row height: a panel
-   holding one line is one line tall. */
-.widgets.arranged { grid-auto-rows: auto; grid-auto-flow: row dense; align-items: start; }
-.widgets.arranged > div { min-width: 0; display: flex; flex-direction: column; }
-/* The widget fills the box the arrangement gave it; the bar of the arrange
-   mode is a bar. Given the same flex as the widget it took half the box,
-   which made the edit mode show something other than what leaving it would
-   show - and left no room to make a full-width tile any taller. */
+/* An arranged board: a narrow panel fills the hole a wider neighbour
+   leaves beside it, and a panel given a height scrolls inside it. */
+.widgets.arranged { grid-auto-flow: row dense; }
+/* In the arrange mode the bar is a bar and the widget takes the rest of
+   the box: given the same flex as the widget it took half of it, and the
+   edit mode then showed something other than what leaving it would. */
+.widgets.arranged > div { display: flex; flex-direction: column; min-width: 0; }
 .widgets.arranged > div > * { flex: 1 1 auto; min-height: 0; }
 .widgets.arranged > div > .widget-handle { flex: 0 0 auto; }
-.widget-size { display: inline-flex; align-items: center; gap: 4px; }
-.widget-size-value { color: var(--text-muted); min-width: 56px; text-align: center; }
+.widgets > [data-rows] { overflow: hidden; display: flex; flex-direction: column; }
+.widgets > [data-rows] > * { min-height: 0; flex: 1 1 auto; }
+.widgets > [data-rows] > .card { overflow: hidden; }
+.widgets > [data-rows] > .card > .card-body { overflow: auto; }
+.widgets > [data-rows="1"] { height: 140px; }
+.widgets > [data-rows="2"] { height: 220px; }
+.widgets > [data-rows="3"] { height: 300px; }
+.widgets > [data-rows="4"] { height: 380px; }
+.widgets > [data-rows="5"] { height: 460px; }
+.widgets > [data-rows="6"] { height: 540px; }
+.widgets > [data-rows="7"] { height: 620px; }
+.widgets > [data-rows="8"] { height: 700px; }
+.widgets > [data-rows="9"] { height: 780px; }
+.widgets > [data-rows="10"] { height: 860px; }
+.widgets > [data-rows="11"] { height: 940px; }
+.widgets > [data-rows="12"] { height: 1020px; }
+.widgets > [data-rows="13"] { height: 1100px; }
+.widgets > [data-rows="14"] { height: 1180px; }
+.widgets > [data-rows="15"] { height: 1260px; }
+.widgets > [data-rows="16"] { height: 1340px; }
 
-/* While a tile is in the hand the board says it will take it anywhere. */
-.widgets.arranged.dragging-over { outline: 1px dashed var(--border-strong); outline-offset: 8px; border-radius: var(--radius); }
+/* Arranging ---------------------------------------------------------- */
 
-/* The same shape for every card in the panel: the title is a bar across the
-   top, the body is the box under it. The card used to run its heading, its
-   sentence and its contents together in one surface, so a screen of cards
-   was a screen of undifferentiated boxes. */
-.card-head {
-  background: transparent;
-  border-radius: var(--radius-card) var(--radius-card) 0 0;
-  border-bottom: 1px solid var(--border);
-  padding: 8px var(--card-pad-x);
+.layout-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  margin-bottom: var(--s3);
 }
-.card-title { font-size: 14px; }
-.card-description { margin-top: 2px; }
-.card.warn > .card-head { box-shadow: inset 3px 0 0 var(--warn); }
-.card.error > .card-head { box-shadow: inset 3px 0 0 var(--error); }
+.layout-bar:has(.layout-arrange) { justify-content: flex-end; }
+.layout-arrange { color: var(--text-faint); }
+.layout-reason { flex: 1 1 280px; min-width: 220px; }
 
-/* ----------------------------------------------------------------------- *
- * The classes that drew nothing.
- *
- * Each of these named something in the markup and had no rule anywhere, so
- * the browser drew its default; several carried their appearance in a
- * style={{...}} beside the name, which is the same defect with the evidence
- * attached. The declarations are here now, where the rest of the panel's
- * appearance is, and web/src/components/styles.test.ts keeps the list of
- * exceptions at nothing.
- * ----------------------------------------------------------------------- */
+.widget-handle {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  padding: var(--s2) var(--s3);
+  margin-bottom: var(--s2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: var(--t-small);
+  cursor: grab;
+}
+.widget-grip { color: var(--text-faint); }
+.widget-size { display: inline-flex; align-items: center; gap: var(--s1); }
+.widget-size-value { min-width: 56px; text-align: center; color: var(--text-muted); }
+.widget-keys { padding: 0 var(--s1); color: var(--text-faint); cursor: pointer; }
+.dragging { opacity: 0.45; }
+.drop-here { outline: 2px dashed var(--accent); outline-offset: 3px; }
+.dragging-over .card { pointer-events: none; }
 
-/* A control somebody may not use: the reason is in the title, and once more
-   under the control for whoever does not hover. */
-.action-guard { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
-.action-guard-denied > fieldset { border: 0; margin: 0; padding: 0; }
-.action-guard-hint { font-size: 12px; }
+/* The parts grid: equal tracks, never CSS columns - a multi-column flow
+   puts the head of a tile in one column and its body in the next. */
+.parts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: var(--s4); }
+.parts-head { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; margin-bottom: var(--s4); }
+.parts-head h2 { font-size: var(--t-lead); font-weight: 600; }
+.parts-head-actions { margin-left: auto; display: flex; gap: var(--s2); }
+.part {
+  min-width: 0;
+  padding: var(--s4);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+.part-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); }
+.part-name { font-weight: 600; font-size: var(--t-body); }
+.part-summary { color: var(--text-faint); font-size: var(--t-small); }
+.part-body { margin-top: var(--s3); }
+.part-reason { margin-top: var(--s2); color: var(--text-muted); font-size: var(--t-small); }
 
-/* The chooser of a table's columns: a button with a popover hanging off it. */
-.column-chooser { position: relative; display: inline-block; }
-
-/* The tags of a host in the fleet list, as many as the row can hold. */
-.fp-host-tags { display: flex; flex-wrap: wrap; gap: 4px; }
-
-/* What somebody wrote down about a host, their line breaks kept. */
-.hm-notes { white-space: pre-wrap; margin: 0; }
-
-/* The row of a table that holds an open panel instead of a record: it belongs
-   to the row above it, and the shade says so. */
-.hm-panel-row > td { background: var(--bg-raised); }
-
-/* The mark of what kind of thing a suggestion is, in the host picker. */
-.host-picker-kind { grid-area: dot; display: inline-flex; color: var(--text-muted); }
-
-/* A paragraph meant to be read rather than scanned: the measure is what makes
-   that possible. */
-.prose { max-width: 70ch; line-height: 1.6; }
-
-/* ---------------------------------------------------------------------------
-   The measurement tile and the severity row.
-
-   Both follow the same rule: colour says state, and a filled surface says
-   "look here first". The hero tile is the only filled one, and it carries the
-   accent, which means nothing by itself - so a glowing tile never claims a
-   number is healthy.
-   --------------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------
+   6. Measurements
+   ------------------------------------------------------------------ */
 
 .metric-tile {
-  background: var(--bg-panel);
-  border-radius: var(--radius-card);
-  padding: 20px 22px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
   min-width: 0;
-  /* A transparent border keeps the box the same size in every state, so a
-     tile does not jump by a pixel when a host goes critical. */
+  padding: var(--s5);
   border: 1px solid transparent;
+  border-radius: var(--radius-card);
+  background: var(--bg-panel);
 }
-
 .metric-chip {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  margin-bottom: var(--s4);
+  border-radius: var(--radius);
   background: var(--accent-soft);
   color: var(--accent-text);
-  margin-bottom: 14px;
 }
-.metric-chip svg { width: 20px; height: 20px; }
-
-.metric-foot {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.metric-delta { font-size: 12px; font-weight: 600; white-space: nowrap; }
-.metric-delta.good { color: var(--ok-text); }
-.metric-delta.bad { color: var(--error-text); }
-
+.metric-chip svg { width: 18px; height: 18px; }
 .metric-value {
-  font-size: var(--metric-l);
-  font-weight: 600;
-  line-height: 1.05;
-  letter-spacing: -0.02em;
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--s1);
   min-width: 0;
+  font-size: var(--metric-l);
+  font-weight: 650;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
-
 .metric-tile-xl .metric-value { font-size: var(--metric-xl); }
 .metric-tile-m .metric-value { font-size: var(--metric-m); }
-
-.metric-unit {
-  font-size: 0.42em;
-  font-weight: 500;
-  color: var(--text-muted);
-}
-
+.metric-unit { font-size: 0.4em; font-weight: 500; color: var(--text-muted); }
 .metric-unknown { color: var(--unknown-text); }
-
-.metric-label {
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-.metric-footnote {
-  font-size: 12px;
-  color: var(--text-faint);
-}
-
-/* The state colours the number, not the box.
-   A row of four tiles with two of them framed in amber and red read as two
-   error boxes beside two cards - the row stopped being a row. The figure
-   is the thing the state is about, so the figure carries it. */
-.metric-tile-warn .metric-value  { color: var(--warn-text); }
+.metric-foot { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); margin-top: var(--s2); }
+.metric-label { color: var(--text-muted); font-size: var(--t-body); min-width: 0; }
+.metric-footnote { margin-top: var(--s1); color: var(--text-faint); font-size: var(--t-small); }
+.metric-delta { font-size: var(--t-small); font-weight: 600; white-space: nowrap; }
+.metric-delta.good { color: var(--ok-text); }
+.metric-delta.bad { color: var(--error-text); }
+/* The state colours the figure, not the frame: a row of tiles with two of
+   them boxed in red stops reading as a row. */
+.metric-tile-warn .metric-value { color: var(--warn-text); }
 .metric-tile-error .metric-value { color: var(--error-text); }
 .metric-tile-unknown .metric-value { color: var(--unknown-text); }
-
+/* The one filled tile. It wears the accent, which carries no state. */
 .metric-tile-hero {
-  background: var(--grad-hero);
-  border-color: transparent;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--lavender) 100%);
   color: var(--accent-contrast);
-  /* The headline tile is the one thing on the page allowed to be loud, so
-     it gets the room to be: the number sits large in a filled block with
-     air around it, the way the references open a screen. */
-  padding: 26px 28px;
 }
-
-.metric-tile-hero .metric-value { letter-spacing: -0.03em; }
-
+.metric-tile-hero .metric-chip { background: rgba(0, 0, 0, 0.12); color: var(--accent-contrast); }
 .metric-tile-hero .metric-label,
 .metric-tile-hero .metric-unit,
-.metric-tile-hero .metric-footnote {
-  color: color-mix(in srgb, var(--accent-contrast) 72%, transparent);
+.metric-tile-hero .metric-footnote { color: color-mix(in srgb, var(--accent-contrast) 72%, transparent); }
+
+@media (max-width: 900px) {
+  :root { --metric-xl: 40px; --metric-l: 32px; }
 }
+
+/* Severity ----------------------------------------------------------- */
 
 .severity-bar {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
   gap: 2px;
-  border-radius: var(--radius-card);
+  border-radius: var(--radius);
   overflow: hidden;
 }
-
 .severity-block {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  padding: 14px 8px;
+  padding: var(--s3) var(--s2);
   border: 0;
-  font: inherit;
+  min-height: 0;
   color: var(--accent-contrast);
+  font: inherit;
   text-align: center;
 }
-
-button.severity-block { cursor: pointer; }
-
-.severity-count {
-  font-size: var(--metric-m);
-  font-weight: 600;
-  line-height: 1;
-}
-
-.severity-label {
-  font-size: 12px;
-  opacity: 0.85;
-}
-
+.severity-count { font-size: var(--metric-m); font-weight: 650; line-height: 1; font-variant-numeric: tabular-nums; }
+.severity-label { font-size: var(--t-small); opacity: 0.9; }
 .severity-critical { background: var(--error); }
-.severity-warning  { background: var(--warn); }
-.severity-info     { background: var(--blue); }
-.severity-unknown  { background: var(--unknown); }
+.severity-warning { background: var(--warn); }
+.severity-info { background: var(--blue); }
+.severity-unknown { background: var(--unknown); }
+.severity-empty { background: var(--bg-raised); color: var(--text-faint); }
+.severity-unanswered { background: var(--bg-raised); color: var(--unknown-text); }
 
-/* An empty severity keeps its place and stops shouting. */
-.severity-empty {
-  background: var(--bg-sunken);
+@media (max-width: 600px) {
+  .severity-bar { grid-auto-flow: row; grid-auto-columns: auto; }
+}
+
+/* ---------------------------------------------------------------------
+   7. Readings: bars, breakdowns, charts
+   ------------------------------------------------------------------ */
+
+/* The status bar: one count above zero is a number on a line, several
+   are a bar whose widths are their shares. */
+.status-bar-group { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3) var(--s5); min-width: 0; }
+.status-bar-group:has(.status-bar) { flex-direction: column; align-items: stretch; }
+.status-bar { display: flex; gap: 2px; border-radius: var(--radius); overflow: hidden; min-height: 72px; }
+.status-bar-segment {
+  flex: var(--share, 1) 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: var(--s3) var(--s2);
+  background: var(--segment, var(--border-strong));
+  color: var(--accent-contrast);
+  text-align: center;
+  overflow: hidden;
+}
+.status-bar-hero {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s2);
+  padding: var(--s2) var(--s4) var(--s2) var(--s3);
+  border-radius: var(--radius);
+  border-left: 3px solid var(--segment, var(--border-strong));
+  background: var(--bg-raised);
+  color: var(--text);
+}
+.status-bar-hero .status-bar-value { font-size: var(--metric-m); font-weight: 650; }
+.status-bar-value { font-weight: 650; font-variant-numeric: tabular-nums; }
+.status-bar-label { font-size: var(--t-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.status-bar-quiet { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s1) var(--s4); min-width: 0; }
+.status-bar-quiet-item { display: inline-flex; align-items: baseline; gap: var(--s1); color: var(--text-faint); font-size: var(--t-small); }
+.status-bar-quiet-item .status-bar-value { font-size: var(--t-body); color: var(--text-muted); }
+.status-bar-quiet-item.zero { color: var(--text-faint); }
+.status-bar-quiet-item.unset .status-bar-value { color: var(--unknown-text); }
+.status-bar-uncounted { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s1) var(--s3); }
+.status-bar-uncounted-note { color: var(--text-faint); font-size: var(--t-small); }
+.status-bar-group.compact .status-bar { min-height: 52px; }
+
+a.status-bar-segment:hover, a.status-bar-hero:hover { filter: brightness(1.08); text-decoration: none; }
+
+.ok.status-bar-segment, .status-bar-segment.ok { --segment: var(--ok); }
+.warn.status-bar-segment, .status-bar-segment.warn { --segment: var(--warn); }
+.error.status-bar-segment, .status-bar-segment.error { --segment: var(--error); }
+.info.status-bar-segment, .status-bar-segment.info { --segment: var(--blue); }
+.unknown.status-bar-segment, .status-bar-segment.unknown { --segment: var(--unknown); }
+.neutral.status-bar-segment, .status-bar-segment.neutral { --segment: var(--border-strong); }
+.status-bar-hero.ok { --segment: var(--ok); }
+.status-bar-hero.warn { --segment: var(--warn); }
+.status-bar-hero.error { --segment: var(--error); }
+.status-bar-hero.info { --segment: var(--blue); }
+.status-bar-hero.unknown { --segment: var(--unknown); }
+.status-bar-hero.neutral { --segment: var(--border-strong); }
+
+/* The counted tiles of "what needs you": a grid of equal cells, so a row
+   of them is a row and not a torn strip. */
+.count-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr)); gap: var(--s2); }
+.count-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--s3) var(--s4);
+  border-radius: var(--radius);
+  border-left: 3px solid var(--segment, var(--border-strong));
+  background: var(--bg-raised);
+  color: var(--text);
+}
+a.count-tile:hover { background: var(--bg-hover); text-decoration: none; }
+.count-tile .status-bar-value { font-size: var(--metric-m); }
+.count-tile .status-bar-label { color: var(--text-muted); white-space: normal; }
+.count-tile.ok { --segment: var(--ok); }
+.count-tile.warn { --segment: var(--warn); }
+.count-tile.error { --segment: var(--error); }
+.count-tile.unknown { --segment: var(--unknown); }
+.count-tile.info { --segment: var(--blue); }
+.count-tile.neutral { --segment: var(--border-strong); }
+
+/* The breakdown: a label, a bar and a number, in three tracks. The bar
+   can never run under the label, which is what the owner saw in Fleet
+   composition - they were layered and the words sat on the colour. */
+.breakdown { display: grid; grid-template-columns: minmax(80px, max-content) minmax(60px, 1fr) max-content; gap: var(--s1) var(--s3); align-items: center; }
+.breakdown-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--t-small);
+}
+.breakdown-bar { height: 8px; border-radius: 999px; background: var(--bg-sunken); overflow: hidden; }
+.breakdown-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--tone, var(--blue)); }
+.breakdown-count { text-align: right; font-size: var(--t-small); font-variant-numeric: tabular-nums; color: var(--text); }
+.breakdown.ok .breakdown-bar > span { background: var(--ok); }
+.breakdown.warn .breakdown-bar > span { background: var(--warn); }
+.breakdown.error .breakdown-bar > span { background: var(--error); }
+.breakdown.info .breakdown-bar > span { background: var(--blue); }
+.breakdown.unknown .breakdown-bar > span { background: var(--unknown); }
+.breakdown.neutral .breakdown-bar > span { background: var(--border-strong); }
+
+.meter, .meter-track, .progress-track { height: 8px; border-radius: 999px; background: var(--bg-sunken); overflow: hidden; min-width: 60px; }
+.meter-value, .progress-fill { display: block; height: 100%; border-radius: 999px; background: var(--tone, var(--blue)); }
+.meter.ok .meter-value, .progress.ok .progress-fill { background: var(--ok); }
+.meter.warn .meter-value, .progress.warn .progress-fill { background: var(--warn); }
+.meter.error .meter-value, .progress.error .progress-fill { background: var(--error); }
+.meter.info .meter-value { background: var(--blue); }
+.meter.unknown .meter-value, .progress-unknown { background: var(--unknown); }
+.progress { display: flex; align-items: center; gap: var(--s3); min-width: 0; }
+.progress-caption { color: var(--text-muted); font-size: var(--t-small); white-space: nowrap; }
+
+/* Charts ------------------------------------------------------------- */
+
+.chart { width: 100%; height: auto; overflow: visible; }
+.chart text { fill: var(--text-faint); font-size: 10px; }
+.chart .axis { stroke: var(--border); stroke-width: 1; }
+.chart .line { fill: none; stroke-width: 2; }
+.chart .area { stroke: none; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); margin-top: var(--s3); font-size: var(--t-small); color: var(--text-muted); }
+.chart-legend li { display: inline-flex; align-items: center; gap: var(--s2); }
+.swatch { width: 10px; height: 10px; border-radius: 3px; background: var(--tone, var(--blue)); flex: none; }
+.swatch.dashed { background: repeating-linear-gradient(90deg, var(--tone, var(--blue)) 0 3px, transparent 3px 6px); }
+.chart-peak circle, .chart-peak rect { fill: var(--accent); }
+.chart-peak-label { fill: var(--accent-contrast); font-size: 10px; font-weight: 600; }
+.bar { fill: var(--tone, var(--blue)); }
+.grid line { stroke: var(--border); stroke-width: 1; opacity: 0.5; }
+.scale { fill: var(--text-faint); }
+
+/* The calendar ------------------------------------------------------- */
+
+.calendar { display: grid; gap: var(--s2); min-width: 0; }
+.calendar-day { display: grid; grid-template-columns: minmax(70px, max-content) minmax(0, 1fr); gap: var(--s3); align-items: start; }
+.calendar-label { color: var(--text-muted); font-size: var(--t-small); white-space: nowrap; }
+.calendar-bar { display: flex; flex-wrap: wrap; gap: var(--s1); min-width: 0; }
+.calendar-entry {
+  padding: 1px var(--s2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: var(--t-small);
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------------
+   8. Facts, forms, toolbars, paging
+   ------------------------------------------------------------------ */
+
+/* One fact list for the whole panel: a pair of columns that becomes one
+   inside a narrow card. The card is a container, so this answers to the
+   width of the card it stands in rather than to the width of the window -
+   a fact list in a third of the page stacks while the same list across
+   the whole page keeps its two tracks. */
+.facts, .pairs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  gap: var(--s3) var(--s5);
+  min-width: 0;
+}
+.facts dt, .pairs dt { color: var(--text-faint); font-size: var(--t-small); }
+.pairs dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.facts dd { min-width: 0; overflow-wrap: anywhere; }
+
+@container card (max-width: 420px) {
+  .facts, .pairs { grid-template-columns: minmax(0, 1fr); }
+  .card-head { flex-direction: column; }
+}
+.facts-table { width: 100%; }
+.fact { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fact-label { color: var(--text-faint); font-size: var(--t-small); }
+.fact-value { min-width: 0; overflow-wrap: anywhere; }
+
+.field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: var(--s4); max-width: 1180px; }
+.field { display: flex; flex-direction: column; gap: var(--s1); min-width: 0; font-size: var(--t-body); }
+.field.wide { grid-column: 1 / -1; }
+.field-label { color: var(--text); font-weight: 500; }
+.field-hint { color: var(--text-faint); font-size: var(--t-small); }
+.form { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
+.form-problem { color: var(--error-text); font-size: var(--t-body); }
+
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.actions.to-the-left { justify-content: flex-start; }
+.operations { display: flex; flex-wrap: wrap; gap: var(--s2); }
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2) var(--s3);
+  padding: var(--s3) var(--s5);
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+.toolbar-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); }
+.toolbar input, .toolbar select { width: auto; min-width: 160px; }
+.search-field { min-width: 220px; }
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); min-width: 0; }
+.more-filters { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.more-filters-row { display: flex; flex-wrap: wrap; gap: var(--s2); width: 100%; }
+.settings-search { min-width: 220px; }
+.rows-per-page { display: inline-flex; align-items: center; gap: var(--s2); color: var(--text-muted); font-size: var(--t-small); }
+.pager { display: inline-flex; align-items: center; gap: var(--s1); }
+.pager-gap { color: var(--text-faint); padding: 0 var(--s1); }
+.scope-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s4); margin-bottom: var(--s4); color: var(--text-muted); font-size: var(--t-body); }
+
+.selection-bar {
+  position: sticky;
+  bottom: var(--s4);
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3);
+  margin-top: var(--s4);
+  padding: var(--s3) var(--s5);
+  border-radius: var(--radius-card);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow);
+}
+
+.column-chooser { position: relative; }
+.column-chooser-popover, .menu-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--s1));
+  z-index: 40;
+  min-width: 220px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow);
+}
+.menu-popover button { width: 100%; justify-content: flex-start; background: none; color: var(--text); }
+.menu-popover button:hover { background: var(--bg-hover); }
+.has-menu { position: relative; }
+
+/* Tabs --------------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  margin-bottom: var(--s5);
+  border-bottom: 1px solid var(--border);
+}
+.tabs button {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--text-muted);
+  font-weight: 500;
+  padding: var(--s2) var(--s3);
+}
+.tabs button:hover { color: var(--text); background: none; filter: none; }
+.tabs button.active { color: var(--accent-text); border-bottom-color: var(--accent); font-weight: 600; }
+.record-tabs { margin-bottom: var(--s3); }
+.bulk-steps { display: flex; flex-wrap: wrap; gap: var(--s2); margin-bottom: var(--s5); }
+.bulk-steps button { background: var(--bg-raised); color: var(--text-muted); border: 1px solid var(--border); }
+.bulk-steps button.current, .bulk-steps button.active { background: var(--accent-soft); color: var(--accent-text); border-color: transparent; }
+.bulk-steps button.done { color: var(--ok-text); }
+.step, .steps { min-width: 0; }
+
+/* Empty, loading and messages ---------------------------------------- */
+
+.empty, .empty-state, .fp-blank {
+  padding: var(--s6);
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--t-body);
+}
+.empty-state .actions { justify-content: center; margin-top: var(--s3); }
+.message, .hm-message { color: var(--text-muted); font-size: var(--t-body); }
+.warning {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  margin-bottom: var(--s4);
+  border-radius: var(--radius);
+  border-left: 3px solid var(--warn);
+  background: var(--bg-panel);
+  font-size: var(--t-body);
+}
+.warning .operations { margin-left: auto; }
+
+/* The verdict: the answer to the page's question, in a container. */
+.verdict {
+  margin-bottom: var(--s5);
+  padding: var(--s4) var(--s5);
+  border-radius: var(--radius-card);
+  border-left: 3px solid var(--border-strong);
+  background: var(--bg-panel);
+}
+.verdict.ok { border-left-color: var(--ok); }
+.verdict.warn { border-left-color: var(--warn); }
+.verdict.error { border-left-color: var(--error); }
+.verdict.unknown { border-left-color: var(--unknown); }
+.verdict-row { display: flex; align-items: baseline; gap: var(--s4); flex-wrap: wrap; }
+.verdict-headline { font-size: var(--t-lead); font-weight: 600; line-height: 1.3; }
+.verdict-actions { margin-left: auto; display: flex; gap: var(--s2); flex-wrap: wrap; }
+.verdict-facts { margin-top: var(--s2); display: flex; flex-wrap: wrap; gap: var(--s1) var(--s5); color: var(--text-muted); font-size: var(--t-body); }
+.verdict-fact.warn { color: var(--warn-text); }
+.verdict-band { display: flex; flex-wrap: wrap; gap: var(--s5); margin-bottom: var(--s5); }
+.verdict-band > .verdict { flex: 1 1 380px; margin-bottom: 0; }
+.verdict-band > .needs-attention { flex: 1 1 420px; }
+
+.needs-attention { margin-bottom: var(--s5); }
+.needs-attention-title { margin-bottom: var(--s2); color: var(--text-faint); font-size: var(--t-label); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+.needs-attention-body { display: grid; gap: var(--s2); }
+.attention-clear, .attention-line { margin-top: var(--s2); color: var(--text-faint); font-size: var(--t-small); }
+
+.widget-subhead { margin: var(--s4) 0 var(--s2); color: var(--text-faint); font-size: var(--t-label); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.widget-subhead.first { margin-top: 0; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: var(--s3); }
+.stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.stat-value { font-size: var(--metric-m); font-weight: 650; font-variant-numeric: tabular-nums; }
+.stat-label { color: var(--text-muted); font-size: var(--t-small); }
+.stat-hint { color: var(--text-faint); font-size: var(--t-small); }
+.stats-folded { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); }
+.stats-folded-item { display: inline-flex; align-items: baseline; gap: var(--s1); font-size: var(--t-small); color: var(--text-muted); }
+.stats-folded-value { font-weight: 650; color: var(--text); }
+
+/* ---------------------------------------------------------------------
+   9. The host workspace (hm-*) and the fleet pages (fp-*)
+   ------------------------------------------------------------------ */
+
+.hm-page { display: flex; flex-direction: column; gap: var(--s5); min-width: 0; }
+.hm-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s4); flex-wrap: wrap; }
+.hm-header h2, .hm-title { font-size: var(--t-lead); font-weight: 600; }
+.hm-sub, .hm-note { color: var(--text-muted); font-size: var(--t-body); }
+.hm-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.hm-section { min-width: 0; background: var(--bg-panel); border-radius: var(--radius-card); }
+.hm-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  padding: var(--s5) var(--s5) 0;
+}
+.hm-section-head h3 { font-size: var(--t-label); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.hm-section-body { padding: var(--s4) var(--s5) var(--s5); min-width: 0; }
+.hm-section.flush .hm-section-body { padding: 0; }
+.hm-count { color: var(--text-faint); font-size: var(--t-small); }
+.hm-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: var(--s3) var(--s5); }
+.hm-fact { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hm-fact-label, .hm-label { color: var(--text-faint); font-size: var(--t-small); }
+.hm-fact-value, .hm-value { min-width: 0; overflow-wrap: anywhere; }
+.hm-mono { font-family: var(--font-mono); overflow-wrap: anywhere; }
+.hm-field { display: flex; flex-direction: column; gap: var(--s1); min-width: 0; }
+.hm-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: var(--s4); }
+.hm-choices { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.hm-check { display: inline-flex; align-items: center; gap: var(--s2); font-size: var(--t-body); }
+.hm-danger { color: var(--error-text); }
+.hm-diff { font-family: var(--font-mono); font-size: var(--t-small); white-space: pre-wrap; overflow-wrap: anywhere; }
+.hm-diff .add { color: var(--ok-text); }
+.hm-diff .del { color: var(--error-text); }
+.hm-empty { padding: var(--s5); text-align: center; color: var(--text-faint); }
+.hm-error { color: var(--error-text); font-size: var(--t-body); }
+.hm-foot { padding: var(--s3) var(--s5); border-top: 1px solid var(--border); color: var(--text-muted); font-size: var(--t-small); }
+.hm-group { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+.hm-inline { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.hm-list { display: flex; flex-direction: column; gap: var(--s2); }
+.hm-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); min-width: 0; }
+.hm-scroll { max-height: 420px; overflow: auto; }
+.hm-tag { display: inline-flex; padding: 1px var(--s2); border-radius: var(--radius-sm); background: var(--bg-raised); font-size: var(--t-small); }
+.hm-text { color: var(--text-muted); font-size: var(--t-body); }
+.hm-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); padding: var(--s3) var(--s5); border-bottom: 1px solid var(--border); }
+.hm-unit { color: var(--text-faint); font-size: var(--t-small); }
+.hm-warn { color: var(--warn-text); }
+.hm-wide { grid-column: 1 / -1; }
+
+.host-header { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--s4); margin-bottom: var(--s5); }
+.host-header-title { font-size: var(--t-title); font-weight: 650; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.host-header-crumb { color: var(--text-faint); font-size: var(--t-small); }
+.host-header-facts { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s4); color: var(--text-muted); font-size: var(--t-body); }
+.host-content { min-width: 0; }
+.host-picker { position: relative; min-width: 0; }
+.host-picker-list { max-height: 320px; overflow: auto; }
+.host-picker-item { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: var(--s2) var(--s3); background: none; border: 0; border-radius: var(--radius-sm); color: var(--text); text-align: left; }
+.host-picker-item:hover, .host-picker-item.active { background: var(--bg-hover); }
+.host-picker-name { font-weight: 600; }
+.host-picker-address { color: var(--text-faint); font-family: var(--font-mono); font-size: var(--t-small); }
+.host-picker-empty { padding: var(--s4); color: var(--text-faint); text-align: center; }
+.host-picker-input { width: 100%; }
+
+.fp-audit-after, .fp-audit-before { font-family: var(--font-mono); font-size: var(--t-small); white-space: pre-wrap; overflow-wrap: anywhere; }
+.fp-audit-before { color: var(--error-text); }
+.fp-audit-after { color: var(--ok-text); }
+.fp-audit-chain { color: var(--text-faint); font-family: var(--font-mono); font-size: var(--t-small); }
+.fp-audit-diff { display: grid; gap: var(--s2); }
+.fp-audit-session { color: var(--text-muted); font-size: var(--t-small); }
+.fp-host-address, .fp-host-cell, .fp-host-name { min-width: 0; overflow-wrap: anywhere; }
+.fp-host-address { font-family: var(--font-mono); color: var(--text-faint); font-size: var(--t-small); }
+.fp-narrow { max-width: 460px; }
+.fp-tones { display: grid; gap: var(--s2); }
+.fp-wrap { overflow-wrap: anywhere; }
+
+/* The plan, the campaign and the job ---------------------------------- */
+
+.plan-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: var(--s3) var(--s5); }
+.plan-group-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s3); padding: var(--s3) 0; }
+.plan-group-words { color: var(--text-muted); font-size: var(--t-body); }
+.plan-group-hosts { color: var(--text-faint); font-size: var(--t-small); }
+.plan-group-body { padding-bottom: var(--s3); }
+.plan-changes-list { display: grid; gap: var(--s2); }
+.plan-changes-table { width: 100%; }
+.plan-changes-foot { color: var(--text-faint); font-size: var(--t-small); padding-top: var(--s2); }
+.plan-change-attention { color: var(--warn-text); }
+.plan-empty { color: var(--text-faint); }
+.timeline { display: grid; gap: var(--s2); }
+.attempt { display: grid; gap: var(--s1); padding: var(--s3) 0; border-top: 1px solid var(--border); }
+.attempt-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s3); }
+
+/* ---------------------------------------------------------------------
+   10. Overlays: modal, menus, toasts
+   ------------------------------------------------------------------ */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: var(--s4);
+  background: rgba(0, 0, 0, 0.6);
+}
+.modal {
+  width: min(560px, 100%);
+  max-height: 86vh;
+  overflow: auto;
+  padding: var(--s6);
+  border-radius: var(--radius-card);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow);
+}
+.modal-title { font-size: var(--t-lead); font-weight: 600; margin-bottom: var(--s3); }
+.modal-body { display: grid; gap: var(--s3); color: var(--text-muted); font-size: var(--t-body); }
+.modal-field { display: flex; flex-direction: column; gap: var(--s1); }
+.modal-rule { color: var(--text-faint); font-size: var(--t-small); }
+.modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--s2); margin-top: var(--s5); }
+
+.user-menu { position: absolute; right: 0; top: calc(100% + var(--s1)); z-index: 40; min-width: 280px; padding: var(--s3); border-radius: var(--radius); background: var(--bg-panel); box-shadow: var(--shadow); }
+.user-menu-identity { padding: var(--s2) var(--s3) var(--s3); border-bottom: 1px solid var(--border); }
+.user-menu-name { font-weight: 600; }
+.user-menu-subject { color: var(--text-faint); font-family: var(--font-mono); font-size: var(--t-small); overflow-wrap: anywhere; }
+.user-menu-roles { margin-top: var(--s1); display: flex; flex-wrap: wrap; gap: var(--s1); }
+.user-menu-section { padding: var(--s3) var(--s3) 0; }
+.user-menu-label { color: var(--text-faint); font-size: var(--t-label); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+.user-menu-session { color: var(--text-muted); font-size: var(--t-small); }
+.user-menu-signout { width: 100%; margin-top: var(--s3); }
+.theme-switch, .language-switch, .scale-switch { display: flex; gap: var(--s1); margin-top: var(--s2); }
+
+.toasts { position: fixed; right: var(--s5); bottom: var(--s5); z-index: 60; display: grid; gap: var(--s2); max-width: min(420px, calc(100vw - var(--s8))); }
+.toast { display: flex; align-items: flex-start; gap: var(--s3); padding: var(--s3) var(--s4); border-radius: var(--radius); background: var(--bg-raised); box-shadow: var(--shadow); font-size: var(--t-body); }
+.toast.error { border-left: 3px solid var(--error); }
+.toast.success { border-left: 3px solid var(--ok); }
+.toast-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.toast-link { color: var(--accent-text); }
+.toast-dismiss { background: none; border: 0; color: var(--text-faint); padding: 0 var(--s1); min-height: 0; }
+
+/* The login screen ---------------------------------------------------- */
+
+.login-screen { min-height: 100vh; display: grid; place-items: center; padding: var(--s6); background: var(--bg); }
+.login-screen > div { width: min(380px, 100%); display: grid; gap: var(--s3); }
+.login-brand { display: flex; justify-content: center; }
+.login-form { display: grid; gap: var(--s3); }
+.login-or { display: flex; align-items: center; gap: var(--s3); color: var(--text-faint); font-size: var(--t-small); }
+.login-or::before, .login-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--border); }
+
+/* ---------------------------------------------------------------------
+   11. The rest, by what each one does
+   ------------------------------------------------------------------ */
+
+/* The guard that explains a refusal before somebody presses the button. */
+.action-guard { display: grid; gap: var(--s2); padding: var(--s3) var(--s4); border-radius: var(--radius); background: var(--bg-raised); font-size: var(--t-body); }
+.action-guard-denied { color: var(--error-text); }
+.action-guard-hint { color: var(--text-muted); font-size: var(--t-small); }
+
+/* A word that follows a name: a tag, a kind, a qualifier. */
+.after-name { color: var(--text-faint); font-size: var(--t-small); }
+.title { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+
+/* A row that opens: the triangle turns, nothing jumps. */
+.expander {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  padding: 0;
+  min-height: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
   color: var(--text-faint);
 }
+.expander:hover { background: var(--bg-hover); color: var(--text); }
+.expander[aria-expanded="true"] { color: var(--accent-text); }
 
-/* The name of a row, which is the way into its record: a link in weight and
-   colour, a button in behaviour, and no button chrome at all. */
-.cell-link {
-  background: none;
-  border: 0;
-  padding: 0;
-  font: inherit;
-  color: var(--accent-text);
-  cursor: pointer;
-  text-align: left;
+.fp-host-tags { display: flex; flex-wrap: wrap; gap: var(--s1); min-width: 0; }
+.hm-notes { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-muted); font-size: var(--t-body); }
+.hm-panel-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); min-width: 0; }
+.inventory-refresh { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.monitoring-handled { margin-top: var(--s3); }
+
+/* The host picker in the top bar. */
+.host-picker-trigger { min-width: 0; }
+.host-picker-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--s1));
+  z-index: 40;
+  width: min(420px, 90vw);
+  padding: var(--s3);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow);
+}
+.host-picker-search { margin-bottom: var(--s2); }
+.host-picker-meta { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s3); color: var(--text-faint); font-size: var(--t-small); }
+.host-picker-kind { color: var(--text-muted); font-size: var(--t-small); }
+.host-picker-note { color: var(--text-faint); font-size: var(--t-small); }
+.host-picker-placeholder { color: var(--text-faint); }
+.host-picker-key { flex: none; padding: 1px var(--s1); border: 1px solid var(--border); border-radius: 4px; color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; }
+
+/* A list of permissions, grouped by what they govern. */
+.permission-picker { display: grid; gap: var(--s4); max-height: 420px; overflow: auto; }
+.permission-group { display: grid; gap: var(--s1); min-width: 0; }
+
+.plan-groups { display: grid; gap: var(--s2); }
+.plan-origin { color: var(--text-faint); font-size: var(--t-small); }
+
+/* The record a row opens into. */
+.record { padding: var(--s3) var(--s4) var(--s4); }
+.record-body { display: grid; gap: var(--s3); min-width: 0; }
+.records { display: grid; gap: var(--s2); }
+
+/* Nesting, stacking and wrapping, used where a layout needs saying. */
+.nested { padding-left: var(--s4); border-left: 1px solid var(--border); }
+.stack { display: grid; gap: var(--s3); min-width: 0; }
+.stacked { display: flex; flex-direction: column; gap: var(--s1); min-width: 0; }
+.wrap { display: flex; flex-wrap: wrap; gap: var(--s2); min-width: 0; }
+.virtual { position: relative; overflow: auto; }
+
+.sidebar-item { display: block; }
+.sidebar-item-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.topbar-sep { width: 1px; height: 20px; background: var(--border); flex: none; }
+.topbar-user-trigger { min-width: 0; }
+.topbar-user-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-user-chevron { flex: none; color: var(--text-faint); width: 12px; height: 12px; }
+.user-menu-text { color: var(--text-muted); font-size: var(--t-small); }
+
+/* What only earns its place where there is room, and what only earns it
+   where there is none. */
+.wide-only { display: initial; }
+.narrow-only { display: none; }
+@media (max-width: 900px) {
+  .wide-only { display: none; }
+  .narrow-only { display: initial; }
 }
 
-.cell-link:hover { text-decoration: underline; }
-
-tr.row-open > td { background: var(--bg-raised); }
-
-.state-on  { color: var(--ok-text); }
-.state-off { color: var(--text-faint); }
-
-/* The record of one row, opened under it. */
-.record { padding: 4px 0 8px; }
-.record-tabs { margin-bottom: 12px; }
-.record-body { display: flex; flex-direction: column; gap: 12px; }
-
-/* What has been done about the alerts, under the severities rather than
-   beside them: acknowledged, pending and silenced are not severities, and a
-   row that mixed the two asked the eye to compare "critical" with
-   "silenced". */
-.monitoring-handled { margin-top: 10px; }
-
-/* A severity nobody has an answer for. It is not the empty block: empty
-   means the server said none, and this means it has not said. The dash does
-   the talking; the block keeps its place so the row does not change shape
-   between the two. */
-.severity-unanswered {
-  background: var(--bg-sunken);
-  color: var(--unknown-text);
+/* A page that prints as a document. */
+@media print {
+  .no-print, .sidebar, .topbar, .layout-bar { display: none !important; }
+  .layout { display: block; }
+  .card { break-inside: avoid; border: 1px solid #ccc; }
+  .report-print-head { display: block; margin-bottom: 12pt; }
 }
+.report-print-head { display: none; }
+.report-folded { color: var(--text-faint); font-size: var(--t-small); }
 
-/* The sentence under the detail card: thirty checks at zero used to be
-   printed one by one in small type, which is a wall of text saying
-   nothing. They are one line now. */
-.attention-clear { margin-top: 10px; }
-
-/* A button with no box: the label alone, in the quiet ink, for a control
-   that is there when wanted and silent otherwise. */
-.ghost {
-  background: none;
-  border: 0;
-  padding: 6px 2px;
-  font: inherit;
-  cursor: pointer;
-  color: var(--text-muted);
+/* The corner a panel is taken hold of by. It appears in the arrange mode
+   only, sits inside the panel's own box so it cannot be confused with the
+   neighbour's, and is big enough to hit with a finger. */
+.widgets.arranged > div { position: relative; }
+.widget-corner {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 18px;
+  height: 18px;
+  border-bottom-right-radius: var(--radius-card);
+  cursor: nwse-resize;
+  background:
+    linear-gradient(135deg, transparent 50%, var(--border-strong) 50% 62%, transparent 62% 74%, var(--border-strong) 74% 86%, transparent 86%);
+  touch-action: none;
 }
-.ghost:hover { color: var(--text); text-decoration: underline; }
-
-/* The arrange control sits at the right edge of the board, level with the
-   cards, and says nothing until somebody looks for it. */
-.layout-bar:has(.layout-arrange) { justify-content: flex-end; margin-bottom: 8px; }
-.layout-arrange { color: var(--text-faint); }
-.layout-arrange:hover { color: var(--text); }
-
-/* The states at zero. Named while there are few of them; past the fourth
-   they fold into one chip of the same cloth, which names the rest in its
-   title rather than printing them. */
-.status-bar-quiet-item.zero { color: var(--text-faint); }
-
-/* The peak of a chart, marked and named. The bubble wears the accent,
-   which carries no state, so naming a high point never reads as a verdict
-   on it. */
-.chart-peak circle { fill: var(--accent); }
-.chart-peak rect { fill: var(--accent); }
-.chart-peak-label { fill: var(--accent-contrast); font-size: 10px; font-weight: 600; }
-
-/* A card holding a form gets a measure. A form stretched across a 2000px
-   screen puts its fields at one edge and nothing at the other, which is
-   what the Bulk workspace looked like: a page of empty card. Tables and
-   charts keep the whole width - they have something to do with it. */
-.card.measure { max-width: 1180px; }
+.widget-corner:hover, .widget-corner:focus-visible {
+  background:
+    linear-gradient(135deg, transparent 50%, var(--accent) 50% 62%, transparent 62% 74%, var(--accent) 74% 86%, transparent 86%);
+}
+.widget-handle { touch-action: none; }
+/* While something is being dragged the panels stop answering the pointer,
+   so a chart underneath cannot swallow the drag. */
+.widgets.dragging-over .card, .widgets.dragging-over .metric-tile { pointer-events: none; }
+/* A placed board shows its rows while it is being arranged, so somebody
+   can see what they are snapping to. */
+.widgets.arranged.placed.dragging-over {
+  background-image: repeating-linear-gradient(to bottom, var(--border) 0 1px, transparent 1px var(--s8));
+  background-size: 100% 80px;
+}

@@ -8,7 +8,7 @@ import { Board } from "./board";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { boardToDraw, heightStep, widthStep, type BoardEntry } from "./board";
+import { boardToDraw, heightStep, isPlaced, placeAll, widthStep, type BoardEntry } from "./board";
 
 vi.mock("../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/api")>();
@@ -290,5 +290,39 @@ describe("a panel with nothing to draw", () => {
       }));
       expect(boardToDraw(stored, catalogue, known)).toEqual([{ key: "first", width: 6 }]);
     }
+  });
+});
+
+/* Taking hold of a panel: the grid, the corner and what a first grab does
+   to an arrangement that was only ever ordered. */
+describe("placing a panel on the grid", () => {
+  it("turns an order into places that look the same", () => {
+    // Three panels of eight, four and twelve columns: the first two share
+    // a row, the third takes the next one.
+    const placed = placeAll([
+      { key: "a", width: 8, height: 3 },
+      { key: "b", width: 4, height: 2 },
+      { key: "c", width: 12, height: 2 },
+    ]);
+    expect(placed.map((one) => [one.x, one.y])).toEqual([[0, 0], [8, 0], [0, 3]]);
+  });
+
+  it("leaves an arrangement that already has places alone", () => {
+    const widgets = [{ key: "a", width: 6, height: 2, x: 6, y: 4 }];
+    expect(isPlaced(widgets)).toBe(true);
+    expect(placeAll(widgets)).toEqual(widgets);
+  });
+
+  it("knows an ordered arrangement has no places", () => {
+    expect(isPlaced([{ key: "a", width: 6 }])).toBe(false);
+  });
+
+  it("starts a new row when the one it is on is full", () => {
+    const placed = placeAll([
+      { key: "a", width: 6 },
+      { key: "b", width: 6 },
+      { key: "c", width: 6 },
+    ]);
+    expect(placed.map((one) => one.y)).toEqual([0, 0, 2]);
   });
 });
