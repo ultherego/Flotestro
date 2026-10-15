@@ -9,6 +9,7 @@ import { toInstant } from "../lib/format";
 import { Actions, Card, EmptyState, Field, FieldGrid, StatGrid, Stat, Toolbar, Pager} from "../components/layout";
 import { Breakdown } from "../components/widgets";
 import { useTeams } from "./Teams";
+import { DataTable } from "../components/table";
 import { useT } from "../i18n";
 
 /** A scope part that names no site or environment: an asterisk, as the server keeps it, or nothing. */
@@ -395,32 +396,46 @@ export function Mappings() {
           flush
         >
           {list.data?.items.length ? (
-            <table>
-              <thead>
-                <tr><th scope="col">{t("Group")}</th><th scope="col">{t("Role")}</th><th scope="col">{t("Scope")}</th><th scope="col">{t("Added by")}</th><th scope="col">{t("When")}</th><th scope="col" /></tr>
-              </thead>
-              <tbody>
-                {list.data.items.map((mapping) => (
-                  <tr key={mapping.id}>
-                    <td className="mono">{mapping.group_name}</td>
-                    <td>{mapping.role}</td>
-                    <td className="source"><ScopeText scope={{
-                      site: mapping.site, environment: mapping.environment,
-                      owners: mapping.owners, tags: mapping.tags,
-                    }} /></td>
-                    <td className="source">{mapping.created_by}</td>
-                    <td><Time value={mapping.created_at} /></td>
-                    <td className="actions-cell">
-                      <div className="row-actions">
-                        <button className="danger" onClick={() => { setForm(false); setRemoving(mapping); }}>
-                          {t("Remove")}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <DataTable
+              rows={list.data.items}
+              rowKey={(mapping) => mapping.id}
+              columns={[
+                {
+                  key: "group", head: t("Group"), rowHeader: true,
+                  cell: (mapping) => <span className="mono">{mapping.group_name}</span>,
+                },
+                { key: "role", head: t("Role"), cell: (mapping) => mapping.role },
+                {
+                  key: "scope", head: t("Scope"),
+                  cell: (mapping) => (
+                    <span className="source">
+                      <ScopeText scope={{
+                        site: mapping.site, environment: mapping.environment,
+                        owners: mapping.owners, tags: mapping.tags,
+                      }} />
+                    </span>
+                  ),
+                },
+                {
+                  key: "by", head: t("Added by"), wideOnly: true,
+                  cell: (mapping) => <span className="source">{mapping.created_by}</span>,
+                },
+                {
+                  key: "when", head: t("When"), wideOnly: true,
+                  cell: (mapping) => <Time value={mapping.created_at} />,
+                },
+                {
+                  key: "actions", actions: true,
+                  cell: (mapping) => (
+                    <div className="row-actions">
+                      <button className="danger" onClick={() => { setForm(false); setRemoving(mapping); }}>
+                        {t("Remove")}
+                      </button>
+                    </div>
+                  ),
+                },
+              ]}
+            />
           ) : (
             <EmptyState action={!form && <button onClick={() => setForm(true)}>{t("Add mapping")}</button>}>
               {t("No mappings. Without them nobody gets a role from the identity provider.")}
@@ -1384,41 +1399,42 @@ export function Roles() {
               {t("No role of this installation's own. The product's six are described below; define one when none of them is the job somebody actually does.")}
             </EmptyState>
           ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">{t("Role")}</th>
-                  <th scope="col">{t("What it is for")}</th>
-                  <th scope="col">{t("Permissions")}</th>
-                  <th scope="col">{t("In use")}</th>
-                  <th scope="col">{t("Defined by")}</th>
-                  <th scope="col" />
-                </tr>
-              </thead>
-              <tbody>
-                {own.map((role) => (
-                  <tr key={role.role}>
-                    <td className="mono">{role.role}</td>
-                    <td className="source">{role.description || "—"}</td>
-                    <td className="num">{role.permissions.length}</td>
-                    <td>
-                      <RoleUsage role={role} />
-                    </td>
-                    <td className="source">{role.created_by || "—"}</td>
-                    <td className="actions-cell">
-                      <div className="row-actions">
-                        <button className="secondary" onClick={() => { setRemoving(null); setEditing(role); }}>
-                          {t("Edit")}
-                        </button>
-                        <button className="danger" onClick={() => { setEditing(null); setRemoving(role); }}>
-                          {t("Remove")}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <DataTable
+              rows={own}
+              rowKey={(role) => role.role}
+              columns={[
+                {
+                  key: "role", head: t("Role"), rowHeader: true,
+                  cell: (role) => <span className="mono">{role.role}</span>,
+                },
+                {
+                  key: "what", head: t("What it is for"), wideOnly: true,
+                  cell: (role) => <span className="source">{role.description || "—"}</span>,
+                },
+                {
+                  key: "permissions", head: t("Permissions"), numeric: true,
+                  cell: (role) => role.permissions.length,
+                },
+                { key: "use", head: t("In use"), cell: (role) => <RoleUsage role={role} /> },
+                {
+                  key: "by", head: t("Defined by"), wideOnly: true,
+                  cell: (role) => <span className="source">{role.created_by || "—"}</span>,
+                },
+                {
+                  key: "actions", actions: true,
+                  cell: (role) => (
+                    <div className="row-actions">
+                      <button className="secondary" onClick={() => { setRemoving(null); setEditing(role); }}>
+                        {t("Edit")}
+                      </button>
+                      <button className="danger" onClick={() => { setEditing(null); setRemoving(role); }}>
+                        {t("Remove")}
+                      </button>
+                    </div>
+                  ),
+                },
+              ]}
+            />
           )}
         </Card>
 

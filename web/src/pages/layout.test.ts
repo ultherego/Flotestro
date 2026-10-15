@@ -102,6 +102,65 @@ function walk(node: ts.Node, stack: ts.Node[], visit: (node: ts.Node, stack: ts.
   ts.forEachChild(node, (child) => walk(child, next, visit));
 }
 
+/**
+ * The screens that still write a table of their own.
+ *
+ * Forty-five of them did on 15.10, with 283 header cells typed out one at a
+ * time - the same object spelled forty-five ways, which is what the owner was
+ * looking at when he said the tables keep to no norm. `DataTable` is that
+ * object; this list is what has not moved onto it yet.
+ *
+ * It may only shrink. A screen that moves must leave it, and a new screen may
+ * not enter it, so the panel cannot grow a forty-sixth spelling while the
+ * forty-five are being worked through.
+ */
+const WRITE_THEIR_OWN_TABLE = [
+  "Access.tsx",
+  "AddHost.tsx",
+  "Audit.tsx",
+  "Backups.tsx",
+  "Budgets.tsx",
+  "Bulk.tsx",
+  "Campaign.tsx",
+  "Campaigns.tsx",
+  "CertificateAuthority.tsx",
+  "Certificates.tsx",
+  "Dashboard.tsx",
+  "Directory.tsx",
+  "Groups.tsx",
+  "Hosts.tsx",
+  "HostsMetadata.tsx",
+  "Job.tsx",
+  "Jobs.tsx",
+  "Monitoring.tsx",
+  "Notifications.tsx",
+  "Policies.tsx",
+  "Policy.tsx",
+  "Profile.tsx",
+  "Readiness.tsx",
+  "Reads.tsx",
+  "Relays.tsx",
+  "Reports.tsx",
+  "Schedules.tsx",
+  "Secret.tsx",
+  "Secrets.tsx",
+  "Security.tsx",
+  "Status.tsx",
+  "Support.tsx",
+  "Tags.tsx",
+  "Teams.tsx",
+  "Unresolved.tsx",
+  "Vulnerabilities.tsx",
+  "Vulnerability.tsx",
+  "directory/Health.tsx",
+  "directory/HostGroups.tsx",
+  "directory/Hosts.tsx",
+  "directory/Services.tsx",
+  "directory/SshKeys.tsx",
+  "directory/Users.tsx",
+  "host/shared.tsx",
+];
+
 describe("the shape of a screen", () => {
   const pages = pageSources(PAGES);
 
@@ -121,6 +180,22 @@ describe("the shape of a screen", () => {
     const stylesheet = readFileSync(join(dirname(PAGES), "styles.css"), "utf8");
     expect(stylesheet).toMatch(/\.card-body:not\(\.flush\) > table/);
     expect(stylesheet).toMatch(/\.card-body:not\(\.flush\) > \* > table/);
+  });
+
+  it("draws its tables with the panel's own table, or is on the list of those that do not yet", () => {
+    const writing: string[] = [];
+    for (const path of pages) {
+      const source = parse(path);
+      let found = false;
+      walk(source, [], (node) => { if (tagOf(node) === "table") found = true; });
+      if (found) writing.push(path.slice(PAGES.length + 1));
+    }
+    const notListed = writing.filter((one) => !WRITE_THEIR_OWN_TABLE.includes(one));
+    expect(notListed, "a new screen writing its own table instead of using DataTable").toEqual([]);
+    // And the list may only shrink: a screen that has moved to DataTable has
+    // to leave it, or the list stops meaning anything.
+    const moved = WRITE_THEIR_OWN_TABLE.filter((one) => !writing.includes(one));
+    expect(moved, "these no longer write their own table and belong off the list").toEqual([]);
   });
 
   it("never sets a table's own margins from a page", () => {
