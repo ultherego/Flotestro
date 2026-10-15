@@ -24,7 +24,7 @@ function badgedAddresses(): string[] {
 
 /** Every address the navigation lists, read off the application's faces. */
 function navigableAddresses(): string[] {
-  const source = readFileSync(join(HERE, "..", "App.tsx"), "utf8");
+  const source = readFileSync(join(HERE, "..", "lib", "navigation.ts"), "utf8");
   return [...source.matchAll(/\bto: "([^"]+)"/g)].map((match) => match[1]);
 }
 

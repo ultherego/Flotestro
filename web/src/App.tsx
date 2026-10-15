@@ -9,7 +9,9 @@ import { useTheme } from "./lib/theme";
 import { useScale } from "./lib/scale";
 import { isBoolean, useStoredState } from "./lib/storage";
 import { useT } from "./i18n";
-import { Sidebar, type NavFace, type NavGroup } from "./components/Sidebar";
+import { Sidebar } from "./components/Sidebar";
+import { NextPanel } from "./next/Panel";
+import { fleetNavigation, visibility, type NavFace, type NavGroup } from "./lib/navigation";
 import { Topbar, type Trail } from "./components/Topbar";
 import { Logo } from "./components/Logo";
 import { Dashboard } from "./pages/Dashboard";
@@ -141,134 +143,21 @@ export function App() {
       </div>
     );
   }
-  const managesAccess = permissions.has("principal.manage");
-  const seesAudit = permissions.has("audit.read");
-  const seesCampaigns = permissions.has("campaign.read");
-  const seesSecurity = permissions.has("security.read");
-  const seesSecrets = permissions.has("secret.read");
-  const seesCertificates = permissions.has("certificate.read");
-  const seesBackups = permissions.has("backup.read");
-  const seesMonitoring = permissions.has("monitoring.read");
-  const seesNotifications = permissions.has("notification.read");
-  const seesVulnerabilities = permissions.has("vulnerability.read");
-  const addsHosts = permissions.has("host.enroll.create");
-  // The settings screen is read by whoever administers the panel: the
-  // permission of its own, or the one to decide who may do what.
-  const seesSettings = permissions.has("settings.read") || managesAccess;
-  // A support bundle reads the whole panel, so the section shows only for
-  // whoever may ask for one.
-  const seesSupport = permissions.has("support.bundle.read");
-  // The relays are read with the right that reads the installations: the
-  // list is the same one the add-host wizard picks a route from.
-  const seesRelays = permissions.has("host.enroll.read");
-  // The budgets are the reason a job or a campaign stands in the queue, so
-  // they stand with the operations they hold back.
-  const seesBudgets = permissions.has("budget.read");
-  // The declared state stands with the operations: a policy is the third
-  // model of change, next to the job and the campaign.
-  const seesPolicies = permissions.has("policy.read");
+  // The panel being written again lives under /next until it is finished;
+  // the shell below is the one it replaces, and the two share nothing but
+  // the navigation model and the API.
+  if (location.pathname.startsWith("/next")) {
+    return (
+      <ToastProvider>
+        <ModalProvider>
+          <NextPanel />
+        </ModalProvider>
+      </ToastProvider>
+    );
+  }
 
-  // The navigation, grouped by what the operator is doing rather than by
-  // backend module.
-  const groups: NavGroup[] = [
-    {
-      key: "fleet",
-      label: "Fleet",
-      items: [
-        { to: "/dashboard", label: "Dashboard", icon: "dashboard" },
-        // The host list stays lit on a host page, but not on the enrolment
-        // screen, which has an item of its own under the same prefix.
-        { to: "/hosts", label: "Hosts", icon: "hosts", active: (path) => path.startsWith("/hosts") && !path.startsWith("/hosts/new") },
-        ...(addsHosts ? [{ to: "/hosts/new", label: "Add host", icon: "add-host" as const }] : []),
-        // A group is a saved answer to "which hosts"; it lives with the
-        // fleet, because that is what it describes, not with the campaigns
-        // that use it.
-        { to: "/groups", label: "Groups", icon: "groups" },
-        { to: "/tags", label: "Tags", icon: "groups" },
-        // A relay is a piece of the fleet's plumbing rather than a host: it
-        // stands with the fleet, because a silent one is a site cut off.
-        ...(seesRelays ? [{ to: "/relays", label: "Relays", icon: "relays" as const }] : []),
-        { to: "/reports", label: "Reports", icon: "audit" as const },
-      ],
-    },
-    {
-      key: "operations",
-      label: "Operations",
-      items: [
-        { to: "/jobs", label: "Jobs", icon: "jobs" },
-        // What the fleet could not confirm. Beside the jobs because that is
-        // what these are, and before the rest of the operations because an
-        // operator who has unconfirmed changes should read them before
-        // ordering more.
-        { to: "/unresolved", label: "Needs confirmation", icon: "jobs" },
-        // What the fleet cannot be asked to do, and why. It stands at the head
-        // of the operations because it is the question before any of them:
-        // ordering work a host cannot carry out is refused, and this is where
-        // that is read once rather than one refusal at a time.
-        { to: "/readiness", label: "Readiness", icon: "overview" },
-        // A read on a handful of hosts at once: a diagnostic, not a change,
-        // so it stands next to the jobs it is made of rather than with the
-        // campaigns.
-        { to: "/reads", label: "Reads", icon: "reads" },
-        // A campaign is the main mechanism of change, not a shortcut on the
-        // host list: it has its own place in the navigation, next to the
-        // work on a single host.
-        ...(seesCampaigns ? [
-          { to: "/bulk", label: "Bulk Workspace", icon: "bulk" as const },
-          { to: "/campaigns", label: "Campaigns", icon: "campaigns" as const },
-        ] : []),
-        // A policy declares what is to be true and orders campaigns for
-        // the rest, so it stands after the campaigns it orders.
-        // The capacity the jobs and the campaigns draw on: the gauge stands
-        // last in the group, after the work it meters.
-      ],
-    },
-    {
-      key: "security",
-      label: "Security",
-      items: [
-        ...(seesSecurity ? [{ to: "/security", label: "Security", icon: "security" as const }] : []),
-        ...(seesVulnerabilities ? [{ to: "/vulnerabilities", label: "Vulnerabilities", icon: "vulnerabilities" as const }] : []),
-        ...(seesCertificates ? [{ to: "/certificates", label: "Certificates", icon: "certificates" as const }] : []),
-        ...(seesSecrets ? [{ to: "/secrets", label: "Secrets", icon: "secrets" as const }] : []),
-      ],
-    },
-    {
-      key: "continuity",
-      label: "Continuity",
-      items: [
-        ...(seesBackups ? [{ to: "/backups", label: "Backups", icon: "backups" as const }] : []),
-        ...(seesMonitoring ? [{ to: "/monitoring", label: "Monitoring", icon: "monitoring" as const }] : []),
-      ],
-    },
-    {
-      key: "identity",
-      label: "Identity",
-      items: [
-        ...(capabilities.directory ? [{ to: "/directory", label: "Directory", icon: "directory" as const }] : []),
-        // Access management is seen only by whoever can change anything in
-        // it; for the rest the item would lead to a bare refusal.
-        // A team is a boundary of authority rather than a label, so it
-        // stands with the access rules and not with the groups and the tags,
-        // which only choose hosts inside what somebody may touch.
-        { to: "/teams", label: "Teams", icon: "accounts" as const },
-      ],
-    },
-    {
-      key: "audit",
-      items: seesAudit ? [{ to: "/audit", label: "Audit", icon: "audit" as const }] : [],
-    },
-    // The settings stand last: they describe the panel itself rather than
-    // the fleet, and they are read rarely.
-    {
-      key: "settings",
-      items: seesSettings
-        ? [{ to: "/status", label: "Status", icon: "settings" as const },
-           { to: "/settings", label: "Settings", icon: "settings" as const },
-           ...(seesSupport ? [{ to: "/support", label: "Support bundle", icon: "logs" as const }] : [])]
-        : [],
-    },
-  ];
+  const v = visibility(permissions, capabilities);
+  const groups = fleetNavigation(permissions, capabilities);
 
   const face: NavFace = onHost?.face ?? { groups };
   const trail: Trail = { ...sectionOf(groups, location.pathname), host: onHost?.host, module: onHost?.module };
@@ -320,20 +209,20 @@ export function App() {
               <Route path="/hosts/new" element={<AddHost />} />
               <Route path="/groups" element={<Groups />} />
               <Route path="/groups/:id" element={<Groups />} />
-              {seesRelays && <Route path="/relays" element={<Relays />} />}
-              {seesRelays && <Route path="/relays/:id" element={<RelayPage />} />}
+              {v.seesRelays && <Route path="/relays" element={<Relays />} />}
+              {v.seesRelays && <Route path="/relays/:id" element={<RelayPage />} />}
               <Route path="/readiness" element={<Readiness />} />
               <Route path="/security" element={<FleetSecurity />} />
               {/* The six screens of an installation's configuration live in
                   the settings area since 15.10. Their old addresses are kept
                   and send the reader there: they are in bookmarks, in the
                   manual and in the panel's own links. */}
-              {seesPolicies && <Route path="/policies" element={<Navigate to="/settings?tab=policies" replace />} />}
-              {seesPolicies && <Route path="/policies/:id" element={<PolicyPage />} />}
+              {v.seesPolicies && <Route path="/policies" element={<Navigate to="/settings?tab=policies" replace />} />}
+              {v.seesPolicies && <Route path="/policies/:id" element={<PolicyPage />} />}
               <Route path="/certificates" element={<FleetCertificates />} />
               <Route path="/backups" element={<FleetBackups />} />
               <Route path="/monitoring" element={<FleetMonitoring />} />
-              {seesNotifications && <Route path="/notifications" element={<Navigate to="/settings?tab=channels" replace />} />}
+              {v.seesNotifications && <Route path="/notifications" element={<Navigate to="/settings?tab=channels" replace />} />}
               <Route path="/vulnerabilities" element={<FleetVulnerabilities />} />
               <Route path="/vulnerabilities/:cve" element={<Vulnerability />} />
               <Route path="/secrets" element={<Secrets />} />
@@ -377,20 +266,20 @@ export function App() {
               <Route path="/unresolved" element={<Unresolved />} />
               <Route path="/reads" element={<Reads />} />
               <Route path="/reads/:id" element={<Reads />} />
-              {seesCampaigns && <Route path="/bulk" element={<Bulk />} />}
-              {seesCampaigns && <Route path="/campaigns" element={<Campaigns />} />}
-              {seesCampaigns && <Route path="/campaigns/schedules" element={<CampaignSchedules />} />}
-              {seesCampaigns && <Route path="/campaigns/:id" element={<Campaign />} />}
-              {seesBudgets && <Route path="/budgets" element={<Navigate to="/settings?tab=budgets" replace />} />}
+              {v.seesCampaigns && <Route path="/bulk" element={<Bulk />} />}
+              {v.seesCampaigns && <Route path="/campaigns" element={<Campaigns />} />}
+              {v.seesCampaigns && <Route path="/campaigns/schedules" element={<CampaignSchedules />} />}
+              {v.seesCampaigns && <Route path="/campaigns/:id" element={<Campaign />} />}
+              {v.seesBudgets && <Route path="/budgets" element={<Navigate to="/settings?tab=budgets" replace />} />}
               {capabilities.directory && <Route path="/directory" element={<Directory />} />}
               {/* The access screen became four tabs of the settings area on
                   15.10, where the roles and the mappings had already gone.
                   The address answers and leads to the right one. */}
-              {managesAccess && <Route path="/access" element={<AccessRedirect />} />}
-              {seesAudit && <Route path="/audit" element={<Audit />} />}
-              {seesSettings && <Route path="/settings" element={<Settings />} />}
-              {seesSupport && <Route path="/support" element={<Support />} />}
-              {seesSettings && <Route path="/status" element={<Status />} />}
+              {v.managesAccess && <Route path="/access" element={<AccessRedirect />} />}
+              {v.seesAudit && <Route path="/audit" element={<Audit />} />}
+              {v.seesSettings && <Route path="/settings" element={<Settings />} />}
+              {v.seesSupport && <Route path="/support" element={<Support />} />}
+              {v.seesSettings && <Route path="/status" element={<Status />} />}
               <Route path="*" element={<div className="ui-empty">{t("Page not found.")}</div>} />
             </Routes>
             </div>

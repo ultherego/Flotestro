@@ -3,37 +3,12 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import { useT } from "../i18n";
 import { useStoredState } from "../lib/storage";
-import { Icon, type IconName } from "./icons";
+import { Icon } from "./icons";
 import { LogoMark } from "./Logo";
 import { toneClass } from "../ui/kit";
 
-export type NavItem = {
-  to: string;
-  /** The English label; it goes through the translation catalogue. */
-  label: string;
-  icon: IconName;
-  /** Overrides the router's prefix match where two items share a prefix. */
-  active?: (pathname: string) => boolean;
-  /** The reason the item has no backing here; it stays listed, dimmed. */
-  unavailable?: string;
-};
-
-export type NavGroup = {
-  /** The storage key of the fold state; it must not change between versions. */
-  key: string;
-  /** The English heading; a group without one is a single top-level item. */
-  label?: string;
-  items: NavItem[];
-};
-
-/**
- * The navigation has two faces, never both at once: the fleet, and one host.
- */
-export type NavFace = {
-  groups: NavGroup[];
-  /** Set on a host page: the address of the fleet view the modules replace. */
-  back?: { to: string; label: string };
-};
+export type { NavItem, NavGroup, NavFace } from "../lib/navigation";
+import type { NavFace } from "../lib/navigation";
 
 const GROUPS_KEY = "flotestro.sidebar.groups";
 

@@ -205,16 +205,21 @@ describe("the class names the panel's markup uses", () => {
    * three vocabularies for one job - card-, hm-section- and ui-panel- for
    * the same box - and a rule outside the kit's namespace is how a fourth
    * starts. The reset and the tokens style elements and nothing else, so
-   * every class selector in the stylesheets is the kit's.
+   * every class selector in the stylesheets is a kit's.
+   *
+   * There are two kits while the panel is written again: `ui-` is the one
+   * being replaced and `fl-` is the one under /next. The pair is the whole
+   * of the transition - when the last screen has moved, `ui-` and its
+   * stylesheet go, and this is left naming one namespace.
    */
-  it("are written in the kit's namespace and no other", () => {
+  it("are written in a kit's namespace and no other", () => {
     const outside = new Set<string>();
     for (const path of sources(SRC, /\.css$/)) {
       for (const line of readFileSync(path, "utf8").split("\n")) {
         const [head, brace] = [line.split("{")[0], line.includes("{")];
         if (!brace) continue;
         for (const found of head.matchAll(/\.([a-zA-Z][\w-]*)/g)) {
-          if (!found[1].startsWith("ui-")) outside.add(found[1]);
+          if (!/^(ui|fl)-/.test(found[1])) outside.add(found[1]);
         }
       }
     }

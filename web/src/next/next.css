@@ -1,0 +1,823 @@
+/* =====================================================================
+   Flotestro — the panel, written again from nothing (16.10).
+
+   The old appearance is not ported here. Every screen is composed anew
+   from the pieces below, and the pieces are the whole of what the panel
+   is allowed to draw.
+
+   The namespace is fl-, and everything is scoped to .fl-app: the panel
+   this replaces still runs beside it until the last screen is written,
+   and its element rules - button, input, table - must not reach in here.
+
+   What it is built to, in order of what decides a layout:
+
+     1. One accent, which carries no state. Four state colours, which
+        carry nothing else.
+     2. Three surfaces: the page, the card, the raised. A card has an
+        edge, so it reads as an object on the page rather than a patch
+        of lighter paint.
+     3. One spacing scale, 4px, named --x1..--x8. No other number.
+     4. A container fits its content; no element is given a height; every
+        flex and grid child carries min-width: 0.
+     5. Hierarchy by weight and air, never by a louder colour.
+   ===================================================================== */
+
+.fl-app {
+  /* Surfaces. The page is nearly black; the card is a clear step above
+     it and carries a hairline; the raised is for what sits on a card. */
+  --fl-page: #0b0c11;
+  --fl-card: #14161d;
+  --fl-raised: #1b1e27;
+  --fl-hover: #212532;
+  --fl-line: #242837;
+  --fl-line-soft: #1c2029;
+  --fl-rail: #0e1016;
+
+  --fl-text: #e4e7ef;
+  --fl-muted: #9aa2b6;
+  --fl-faint: #6b7489;
+
+  /* The accent is the product's, whichever theme is on. */
+  --fl-accent: var(--accent);
+  --fl-accent-text: var(--accent-text);
+  --fl-accent-contrast: var(--accent-contrast);
+  --fl-accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+
+  --fl-ok: var(--ok);
+  --fl-warn: var(--warn);
+  --fl-error: var(--error);
+  --fl-unknown: var(--unknown);
+  --fl-blue: var(--blue);
+
+  --x1: 4px;
+  --x2: 8px;
+  --x3: 12px;
+  --x4: 16px;
+  --x5: 20px;
+  --x6: 24px;
+  --x7: 32px;
+  --x8: 48px;
+
+  --fl-r-sm: 8px;
+  --fl-r: 12px;
+  --fl-r-lg: 16px;
+  --fl-pill: 999px;
+
+  --fl-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.22);
+  --fl-shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.45);
+
+  --fl-font: var(--font);
+  --fl-mono: var(--font-mono);
+
+  --fl-rail-width: 248px;
+  --fl-bar-height: 60px;
+  --fl-gutter: var(--x5);
+  --fl-pad: var(--x7);
+
+  min-height: 100vh;
+  background: var(--fl-page);
+  color: var(--fl-text);
+  font-family: var(--fl-font);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+/* The light theme is the same system with the surfaces turned over. */
+[data-theme="latte"] .fl-app {
+  --fl-page: #f2f4f8;
+  --fl-card: #ffffff;
+  --fl-raised: #eef1f6;
+  --fl-hover: #e4e9f1;
+  --fl-line: #dfe3ec;
+  --fl-line-soft: #e9ecf3;
+  --fl-rail: #ffffff;
+  --fl-text: #1f2430;
+  --fl-muted: #5a6274;
+  --fl-faint: #858d9e;
+  --fl-shadow: 0 1px 2px rgba(31, 36, 48, 0.06), 0 8px 24px rgba(31, 36, 48, 0.08);
+  --fl-shadow-lg: 0 24px 60px rgba(31, 36, 48, 0.18);
+}
+
+.fl-app *, .fl-app *::before, .fl-app *::after { box-sizing: border-box; }
+.fl-app h1, .fl-app h2, .fl-app h3, .fl-app h4, .fl-app p,
+.fl-app dl, .fl-app dd, .fl-app figure { margin: 0; }
+.fl-app ul, .fl-app ol { margin: 0; padding: 0; list-style: none; }
+.fl-app a { color: var(--fl-accent-text); text-decoration: none; }
+.fl-app a:hover { text-decoration: underline; }
+.fl-app code, .fl-app .fl-mono { font-family: var(--fl-mono); font-size: 0.92em; overflow-wrap: anywhere; }
+.fl-app :focus-visible { outline: 2px solid var(--fl-accent); outline-offset: 2px; border-radius: var(--fl-r-sm); }
+.fl-app svg { display: block; }
+
+/* --- Tone --------------------------------------------------------------
+   A state names two properties and nothing else draws itself a colour. */
+.fl-ok { --fl-tone: var(--fl-ok); --fl-tone-text: var(--ok-text); }
+.fl-warn { --fl-tone: var(--fl-warn); --fl-tone-text: var(--warn-text); }
+.fl-error { --fl-tone: var(--fl-error); --fl-tone-text: var(--error-text); }
+.fl-info { --fl-tone: var(--fl-blue); --fl-tone-text: var(--fl-blue); }
+.fl-unknown { --fl-tone: var(--fl-unknown); --fl-tone-text: var(--unknown-text); }
+.fl-neutral { --fl-tone: var(--fl-faint); --fl-tone-text: var(--fl-muted); }
+.fl-accent { --fl-tone: var(--fl-accent); --fl-tone-text: var(--fl-accent-text); }
+
+/* --- The shell ---------------------------------------------------------
+   A rail down the left, a bar across the top, the page under it. */
+
+.fl-shell {
+  display: grid;
+  grid-template-columns: var(--fl-rail-width) minmax(0, 1fr);
+  grid-template-rows: var(--fl-bar-height) minmax(0, 1fr);
+  min-height: 100vh;
+}
+.fl-shell.fl-folded { --fl-rail-width: 68px; }
+
+.fl-skip {
+  position: absolute;
+  left: -9999px;
+  z-index: 100;
+  padding: var(--x2) var(--x4);
+  background: var(--fl-accent);
+  color: var(--fl-accent-contrast);
+  border-radius: var(--fl-r-sm);
+}
+.fl-skip:focus { left: var(--x4); top: var(--x2); }
+
+.fl-rail {
+  grid-column: 1;
+  grid-row: 1 / 3;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: var(--fl-rail);
+  border-right: 1px solid var(--fl-line);
+  overflow: hidden;
+}
+.fl-brand {
+  flex: none;
+  height: var(--fl-bar-height);
+  display: flex;
+  align-items: center;
+  gap: var(--x3);
+  padding: 0 var(--x5);
+  color: var(--fl-text);
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.fl-brand:hover { text-decoration: none; }
+.fl-brand-mark {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--fl-r-sm);
+  background: var(--fl-accent-soft);
+  color: var(--fl-accent-text);
+}
+.fl-brand-name { white-space: nowrap; overflow: hidden; }
+
+.fl-nav {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: var(--x3) var(--x3) var(--x7);
+  display: flex;
+  flex-direction: column;
+  gap: var(--x1);
+}
+.fl-nav::-webkit-scrollbar { width: 8px; }
+.fl-nav::-webkit-scrollbar-thumb { background: var(--fl-line); border-radius: var(--fl-pill); }
+
+.fl-navgroup + .fl-navgroup { margin-top: var(--x5); }
+.fl-navgroup-label {
+  display: block;
+  padding: 0 var(--x3) var(--x2);
+  color: var(--fl-faint);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.fl-navitem {
+  display: flex;
+  align-items: center;
+  gap: var(--x3);
+  height: 36px;
+  padding: 0 var(--x3);
+  border-radius: var(--fl-r-sm);
+  color: var(--fl-muted);
+  font-size: 13.5px;
+  font-weight: 500;
+  min-width: 0;
+  position: relative;
+}
+.fl-navitem:hover { background: var(--fl-hover); color: var(--fl-text); text-decoration: none; }
+.fl-navitem svg { flex: none; width: 18px; height: 18px; opacity: 0.85; }
+.fl-navitem-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-navitem.fl-on {
+  background: var(--fl-accent-soft);
+  color: var(--fl-accent-text);
+  font-weight: 600;
+}
+.fl-navitem.fl-on svg { opacity: 1; }
+.fl-navitem.fl-on::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--fl-accent);
+}
+.fl-navitem-count {
+  flex: none;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--fl-pill);
+  background: var(--fl-raised);
+  color: var(--fl-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.fl-navitem.fl-on .fl-navitem-count { background: color-mix(in srgb, var(--fl-accent) 24%, transparent); color: var(--fl-accent-text); }
+.fl-shell.fl-folded .fl-navitem-label,
+.fl-shell.fl-folded .fl-navitem-count,
+.fl-shell.fl-folded .fl-navgroup-label,
+.fl-shell.fl-folded .fl-brand-name { display: none; }
+.fl-shell.fl-folded .fl-navitem { justify-content: center; padding: 0; }
+.fl-shell.fl-folded .fl-navgroup + .fl-navgroup { margin-top: var(--x3); border-top: 1px solid var(--fl-line); padding-top: var(--x3); }
+
+.fl-bar {
+  grid-column: 2;
+  grid-row: 1;
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--x3);
+  padding: 0 var(--fl-pad);
+  background: color-mix(in srgb, var(--fl-page) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--fl-line);
+}
+.fl-iconbtn {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--fl-r-sm);
+  background: none;
+  color: var(--fl-muted);
+  cursor: pointer;
+}
+.fl-iconbtn:hover { background: var(--fl-hover); color: var(--fl-text); }
+.fl-crumbs { display: flex; align-items: center; gap: var(--x2); min-width: 0; font-size: 13px; color: var(--fl-muted); }
+.fl-crumbs svg { width: 14px; height: 14px; color: var(--fl-faint); }
+.fl-crumbs-here { color: var(--fl-text); font-weight: 600; }
+.fl-bar-spacer { flex: 1 1 auto; }
+
+.fl-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: min(360px, 34vw);
+  height: 34px;
+}
+.fl-search svg { position: absolute; left: 10px; width: 15px; height: 15px; color: var(--fl-faint); pointer-events: none; }
+.fl-search input {
+  width: 100%;
+  height: 34px;
+  padding: 0 60px 0 32px;
+  border: 1px solid var(--fl-line);
+  border-radius: var(--fl-r-sm);
+  background: var(--fl-card);
+  color: var(--fl-text);
+  font: inherit;
+  font-size: 13px;
+}
+.fl-search input::placeholder { color: var(--fl-faint); }
+.fl-search input:hover { border-color: var(--fl-faint); }
+.fl-search-key {
+  position: absolute;
+  right: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--fl-line);
+  border-radius: 5px;
+  background: var(--fl-raised);
+  color: var(--fl-faint);
+  font-family: var(--fl-mono);
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.fl-user {
+  display: flex;
+  align-items: center;
+  gap: var(--x2);
+  height: 34px;
+  padding: 0 var(--x2) 0 var(--x1);
+  border: 1px solid transparent;
+  border-radius: var(--fl-pill);
+  background: none;
+  color: var(--fl-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  max-width: 220px;
+  min-width: 0;
+}
+.fl-user:hover { background: var(--fl-hover); }
+.fl-avatar {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--fl-accent);
+  color: var(--fl-accent-contrast);
+  font-size: 11px;
+  font-weight: 700;
+}
+.fl-user-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.fl-main { grid-column: 2; grid-row: 2; min-width: 0; padding: var(--x6) var(--fl-pad) var(--x8); }
+.fl-rail-backdrop { position: fixed; inset: 0; z-index: 19; background: rgba(0, 0, 0, 0.55); }
+
+/* --- The head of a page ------------------------------------------------ */
+
+.fl-head { display: flex; align-items: flex-start; gap: var(--x5); margin-bottom: var(--x6); }
+.fl-head-text { flex: 1 1 auto; min-width: 0; }
+.fl-head-title { font-size: 23px; font-weight: 680; letter-spacing: -0.025em; line-height: 1.15; }
+.fl-head-lead { margin-top: 5px; color: var(--fl-muted); font-size: 13px; max-width: 86ch; }
+.fl-head-actions { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--x2); }
+
+/* --- The grid ----------------------------------------------------------- */
+
+.fl-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--fl-gutter); align-items: start; }
+.fl-grid > * { min-width: 0; }
+.fl-c1 { grid-column: span 1; } .fl-c2 { grid-column: span 2; }
+.fl-c3 { grid-column: span 3; } .fl-c4 { grid-column: span 4; }
+.fl-c5 { grid-column: span 5; } .fl-c6 { grid-column: span 6; }
+.fl-c7 { grid-column: span 7; } .fl-c8 { grid-column: span 8; }
+.fl-c9 { grid-column: span 9; } .fl-c10 { grid-column: span 10; }
+.fl-c11 { grid-column: span 11; } .fl-c12 { grid-column: span 12; }
+.fl-stack { display: grid; gap: var(--x3); min-width: 0; }
+.fl-stack-l { display: grid; gap: var(--fl-gutter); min-width: 0; }
+.fl-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--x2); min-width: 0; }
+
+/* --- The card ----------------------------------------------------------- */
+
+.fl-card {
+  min-width: 0;
+  background: var(--fl-card);
+  border: 1px solid var(--fl-line);
+  border-radius: var(--fl-r-lg);
+  box-shadow: var(--fl-shadow);
+  container: flcard / inline-size;
+}
+.fl-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--x2) var(--x4);
+  flex-wrap: wrap;
+  padding: var(--x4) var(--x5);
+  border-bottom: 1px solid var(--fl-line-soft);
+}
+.fl-card-title { font-size: 13.5px; font-weight: 650; letter-spacing: -0.01em; color: var(--fl-text); }
+.fl-card-note { flex-basis: 100%; color: var(--fl-muted); font-size: 12.5px; max-width: 86ch; }
+.fl-card-tools { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: var(--x2); }
+.fl-card-body { padding: var(--x5); min-width: 0; }
+.fl-card-body.fl-flush { padding: 0; }
+.fl-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--x1) var(--x4);
+  padding: var(--x3) var(--x5);
+  border-top: 1px solid var(--fl-line-soft);
+  color: var(--fl-faint);
+  font-size: 12px;
+}
+
+/* --- Measurements ------------------------------------------------------- */
+
+.fl-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: var(--fl-gutter); }
+.fl-kpi {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--x5);
+  background: var(--fl-card);
+  border: 1px solid var(--fl-line);
+  border-radius: var(--fl-r-lg);
+  box-shadow: var(--fl-shadow);
+  color: var(--fl-text);
+}
+a.fl-kpi:hover { border-color: color-mix(in srgb, var(--fl-accent) 45%, var(--fl-line)); text-decoration: none; }
+.fl-kpi-top { display: flex; align-items: center; justify-content: space-between; gap: var(--x3); }
+.fl-kpi-mark {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--fl-r);
+  background: color-mix(in srgb, var(--fl-tone, var(--fl-accent)) 14%, transparent);
+  color: var(--fl-tone-text, var(--fl-accent-text));
+}
+.fl-kpi-mark svg { width: 18px; height: 18px; }
+.fl-kpi-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: var(--fl-pill);
+  background: var(--fl-raised);
+  color: var(--fl-muted);
+  font-size: 11.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.fl-kpi-delta.fl-up { background: color-mix(in srgb, var(--fl-ok) 15%, transparent); color: var(--ok-text); }
+.fl-kpi-delta.fl-down { background: color-mix(in srgb, var(--fl-error) 15%, transparent); color: var(--error-text); }
+.fl-kpi-value {
+  margin-top: var(--x4);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: 34px;
+  font-weight: 680;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  color: var(--fl-tone-text, var(--fl-text));
+}
+.fl-kpi-unit { font-size: 15px; font-weight: 600; color: var(--fl-muted); letter-spacing: 0; }
+.fl-kpi-dash { color: var(--unknown-text); }
+.fl-kpi-label { margin-top: 6px; color: var(--fl-muted); font-size: 12.5px; }
+.fl-kpi-note { margin-top: 2px; color: var(--fl-faint); font-size: 11.5px; overflow-wrap: anywhere; }
+/* One filled tile at most, and it wears the accent, which says "start
+   here" and never "this is healthy". */
+.fl-kpi.fl-hero {
+  background: linear-gradient(140deg, var(--fl-accent) 0%, color-mix(in srgb, var(--fl-accent) 55%, var(--lavender)) 100%);
+  border-color: transparent;
+  color: var(--fl-accent-contrast);
+}
+.fl-kpi.fl-hero .fl-kpi-value { color: var(--fl-accent-contrast); }
+.fl-kpi.fl-hero .fl-kpi-mark { background: rgba(0, 0, 0, 0.14); color: var(--fl-accent-contrast); }
+.fl-kpi.fl-hero .fl-kpi-label,
+.fl-kpi.fl-hero .fl-kpi-unit,
+.fl-kpi.fl-hero .fl-kpi-note { color: color-mix(in srgb, var(--fl-accent-contrast) 74%, transparent); }
+
+/* A figure inside a card, where a second box would only add lines. */
+.fl-figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: var(--x4); }
+.fl-fig { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fl-fig-value { font-size: 22px; font-weight: 650; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--fl-tone-text, var(--fl-text)); }
+.fl-fig-label { color: var(--fl-muted); font-size: 12px; }
+
+/* --- Pills, tags, dots -------------------------------------------------- */
+
+.fl-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--fl-pill);
+  background: color-mix(in srgb, var(--fl-tone, var(--fl-faint)) 16%, transparent);
+  color: var(--fl-tone-text, var(--fl-muted));
+  font-size: 11.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.fl-pill::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--fl-tone, var(--fl-faint));
+}
+.fl-pill.fl-nodot::before { display: none; }
+.fl-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--x1);
+  padding: 1px 8px;
+  border-radius: var(--fl-r-sm);
+  background: var(--fl-raised);
+  color: var(--fl-muted);
+  font-size: 11.5px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.fl-tags { display: flex; flex-wrap: wrap; gap: var(--x1); min-width: 0; }
+.fl-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--fl-tone, var(--fl-unknown)); flex: none; }
+
+/* --- Buttons and controls ----------------------------------------------- */
+
+.fl-app button, .fl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--x2);
+  height: 34px;
+  padding: 0 var(--x4);
+  border: 1px solid transparent;
+  border-radius: var(--fl-r-sm);
+  background: var(--fl-accent);
+  color: var(--fl-accent-contrast);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fl-app button:hover, .fl-btn:hover { filter: brightness(1.08); text-decoration: none; }
+.fl-app button:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
+.fl-app button.fl-quiet, .fl-btn.fl-quiet {
+  background: var(--fl-raised);
+  border-color: var(--fl-line);
+  color: var(--fl-text);
+}
+.fl-app button.fl-quiet:hover { background: var(--fl-hover); filter: none; }
+.fl-app button.fl-plain {
+  background: none;
+  border-color: transparent;
+  color: var(--fl-muted);
+  font-weight: 500;
+  padding: 0 var(--x2);
+}
+.fl-app button.fl-plain:hover { background: var(--fl-hover); color: var(--fl-text); filter: none; }
+.fl-app button.fl-word {
+  background: none;
+  border: 0;
+  padding: 0;
+  height: auto;
+  color: var(--fl-accent-text);
+  font-weight: 500;
+}
+.fl-app button.fl-word:hover { background: none; text-decoration: underline; filter: none; }
+.fl-app button.fl-small, .fl-btn.fl-small { height: 28px; padding: 0 var(--x3); font-size: 12.5px; }
+
+.fl-app input, .fl-app select, .fl-app textarea {
+  width: 100%;
+  height: 34px;
+  padding: 0 var(--x3);
+  border: 1px solid var(--fl-line);
+  border-radius: var(--fl-r-sm);
+  background: var(--fl-card);
+  color: var(--fl-text);
+  font: inherit;
+  font-size: 13px;
+}
+.fl-app textarea { height: auto; min-height: 80px; padding: var(--x2) var(--x3); resize: vertical; }
+.fl-app input:hover, .fl-app select:hover { border-color: var(--fl-faint); }
+.fl-app input::placeholder { color: var(--fl-faint); }
+.fl-app input[type="checkbox"], .fl-app input[type="radio"] { width: auto; height: auto; accent-color: var(--fl-accent); }
+.fl-check { display: inline-flex; align-items: center; gap: var(--x2); font-size: 13px; cursor: pointer; }
+
+.fl-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--fl-r-sm); background: var(--fl-raised); }
+.fl-app .fl-seg button {
+  height: 26px;
+  background: none;
+  border: 0;
+  color: var(--fl-muted);
+  font-weight: 550;
+  padding: 0 var(--x3);
+}
+.fl-app .fl-seg button.fl-on { background: var(--fl-card); color: var(--fl-text); box-shadow: var(--fl-shadow); }
+
+/* --- The table ---------------------------------------------------------- */
+
+.fl-tablewrap { overflow-x: auto; min-width: 0; }
+.fl-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.fl-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: var(--x3) var(--x5);
+  background: var(--fl-card);
+  border-bottom: 1px solid var(--fl-line);
+  color: var(--fl-faint);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.fl-table td {
+  padding: var(--x3) var(--x5);
+  border-bottom: 1px solid var(--fl-line-soft);
+  vertical-align: middle;
+  min-width: 0;
+}
+.fl-table tbody tr:last-child td { border-bottom: 0; }
+.fl-table tbody tr:hover td { background: color-mix(in srgb, var(--fl-text) 3%, transparent); }
+.fl-num { text-align: right; font-variant-numeric: tabular-nums; }
+.fl-table th.fl-num { text-align: right; }
+.fl-cell-actions { text-align: right; white-space: nowrap; }
+.fl-cell-actions > * + * { margin-left: var(--x2); }
+.fl-twoline { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.fl-twoline-sub { color: var(--fl-faint); font-family: var(--fl-mono); font-size: 11.5px; overflow-wrap: anywhere; }
+
+/* --- Bars --------------------------------------------------------------- */
+
+.fl-bar-track { display: block; height: 6px; border-radius: var(--fl-pill); background: var(--fl-raised); overflow: hidden; min-width: 48px; }
+.fl-bar-fill { display: block; height: 100%; border-radius: var(--fl-pill); background: var(--fl-tone, var(--fl-accent)); }
+.fl-meter { display: flex; align-items: center; gap: var(--x3); min-width: 0; }
+.fl-meter .fl-bar-track { flex: 1 1 auto; }
+.fl-meter-value { color: var(--fl-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* A label, a bar and a number in three tracks. The bar never runs under
+   the words: that is the fault the whole rebuild started from. */
+.fl-bars { display: grid; gap: var(--x2); min-width: 0; }
+.fl-bars-row {
+  display: grid;
+  grid-template-columns: minmax(84px, max-content) minmax(60px, 1fr) max-content;
+  gap: var(--x3);
+  align-items: center;
+}
+.fl-bars-row dt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fl-muted); font-size: 12.5px; }
+.fl-bars-row dd { min-width: 0; }
+.fl-bars-count { text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--fl-text); }
+
+/* A share of a whole, as one band of segments. */
+.fl-band { display: flex; gap: 2px; border-radius: var(--fl-r); overflow: hidden; min-height: 64px; }
+.fl-band-seg {
+  flex: var(--fl-share, 1) 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: var(--x3) var(--x2);
+  background: color-mix(in srgb, var(--fl-tone, var(--fl-faint)) 85%, black);
+  color: var(--fl-accent-contrast);
+  text-align: center;
+  overflow: hidden;
+}
+.fl-band-value { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.fl-band-label { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.fl-quiet-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--x1) var(--x4); margin-top: var(--x3); }
+.fl-quiet-item { display: inline-flex; align-items: baseline; gap: 5px; color: var(--fl-faint); font-size: 12px; }
+.fl-quiet-item b { color: var(--fl-muted); font-weight: 650; font-variant-numeric: tabular-nums; }
+
+/* --- Facts, notes, empties ---------------------------------------------- */
+
+.fl-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: var(--x4) var(--x6); min-width: 0; }
+.fl-fact { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fl-fact dt { color: var(--fl-faint); font-size: 11.5px; }
+.fl-fact dd { min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+@container flcard (max-width: 420px) { .fl-facts { grid-template-columns: minmax(0, 1fr); } }
+
+.fl-note { color: var(--fl-muted); font-size: 12px; }
+.fl-faint { color: var(--fl-faint); font-size: 12px; }
+.fl-empty { padding: var(--x7) var(--x5); text-align: center; color: var(--fl-faint); font-size: 13px; }
+.fl-empty-actions { margin-top: var(--x4); display: flex; justify-content: center; gap: var(--x2); }
+.fl-problem {
+  display: flex;
+  align-items: center;
+  gap: var(--x3);
+  padding: var(--x3) var(--x4);
+  border: 1px solid color-mix(in srgb, var(--fl-error) 35%, var(--fl-line));
+  border-radius: var(--fl-r);
+  background: color-mix(in srgb, var(--fl-error) 8%, var(--fl-card));
+  color: var(--error-text);
+  font-size: 13px;
+}
+
+/* --- The toolbar of a list ---------------------------------------------- */
+
+.fl-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--x2) var(--x3);
+  padding: var(--x3) var(--x5);
+  border-bottom: 1px solid var(--fl-line-soft);
+  min-width: 0;
+}
+.fl-toolbar-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: var(--x2) var(--x3); }
+.fl-app .fl-toolbar input, .fl-app .fl-toolbar select { width: auto; min-width: 150px; }
+.fl-find { position: relative; display: flex; align-items: center; min-width: 220px; }
+.fl-find svg { position: absolute; left: 10px; width: 15px; height: 15px; color: var(--fl-faint); pointer-events: none; }
+.fl-app .fl-find input { padding-left: 32px; width: 240px; }
+.fl-pager { display: inline-flex; align-items: center; gap: var(--x1); }
+.fl-app .fl-pager button { min-width: 30px; height: 28px; padding: 0 var(--x2); background: var(--fl-raised); border: 1px solid var(--fl-line); color: var(--fl-muted); font-variant-numeric: tabular-nums; }
+.fl-app .fl-pager button.fl-on { background: var(--fl-accent-soft); border-color: transparent; color: var(--fl-accent-text); }
+.fl-app .fl-pager button:disabled { opacity: 0.4; }
+.fl-pager-gap { padding: 0 var(--x1); color: var(--fl-faint); }
+.fl-rows { display: inline-flex; align-items: center; gap: var(--x2); color: var(--fl-muted); font-size: 12px; white-space: nowrap; }
+.fl-app .fl-rows select { width: auto; height: 28px; font-size: 12px; }
+
+/* --- The ladder ---------------------------------------------------------- */
+
+@media (max-width: 1500px) {
+  .fl-c1, .fl-c2 { grid-column: span 3; }
+}
+@media (max-width: 1200px) {
+  .fl-app { --fl-pad: var(--x5); }
+  .fl-c1, .fl-c2, .fl-c3, .fl-c4 { grid-column: span 6; }
+  .fl-c5, .fl-c7, .fl-c8, .fl-c9, .fl-c10, .fl-c11 { grid-column: span 12; }
+}
+@media (max-width: 1024px) {
+  .fl-shell { grid-template-columns: minmax(0, 1fr); }
+  .fl-rail {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 264px;
+    transform: translateX(-100%);
+    transition: transform 0.18s ease;
+  }
+  .fl-rail.fl-open { transform: translateX(0); box-shadow: var(--fl-shadow-lg); }
+  .fl-bar, .fl-main { grid-column: 1; }
+}
+@media (max-width: 900px) {
+  .fl-app { --fl-pad: var(--x4); --fl-gutter: var(--x4); }
+  .fl-grid > * { grid-column: span 12 !important; }
+  .fl-search { width: 100%; }
+  .fl-head { flex-wrap: wrap; }
+  .fl-table th, .fl-table td { padding: var(--x3); }
+  .fl-minor { display: none; }
+}
+@media (max-width: 600px) {
+  .fl-app { --fl-pad: var(--x3); }
+  .fl-head-title { font-size: 20px; }
+  .fl-user-name { display: none; }
+}
+@media (min-width: 1900px) {
+  .fl-app { --fl-pad: var(--x8); }
+  .fl-main { max-width: 2200px; }
+}
+
+/* --- The chart ----------------------------------------------------------
+   Eight bars drawn by hand rather than a library on every screen. The
+   column carries its own reading as a title; the axis is a row of words
+   under the plot, so nothing is written inside the picture. */
+
+.fl-chart { min-width: 0; }
+.fl-chart-plot { width: 100%; display: block; overflow: visible; }
+.fl-chart-rule { stroke: var(--fl-line); stroke-width: 0.5; vector-effect: non-scaling-stroke; }
+.fl-chart-bar { fill: var(--fl-tone, var(--fl-accent)); }
+.fl-chart-axis {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  margin-top: var(--x2);
+  color: var(--fl-faint);
+  font-size: 10.5px;
+  text-align: center;
+}
+.fl-chart-legend { display: flex; flex-wrap: wrap; gap: var(--x2) var(--x4); margin-top: var(--x3); color: var(--fl-muted); font-size: 12px; }
+.fl-chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.fl-chart-key { width: 9px; height: 9px; border-radius: 3px; background: var(--fl-tone, var(--fl-accent)); }
+
+/* --- What needs you ------------------------------------------------------
+   A list, not a field of tiles: the count, the thing, and the way to it,
+   read down in one pass. Thirty tiles of nought was the wall of text the
+   dashboard was thrown out for. */
+
+.fl-needs { display: grid; gap: 2px; }
+.fl-needs-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--x3);
+  padding: var(--x2) var(--x3);
+  border-radius: var(--fl-r-sm);
+  color: var(--fl-text);
+  min-width: 0;
+}
+a.fl-needs-row:hover { background: var(--fl-hover); text-decoration: none; }
+.fl-needs-count {
+  flex: none;
+  min-width: 42px;
+  text-align: right;
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--fl-tone-text, var(--fl-text));
+}
+.fl-needs-label { flex: 1 1 auto; min-width: 0; font-size: 13px; }
+.fl-subhead {
+  margin-bottom: var(--x2);
+  color: var(--fl-faint);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
