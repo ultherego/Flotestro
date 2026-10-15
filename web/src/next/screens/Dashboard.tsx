@@ -160,7 +160,15 @@ export function Dashboard() {
       />
 
       <Board screen="next-dashboard" catalogue={DASHBOARD} drawn={{
-        hosts: <Kpi icon="hosts" label={t("Hosts")} value={s?.hosts ?? null} hero />,
+        hosts: (
+          <Kpi
+            icon="hosts"
+            label={t("Hosts")}
+            value={s?.hosts ?? null}
+            note={t("enrolled in this installation")}
+            hero
+          />
+        ),
         online: (
           <Kpi
             icon="server"
