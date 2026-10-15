@@ -125,7 +125,7 @@
 
   <main class="content">
 <h1>8. API</h1>
-<p class="lede">Everything the panel does, a program can do. The API is the same surface the web panel runs on: 244 routes under <code>/api/v1</code>, answered in JSON, authorised by the same permissions and written to the same audit trail. This page is the route table as <code>internal/adminapi/adminapi.go</code> registers it and the conventions as <code>internal/adminapi/openapi.go</code> describes them; the panel serves its own OpenAPI document at <code>GET /api/v1/openapi.json</code>. For calls to paste into a terminal, with the answers they gave, see <a href="examples.html">11. Worked examples</a>.</p>
+<p class="lede">Everything the panel does, a program can do. The API is the same surface the web panel runs on: 246 routes under <code>/api/v1</code>, answered in JSON, authorised by the same permissions and written to the same audit trail. This page is the route table as <code>internal/adminapi/adminapi.go</code> registers it and the conventions as <code>internal/adminapi/openapi.go</code> describes them; the panel serves its own OpenAPI document at <code>GET /api/v1/openapi.json</code>. For calls to paste into a terminal, with the answers they gave, see <a href="examples.html">11. Worked examples</a>.</p>
 <h2 id="basics">The shape of the interface</h2>
 <ul><li>Reads use <code>GET</code>. Plans, operations and campaigns are created with <code>POST</code> and have explicit <code>approve</code>, <code>cancel</code>, <code>pause</code> and <code>resume</code> endpoints of their own.</li><li>Every list is paged on the server.</li><li>Errors are problem objects with a stable code.</li><li>The document describes itself: <code>GET /api/v1/openapi.json</code> is generated from the registered routes, so it can never drift from them.</li><li>The panel listens on <code>FLOTESTRO_ADMIN_ADDR</code>, <code>127.0.0.1:8080</code> by default, in plain HTTP; it is meant to sit behind a reverse proxy that terminates TLS.</li></ul>
 <h2 id="authentication">Authentication</h2>
@@ -186,7 +186,7 @@
 <table>
 <thead><tr><th>Section</th><th>Routes</th></tr></thead>
 <tbody>
-<tr><td><a href="#routes-service">Service endpoints</a></td><td>19</td></tr>
+<tr><td><a href="#routes-service">Service endpoints</a></td><td>21</td></tr>
 <tr><td><a href="#routes-caller">Signing in, and the caller's own records</a></td><td>8</td></tr>
 <tr><td><a href="#routes-fleet">The fleet at a glance</a></td><td>10</td></tr>
 <tr><td><a href="#routes-hosts">Hosts</a></td><td>59</td></tr>
@@ -214,7 +214,9 @@
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings/monitoring</code><br><span class="caption">The monitoring retentions are the installation's own setting rather than the process's: read here, and written without a restart.</span></td><td><code>settings.read</code></td></tr>
 <tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/monitoring</code></td><td><code>monitoring.rules.write</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings/layout/{screen}</code><br><span class="caption">How a screen's tiles are arranged. The arrangement is the installation's, so everybody sees the same one.</span></td><td><code>host.read</code></td></tr>
-<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/layout/{screen}</code></td><td><code>settings.advertise.write</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/layout/{screen}</code><br><span class="caption">Arranges the screen for everybody who opens it. Carries the <code>revision</code> it was read at - a write against an older one is refused with 409 rather than overwriting whoever saved in the meantime - and a <code>reason</code>, which the audit trail keeps.</span></td><td><code>settings.layout.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/settings/layout/{screen}</code><br><span class="caption">Puts the screen back on the arrangement the panel ships with. The previous arrangements are kept.</span></td><td><code>settings.layout.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings/layout/{screen}/history</code><br><span class="caption">The last ten arrangements of this screen, newest first, each with who wrote it and why.</span></td><td><code>settings.layout.write</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/setup</code><br><span class="caption">The first run: what the installation still lacks, and the two connection tests the checklist offers in place.</span></td><td><span class="caption">any authenticated identity</span></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/setup/test-directory</code></td><td><code>identity.read</code></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/setup/test-oidc</code></td><td><code>settings.read</code>, <code>principal.manage</code></td></tr>

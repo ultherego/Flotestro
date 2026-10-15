@@ -1932,6 +1932,13 @@ a.status-bar-segment:hover { filter: brightness(1.08); text-decoration: none; co
 .widgets > * { min-width: 0; margin: 0; }
 .widgets > .card { display: flex; flex-direction: column; }
 .widgets > .card > .card-body { flex: 1 1 auto; }
+/* Every width from one to twelve has a class. Until 15.10 only five did,
+   and the server refused the rest - which was honest but narrow: the rows
+   worth building are the uneven ones, three narrow tiles beside two wider.
+   A width without a class would fall silently back to a full row, so the
+   list here and the server's bound are the same twelve on purpose. */
+.span-1 { grid-column: span 1; }
+.span-2 { grid-column: span 2; }
 .span-3 { grid-column: span 3; }
 .span-4 { grid-column: span 4; }
 .span-5 { grid-column: span 5; }
@@ -1939,10 +1946,40 @@ a.status-bar-segment:hover { filter: brightness(1.08); text-decoration: none; co
 .span-7 { grid-column: span 7; }
 .span-8 { grid-column: span 8; }
 .span-9 { grid-column: span 9; }
+.span-10 { grid-column: span 10; }
+.span-11 { grid-column: span 11; }
 .span-12 { grid-column: span 12; }
+
+/* A widget may be given a height in rows. Its content scrolls inside it
+   rather than pushing the grid about: a list that grew by ten rows must not
+   move every panel below it. The rows are the same height everywhere, so
+   two widgets of three rows line up across the screen. */
+.widgets > [data-rows] { overflow: hidden; }
+.widgets > [data-rows] > .card-body,
+.widgets > [data-rows] > .widget-body { overflow: auto; }
+.widgets > [data-rows="1"] { height: 120px; }
+.widgets > [data-rows="2"] { height: 220px; }
+.widgets > [data-rows="3"] { height: 320px; }
+.widgets > [data-rows="4"] { height: 420px; }
+.widgets > [data-rows="5"] { height: 520px; }
+.widgets > [data-rows="6"] { height: 620px; }
+.widgets > [data-rows="7"] { height: 720px; }
+.widgets > [data-rows="8"] { height: 820px; }
+.widgets > [data-rows="9"] { height: 920px; }
+.widgets > [data-rows="10"] { height: 1020px; }
+.widgets > [data-rows="11"] { height: 1120px; }
+.widgets > [data-rows="12"] { height: 1220px; }
+.widgets > [data-rows="13"] { height: 1320px; }
+.widgets > [data-rows="14"] { height: 1420px; }
+.widgets > [data-rows="15"] { height: 1520px; }
+.widgets > [data-rows="16"] { height: 1620px; }
+
 @media (max-width: 1400px) {
-  .span-3, .span-4 { grid-column: span 6; }
-  .span-5, .span-7, .span-8, .span-9 { grid-column: span 12; }
+  /* Narrower: the halves and the thirds pair up, and anything wider than
+     half takes the row. An arrangement is not a second arrangement here -
+     it is the same order, folded. */
+  .span-1, .span-2, .span-3, .span-4 { grid-column: span 6; }
+  .span-5, .span-7, .span-8, .span-9, .span-10, .span-11 { grid-column: span 12; }
 }
 @media (max-width: 900px) {
   .widgets > * { grid-column: span 12; }

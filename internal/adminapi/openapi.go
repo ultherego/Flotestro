@@ -1121,6 +1121,10 @@ var responseSchemas = map[string]map[string]any{
 			"areas": map[string]any{"type": "array", "items": ref("SettingsArea")},
 		},
 	},
+	"GET /api/v1/settings/layout/{screen}/history": map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"items": map[string]any{"type": "array", "items": ref("DashboardLayout")}},
+	},
 	"GET /api/v1/settings/advertised":      ref("AdvertisedAddress"),
 	"PUT /api/v1/settings/advertised":      ref("AdvertisedAddress"),
 	"GET /api/v1/settings/layout/{screen}": ref("DashboardLayout"),
@@ -1891,6 +1895,7 @@ var emptyAnswers = map[string]string{
 	"DELETE /api/v1/policies/{id}":                            "the policy is gone; the campaigns it made stay",
 	"DELETE /api/v1/principals/{id}":                          "the principal is disabled, not removed",
 	"DELETE /api/v1/principals/{id}/roles/{role}":             "the role is no longer granted",
+	"DELETE /api/v1/settings/layout/{screen}":                 "the screen is back on the arrangement the panel ships with",
 	"DELETE /api/v1/principals/{id}/password":                 "the identity signs in with no password here any more",
 	"DELETE /api/v1/roles/{role}":                             "the role is gone; a role somebody is bound to is refused instead",
 	"DELETE /api/v1/principals/{id}/sessions/{sid}":           "the session is revoked",

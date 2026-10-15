@@ -169,7 +169,6 @@ tests/integration/groups_test.go:238	t.Skip("the host has not reported its OS fa
 tests/integration/groups_test.go:276	t.Skip("the test needs two hosts in the lab")
 tests/integration/groups_test.go:324	t.Skip("the test needs two hosts in the lab")
 tests/integration/groups_test.go:398	t.Skip("no host in the lab")
-tests/integration/hardening_test.go:156	t.Skip("the test identity is not on the list of principals")
 tests/integration/hardening_test.go:459	t.Skip("the test needs a host in the lab")
 tests/integration/hello_test.go:83	t.Skip("no online host runs an agent that reports its build")
 tests/integration/hostname_campaign_test.go:21	t.Skip("the fleet has fewer than two connected hosts of the debian family")
