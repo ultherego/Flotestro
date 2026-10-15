@@ -113,7 +113,10 @@ function Rail({ group }: { group: NavGroup }) {
         // Every place of the new panel lives under /next while it is being
         // written; the navigation model names the addresses it will have.
         const to = `/next${item.to}`;
-        const on = item.active ? item.active(location.pathname.replace(/^\/next/, "")) : location.pathname === to;
+        // /next alone is the dashboard, so the item that leads there is the
+        // one the reader is standing on.
+        const here = location.pathname.replace(/^\/next/, "") || "/dashboard";
+        const on = item.active ? item.active(here) : here === item.to;
         return (
           <NavLink key={item.to} to={to} className={on ? "fl-navitem fl-on" : "fl-navitem"} title={t(item.label)}>
             <Icon name={item.icon} />
