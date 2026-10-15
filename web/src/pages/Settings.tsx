@@ -149,14 +149,22 @@ export function Settings() {
 
       {tab === "general" && <GeneralSettings permissions={permissions} />}
       {tab === "users" && (
-        <>
-          {/* Who may sign in comes first: it is the question an administrator
-              opens this tab with. The identities below are the panel's own
-              records - where a token is issued, a session ended, a role
-              bound by hand. */}
-          <div className="widgets"><AccessHolders /></div>
-          <Identities initialSearch={searchParams.get("q") ?? ""} />
-        </>
+        /* Arrangeable like every other board: which panel comes first and
+           how wide it is belongs to the installation, not to whoever wrote
+           the screen. The order here is only the one it ships with - who
+           may sign in first, because that is the question an administrator
+           opens this tab with, and the panel's own records below it. */
+        <Board
+          screen="settings_users"
+          catalogue={[
+            { key: "who_may_sign_in", title: "Who may sign in", width: 12 },
+            { key: "identities", title: "Identities", width: 12 },
+          ]}
+          drawn={{
+            who_may_sign_in: <AccessHolders />,
+            identities: <Identities initialSearch={searchParams.get("q") ?? ""} />,
+          }}
+        />
       )}
       {tab === "roles" && <Roles />}
       {tab === "mappings" && <Mappings />}

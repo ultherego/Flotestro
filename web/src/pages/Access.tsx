@@ -1168,7 +1168,17 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
           />
         )}
 
-        <Card className="span-3" title={t("By kind")} description={t("among the {n} listed", { n: all.length })}>
+        {/* The scope said honestly. It read "among the 50 listed" while the
+            server counts these over everything the search matches - so on a
+            page of fifty out of 1805 the card named the wrong population,
+            and the one it named was the one the reader could see. */}
+        <Card
+          className="span-3"
+          title={t("By kind")}
+          description={showDisabled
+            ? t("among the {n} disabled identities", { n: shown.length })
+            : t("over all {n} that match, not only this page", { n: total })}
+        >
           {!data ? (
             <Empty>{t("Loading…")}</Empty>
           ) : (

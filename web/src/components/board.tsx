@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import { useToast } from "./Toast";
 import { useT } from "../i18n";
 
@@ -28,21 +28,27 @@ export type StoredBoard = {
   updated_at?: string;
   updated_by?: string;
   revision?: number;
+  reason?: string;
 };
 
 /** One widget the screen can draw: how it is named when picked, and its own width. */
 export type BoardEntry = { key: string; title: string; width: number };
 
-/** The widths the twelve-column grid has a class for. */
-export const BOARD_WIDTHS = [3, 4, 6, 8, 12];
-/** How many rows of the board a tile may take. */
-export const BOARD_HEIGHTS = { min: 1, max: 8 };
+/**
+ * The widths the twelve-column grid has a class for: every one of them.
+ *
+ * It was five - 3, 4, 6, 8, 12 - because the stylesheet had five classes,
+ * and the server refused the rest. The rows worth building are the uneven
+ * ones, so the ladder is now every column from one to twelve, and the server
+ * holds to the same twelve.
+ */
+export const BOARD_WIDTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+/** How many rows of the board a tile may take. Its content scrolls inside. */
+export const BOARD_HEIGHTS = { min: 1, max: 16 };
 
-/** The next width up or down the ladder, staying on it at the ends. */
+/** The next width up or down, staying on the grid at the ends. */
 export function widthStep(width: number, by: number): number {
-  const at = BOARD_WIDTHS.indexOf(width);
-  const next = (at === -1 ? 1 : at) + by;
-  return BOARD_WIDTHS[Math.max(0, Math.min(BOARD_WIDTHS.length - 1, next))];
+  return Math.max(BOARD_WIDTHS[0], Math.min(BOARD_WIDTHS[BOARD_WIDTHS.length - 1], width + by));
 }
 
 export function heightStep(height: number | undefined, by: number): number {
@@ -84,19 +90,48 @@ export function Board({
   // a board is arranged, and the arrows it replaced were a click per place.
   const [dragging, setDragging] = useState<number | null>(null);
   const [over, setOver] = useState<number | null>(null);
+  const [reason, setReason] = useState("");
+  const [showEarlier, setShowEarlier] = useState(false);
 
   const layout = useQuery({
     queryKey: ["screen-layout", screen],
     queryFn: () => api.get<StoredBoard>(`/api/v1/settings/layout/${screen}`),
     retry: false,
   });
+  // The arrangement changes what everybody sees, so the write carries the
+  // reason the trail will keep and the revision it was read at. A second
+  // administrator who saved meanwhile wins, and this one is told rather than
+  // having their work vanish.
   const save = useMutation({
     mutationFn: (widgets: BoardWidget[]) =>
-      api.put<StoredBoard>(`/api/v1/settings/layout/${screen}`, { widgets }),
+      api.put<StoredBoard>(`/api/v1/settings/layout/${screen}`, {
+        widgets, reason: reason.trim(), revision: layout.data?.revision ?? 0,
+      }),
     onSuccess: () => {
       setEditing(null);
+      setReason("");
       void queryClient.invalidateQueries({ queryKey: ["screen-layout", screen] });
       toast.success(t("The screen is arranged this way for everybody who opens it."));
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        void queryClient.invalidateQueries({ queryKey: ["screen-layout", screen] });
+        toast.error(t("Somebody else arranged this screen while you were editing it. What they stored is on screen now; make your change again on top of it."));
+        setEditing(null);
+        return;
+      }
+      toast.error(error instanceof Error ? error.message : String(error));
+    },
+  });
+  // Back to the arrangement the panel ships with. It is a change like any
+  // other: a reason, the trail, and the previous one kept.
+  const reset = useMutation({
+    mutationFn: () => api.del(`/api/v1/settings/layout/${screen}?reason=${encodeURIComponent(reason.trim())}`),
+    onSuccess: () => {
+      setEditing(null);
+      setReason("");
+      void queryClient.invalidateQueries({ queryKey: ["screen-layout", screen] });
+      toast.success(t("The screen is back to the arrangement the panel ships with."));
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : String(error)),
   });
@@ -134,10 +169,34 @@ export function Board({
             <button className="secondary" onClick={() => setEditing(current)}>{t("Arrange this screen")}</button>
           ) : (
             <>
-              <button onClick={() => save.mutate(current)} disabled={save.isPending || current.length === 0}>
+              {/* A reason, because the trail keeps one for every change that
+                  reaches other people, and this one reaches all of them. */}
+              <input
+                className="layout-reason"
+                placeholder={t("why this arrangement (for the trail)")}
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                data-testid="board-reason"
+              />
+              <button
+                onClick={() => save.mutate(current)}
+                disabled={save.isPending || current.length === 0 || reason.trim().length < 8}
+                data-testid="board-save"
+              >
                 {save.isPending ? t("storing…") : t("Store this arrangement for everybody")}
               </button>
-              <button className="secondary" onClick={() => setEditing(null)}>{t("Back")}</button>
+              <button className="secondary" onClick={() => { setEditing(null); setReason(""); }}>{t("Back")}</button>
+              {layout.data?.present && (
+                <button
+                  className="danger"
+                  disabled={reset.isPending || reason.trim().length < 8}
+                  onClick={() => reset.mutate()}
+                  data-testid="board-reset"
+                  title={t("Everybody goes back to the arrangement the panel ships with.")}
+                >
+                  {t("Back to the panel's own")}
+                </button>
+              )}
               {absent.length > 0 && (
                 <select
                   value=""
@@ -151,6 +210,9 @@ export function Board({
                   {absent.map((one) => <option key={one.key} value={one.key}>{t(one.title)}</option>)}
                 </select>
               )}
+              <button className="secondary" onClick={() => setShowEarlier(!showEarlier)} data-testid="board-earlier">
+                {t("Earlier arrangements")}
+              </button>
               <span className="source">{t("Drag a tile by its bar to move it. The arrangement is the installation's: everybody sees it.")}</span>
             </>
           )}
@@ -175,6 +237,11 @@ export function Board({
           <div
             key={placed.key}
             style={{ gridRow: `span ${placed.height ?? 1}` }}
+            /* A height somebody chose is a box of that height, and the
+               content scrolls inside it: a list that grows by ten rows must
+               not push every panel below it down the screen. A tile nobody
+               gave a height to is still as tall as what it holds. */
+            data-rows={placed.height ? placed.height : undefined}
             className={[
               `span-${placed.width}`,
               dragging === index ? "dragging" : "",

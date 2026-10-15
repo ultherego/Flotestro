@@ -2274,6 +2274,15 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 /* Arranging the dashboard: the bar of the edit mode and the handle each
    widget grows while it lasts. */
 .layout-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
+
+/* The reason a rearrangement is stored with. It stands in the bar beside
+   the button rather than behind a dialogue: the reason is part of the act,
+   and a dialogue would make it a hurdle to clear rather than a sentence to
+   write. */
+.layout-reason {
+  min-width: 280px;
+  flex: 1 1 280px;
+}
 .layout-bar .source { margin-left: auto; }
 .widget-handle {
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;

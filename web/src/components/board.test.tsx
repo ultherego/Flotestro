@@ -163,12 +163,12 @@ describe("arranging a board with the mouse", () => {
     expect(order()).toEqual(["First", "Second", "Third"]);
   });
 
-  it("widens and narrows a tile along the widths the grid has", async () => {
+  it("widens and narrows a tile a column at a time", async () => {
     await arrange();
     const wider = () => screen.getAllByLabelText("Wider")[0];
     expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-4");
     fireEvent.click(wider());
-    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-6");
+    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-5");
     fireEvent.click(screen.getAllByLabelText("Narrower")[0]);
     expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-4");
   });
@@ -188,31 +188,35 @@ describe("arranging a board with the mouse", () => {
 
   it("stops at the ends of both ladders instead of going past them", async () => {
     await arrange();
-    for (let i = 0; i < 10; i += 1) {
+    for (let i = 0; i < 20; i += 1) {
       const shorter = screen.getAllByLabelText("Shorter")[0] as HTMLButtonElement;
       if (!shorter.disabled) fireEvent.click(shorter);
       const narrower = screen.getAllByLabelText("Narrower")[0] as HTMLButtonElement;
       if (!narrower.disabled) fireEvent.click(narrower);
     }
-    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-3");
+    // One column is the narrowest the grid has a class for.
+    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-1");
     expect(screen.getAllByTestId("board-tile")[0].style.gridRow).toBe("span 1");
   });
 });
 
 describe("the ladders a tile is resized along", () => {
-  it("steps the width between the widths the grid has a class for", () => {
-    expect(widthStep(4, 1)).toBe(6);
+  it("steps the width by one column and stops at the edges of the grid", () => {
+    // Every column from one to twelve since 15.10: the rows worth building
+    // are the uneven ones, so the ladder is the grid itself.
+    expect(widthStep(4, 1)).toBe(5);
     expect(widthStep(4, -1)).toBe(3);
-    expect(widthStep(3, -1)).toBe(3);
+    expect(widthStep(1, -1)).toBe(1);
     expect(widthStep(12, 1)).toBe(12);
-    // A width from a record this panel has no class for lands on the ladder.
     expect(widthStep(5, 1)).toBe(6);
   });
 
-  it("steps the height between one row and eight", () => {
+  it("steps the height between one row and sixteen", () => {
     expect(heightStep(undefined, 1)).toBe(2);
     expect(heightStep(1, -1)).toBe(1);
-    expect(heightStep(8, 1)).toBe(8);
+    expect(heightStep(16, 1)).toBe(16);
+    // Eight used to be the ceiling; a tile holding a list is worth more.
+    expect(heightStep(8, 1)).toBe(9);
   });
 });
 
