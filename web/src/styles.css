@@ -788,11 +788,19 @@ input[type="checkbox"], input[type="radio"] { width: auto; min-height: 0; accent
 
 .table-scroll { overflow-x: auto; min-width: 0; }
 
-table { width: 100%; border-collapse: collapse; font-size: var(--t-body); }
-thead th {
+/* The head of a table stays in view only where the table itself scrolls -
+   inside a card given a height, or a holder with its own overflow. Made
+   sticky everywhere it would detach from its table and hang over the page,
+   which looks like a fault rather than a convenience. */
+.table-scroll thead th,
+.widgets > [data-rows] thead th {
   position: sticky;
   top: 0;
   z-index: 1;
+}
+
+table { width: 100%; border-collapse: collapse; font-size: var(--t-body); }
+thead th {
   background: var(--bg-panel);
   text-align: left;
   padding: var(--s3) var(--s4);
