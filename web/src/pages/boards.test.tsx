@@ -80,14 +80,15 @@ describe("a screen that was put on a board", () => {
 
       const grid = screen.getByTestId("board-grid");
       const expected = layouts[one.screen];
-      // The stored panels come first, in their order and at their widths.
-      // Anything the record says nothing about follows them: a panel added
-      // by an upgrade has to appear, or every widget this product ever adds
-      // is invisible to an installation that arranged the screen once.
+      // Every stored panel is on the screen at its stored width, in the
+      // order it was stored in - with the panels the record says nothing
+      // about placed among them where the catalogue puts them, so a widget
+      // an upgrade adds appears instead of staying invisible for ever.
+      const widths = Array.from(grid.children).map((child) => (child as HTMLElement).className);
       expect(grid.children.length).toBeGreaterThanOrEqual(expected.length);
-      expected.forEach((widget, index) => {
-        expect((grid.children[index] as HTMLElement).className).toContain(`span-${widget.width}`);
-      });
+      const storedAt = expected.map((widget) => widths.findIndex((name) => name.includes(`span-${widget.width}`)));
+      expect(storedAt.every((at) => at !== -1)).toBe(true);
+      expect([...storedAt].sort((a, b) => a - b)).toEqual(storedAt);
     });
   }
 });

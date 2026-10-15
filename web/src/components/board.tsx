@@ -77,18 +77,36 @@ export function boardToDraw(
     return catalogue.filter((one) => known.has(one.key)).map((one) => ({ key: one.key, width: one.width }));
   }
   const placed = stored.widgets.filter((one) => known.has(one.key) && !one.hidden);
-  // A panel the stored arrangement says nothing about did not exist when
-  // somebody arranged this screen: it arrived with an upgrade. It goes at
-  // the end at its own width, because the alternative - leaving it out -
-  // means every panel this product ever adds is invisible to every
-  // installation that has ever arranged a screen, and nobody would know
-  // to go looking for it. A panel somebody removed carries hidden and
-  // stays away; the two are deliberately not the same record.
   const decided = new Set(stored.widgets.map((one) => one.key));
-  const arrived = catalogue
-    .filter((one) => known.has(one.key) && !decided.has(one.key))
-    .map((one) => ({ key: one.key, width: one.width }));
-  return [...placed, ...arrived];
+
+  // A panel the stored arrangement says nothing about did not exist when
+  // somebody arranged this screen: it arrived with an upgrade. Leaving it
+  // out would make every panel this product ever adds invisible to every
+  // installation that has arranged that screen once, and nobody would know
+  // to go looking. A panel somebody removed carries hidden and stays away:
+  // the two are deliberately not the same record.
+  //
+  // Where it goes matters as much as that it appears. At the end it would
+  // be buried: a row of headline tiles added above six existing panels
+  // would arrive under the tables at the bottom. So it lands beside the
+  // catalogue neighbour it shipped next to - after the nearest earlier
+  // panel that is on the screen, or at the front when there is none - and
+  // an arrangement somebody made keeps its own order around it.
+  const result = [...placed];
+  for (let i = 0; i < catalogue.length; i += 1) {
+    const entry = catalogue[i];
+    if (!known.has(entry.key) || decided.has(entry.key)) continue;
+    // After everything that ships before it and is on the screen - not
+    // merely after the nearest one. With the nearest, a newcomer jumped
+    // over a panel somebody had deliberately moved earlier.
+    let at = 0;
+    for (let before = 0; before < i; before += 1) {
+      const neighbour = result.findIndex((one) => one.key === catalogue[before].key);
+      if (neighbour !== -1 && neighbour + 1 > at) at = neighbour + 1;
+    }
+    result.splice(at, 0, { key: entry.key, width: entry.width });
+  }
+  return result;
 }
 
 export function Board({

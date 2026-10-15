@@ -67,10 +67,23 @@ describe("boardToDraw", () => {
      A panel somebody took off carries `hidden` and stays off, which is how
      "removed" and "did not exist yet" stay two different answers. */
   describe("a panel the stored arrangement says nothing about", () => {
-    it("is placed at the end, at its own width", () => {
+    it("lands where the product put it, not at the end", () => {
+      // "first" ships before "second" in the catalogue and nothing earlier
+      // than it is on the screen, so it goes to the front. At the end it
+      // would be buried: a row of headline tiles added above six existing
+      // panels would otherwise arrive under the tables at the bottom.
       const stored = { widgets: [{ key: "second", width: 4 }], present: true };
       expect(boardToDraw(stored, catalogue, known))
-        .toEqual([{ key: "second", width: 4 }, { key: "first", width: 12 }]);
+        .toEqual([{ key: "first", width: 12 }, { key: "second", width: 4 }]);
+    });
+
+    it("keeps the order somebody chose around it", () => {
+      // The arrangement reversed the two it knows about; the newcomer
+      // follows its own catalogue neighbour and leaves that reversal alone.
+      const three = [...catalogue, { key: "third", title: "Third", width: 3 }];
+      const stored = { widgets: [{ key: "second", width: 4 }, { key: "first", width: 8 }], present: true };
+      expect(boardToDraw(stored, three, new Set(["first", "second", "third"])))
+        .toEqual([{ key: "second", width: 4 }, { key: "first", width: 8 }, { key: "third", width: 3 }]);
     });
 
     it("stays away when it was taken off on purpose", () => {
