@@ -4,6 +4,74 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [semantic versioning](https://semver.org/). Dates are the
 day the tag was published.
 
+## [Unreleased]
+
+### Added
+
+- **An installation can define a role of its own.** A role used to be one of
+  six names in a check constraint, so "restart a service and read the journal,
+  nothing else" - a real job on a real rota - could only be had by handing
+  somebody `operator`, which also reboots hosts, installs packages and
+  decommissions machines. Roles are rows now: the access screen defines one,
+  names what it is for and picks its permissions from the 188 the product
+  defines (`GET /api/v1/permissions`), and `POST`, `PUT` and `DELETE
+  /api/v1/roles` keep them. The six built-in roles keep their permissions in
+  the code, where nobody holding a database password can change them, and only
+  a role defined here keeps them in the database; a role somebody is bound to
+  cannot be deleted, which the database itself refuses. An edit replaces the
+  definition whole and the trail records what the holders lost. Defining a
+  role requires holding every permission in it everywhere, because a role is a
+  global object anybody may later bind anywhere. Migration 0159; **it cannot
+  be undone by a later migration**, because going back would delete
+  somebody's access to satisfy a schema.
+- **A group of the identity provider can grant a role narrowed by owner and
+  by tag**, as a binding made by hand already could. Until now every role
+  arriving through the provider was wider than one granted locally, which is
+  the opposite of what a directory is for. Migration 0158.
+- **The settings screen configures the installation** instead of only
+  reporting it. It opens with what the installation holds and can change - the
+  notification channels, the relays, the roles, the group mappings, the budgets
+  and the policies, each saying how much is set and offering the screen that
+  owns it - with the values the process was started with kept below and
+  labelled as such.
+- **An installation says whether anything of the first envelope form is
+  left.** `crypto status` carries `legacy_envelopes`,
+  `keys_without_installation` and `second_form_complete`, and the release step
+  `./checks/readiness.sh secondform` reads them from a running panel, so the
+  migration of the key material is a measured step rather than an assumption.
+
+### Changed
+
+- **The screen of unconfirmed operations tells the two kinds apart at the
+  level of the list**: the operations that did not happen and the ones whose
+  evidence could not be read are two counts with a way into each, rather than
+  one list of thirty-one rows to read through.
+- **A bar that could not count a state says so.** A state whose count was
+  never taken used to sit among the states that are empty, under a bar that
+  went on dividing its width as though the fleet were the states it had
+  managed to count. The uncounted states stand in a row of their own now,
+  named, under a sentence saying what the bar above is a share of.
+
+### Fixed
+
+- **A relay reporting nothing no longer reads as a relay that holds the new
+  trust.** A CA rotation that no relay was told of was reported as a success;
+  the preparation and the activation refuse with `prepared_not_announced` or
+  `activated_not_recorded`, and a relay counts as holding an authority only
+  once it has used the certificate it came with.
+- **A revert drops the rows it read**, not the rows that happen to carry the
+  same names, so material changed under a name between the read and the revert
+  is no longer deleted.
+- **The bulk workspace no longer draws zero for an answer it has not got.** A
+  preview that had not arrived, or that the server refused, showed "0 hosts
+  match" - which reads as a selector that matches nothing.
+- **An acknowledgement whose status the agent does not understand no longer
+  releases the result.** The copy is kept for sending again, which is what a
+  status from a newer panel, or a field nobody set, has to mean.
+- **`shipcheck` reads the workflow identity an air-gapped verification asks
+  for**, so a procedure copied with the wrong identity is caught here rather
+  than by an operator holding a correctly signed image that will not verify.
+
 ## [0.63.1] - 2026-10-14
 
 ### Added

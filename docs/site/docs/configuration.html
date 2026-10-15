@@ -152,7 +152,7 @@
 </table>
 </div>
 <p>The tables below name the variable itself. Read each one that carries a secret as its <code>_FILE</code> form.</p>
-<p>A change of any variable takes effect at the next start of the service: nothing here is re-read while the process runs. The settings screen of the panel shows the effective values with the secrets masked; the status screen shows what the loops set up by them are doing.</p>
+<p>A change of any variable takes effect at the next start of the service: nothing here is re-read while the process runs. The settings screen of the panel shows the effective values with the secrets masked, under the configuration the installation holds and can change without a restart &mdash; the monitoring retentions, the notification channels, the relays, the roles, the group mappings, the budgets and the policies, each with the way into the screen that owns it. The status screen shows what the loops set up by these variables are doing.</p>
 <p>Durations are written the way Go reads them: <code>30s</code>, <code>5m</code>, <code>8h</code>, <code>720h</code>. An unreadable duration keeps the default rather than switching a safeguard off.</p>
 <h2 id="control-plane-flotestro-control-plane">Control plane (<code>flotestro-control-plane</code>)</h2>
 <h3 id="database-and-listeners">Database and listeners</h3>
