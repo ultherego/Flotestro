@@ -226,11 +226,13 @@ test.describe("access", () => {
     test.skip(!granted.has("principal.manage"), absent("the token may not manage access (principal.manage)"));
     const { errors } = watchErrors(page);
 
+    // The old address still answers: it is in bookmarks and in the manual,
+    // and since 15.10 it carries its tab across into Settings, where the
+    // identities now live under the name Users.
     await page.goto("/access?tab=identities");
-    await expect(header(page, "Access")).toBeVisible();
-    const tabs = page.locator(".tabs").first();
-    await expect(tabs.getByRole("button", { name: "Identities" })).toHaveClass(/active/);
-    await expect(tabs.getByRole("button", { name: "Group mappings" })).not.toHaveClass(/active/);
+    await expect(header(page, "Settings")).toBeVisible();
+    await expect(page.getByTestId("settings-tab-users")).toHaveClass(/active/);
+    await expect(page.getByTestId("settings-tab-mappings")).not.toHaveClass(/active/);
     const identities = card(page, "Identities");
     await expect(identities).toBeVisible();
     await expect(identities.getByPlaceholder("subject, name or identifier")).toBeVisible();
@@ -257,8 +259,8 @@ test.describe("access", () => {
       await expect(cell).toContainText("job.");
     }
     // The tab click writes the address like the address wrote the tab.
-    await tabs.getByRole("button", { name: "Identities" }).click();
-    await expect(page).toHaveURL(/[?&]tab=identities/);
+    await page.getByTestId("settings-tab-users").click();
+    await expect(page).toHaveURL(/[?&]tab=users/);
     await expectHealthy(page, errors);
   });
 });
