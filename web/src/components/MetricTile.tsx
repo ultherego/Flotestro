@@ -20,7 +20,7 @@ import { useT } from "../i18n";
 export type MetricState = "ok" | "warn" | "error" | "unknown";
 
 export function MetricTile({
-  label, value, unit, state, hero = false, size = "l", footnote,
+  label, value, unit, state, hero = false, size = "l", footnote, span,
 }: {
   label: string;
   /** null or undefined is unknown. A number is shown as given. */
@@ -30,11 +30,16 @@ export function MetricTile({
   hero?: boolean;
   size?: "xl" | "l" | "m";
   footnote?: string;
+  /** How many of the twelve columns the tile takes, when it stands in a
+      widget grid. Without it the tile is one column wide, which is what a
+      grid child with no span class is - and which is never what was meant. */
+  span?: number;
 }) {
   const t = useT();
   const unknown = value === null || value === undefined;
   const shown: MetricState | undefined = unknown ? "unknown" : state;
   const classes = ["metric-tile", `metric-tile-${size}`];
+  if (span) classes.push(`span-${span}`);
   if (hero) classes.push("metric-tile-hero");
   if (shown && shown !== "ok") classes.push(`metric-tile-${shown}`);
 

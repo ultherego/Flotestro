@@ -58,3 +58,15 @@ describe("the severity bar", () => {
     expect(screen.getByTestId("severity-unknown")).toHaveTextContent("7");
   });
 });
+
+describe("a tile in a widget grid", () => {
+  it("takes the columns it was given, because a grid child with none takes one", () => {
+    render(<MetricTile label="Disk used" value={41} unit="%" span={4} />);
+    expect(screen.getByTestId("metric-Disk used").className).toContain("span-4");
+  });
+
+  it("stands alone without a span, for a tile that is not in a grid", () => {
+    render(<MetricTile label="Memory" value="16 GiB" />);
+    expect(screen.getByTestId("metric-Memory").className).not.toMatch(/span-/);
+  });
+});
