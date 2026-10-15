@@ -383,8 +383,11 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 16px 0 10px;
-  background: var(--bg-panel);
+  padding: 0 22px 0 12px;
+  /* The bar belongs to the page, not to a card: on the page's own ground
+     it reads as the frame of the window, which is what it is. A panel
+     colour made it look like one more card that happened to be first. */
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
 .topbar-fold, .topbar-menu {
@@ -1329,10 +1332,13 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
    of the section on an accent tile, the title and its one sentence, the
    actions at the right edge, and a rule underneath that the widgets
    hang from. */
+/* The head of a page. No rule under it: with the content below now sitting
+   in cards on a darker ground, the line was separating a title from a gap.
+   The room it took is kept as room. */
 .page-header {
-  margin: 0 0 18px;
-  padding: 0 0 16px;
-  border-bottom: 1px solid var(--border);
+  margin: 0 0 22px;
+  padding: 0;
+  border-bottom: 0;
 }
 .page-mark {
   flex: none;
@@ -1355,7 +1361,7 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
   flex-wrap: wrap;
 }
 .page-header-text { flex: 1 1 320px; min-width: 0; }
-.page-title { margin: 0; font-size: 24px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.25; }
+.page-title { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.25; }
 .page-description { margin: 3px 0 0; color: var(--text-muted); font-size: 13px; max-width: 90ch; line-height: 1.45; }
 .page-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: none; }
 .breadcrumb {
