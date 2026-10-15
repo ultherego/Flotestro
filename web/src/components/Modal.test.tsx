@@ -64,7 +64,7 @@ describe("ModalProvider", () => {
     const confirm = screen.getByRole("button", { name: "Remove" });
     const reason = screen.getByLabelText("Reason");
     expect(confirm).toBeDisabled();
-    expect(confirm).toHaveClass("danger");
+    expect(confirm).toHaveClass("ui-btn-danger");
     expect(screen.getByText(/At least 8 characters/)).toBeInTheDocument();
     fireEvent.change(reason, { target: { value: "short  " } });
     expect(confirm).toBeDisabled();

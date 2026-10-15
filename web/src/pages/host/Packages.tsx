@@ -4,7 +4,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { api, loadedItems, type Collection, type Page } from "../../lib/api";
 import { awaitJob } from "../../lib/jobs";
 import { RELEASE_CHANNELS, type Attempt, type Host, type Job, type ReleaseChannel } from "../../lib/types";
-import { Empty, ErrorCode, JobState, Time } from "../../components/ui";
+import { ErrorCode, JobState, Time } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import { VirtualRows } from "../../components/virtual";
 import { ColumnChooser, Td, Th, useColumns } from "../../components/SortableTable";
@@ -16,6 +16,7 @@ import {
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 type Repository = {
   id: string;
@@ -437,7 +438,7 @@ export function Packages() {
           {/* A dash is not a zero: the operator is told why the host has
               no count, and what produces one. */}
           {pending === undefined && (
-            <p className="source">
+            <p className="ui-note">
               {packages?.unavailable_reason
                 ? t("The update counts could not be read: {reason}", { reason: packages.unavailable_reason })
                 : t("The host has not counted its updates yet; plan updates below to count them.")}
@@ -452,20 +453,20 @@ export function Packages() {
               {host.package_database_broken
                 ? (
                   <>
-                    <span className="badge error">{t("needs repair")}</span>
+                    <span className="ui-pill ui-error">{t("needs repair")}</span>
                     {/* Every other package operation is refused while the
                         database is broken, so the repair stands where the
                         verdict is. Critical: it finishes a transaction
                         somebody interrupted, with a reason and an approval. */}
                     {" "}
                     <ActionGuard action="packages.repair" host={host.id}>
-                      <button type="button" className="link" onClick={() => setRepairing(true)} disabled={repairing}>
+                      <button type="button" className="ui-btn-link" onClick={() => setRepairing(true)} disabled={repairing}>
                         {t("Repair the package database…")}
                       </button>
                     </ActionGuard>
                   </>
                 )
-                : <span className="badge ok">{t("healthy")}</span>}
+                : <span className="ui-pill ui-ok">{t("healthy")}</span>}
             </Fact>
             <Fact label={t("Repositories")}>{knownSources ? knownSources.length : <Unknown />}</Fact>
             <Fact label={t("By state")} wide>
@@ -526,7 +527,7 @@ export function Packages() {
           <FormActions>
             <ActionGuard action="packages.hold.set" host={host.id}>
             <button
-              className="secondary"
+              className="ui-btn-secondary"
               disabled={request.isPending || list().length === 0}
               onClick={() => request.mutate({
                 action: "packages.hold.set",
@@ -536,7 +537,7 @@ export function Packages() {
               {t("Hold")}
             </button>
             <button
-              className="secondary"
+              className="ui-btn-secondary"
               disabled={request.isPending || list().length === 0}
               onClick={() => request.mutate({
                 action: "packages.hold.set",
@@ -552,7 +553,7 @@ export function Packages() {
                 stands behind the right to remove. */}
             <ActionGuard action="packages.remove" host={host.id}>
             <button
-              className="hm-danger"
+              className="ui-btn-danger"
               disabled={planRemoval.isPending || list().length === 0}
               onClick={() => planRemoval.mutate(list())}
             >
@@ -571,7 +572,7 @@ export function Packages() {
         <Facts>
           <Fact label={t("Agent version")}>{host.agent_version || <Unknown />}</Fact>
           <Fact label={t("Release channel")}>
-            <span className={host.release_channel === "beta" ? "badge warn" : "badge ok"}>{host.release_channel}</span>
+            <span className={host.release_channel === "beta" ? "ui-pill ui-warn" : "ui-pill ui-ok"}>{host.release_channel}</span>
           </Fact>
         </Facts>
         <Form>
@@ -604,7 +605,7 @@ export function Packages() {
               help={t("The SHA-256 from the release. Without it the host installs whatever its repository serves under that version: the repository's own signature is then the only proof, and the panel has none of its own.")}
             >
               <input
-                className="mono"
+                className="ui-mono"
                 value={agentDigest}
                 onChange={(e) => setAgentDigest(e.target.value.trim())}
                 placeholder={t("64 hexadecimal characters, or empty")}
@@ -640,7 +641,7 @@ export function Packages() {
       {plan && (
         <Section title={t("Removal plan")} count={plan.plan.removals?.length ?? 0} flush>
           {plan.plan.protected && plan.plan.protected.length > 0 && (
-            <p className="warning">
+            <p className="ui-banner">
               <span>
                 {t("These packages are protected and will not be removed: {packages}. Removing them would leave the host unmanageable or unbootable.", { packages: plan.plan.protected.join(", ") })}
               </span>
@@ -655,7 +656,7 @@ export function Packages() {
                 <tbody>
                   {plan.plan.removals.map((pkg) => (
                     <tr key={pkg}>
-                      <td className="hm-mono">{pkg}</td>
+                      <td className="ui-mono">{pkg}</td>
                       <td>{plan.requested.includes(pkg) ? t("requested") : t("dependency")}</td>
                     </tr>
                   ))}
@@ -667,7 +668,7 @@ export function Packages() {
                 </span>
                 {(!plan.plan.protected || plan.plan.protected.length === 0) && (
                   <ActionGuard action="packages.remove" host={host.id}>
-                    <button className="danger" onClick={() => setToRemove({ requested: plan.requested, removals: plan.plan.removals ?? [] })}>
+                    <button className="ui-btn-danger" onClick={() => setToRemove({ requested: plan.requested, removals: plan.plan.removals ?? [] })}>
                       {t("Remove these packages")}
                     </button>
                   </ActionGuard>
@@ -821,7 +822,7 @@ function PlanThenApply({ host, action, packages, planLabel, applyLabel, busy, on
     <>
       <FormActions>
         <button
-          className="secondary"
+          className="ui-btn-secondary"
           disabled={packages.length === 0 || planning.isPending || apply.isPending || busy}
           onClick={() => planning.mutate()}
         >
@@ -841,9 +842,9 @@ function PlanThenApply({ host, action, packages, planLabel, applyLabel, busy, on
               <tbody>
                 {plan.changes.map((change) => (
                   <tr key={`${change.name}/${change.architecture ?? ""}`}>
-                    <td className="hm-mono">{change.name}</td>
+                    <td className="ui-mono">{change.name}</td>
                     <td>{change.current_version || "—"}</td>
-                    <td className="hm-mono">{change.candidate_version || "—"}</td>
+                    <td className="ui-mono">{change.candidate_version || "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -973,7 +974,7 @@ function InstalledPackages({
             <Foot>
               <span>{t("The read goes through a job and needs no root on the host.")}</span>
               <ActionGuard action="packages.list" host={host.id} explain>
-                <button className="secondary" onClick={onRead} disabled={reading || host.connection_state !== "online"}>
+                <button className="ui-btn-secondary" onClick={onRead} disabled={reading || host.connection_state !== "online"}>
                   {reading ? t("Requesting…") : t("Read the package list")}
                 </button>
               </ActionGuard>
@@ -982,17 +983,17 @@ function InstalledPackages({
         ) : (
           <>
             {stale && (
-              <p className="warning">
+              <p className="ui-banner">
                 <span>{t("The host's own list has changed since the panel read it; the rows describe an earlier moment.")}</span>
                 <ActionGuard action="packages.list" host={host.id}>
-                  <button className="secondary" onClick={onRead} disabled={reading || host.connection_state !== "online"}>
+                  <button className="ui-btn-secondary" onClick={onRead} disabled={reading || host.connection_state !== "online"}>
                     {reading ? t("Requesting…") : t("Read it again")}
                   </button>
                 </ActionGuard>
               </p>
             )}
             {packages && packages.holds_known === false && (
-              <p className="warning">
+              <p className="ui-banner">
                 <span>
                   {t("The holds could not be read, so no package is known to be held")}
                   {packages.holds_unavailable_reason ? `: ${packages.holds_unavailable_reason}` : "."}
@@ -1017,7 +1018,7 @@ function InstalledPackages({
                   <>
                     <Td columns={columns} name="name">
                       <button
-                        className="inline"
+                        className="ui-inline"
                         aria-pressed={selected === key(row)}
                         onClick={() => setSelected(selected === key(row) ? "" : key(row))}
                         title={row.source_name && row.source_name !== row.name ? t("source package {name}", { name: row.source_name }) : undefined}
@@ -1025,25 +1026,25 @@ function InstalledPackages({
                         {row.name}
                       </button>
                     </Td>
-                    <Td columns={columns} name="version" className="hm-mono">{packageVersion(row)}</Td>
+                    <Td columns={columns} name="version" className="ui-mono">{packageVersion(row)}</Td>
                     <Td columns={columns} name="architecture">{row.architecture || "—"}</Td>
-                    <Td columns={columns} name="source" className="source" title={row.origin || undefined}>
+                    <Td columns={columns} name="source" className="ui-note" title={row.origin || undefined}>
                       {row.repository_id || row.origin || originWords(t, row.origin_class)}
                     </Td>
                     {/* The candidate with its origin on hover, and the
                         direction where it is not an upgrade: a plan that
                         takes a package back a version is what the
                         operator must not miss in a column of upgrades. */}
-                    <Td columns={columns} name="candidate" className="hm-mono" title={row.candidateOrigin || undefined}>
+                    <Td columns={columns} name="candidate" className="ui-mono" title={row.candidateOrigin || undefined}>
                       {row.candidate ?? ""}
-                      {row.action && row.action !== "upgrade" && <> <span className="badge warn">{t(row.action)}</span></>}
+                      {row.action && row.action !== "upgrade" && <> <span className="ui-pill ui-warn">{t(row.action)}</span></>}
                     </Td>
-                    <Td columns={columns} name="security">{row.security && <span className="badge error">{t("security")}</span>}</Td>
+                    <Td columns={columns} name="security">{row.security && <span className="ui-pill ui-error">{t("security")}</span>}</Td>
                     <Td columns={columns} name="held">
                       {row.held === true
-                        ? <span className="badge warn">{t("held")}</span>
+                        ? <span className="ui-pill ui-warn">{t("held")}</span>
                         : row.held === undefined
-                          ? <span className="badge unknown" title={t("The holds were not read.")}>?</span>
+                          ? <span className="ui-pill ui-unknown" title={t("The holds were not read.")}>?</span>
                           : ""}
                     </Td>
                   </>
@@ -1055,20 +1056,20 @@ function InstalledPackages({
                 {t("{shown} of {total} packages", { shown: shown.length, total: list.data.items.length })}
                 {" · "}
                 {t("list read")} <Time value={state?.collected_at} />
-                {state?.job_id && <> (<Link to={`/jobs/${state.job_id}`} className="mono">{state.job_id.slice(0, 8)}</Link>)</>}
+                {state?.job_id && <> (<Link to={`/jobs/${state.job_id}`} className="ui-mono">{state.job_id.slice(0, 8)}</Link>)</>}
                 {" · "}
                 {plan.at
                   ? <>
                       {t("upgrade plan from")} <Time value={plan.at} />
-                      {plan.header?.planner_version && <> · {t("planner")} <span className="hm-mono">{plan.header.planner_version}</span></>}
+                      {plan.header?.planner_version && <> · {t("planner")} <span className="ui-mono">{plan.header.planner_version}</span></>}
                       {plan.header?.expires_at && (planExpired(plan.header)
-                        ? <> · <span className="badge error">{t("plan expired")}</span></>
+                        ? <> · <span className="ui-pill ui-error">{t("plan expired")}</span></>
                         : <> · {t("valid until")} <Time value={plan.header.expires_at} /></>)}
                     </>
                   : t("no upgrade plan yet; the upgrade column fills in after one")}
               </span>
               <ActionGuard action="packages.list" host={host.id}>
-                <button className="secondary" onClick={onRead} disabled={reading || host.connection_state !== "online"}>
+                <button className="ui-btn-secondary" onClick={onRead} disabled={reading || host.connection_state !== "online"}>
                   {reading ? t("Requesting…") : t("Read again")}
                 </button>
               </ActionGuard>
@@ -1080,21 +1081,21 @@ function InstalledPackages({
             {current && (
               <Foot>
                 <span>
-                  <span className="hm-mono">{current.name}</span> {packageVersion(current)}
-                  {current.candidate && <> → <span className="hm-mono">{current.candidate}</span></>}
+                  <span className="ui-mono">{current.name}</span> {packageVersion(current)}
+                  {current.candidate && <> → <span className="ui-mono">{current.candidate}</span></>}
                   {current.held === true && <> · {t("held")}</>}
                 </span>
                 <ActionGuard action="packages.hold.set" host={host.id}>
-                  <button className="secondary" disabled={busy} onClick={() => onHold(current.name, current.held !== true)}>
+                  <button className="ui-btn-secondary" disabled={busy} onClick={() => onHold(current.name, current.held !== true)}>
                     {current.held === true ? t("Unhold") : t("Hold")}
                   </button>
                 </ActionGuard>
                 <ActionGuard action="packages.remove" host={host.id}>
-                  <button className="hm-danger" disabled={busy} onClick={() => onRemove(current.name)}>
+                  <button className="ui-btn-danger" disabled={busy} onClick={() => onRemove(current.name)}>
                     {t("Plan removal")}
                   </button>
                 </ActionGuard>
-                <button className="secondary" onClick={() => setSelected("")}>{t("Deselect")}</button>
+                <button className="ui-btn-secondary" onClick={() => setSelected("")}>{t("Deselect")}</button>
               </Foot>
             )}
           </>
@@ -1102,7 +1103,7 @@ function InstalledPackages({
       </Section>
       {current && (pacman ? (
         <Section title={t("Upgrade {name}", { name: current.name })}>
-          <p className="source">
+          <p className="ui-note">
             {t("pacman upgrades the whole system at once: a single package cannot be moved on its own without leaving the host partially upgraded. Plan updates above and upgrade the host as a whole.")}
           </p>
         </Section>
@@ -1228,7 +1229,7 @@ function TransactionHistory({ hostId }: { hostId: string }) {
               {jobs.map((job) => (
                 <tr key={job.id}>
                   <td><Time value={job.finished_at ?? job.created_at} /></td>
-                  <td className="hm-mono">{job.action_type.replace(/^packages\./, "")}</td>
+                  <td className="ui-mono">{job.action_type.replace(/^packages\./, "")}</td>
                   <td>
                     <JobState state={job.state} />
                     {job.result_error_code && <> <ErrorCode code={job.result_error_code} /></>}
@@ -1240,7 +1241,7 @@ function TransactionHistory({ hostId }: { hostId: string }) {
                   </td>
                   <td>{job.created_by}</td>
                   <td>
-                    <Link to={`/jobs/${job.id}`} className="mono" title={job.id}>{job.id.slice(0, 8)}</Link>
+                    <Link to={`/jobs/${job.id}`} className="ui-mono" title={job.id}>{job.id.slice(0, 8)}</Link>
                   </td>
                 </tr>
               ))}
@@ -1248,7 +1249,7 @@ function TransactionHistory({ hostId }: { hostId: string }) {
           </Table>
           {history.hasNextPage && (
             <Foot>
-              <button className="secondary" onClick={() => history.fetchNextPage()} disabled={history.isFetchingNextPage}>
+              <button className="ui-btn-secondary" onClick={() => history.fetchNextPage()} disabled={history.isFetchingNextPage}>
                 {t("Load more")}
               </button>
             </Foot>
@@ -1270,11 +1271,11 @@ function AppliedCount({ jobId }: { jobId: string }) {
     queryFn: () => api.get<Collection<Attempt>>(`/api/v1/jobs/${jobId}/attempts`),
     staleTime: Infinity,
   });
-  if (attempts.error) return <span className="badge unknown">{t("unknown")}</span>;
+  if (attempts.error) return <span className="ui-pill ui-unknown">{t("unknown")}</span>;
   if (!attempts.data) return <>…</>;
   const last = attempts.data.items[attempts.data.items.length - 1];
   const applied = (last?.detail as { kind?: string; applied?: unknown[] } | undefined)?.applied;
-  if (!Array.isArray(applied)) return <span className="badge unknown">{t("unknown")}</span>;
+  if (!Array.isArray(applied)) return <span className="ui-pill ui-unknown">{t("unknown")}</span>;
   return <>{t("{n} package(s)", { n: applied.length })}</>;
 }
 
@@ -1301,7 +1302,7 @@ function Repositories({
         description={t("Where this host takes software from. Adding a source installs nothing today; it decides whose packages the host will accept tomorrow, with their scripts running as root.")}
         tools={
           <ActionGuard action="packages.repository.set" host={hostID}>
-            <button className="secondary" onClick={() => setForm((open) => !open)}>
+            <button className="ui-btn-secondary" onClick={() => setForm((open) => !open)}>
               {form ? t("Cancel") : t("Add or change a source")}
             </button>
           </ActionGuard>
@@ -1309,7 +1310,7 @@ function Repositories({
         flush
       >
         {view && view.repositories_known === false && (
-          <p className="warning">
+          <p className="ui-banner">
             <span>
               {t("The list of sources could not be read")}
               {view.repositories_unavailable_reason
@@ -1333,15 +1334,15 @@ function Repositories({
               {sources.map((source) => (
                 <tr key={`${source.path}-${source.id}`}>
                   <td>
-                    <span className="hm-primary">{source.id}</span>
-                    {source.path && <div className="source hm-mono">{source.path}</div>}
+                    <span className="ui-name">{source.id}</span>
+                    {source.path && <div className="ui-note ui-mono">{source.path}</div>}
                   </td>
-                  <td className="source">
+                  <td className="ui-note">
                     {source.unavailable_reason ? (
-                      <span className="badge unknown">{source.unavailable_reason}</span>
+                      <span className="ui-pill ui-unknown">{source.unavailable_reason}</span>
                     ) : (
                       <>
-                        <span className="hm-mono">{source.url}</span>
+                        <span className="ui-mono">{source.url}</span>
                         {source.suites?.length ? (
                           <div>{source.suites.join(" ")} {source.components?.join(" ")}</div>
                         ) : null}
@@ -1350,33 +1351,33 @@ function Repositories({
                   </td>
                   <td>
                     {source.enabled
-                      ? <span className="badge ok">{t("enabled")}</span>
-                      : <span className="badge">{t("disabled")}</span>}
+                      ? <span className="ui-pill ui-ok">{t("enabled")}</span>
+                      : <span className="ui-pill">{t("disabled")}</span>}
                   </td>
                   <td>
                     {/* A source without signature checking is a remote root
                         shell, not a setting - and it is to look like one. */}
                     {source.signed
-                      ? <span className="badge ok">{t("checked")}</span>
-                      : <span className="badge error">{t("not checked")}</span>}
+                      ? <span className="ui-pill ui-ok">{t("checked")}</span>
+                      : <span className="ui-pill ui-error">{t("not checked")}</span>}
                   </td>
                   <td>
                     {source.managed ? (
                       <>
-                        <span className="badge ok">{t("panel")}</span>
+                        <span className="ui-pill ui-ok">{t("panel")}</span>
                         {source.secret_name && (
-                          <div className="source">{t("password from {secret}", { secret: source.secret_name })}</div>
+                          <div className="ui-note">{t("password from {secret}", { secret: source.secret_name })}</div>
                         )}
                       </>
                     ) : (
-                      <span className="badge">{t("distribution")}</span>
+                      <span className="ui-pill">{t("distribution")}</span>
                     )}
                   </td>
                   <td>
-                    <div className="operations">
+                    <div className="ui-actions">
                       <ActionGuard action="packages.repository.set" host={hostID}>
                       <button
-                        className="secondary"
+                        className="ui-btn-secondary"
                         disabled={!source.managed}
                         title={source.managed ? undefined : t("Only a source written by the panel can be changed here; this one belongs to the distribution or the host administrator.")}
                         onClick={() =>
@@ -1396,7 +1397,7 @@ function Repositories({
                         {source.enabled ? t("Disable") : t("Enable")}
                       </button>
                       <button
-                        className="hm-danger"
+                        className="ui-btn-danger"
                         disabled={!source.managed}
                         title={source.managed ? undefined : t("Only a source written by the panel can be removed here; this one belongs to the distribution or the host administrator.")}
                         onClick={() =>

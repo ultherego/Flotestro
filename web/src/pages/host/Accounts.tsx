@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../lib/api";
 import type { Host, Job, LocalAccount } from "../../lib/types";
-import { ErrorBox, Time, Empty } from "../../components/ui";
+import { ErrorBox, Time } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import {
@@ -11,6 +11,7 @@ import {
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 /**
  * The groups whose membership is root by another name: sudo and wheel give
@@ -93,7 +94,7 @@ export function HostAccounts() {
         }
       />
       {accounts.length > 0 && (
-        <p className="hm-freshness">
+        <p className="ui-freshness">
           <span>{t("Source: the agent's report, observed")} <Time value={accounts[0].observed_at} /></span>
         </p>
       )}
@@ -116,7 +117,7 @@ export function HostAccounts() {
       />
       <Section title={t("By source")} span={4} description={t("Where each account is defined.")}>
         {!known ? (
-          <p className="source">{t("Loading…")}</p>
+          <p className="ui-note">{t("Loading…")}</p>
         ) : (
           <Breakdown
             items={sources.map((source) => ({
@@ -134,7 +135,7 @@ export function HostAccounts() {
         count={accounts.length}
         span={12}
         tools={
-          <label className="toggle">
+          <label className="ui-check">
             <input
               type="checkbox"
               checked={showSystem}
@@ -155,7 +156,7 @@ export function HostAccounts() {
           <Table>
             <thead>
               <tr>
-                <th scope="col">{t("Account")}</th><th scope="col" className="hm-num">UID</th><th scope="col">{t("Source")}</th><th scope="col">{t("Access")}</th>
+                <th scope="col">{t("Account")}</th><th scope="col" className="ui-numeric">UID</th><th scope="col">{t("Source")}</th><th scope="col">{t("Access")}</th>
                 <th scope="col">{t("SSH keys")}</th><th scope="col">{t("Groups")}</th><th scope="col">{t("Expires")}</th><th scope="col">{t("Actions")}</th>
               </tr>
             </thead>
@@ -191,32 +192,32 @@ function Row({ host, account }: { host: Host; account: LocalAccount }) {
     <>
       <tr>
         <td>
-          <span className="hm-mono hm-primary">{account.name}</span>
-          {account.gecos && <div className="source">{account.gecos}</div>}
+          <span className="ui-mono ui-name">{account.name}</span>
+          {account.gecos && <div className="ui-note">{account.gecos}</div>}
         </td>
-        <td className="hm-num">{account.uid}</td>
+        <td className="ui-numeric">{account.uid}</td>
         <td>{sourceName(t, account.source)}</td>
         <td><Access account={account} /></td>
         <td>
           {account.ssh_keys.length === 0 ? (
-            <span className="source">{t("none")}</span>
+            <span className="ui-note">{t("none")}</span>
           ) : (
             account.ssh_keys.map((key) => (
-              <div key={key.fingerprint} title={`${t("fingerprint")} ${key.fingerprint}`} className="hm-mono">
+              <div key={key.fingerprint} title={`${t("fingerprint")} ${key.fingerprint}`} className="ui-mono">
                 {key.type || "?"} · {shortFingerprint(key.fingerprint)}
-                {key.comment && <span className="source"> {key.comment}</span>}
+                {key.comment && <span className="ui-note"> {key.comment}</span>}
               </div>
             ))
           )}
         </td>
-        <td className="source"><AccountGroups groups={account.groups} /></td>
+        <td className="ui-note"><AccountGroups groups={account.groups} /></td>
         <td><Expiry account={account} /></td>
         <td>
           {fromDirectory ? (
             // Changing a directory account belongs to the directory.
-            <span className="source">{t("managed by directory")}</span>
+            <span className="ui-note">{t("managed by directory")}</span>
           ) : (
-            <div className="operations">
+            <div className="ui-actions">
               {account.locked === true ? (
                 <ActionGuard action="localuser.unlock" host={host.id}>
                   <button
@@ -236,13 +237,13 @@ function Row({ host, account }: { host: Host; account: LocalAccount }) {
                   </button>
                 </ActionGuard>
               )}
-              <button className="secondary" onClick={() => toggle("keys")}>{t("SSH keys")}</button>
-              <button className="secondary" onClick={() => toggle("groups")}>{t("Groups")}</button>
-              <button className="secondary" onClick={() => toggle("expiry")}>{t("Expiry")}</button>
+              <button className="ui-btn-secondary" onClick={() => toggle("keys")}>{t("SSH keys")}</button>
+              <button className="ui-btn-secondary" onClick={() => toggle("groups")}>{t("Groups")}</button>
+              <button className="ui-btn-secondary" onClick={() => toggle("expiry")}>{t("Expiry")}</button>
               {/* Deletion is irreversible, so it does not go straight from
                   the click - it opens the target confirmation. */}
               <ActionGuard action="localuser.delete" host={host.id}>
-                <button className="hm-danger" onClick={() => toggle("delete")}>{t("Delete")}</button>
+                <button className="ui-btn-danger" onClick={() => toggle("delete")}>{t("Delete")}</button>
               </ActionGuard>
             </div>
           )}
@@ -271,7 +272,7 @@ function Row({ host, account }: { host: Host; account: LocalAccount }) {
         </tr>
       )}
       {panel === "unlock" && (
-        <tr className="hm-panel-row">
+        <tr className="ui-row">
           <td colSpan={8}>
             {/* Letting an account log in again hands somebody access, and the
                 panel keeps the reason. It used to go out with no reason at all,
@@ -326,7 +327,7 @@ export function AccountGroups({ groups }: { groups: string[] }) {
           {PRIVILEGED_GROUPS.includes(group)
             ? (
               <span
-                className="badge warn"
+                className="ui-pill ui-warn"
                 data-testid="privileged-group"
                 title={t("Membership of this group is root by another name: changing it needs the permission accounts.privileged_groups on top of the operation's own, and an approval.")}
               >
@@ -346,13 +347,13 @@ function Expiry({ account }: { account: LocalAccount }) {
   if (account.expires_at) {
     const expired = account.expires_at < new Date().toISOString().slice(0, 10);
     return (
-      <span className={expired ? "badge error" : "badge warn"} title={expired ? t("The account stopped accepting logins on that day.") : t("The account stops accepting logins on that day.")}>
+      <span className={expired ? "ui-pill ui-error" : "ui-pill ui-warn"} title={expired ? t("The account stopped accepting logins on that day.") : t("The account stops accepting logins on that day.")}>
         {account.expires_at}
       </span>
     );
   }
-  if (account.unavailable_reason) return <span className="badge unknown">{t("unknown")}</span>;
-  return <span className="source">{t("never")}</span>;
+  if (account.unavailable_reason) return <span className="ui-pill ui-unknown">{t("unknown")}</span>;
+  return <span className="ui-note">{t("never")}</span>;
 }
 
 /**
@@ -433,13 +434,13 @@ export function KeysPanel({
             {keys.map((key) => (
               <tr key={`${fileOf(key)}:${key.fingerprint}`} data-testid="account-key">
                 <td>{key.type || "?"}</td>
-                <td className="hm-mono" title={key.fingerprint}>{shortFingerprint(key.fingerprint)}</td>
-                <td className="source">{key.comment || "—"}</td>
-                <td className="source">{fileName(t, fileOf(key))}</td>
+                <td className="ui-mono" title={key.fingerprint}>{shortFingerprint(key.fingerprint)}</td>
+                <td className="ui-note">{key.comment || "—"}</td>
+                <td className="ui-note">{fileName(t, fileOf(key))}</td>
                 <td>
                   <ActionGuard action="localuser.sshkeys.remove" host={hostID}>
                     <button
-                      className="hm-danger"
+                      className="ui-btn-danger"
                       disabled={request.busy}
                       onClick={() => (cutsOff(key.fingerprint) ? setLockoutFor(key.fingerprint) : remove(key, false))}
                     >
@@ -447,16 +448,16 @@ export function KeysPanel({
                     </button>
                   </ActionGuard>
                   {lockoutFor === key.fingerprint && (
-                    <div className="hm-form">
+                    <div className="ui-form">
                       <Message
                         error
                         text={t("This is the last key of {name}, and the account has no password login: after the removal nobody can log in as it. Add the new key first, or say that cutting the account off is the intent.", { name: account.name })}
                       />
                       <FormActions>
-                        <button className="hm-danger" onClick={() => remove(key, true)}>
+                        <button className="ui-btn-danger" onClick={() => remove(key, true)}>
                           {t("Remove and cut the account off")}
                         </button>
-                        <button className="secondary" onClick={() => setLockoutFor(null)}>{t("Cancel")}</button>
+                        <button className="ui-btn-secondary" onClick={() => setLockoutFor(null)}>{t("Cancel")}</button>
                       </FormActions>
                     </div>
                   )}
@@ -508,11 +509,11 @@ export function KeysPanel({
           </button>
         </ActionGuard>
         <ActionGuard action="localuser.sshkeys.replace_all" host={hostID}>
-          <button className="hm-danger" disabled={replacing} onClick={() => setReplacing(true)}>
+          <button className="ui-btn-danger" disabled={replacing} onClick={() => setReplacing(true)}>
             {t("Replace all…")}
           </button>
         </ActionGuard>
-        <button className="secondary" onClick={onClose}>{t("Cancel")}</button>
+        <button className="ui-btn-secondary" onClick={onClose}>{t("Cancel")}</button>
       </FormActions>
 
       {replacing && (
@@ -552,7 +553,7 @@ function ReplaceAllKeys({
   const ready = reason.trim().length >= 8 && orderReady(replaceOrder) && !request.busy;
 
   return (
-    <div className="hm-form">
+    <div className="ui-form">
       <Fields>
         <Field label={t("Key file")} help={t("The file that is written anew; the other file of the account is not touched.")}>
           <select value={file} onChange={(event) => setFile(event.target.value as KeyFile)}>
@@ -579,9 +580,9 @@ function ReplaceAllKeys({
           <FormNote>
             {t("These keys are in {file} of {name} now. Every one of them goes away unless it is on the list above:", { file: fileName(t, file), name: account.name })}
           </FormNote>
-          <ul className="source" data-testid="keys-going-away">
+          <ul className="ui-note" data-testid="keys-going-away">
             {current.map((key) => (
-              <li key={key.fingerprint} className="hm-mono" title={key.fingerprint}>
+              <li key={key.fingerprint} className="ui-mono" title={key.fingerprint}>
                 {key.type || "?"} · {shortFingerprint(key.fingerprint)}{key.comment ? ` · ${key.comment}` : ""}
               </li>
             ))}
@@ -602,7 +603,7 @@ function ReplaceAllKeys({
 
       <FormActions>
         <button
-          className="hm-danger"
+          className="ui-btn-danger"
           disabled={!ready}
           title={refusalOf(t, replaceOrder)}
           onClick={() => {
@@ -620,7 +621,7 @@ function ReplaceAllKeys({
         >
           {t("Replace all keys")}
         </button>
-        <button className="secondary" onClick={onClose}>{t("Cancel")}</button>
+        <button className="ui-btn-secondary" onClick={onClose}>{t("Cancel")}</button>
       </FormActions>
     </div>
   );
@@ -666,7 +667,7 @@ function GroupsPanel({
             {t("Set groups")}
           </button>
         </ActionGuard>
-        <button className="secondary" onClick={onClose}>{t("Cancel")}</button>
+        <button className="ui-btn-secondary" onClick={onClose}>{t("Cancel")}</button>
       </FormActions>
     </Form>
   );
@@ -699,14 +700,14 @@ function ExpiryPanel({
         </ActionGuard>
         <ActionGuard action="localuser.expiry.set" host={hostID}>
           <button
-            className="secondary"
+            className="ui-btn-secondary"
             disabled={!account.expires_at}
             onClick={() => request.mutate({ action: "localuser.expiry.set", name: account.name, expires_at: "" })}
           >
             {t("Clear expiry")}
           </button>
         </ActionGuard>
-        <button className="secondary" onClick={onClose}>{t("Cancel")}</button>
+        <button className="ui-btn-secondary" onClick={onClose}>{t("Cancel")}</button>
       </FormActions>
     </Form>
   );
@@ -720,7 +721,7 @@ function DeletePanel({ host, account, request, onClose }: { host: Host; account:
   const t = useT();
   const [removeHome, setRemoveHome] = useState(false);
   return (
-    <div className="hm-form">
+    <div className="ui-form">
       <Check checked={removeHome} onChange={setRemoveHome}>
         {t("Remove the home directory {home} as well. Its contents are lost.", { home: account.home || "" })}
       </Check>
@@ -758,21 +759,21 @@ function DeletePanel({ host, account, request, onClose }: { host: Host; account:
 function Access({ account }: { account: LocalAccount }) {
   const t = useT();
   if (account.locked === null) {
-    return <span className="badge unknown">{t("unknown")}</span>;
+    return <span className="ui-pill ui-unknown">{t("unknown")}</span>;
   }
   // The tones are the ones of the bar above the table: a key is the
   // desired way in, a password is worth a look, a lock is deliberate.
-  if (account.locked) return <span className="badge">{t("locked")}</span>;
+  if (account.locked) return <span className="ui-pill">{t("locked")}</span>;
   if (account.ssh_keys.length > 0) {
-    return <span className="badge ok">{t("SSH key")}</span>;
+    return <span className="ui-pill ui-ok">{t("SSH key")}</span>;
   }
-  if (account.password_set === true) return <span className="badge warn">{t("password")}</span>;
+  if (account.password_set === true) return <span className="ui-pill ui-warn">{t("password")}</span>;
   if (account.password_set === false) {
     // An account without a password and without a key is reachable by
     // nobody.
-    return <span className="badge error">{t("no access")}</span>;
+    return <span className="ui-pill ui-error">{t("no access")}</span>;
   }
-  return <span className="badge unknown">{t("unknown")}</span>;
+  return <span className="ui-pill ui-unknown">{t("unknown")}</span>;
 }
 
 function NewAccount({ host, onClose }: { host: Host; onClose: () => void }) {
@@ -861,7 +862,7 @@ function NewAccount({ host, onClose }: { host: Host; onClose: () => void }) {
               {t("Request account creation")}
             </button>
           </ActionGuard>
-          <button className="secondary" onClick={onClose}>{t("Cancel")}</button>
+          <button className="ui-btn-secondary" onClick={onClose}>{t("Cancel")}</button>
         </FormActions>
         <Message text={request.message} />
       </Form>

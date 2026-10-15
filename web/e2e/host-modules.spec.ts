@@ -32,7 +32,7 @@ function exact(text: string): RegExp {
 
 /** A titled section of a module page. */
 function section(page: Page, title: string) {
-  return page.locator(".hm-section").filter({ has: page.locator(".hm-section-head h3", { hasText: exact(title) }) });
+  return page.locator(".ui-panel").filter({ has: page.locator(".ui-panel-head h3", { hasText: exact(title) }) });
 }
 
 /** The job identifier of the next operation the page orders. */
@@ -57,7 +57,7 @@ test.describe("services", () => {
 
     const missing = await openModule(page, target, "services", "Services");
     test.skip(missing !== null, absent(missing ?? ""));
-    await expect(page.locator(".hm-header .hm-lede")).toContainText("systemd units");
+    await expect(page.locator(".ui-sectionhead .ui-lede")).toContainText("systemd units");
     await expect(section(page, "Unit states").getByTestId("status-bar")).toBeVisible();
     await expect(section(page, "Failed units")).toBeVisible();
 
@@ -67,16 +67,16 @@ test.describe("services", () => {
     await page.goto(`/hosts/${target.id}/services?unit=${encodeURIComponent(unit)}`);
     await ordered;
     const detail = page.getByTestId("unit-detail");
-    const refused = page.locator(".hm-message.error");
+    const refused = page.locator(".ui-message.ui-error");
     await expect(detail.or(refused).first()).toBeVisible({ timeout: 60_000 });
     if (await refused.isVisible()) test.skip(true, absent(`${target.hostname} answered the detail read of ${unit} with: ${await refused.textContent()}`));
 
-    const fact = (label: string) => detail.locator(".hm-fact").filter({ has: page.locator("dt", { hasText: exact(label) }) }).locator("dd");
+    const fact = (label: string) => detail.locator(".ui-fact").filter({ has: page.locator("dt", { hasText: exact(label) }) }).locator("dd");
     await expect(fact("Unit file")).toContainText(unit);
-    await expect(fact("State").locator(".badge").first()).toHaveText(/^(active|inactive|failed|activating|deactivating)$/);
+    await expect(fact("State").locator(".ui-pill").first()).toHaveText(/^(active|inactive|failed|activating|deactivating)$/);
     await expect(fact("On boot")).not.toBeEmpty();
     for (const heading of ["Drop-ins", "Last journal lines"]) {
-      await expect(detail.locator(".widget-subhead", { hasText: heading })).toBeVisible();
+      await expect(detail.locator(".ui-subhead", { hasText: heading })).toBeVisible();
     }
     // The journal continues on the Logs page from where the detail ended.
     await expect(detail.getByRole("link", { name: "Follow in Logs" })).toHaveAttribute("href", new RegExp(`/logs\\?unit=${encodeURIComponent(unit).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
@@ -103,9 +103,9 @@ test.describe("services", () => {
       // The list is read on request; the page picks the new module up on
       // its next refresh, which is due within half a minute.
       const ordered = nextJob(page, target.id);
-      await page.locator(".hm-header").getByRole("button", { name: "Read from host" }).click();
+      await page.locator(".ui-sectionhead").getByRole("button", { name: "Read from host" }).click();
       const job = await ordered;
-      await expect(page.locator(".hm-message")).toContainText(/Job \w+ has been queued|is waiting for approval/);
+      await expect(page.locator(".ui-message")).toContainText(/Job \w+ has been queued|is waiting for approval/);
       await expect.poll(() => jobState(request, job), { timeout: 60_000 }).toMatch(/^(succeeded|failed|timed_out|canceled|expired)$/);
       const state = await jobState(request, job);
       test.skip(!["succeeded", "failed"].includes(state), absent(`${target.hostname} did not answer the unit listing: ${state}`));
@@ -116,12 +116,12 @@ test.describe("services", () => {
     // the units whose name carries the text.
     const rows = all.locator("tbody tr");
     await expect(rows.first()).toBeVisible();
-    await expect(all.locator(".hm-foot")).toContainText(/\d+ of \d+ units shown/);
+    await expect(all.locator(".ui-panel-foot")).toContainText(/\d+ of \d+ units shown/);
     await filter.fill(unit.replace(/\.service$/, ""));
     await expect(rows.first()).toBeVisible();
     for (const row of await rows.all()) {
       await expect(row.locator("td").first()).toContainText(unit.replace(/\.service$/, ""));
-      await expect(row.locator("td").nth(1).locator(".badge")).not.toBeEmpty();
+      await expect(row.locator("td").nth(1).locator(".ui-pill")).not.toBeEmpty();
     }
     const cron = rows.filter({ hasText: unit }).first();
     await expect(cron).toBeVisible();
@@ -132,7 +132,7 @@ test.describe("services", () => {
     await expect(cron.getByRole("button", { name: "Reset failed" })).toHaveCount(state === "failed" ? 1 : 0);
 
     await filter.fill("");
-    const failed = rows.filter({ has: page.locator("td:nth-child(2) .badge.error") });
+    const failed = rows.filter({ has: page.locator("td:nth-child(2) .ui-pill.ui-error") });
     if (await failed.count()) {
       await expect(failed.first().getByRole("button", { name: "Reset failed" })).toBeVisible();
     } else {
@@ -159,11 +159,11 @@ test.describe("schedules", () => {
     test.skip(missing !== null, absent(missing ?? ""));
     await expect(section(page, "By kind")).toBeVisible();
     const list = section(page, "Schedules").last();
-    await expect(list.locator("tbody tr").first().or(list.locator(".empty"))).toBeVisible();
+    await expect(list.locator("tbody tr").first().or(list.locator(".ui-empty"))).toBeVisible();
 
     // The form opens from the header; the preview is a read the host
     // answers, so the dates come in the host's zone rather than the browser's.
-    await page.locator(".hm-header").getByRole("button", { name: "New schedule" }).click();
+    await page.locator(".ui-sectionhead").getByRole("button", { name: "New schedule" }).click();
     const form = section(page, "New schedule");
     await expect(form).toBeVisible();
     const expression = form.getByPlaceholder("Cron expression");
@@ -180,13 +180,13 @@ test.describe("schedules", () => {
     expect(posted.some((body) => body.includes("schedule.preview")), "the preview is ordered as schedule.preview").toBe(true);
     expect(posted.some((body) => body.includes("schedule.ensure")), "nothing is created").toBe(false);
 
-    const note = form.locator(".hm-form-note").filter({ hasText: /Next runs in|does not accept the expression/ });
-    const refused = form.locator(".hm-message.error");
+    const note = form.locator(".ui-field-hint").filter({ hasText: /Next runs in|does not accept the expression/ });
+    const refused = form.locator(".ui-message.ui-error");
     await expect(note.or(refused).first()).toBeVisible({ timeout: 60_000 });
     if (await refused.isVisible()) test.skip(true, absent(`${target.hostname} refused the preview: ${await refused.textContent()}`));
     await expect(note).toContainText("Next runs in");
     // Three Mondays at half past four, written as the host's wall clock.
-    const runs = (await note.locator(".hm-mono").textContent()) ?? "";
+    const runs = (await note.locator(".ui-mono").textContent()) ?? "";
     const dates = runs.split(",").map((run) => run.trim()).filter(Boolean);
     expect(dates.length).toBeGreaterThanOrEqual(1);
     for (const run of dates) {
@@ -219,7 +219,7 @@ test.describe("processes", () => {
 
     if (await unread.isVisible()) {
       const ordered = nextJob(page, target.id);
-      await page.locator(".hm-header").getByRole("button", { name: "Read from host" }).click();
+      await page.locator(".ui-sectionhead").getByRole("button", { name: "Read from host" }).click();
       const job = await ordered;
       await expect.poll(() => jobState(request, job), { timeout: 60_000 }).toMatch(/^(succeeded|failed|timed_out|canceled|expired)$/);
       const state = await jobState(request, job);
@@ -235,7 +235,7 @@ test.describe("processes", () => {
     for (const value of await section(page, "Process states").getByTestId("status-bar-value").all()) {
       await expect(value).toHaveText(/^\d+$/);
     }
-    await expect(section(page, "By user").locator(".breakdown-fill").first()).toBeVisible();
+    await expect(section(page, "By user").locator(".ui-bar-fill").first()).toBeVisible();
 
     // The tree nests every child under its parent: a child is indented,
     // a parent carries a fold, and nothing is lost in the nesting.
@@ -245,7 +245,7 @@ test.describe("processes", () => {
     // A cut-off slice may hold children whose parents were left out, and
     // those stand as roots; a whole host always nests something under its
     // init process.
-    const truncated = (await list.locator(".warning").count()) > 0;
+    const truncated = (await list.locator(".ui-banner").count()) > 0;
     if (!truncated) expect(await indents.count(), "a whole host has at least one parent with a child").toBeGreaterThan(0);
     for (const indent of await indents.all()) {
       expect(Number(await indent.getAttribute("data-depth"))).toBeGreaterThan(0);
@@ -284,7 +284,7 @@ test.describe("logs", () => {
     const missing = await openModule(page, target, "logs", "Logs");
     test.skip(missing !== null, absent(missing ?? ""));
     const reading = section(page, "Reading");
-    await expect(reading.locator(".badge", { hasText: "nothing read yet" })).toBeVisible();
+    await expect(reading.locator(".ui-pill", { hasText: "nothing read yet" })).toBeVisible();
     // Nothing read means nothing counted: dashes, not zeros.
     for (const value of await section(page, "Lines on screen").getByTestId("status-bar-value").all()) {
       await expect(value).toHaveText("—");
@@ -292,22 +292,22 @@ test.describe("logs", () => {
 
     // A page of the journal, bounded by the line count.
     const form = section(page, "Read");
-    await form.locator("label.hm-field", { hasText: /^Unit/ }).locator("input").fill("");
-    await form.locator("label.hm-field", { hasText: /^Lines/ }).locator("input[type=number]").fill("50");
+    await form.locator("label.ui-field", { hasText: /^Unit/ }).locator("input").fill("");
+    await form.locator("label.ui-field", { hasText: /^Lines/ }).locator("input[type=number]").fill("50");
     const ordered = nextJob(page, target.id);
     await form.getByRole("button", { name: "Read", exact: true }).click();
     const readJob = await ordered;
     const output = section(page, "Output");
-    const refused = page.locator(".hm-message.error");
+    const refused = page.locator(".ui-message.ui-error");
     await expect(output.or(refused).first()).toBeVisible({ timeout: 60_000 });
     if (await refused.isVisible()) test.skip(true, absent(`${target.hostname} refused the journal read: ${await refused.textContent()}`));
     expect(await jobState(request, readJob)).toBe("succeeded");
     // The count beside the title is the number of lines the host gave;
     // the text under it is those lines, one per line.
-    const lines = ((await output.locator("pre.hm-log").textContent()) ?? "").split("\n");
+    const lines = ((await output.locator("pre.ui-log").textContent()) ?? "").split("\n");
     expect(lines.length).toBeGreaterThan(0);
-    await expect(output.locator(".hm-count")).toHaveText(String(lines.length));
-    await expect(reading.locator(".badge", { hasText: exact("read") })).toBeVisible();
+    await expect(output.locator(".ui-count")).toHaveText(String(lines.length));
+    await expect(reading.locator(".ui-pill", { hasText: exact("read") })).toBeVisible();
     for (const value of await section(page, "Lines on screen").getByTestId("status-bar-value").all()) {
       await expect(value).toHaveText(/^\d+$|^—$/);
     }
@@ -318,7 +318,7 @@ test.describe("logs", () => {
     await form.getByRole("button", { name: "Follow" }).click();
     const followJob = await followed;
     await expect(section(page, "Live")).toBeVisible();
-    await expect(reading.locator(".badge", { hasText: exact("live") })).toBeVisible();
+    await expect(reading.locator(".ui-pill", { hasText: exact("live") })).toBeVisible();
     await expect(form.getByRole("button", { name: "Pause" })).toBeVisible();
 
     const canceled = page.waitForResponse((response) => response.url().endsWith(`/api/v1/jobs/${followJob}/cancel`));
@@ -340,7 +340,7 @@ test.describe("security and ssh", () => {
 
     const missing = await openModule(page, target, "security", "Security");
     test.skip(missing !== null, absent(missing ?? ""));
-    await expect(page.locator(".hm-header").getByRole("button", { name: "Scan now" })).toBeVisible();
+    await expect(page.locator(".ui-sectionhead").getByRole("button", { name: "Scan now" })).toBeVisible();
     await expect(page.getByTestId("module-freshness")).toBeVisible();
     const checks = section(page, "Checks").getByTestId("status-bar");
     await expect(checks.getByTestId("status-bar-value")).toHaveCount(4);
@@ -379,11 +379,11 @@ test.describe("security and ssh", () => {
       await expect(section(page, title).first()).toBeVisible();
     }
 
-    await page.locator(".hm-header").getByRole("button", { name: "Change configuration" }).click();
+    await page.locator(".ui-sectionhead").getByRole("button", { name: "Change configuration" }).click();
     const editor = section(page, "Change configuration");
     await expect(editor).toBeVisible();
     await expect(editor.locator("select").first()).toHaveValue("");
-    await page.locator(".hm-header").getByRole("button", { name: "Cancel" }).click();
+    await page.locator(".ui-sectionhead").getByRole("button", { name: "Cancel" }).click();
     await expect(editor).toHaveCount(0);
     expect(posted, "opening the editor must not write anything").toEqual([]);
     await expectHealthy(page, errors);

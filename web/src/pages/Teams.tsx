@@ -3,8 +3,8 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection, type Page } from "../lib/api";
 import type { Host, Whoami } from "../lib/types";
-import { Empty, ErrorBox, Time } from "../components/ui";
-import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Stat, StatGrid } from "../components/layout";
+import { ErrorBox, Time } from "../components/ui";
+import { Actions, Empty, Field, Fields, PageHead, Panel, Stat, Stats } from "../ui/kit";
 import { t, useT } from "../i18n";
 
 /**
@@ -83,11 +83,11 @@ function Refusal({ error, close }: { error: ApiError | null; close: () => void }
   if (!error) return null;
   if (error.code === "reauthentication_required") {
     return (
-      <div className="warning" data-testid="teams-refusal">
+      <div className="ui-banner" data-testid="teams-refusal">
         <div>
           <strong>{t("Re-authentication required.")}</strong> {error.message}
         </div>
-        <div className="operations">
+        <div className="ui-actions">
           <button
             onClick={() => {
               const target = encodeURIComponent(window.location.pathname + window.location.search);
@@ -96,15 +96,15 @@ function Refusal({ error, close }: { error: ApiError | null; close: () => void }
           >
             {t("Sign in again")}
           </button>
-          <button className="secondary" onClick={close}>{t("Close")}</button>
+          <button className="ui-btn-secondary" onClick={close}>{t("Close")}</button>
         </div>
       </div>
     );
   }
   return (
-    <div className="warning" data-testid="teams-refusal">
+    <div className="ui-banner" data-testid="teams-refusal">
       <div>{refusalText(error.code, error.message)}</div>
-      <div className="operations"><button onClick={close}>{t("Close")}</button></div>
+      <div className="ui-actions"><button onClick={close}>{t("Close")}</button></div>
     </div>
   );
 }
@@ -119,11 +119,11 @@ function Guarded({ allowed, children }: { allowed: boolean; children: ReactNode 
   if (allowed) return <>{children}</>;
   const reason = t("This needs the permission {permission}, which the platform administrator holds.", { permission: TEAM_WRITE_PERMISSION });
   return (
-    <span className="action-guard action-guard-denied" title={reason} data-testid="teams-guard">
+    <span className="ui-guard ui-guard-denied" title={reason} data-testid="teams-guard">
       <fieldset disabled aria-disabled="true" style={{ display: "contents" }}>
         {children}
       </fieldset>
-      <span className="source action-guard-hint">{reason}</span>
+      <span className="ui-note">{reason}</span>
     </span>
   );
 }
@@ -179,10 +179,10 @@ export function Teams() {
   if (list.error instanceof ApiError && list.error.forbidden) {
     return (
       <>
-        <PageHeader title={t("Teams")} description={doctrine}
+        <PageHead title={t("Teams")} description={doctrine}
         help={<p>{t("A team is a group of people and the scopes they may act in. Membership decides what the panel offers them, so a role taken away here is taken away from every screen at once.")}</p>}
       />
-        <Card><Empty>{t("You do not have permission to read the teams.")}</Empty></Card>
+        <Panel><Empty>{t("You do not have permission to read the teams.")}</Empty></Panel>
       </>
     );
   }
@@ -196,10 +196,10 @@ export function Teams() {
 
   return (
     <>
-      <PageHeader title={t("Teams")} description={doctrine} />
+      <PageHead title={t("Teams")} description={doctrine} />
       <Refusal error={warning} close={() => setWarning(null)} />
 
-      <StatGrid>
+      <Stats>
         <Stat label={t("Teams")} value={list.data ? teams.length : "—"} hint={t("Each one is a boundary a role binding can name.")} />
         <Stat label={t("Hosts in a team")} value={list.data ? placed : "—"} hint={t("Reachable through their team as well as their site.")} />
         <Stat
@@ -208,11 +208,11 @@ export function Teams() {
           hint={t("Reachable through their site alone; that is a placement nobody has made, not a fault.")}
           to={UNPLACED_HOSTS_ADDRESS}
         />
-      </StatGrid>
+      </Stats>
 
-      <div className="widgets">
-        <Card
-          className={aside ? "span-6" : "span-9"}
+      <div className="ui-grid">
+        <Panel
+          className={aside ? "ui-col-6" : "ui-col-9"}
           title={t("Teams")}
           actions={!aside && (
             <Guarded allowed={canManage}>
@@ -224,7 +224,7 @@ export function Teams() {
           {!list.data ? (
             <Empty>{t("Loading…")}</Empty>
           ) : teams.length === 0 ? (
-            <EmptyState
+            <Empty
               action={(
                 <Guarded allowed={canManage}>
                   <button onClick={() => setAside({ kind: "create" })}>{t("Create team")}</button>
@@ -232,14 +232,14 @@ export function Teams() {
               )}
             >
               {t("No teams. Every host is reachable through its site, and every role binding names a site and an environment. Draw a team where the division of the work is not the geography of the machines.")}
-            </EmptyState>
+            </Empty>
           ) : (
             <table>
               <thead>
                 <tr>
                   <th scope="col">{t("Team")}</th>
                   <th scope="col">{t("What belongs here")}</th>
-                  <th scope="col" className="num">{t("Hosts")}</th>
+                  <th scope="col" className="ui-numeric">{t("Hosts")}</th>
                   <th scope="col">{t("Created by")}</th>
                   <th scope="col">{t("When")}</th>
                   <th scope="col" />
@@ -253,23 +253,23 @@ export function Teams() {
                       {/* The identifier is the boundary: a binding names it,
                           and a rename moves nobody. It is shown because the
                           audit trail and the address bar speak it. */}
-                      <div className="source mono" title={t("The identifier a role binding names; a rename does not change it.")}>
+                      <div className="ui-note ui-mono" title={t("The identifier a role binding names; a rename does not change it.")}>
                         {team.id}
                       </div>
                     </td>
-                    <td className="source">{team.description || <span className="badge unknown">{t("nobody wrote one")}</span>}</td>
-                    <td className="num">
+                    <td className="ui-note">{team.description || <span className="ui-pill ui-unknown">{t("nobody wrote one")}</span>}</td>
+                    <td className="ui-numeric">
                       <Link to={teamHostsAddress(team.id)} title={t("show the hosts of this team")}>{team.hosts}</Link>
                     </td>
-                    <td className="source">{team.created_by || "—"}</td>
+                    <td className="ui-note">{team.created_by || "—"}</td>
                     <td><Time value={team.created_at} /></td>
-                    <td className="actions-cell">
-                      <div className="row-actions">
+                    <td className="ui-actioncell">
+                      <div className="ui-rowactions">
                         <Guarded allowed={canManage}>
-                          <button className="secondary" onClick={() => setAside({ kind: "edit", team })}>
+                          <button className="ui-btn-secondary" onClick={() => setAside({ kind: "edit", team })}>
                             {t("Rename")}
                           </button>
-                          <button className="danger" onClick={() => setAside({ kind: "delete", team })}>
+                          <button className="ui-btn-danger" onClick={() => setAside({ kind: "delete", team })}>
                             {t("Delete")}
                           </button>
                         </Guarded>
@@ -280,7 +280,7 @@ export function Teams() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
 
         {aside?.kind === "create" && (
           <TeamForm key="create" onDone={settled} onCancel={() => setAside(null)} onError={onError} />
@@ -299,14 +299,14 @@ export function Teams() {
         )}
 
         {!aside && (
-          <Card className="span-3" title={t("A team is not a tag")}>
-            <p className="source">
+          <Panel className="ui-col-3" title={t("A team is not a tag")}>
+            <p className="ui-note">
               {t("An operator edits tags, so a tag may never decide who may touch what: somebody who can widen their own scope has no scope. A team is a row with an identifier, and putting a host into one is an operation of its own, with its own permission and its own line in the trail.")}
             </p>
-            <p className="source">
+            <p className="ui-note">
               {t("A team renamed is the same team: every binding and every host stay where they were. Use tags to choose hosts inside what you may already touch.")}
             </p>
-          </Card>
+          </Panel>
         )}
       </div>
     </>
@@ -337,19 +337,19 @@ function TeamForm({ team, onDone, onCancel, onError }: {
   });
   const ready = name.trim() !== "" && reasonGiven(reason) && !save.isPending;
   return (
-    <Card
-      className="span-3 fp-narrow"
+    <Panel
+      className="ui-col-3 ui-narrow"
       title={team ? t("Rename {name}", { name: team.name }) : t("New team")}
       footer={
         <Actions>
           <button disabled={!ready} onClick={() => save.mutate()} data-testid="team-save">
             {save.isPending ? t("Working…") : team ? t("Save team") : t("Create team")}
           </button>
-          <button className="secondary" onClick={onCancel} disabled={save.isPending}>{t("Cancel")}</button>
+          <button className="ui-btn-secondary" onClick={onCancel} disabled={save.isPending}>{t("Cancel")}</button>
         </Actions>
       }
     >
-      <FieldGrid>
+      <Fields>
         <Field label={t("Name")} hint={t("What people call the team; it is unique, and it is not the boundary - the identifier is, so a rename keeps every binding and every host.")} wide>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("payments platform")} data-testid="team-name" />
         </Field>
@@ -359,13 +359,13 @@ function TeamForm({ team, onDone, onCancel, onError }: {
         <Field label={t("Reason (kept in the audit trail)")} hint={t("At least {n} characters; the button opens when they are there.", { n: TEAM_REASON_MIN_LENGTH })} wide>
           <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("e.g. the payments group took over the database hosts")} data-testid="team-reason" />
         </Field>
-      </FieldGrid>
+      </Fields>
       {!team && (
-        <p className="source">
+        <p className="ui-note">
           {t("A new team holds nobody and grants nothing until a host is placed in it and a role is granted over it. Both are decisions of their own.")}
         </p>
       )}
-    </Card>
+    </Panel>
   );
 }
 
@@ -381,30 +381,30 @@ function DeleteTeam({ team, busy, onConfirm, onCancel }: {
   const t = useT();
   const [reason, setReason] = useState("");
   return (
-    <Card
-      className="span-3 fp-narrow"
+    <Panel
+      className="ui-col-3 ui-narrow"
       title={t("Delete {name}", { name: team.name })}
       footer={
         <Actions>
-          <button className="danger" disabled={!reasonGiven(reason) || busy} onClick={() => onConfirm(reason.trim())} data-testid="team-delete">
+          <button className="ui-btn-danger" disabled={!reasonGiven(reason) || busy} onClick={() => onConfirm(reason.trim())} data-testid="team-delete">
             {busy ? t("Working…") : t("Delete team")}
           </button>
-          <button className="secondary" onClick={onCancel} disabled={busy}>{t("Cancel")}</button>
+          <button className="ui-btn-secondary" onClick={onCancel} disabled={busy}>{t("Cancel")}</button>
         </Actions>
       }
     >
-      <p className="source" data-testid="team-delete-text">
+      <p className="ui-note" data-testid="team-delete-text">
         {t("This releases {n} hosts. They keep existing and stay reachable through their site, as they were before anybody drew this boundary; no machine is touched.", { n: team.hosts })}
       </p>
-      <p className="source">
+      <p className="ui-note">
         {t("Every role binding that named this team goes with it: whoever held a role here and nowhere else loses it on their next request.")}
       </p>
-      <FieldGrid>
+      <Fields>
         <Field label={t("Reason (kept in the audit trail)")} hint={t("At least {n} characters; the button opens when they are there.", { n: TEAM_REASON_MIN_LENGTH })} wide>
           <input value={reason} onChange={(e) => setReason(e.target.value)} data-testid="team-reason" />
         </Field>
-      </FieldGrid>
-    </Card>
+      </Fields>
+    </Panel>
   );
 }
 

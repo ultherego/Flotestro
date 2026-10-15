@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Host, Job } from "../../lib/types";
-import { Time, Empty } from "../../components/ui";
+import { Time } from "../../components/ui";
 import { absoluteTime } from "../../lib/format";
 import {
   Check, Fact, Facts, Field, Fields, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader, ModulePage,
@@ -12,6 +12,7 @@ import {
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 type Inhibitor = { who: string; user?: string; pid?: number; what?: string; why?: string; mode?: string };
 
@@ -77,7 +78,7 @@ export function Power() {
   const [message, setMessage] = useState("");
   const [shutdownReason, setShutdownReason] = useState("");
   const [ignoreInhibitors, setIgnoreInhibitors] = useState(false);
-  const unknown = <span className="badge unknown">{t("unknown")}</span>;
+  const unknown = <span className="ui-pill ui-unknown">{t("unknown")}</span>;
 
   const request = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
@@ -113,14 +114,14 @@ export function Power() {
       <Message text={message} />
 
       {snapshot?.unavailable_reason && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>{t("Boot state could not be read: {reason}", { reason: snapshot.unavailable_reason })}</span>
         </p>
       )}
       {/* A shutdown scheduled outside the panel is a fact the operator is to
           see before requesting anything here. */}
       {snapshot?.scheduled_shutdown && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>
             {t("A {mode} is already scheduled on this host for", { mode: snapshot.scheduled_shutdown.mode })}{" "}
             <Time value={snapshot.scheduled_shutdown.at} />.
@@ -151,16 +152,16 @@ export function Power() {
           <Fact label={t("Reboot required")}>
             {snapshot?.reboot_required === undefined || snapshot?.reboot_required === null
               ? unknown
-              : <span className={snapshot.reboot_required ? "badge warn" : "badge ok"}>{snapshot.reboot_required ? t("yes") : t("no")}</span>}
+              : <span className={snapshot.reboot_required ? "ui-pill ui-warn" : "ui-pill ui-ok"}>{snapshot.reboot_required ? t("yes") : t("no")}</span>}
           </Fact>
           <Fact label={t("Inhibitors")}>
             {!snapshot?.inhibitors_known
               ? unknown
-              : <span className={blocking.length > 0 ? "badge warn" : "badge"}>{(snapshot.inhibitors ?? []).length}</span>}
+              : <span className={blocking.length > 0 ? "ui-pill ui-warn" : "ui-pill"}>{(snapshot.inhibitors ?? []).length}</span>}
           </Fact>
           <Fact label={t("Scheduled shutdown")}>
             {snapshot?.scheduled_shutdown
-              ? <><span className="badge warn">{snapshot.scheduled_shutdown.mode}</span> <Time value={snapshot.scheduled_shutdown.at} /></>
+              ? <><span className="ui-pill ui-warn">{snapshot.scheduled_shutdown.mode}</span> <Time value={snapshot.scheduled_shutdown.at} /></>
               : t("none")}
           </Fact>
           <Fact label={t("Boots in the journal")}>{known ? (known.last_boots ?? []).length : unknown}</Fact>
@@ -174,15 +175,15 @@ export function Power() {
         <Facts>
           <Fact label={t("Boot ID")}>
             {snapshot?.boot_id
-              ? <Link className="hm-mono" to={bootLogsPath(host.id, snapshot.boot_id)} title={t("The journal of this boot")}>{snapshot.boot_id}</Link>
-              : <span className="hm-mono">{unknown}</span>}
+              ? <Link className="ui-mono" to={bootLogsPath(host.id, snapshot.boot_id)} title={t("The journal of this boot")}>{snapshot.boot_id}</Link>
+              : <span className="ui-mono">{unknown}</span>}
           </Fact>
           {/* The boot instant absolute beside the relative one, and the
               uptime marked as of the read: the two are read at different
               moments and would otherwise seem to disagree. */}
           <Fact label={t("Booted")}>
             {snapshot?.booted_at
-              ? <><Time value={snapshot.booted_at} /> <span className="source">· {absoluteTime(snapshot.booted_at)}</span></>
+              ? <><Time value={snapshot.booted_at} /> <span className="ui-note">· {absoluteTime(snapshot.booted_at)}</span></>
               : unknown}
           </Fact>
           <Fact label={t("Uptime")}>
@@ -190,10 +191,10 @@ export function Power() {
               ? unknown
               : <span title={t("as of the last read")}>{uptime(snapshot.uptime_seconds)}</span>}
             {snapshot?.uptime_seconds !== undefined && snapshot?.uptime_seconds !== null && snapshot.observed_at && (
-              <span className="source"> · {t("as of")} <Time value={snapshot.observed_at} /></span>
+              <span className="ui-note"> · {t("as of")} <Time value={snapshot.observed_at} /></span>
             )}
           </Fact>
-          <Fact label={t("Running kernel")}><span className="hm-mono">{snapshot?.running_kernel || unknown}</span></Fact>
+          <Fact label={t("Running kernel")}><span className="ui-mono">{snapshot?.running_kernel || unknown}</span></Fact>
           <Fact label={t("Reboot required")}>
             {snapshot?.reboot_required === undefined || snapshot?.reboot_required === null
               ? unknown
@@ -203,7 +204,7 @@ export function Power() {
             {/* "Why" is the whole answer here: a host that requires a
                 reboot without a reason tells the operator nothing. */}
             {(snapshot?.reboot_reasons ?? []).length > 0 && (
-              <span className="source"> · {snapshot!.reboot_reasons!.join(", ")}</span>
+              <span className="ui-note"> · {snapshot!.reboot_reasons!.join(", ")}</span>
             )}
           </Fact>
         </Facts>
@@ -228,11 +229,11 @@ export function Power() {
             <tbody>
               {snapshot.inhibitors.map((inhibitor, i) => (
                 <tr key={`${inhibitor.who}-${i}`}>
-                  <td className="hm-primary">{inhibitor.who}</td>
+                  <td className="ui-name">{inhibitor.who}</td>
                   <td>{inhibitor.user || "—"}</td>
-                  <td className="hm-mono">{inhibitor.what || "—"}</td>
+                  <td className="ui-mono">{inhibitor.what || "—"}</td>
                   <td>{inhibitor.why || "—"}</td>
-                  <td>{inhibitor.mode === "block" ? <span className="badge warn">block</span> : inhibitor.mode}</td>
+                  <td>{inhibitor.mode === "block" ? <span className="ui-pill ui-warn">block</span> : inhibitor.mode}</td>
                 </tr>
               ))}
             </tbody>
@@ -274,7 +275,7 @@ export function Power() {
             </ActionGuard>
             <ActionGuard action="system.shutdown" host={host.id}>
             <button
-              className="hm-danger"
+              className="ui-btn-danger"
               onClick={() =>
                 setIntent({
                   action: "system.shutdown",
@@ -312,20 +313,20 @@ export function Power() {
           <Empty>{t("The journal on this host lists no earlier boots.")}</Empty>
         ) : (
           <Table>
-            <thead><tr><th scope="col" className="hm-num">#</th><th scope="col">{t("Boot ID")}</th><th scope="col">{t("First entry")}</th><th scope="col">{t("Last entry")}</th></tr></thead>
+            <thead><tr><th scope="col" className="ui-numeric">#</th><th scope="col">{t("Boot ID")}</th><th scope="col">{t("First entry")}</th><th scope="col">{t("Last entry")}</th></tr></thead>
             <tbody>
               {[...snapshot.last_boots].reverse().map((boot) => (
                 <tr key={boot.boot_id}>
-                  <td className="hm-num">{boot.index}</td>
+                  <td className="ui-numeric">{boot.index}</td>
                   {/* The journal numbers boots back from the current one:
                       0 is this boot, -1 the one before. */}
                   {/* Each boot opens the Logs tab narrowed to it. */}
-                  <td className="hm-mono">
+                  <td className="ui-mono">
                     <Link to={bootLogsPath(host.id, boot.boot_id)} title={t("The journal of this boot")}>{dashedBootID(boot.boot_id)}</Link>
-                    {boot.index === 0 && <span className="badge ok"> {t("this boot")}</span>}
+                    {boot.index === 0 && <span className="ui-pill ui-ok"> {t("this boot")}</span>}
                   </td>
-                  <td><Time value={boot.first_entry} /> <span className="source">· {absoluteTime(boot.first_entry)}</span></td>
-                  <td><Time value={boot.last_entry} /> <span className="source">· {absoluteTime(boot.last_entry)}</span></td>
+                  <td><Time value={boot.first_entry} /> <span className="ui-note">· {absoluteTime(boot.first_entry)}</span></td>
+                  <td><Time value={boot.last_entry} /> <span className="ui-note">· {absoluteTime(boot.last_entry)}</span></td>
                 </tr>
               ))}
             </tbody>
@@ -335,7 +336,7 @@ export function Power() {
       </Widgets>
 
       {snapshot?.observed_at && (
-        <p className="hm-freshness">
+        <p className="ui-freshness">
           <span>{t("Boot state read")} <Time value={snapshot.observed_at} /></span>
         </p>
       )}
@@ -402,7 +403,7 @@ function MaintenanceWindow({ host }: { host: Host }) {
       ) : (
         <Empty>{t("This host is not in a maintenance window.")}</Empty>
       )}
-      <div className="hm-section-body">
+      <div className="ui-panel-body">
         <Form>
           <Fields>
             <Field label={t("Duration (minutes)")} narrow help={t("Counted from now; the window ends on its own.")}>
@@ -428,7 +429,7 @@ function MaintenanceWindow({ host }: { host: Host }) {
             >
               {active ? t("Extend window") : t("Start window")}
             </button>
-            <button className="secondary" onClick={() => set.mutate({ clear: true })} disabled={!active || set.isPending}>
+            <button className="ui-btn-secondary" onClick={() => set.mutate({ clear: true })} disabled={!active || set.isPending}>
               {t("End window")}
             </button>
           </FormActions>

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { Time, Empty } from "../../components/ui";
+import { Time } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import {
   Fact, Facts, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
@@ -14,6 +14,7 @@ import { OperationForm } from "../../components/OperationForm";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { emptyForm, operationForm, type FormValue } from "../../lib/operations";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 /**
  * A change to the server's settings as an order, composed by the operation
@@ -135,12 +136,12 @@ export function SshServer() {
       <Message text={message} />
 
       {snapshot?.unavailable_reason && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>{t("sshd configuration could not be read: {reason}", { reason: snapshot.unavailable_reason })}</span>
         </p>
       )}
       {effectiveMissing && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>{t("The host returned no effective configuration: the read of sshd -T gave nothing, so the ports, the methods and the limits are unknown. The host keys were read from disk.")}</span>
         </p>
       )}
@@ -174,7 +175,7 @@ export function SshServer() {
           <Fact label={t("Password")}>
             <span className={risky(snapshot?.password_authentication)}>{snapshot?.password_authentication || t("unknown")}</span>
           </Fact>
-          <Fact label={t("Max auth tries")}>{maxAuthTries ?? <span className="badge unknown">{t("unknown")}</span>}</Fact>
+          <Fact label={t("Max auth tries")}>{maxAuthTries ?? <span className="ui-pill ui-unknown">{t("unknown")}</span>}</Fact>
           <Fact label={t("Access lists")} wide>
             {known ? (
               <Breakdown
@@ -200,14 +201,14 @@ export function SshServer() {
           the drop-in below share the next one. */}
       <Section title={t("Effective configuration")} span={7} flush>
         <Facts>
-          <Fact label={t("Port")}><span className="hm-mono">{(snapshot?.ports ?? []).join(", ") || "—"}</span></Fact>
-          <Fact label={t("Listening on")}><span className="hm-mono">{(snapshot?.listen_addresses ?? []).join(", ") || "—"}</span></Fact>
+          <Fact label={t("Port")}><span className="ui-mono">{(snapshot?.ports ?? []).join(", ") || "—"}</span></Fact>
+          <Fact label={t("Listening on")}><span className="ui-mono">{(snapshot?.listen_addresses ?? []).join(", ") || "—"}</span></Fact>
           <Fact label={t("Root login")}>{snapshot?.permit_root_login || "—"}</Fact>
           <Fact label={t("Max auth tries")}>{maxAuthTries ?? "—"}</Fact>
-          <Fact label={t("Allow users")}><span className="hm-mono">{(snapshot?.allow_users ?? []).join(" ") || "—"}</span></Fact>
-          <Fact label={t("Allow groups")}><span className="hm-mono">{(snapshot?.allow_groups ?? []).join(" ") || "—"}</span></Fact>
-          <Fact label={t("Deny users")}><span className="hm-mono">{(snapshot?.deny_users ?? []).join(" ") || "—"}</span></Fact>
-          <Fact label={t("Service unit")}><span className="hm-mono">{snapshot?.unit || "—"}</span></Fact>
+          <Fact label={t("Allow users")}><span className="ui-mono">{(snapshot?.allow_users ?? []).join(" ") || "—"}</span></Fact>
+          <Fact label={t("Allow groups")}><span className="ui-mono">{(snapshot?.allow_groups ?? []).join(" ") || "—"}</span></Fact>
+          <Fact label={t("Deny users")}><span className="ui-mono">{(snapshot?.deny_users ?? []).join(" ") || "—"}</span></Fact>
+          <Fact label={t("Service unit")}><span className="ui-mono">{snapshot?.unit || "—"}</span></Fact>
         </Facts>
       </Section>
 
@@ -217,8 +218,8 @@ export function SshServer() {
           <tbody>
             {methods.map(([name, value]) => (
               <tr key={name}>
-                <td className="hm-primary">{name}</td>
-                <td>{value || <span className="badge unknown">{t("unknown")}</span>}</td>
+                <td className="ui-name">{name}</td>
+                <td>{value || <span className="ui-pill ui-unknown">{t("unknown")}</span>}</td>
               </tr>
             ))}
           </tbody>
@@ -233,17 +234,17 @@ export function SshServer() {
         flush
       >
         <Table>
-          <thead><tr><th scope="col">{t("Type")}</th><th scope="col" className="hm-num">{t("Bits")}</th><th scope="col">{t("Fingerprint")}</th><th scope="col">{t("Actions")}</th></tr></thead>
+          <thead><tr><th scope="col">{t("Type")}</th><th scope="col" className="ui-numeric">{t("Bits")}</th><th scope="col">{t("Fingerprint")}</th><th scope="col">{t("Actions")}</th></tr></thead>
           <tbody>
             {(snapshot?.host_keys ?? []).map((key) => (
               <tr key={key.path}>
-                <td className="hm-primary">{key.type}</td>
-                <td className="hm-num">{key.bits}</td>
-                <td className="source hm-mono">{key.fingerprint}</td>
+                <td className="ui-name">{key.type}</td>
+                <td className="ui-numeric">{key.bits}</td>
+                <td className="ui-note ui-mono">{key.fingerprint}</td>
                 <td>
                   <ActionGuard action="ssh.hostkey.rotate" host={host.id}>
                   <button
-                    className="hm-danger"
+                    className="ui-btn-danger"
                     onClick={() =>
                       setIntent({
                         action: "ssh.hostkey.rotate",
@@ -265,9 +266,9 @@ export function SshServer() {
         </Table>
       </Section>
 
-      <Section title={t("Managed drop-in")} description={<span className="hm-mono">{snapshot?.managed_path}</span>} span={5} flush>
+      <Section title={t("Managed drop-in")} description={<span className="ui-mono">{snapshot?.managed_path}</span>} span={5} flush>
         {snapshot?.managed_present ? (
-          <div className="hm-section-body">
+          <div className="ui-panel-body">
             <pre>{snapshot.managed_config}</pre>
           </div>
         ) : (
@@ -277,7 +278,7 @@ export function SshServer() {
       </Widgets>
 
       {snapshot?.observed_at && (
-        <p className="hm-freshness">
+        <p className="ui-freshness">
           <span>{t("Configuration read")} <Time value={snapshot.observed_at} /></span>
         </p>
       )}

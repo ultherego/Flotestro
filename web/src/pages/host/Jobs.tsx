@@ -5,7 +5,7 @@ import { api, loadedItems, type Collection, type Page } from "../../lib/api";
 import { useDebounced } from "../../lib/debounce";
 import { toInstant } from "../../lib/format";
 import type { Attempt, Job, OperationContract } from "../../lib/types";
-import { ErrorBox, ErrorCode, Time, ProgressBar, Empty, JobState } from "../../components/ui";
+import { ErrorBox, ErrorCode, Time, ProgressBar, JobState } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import { Foot, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere, useHost } from "./shared";
 import { OPERATIONS_INTERVAL, useProgress } from "../../lib/stream";
@@ -13,6 +13,7 @@ import { contractWords, useOperations } from "../Bulk";
 import { AttemptHead, hoursAgo, prettyJSON, reasonAccepted } from "../Jobs";
 import { needsReason } from "../../lib/actions";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 /** The states a job passes through before the host has touched anything. */
 const BEFORE_START = ["planned", "awaiting_approval", "queued", "leased", "dispatched"];
@@ -178,18 +179,18 @@ export function HostJobs() {
       >
         {requesters.length > 0 && (
           <>
-            <p className="widget-subhead">{t("Requested by")}</p>
+            <p className="ui-subhead">{t("Requested by")}</p>
             <Breakdown items={requesters.map(([who, count]) => ({ label: who, value: count }))} />
           </>
         )}
       </Summary>
       <Section title={t("By module")} span={4} description={t("Which modules the operations belong to.")}>
         {!jobs ? (
-          <p className="source">{t("Loading…")}</p>
+          <p className="ui-note">{t("Loading…")}</p>
         ) : !operations.length ? (
-          <p className="source">{t("No jobs for this host.")}</p>
+          <p className="ui-note">{t("No jobs for this host.")}</p>
         ) : (
-          <Breakdown items={operations.map(([module, count]) => ({ label: <span className="hm-mono">{module}</span>, value: count }))} />
+          <Breakdown items={operations.map(([module, count]) => ({ label: <span className="ui-mono">{module}</span>, value: count }))} />
         )}
       </Section>
       <Section
@@ -207,19 +208,19 @@ export function HostJobs() {
               value={action}
               onChange={(e) => setAction(e.target.value)}
             />
-            <label className="toggle">
+            <label className="ui-check">
               {t("Since")}{" "}
               <input type="datetime-local" value={since} onChange={(e) => setSince(e.target.value)} />
             </label>
             {/* A preset sets the lower bound to the moment of the click:
                 "the last day" is what the operator asks after an incident. */}
-            <span className="segmented">
+            <span className="ui-segmented">
               <button type="button" onClick={() => setSince(hoursAgo(1))}>{t("last hour")}</button>
               <button type="button" onClick={() => setSince(hoursAgo(24))}>{t("last 24 h")}</button>
               <button type="button" onClick={() => setSince(hoursAgo(24 * 7))}>{t("last 7 days")}</button>
             </span>
             {filtered && (
-              <button type="button" className="secondary" onClick={() => { setState(""); setAction(""); setSince(""); }}>
+              <button type="button" className="ui-btn-secondary" onClick={() => { setState(""); setAction(""); setSince(""); }}>
                 {t("Clear filters")}
               </button>
             )}
@@ -249,7 +250,7 @@ export function HostJobs() {
                         the link opens the job with its full payload, plan
                         and output. */}
                     <button
-                      className="expander"
+                      className="ui-expander"
                       aria-expanded={open}
                       aria-label={open ? t("Hide the attempts") : t("Show the attempts")}
                       onClick={() => setExpanded(open ? "" : job.id)}
@@ -257,11 +258,11 @@ export function HostJobs() {
                       {open ? "▾" : "▸"}
                     </button>
                     {" "}
-                    <Link to={`/jobs/${job.id}`} className="hm-mono" title={job.id}>{job.action_type}</Link>
+                    <Link to={`/jobs/${job.id}`} className="ui-mono" title={job.id}>{job.action_type}</Link>
                     {job.campaign_id && (
                       <>
                         {" "}
-                        <Link to={`/campaigns/${job.campaign_id}`} className="chip" title={`${t("Part of a campaign")} · ${job.campaign_id}`}>
+                        <Link to={`/campaigns/${job.campaign_id}`} className="ui-tag" title={`${t("Part of a campaign")} · ${job.campaign_id}`}>
                           {t("campaign {id}", { id: campaignLabel(job) })}
                         </Link>
                       </>
@@ -281,13 +282,13 @@ export function HostJobs() {
                   <td>
                     {/* A campaign's job is requested by the campaign; the
                         chip beside the operation already names it. */}
-                    {job.created_by.startsWith("campaign:") ? <span className="source">{t("the campaign")}</span> : job.created_by}
+                    {job.created_by.startsWith("campaign:") ? <span className="ui-note">{t("the campaign")}</span> : job.created_by}
                   </td>
                   <td>
                     {job.required_approvals > 1 ? (
                       <>
                         {t("{collected} of {required} approvals", { collected: job.collected_approvals, required: job.required_approvals })}
-                        {job.approved_by && <span className="source"> · {job.approved_by}</span>}
+                        {job.approved_by && <span className="ui-note"> · {job.approved_by}</span>}
                       </>
                     ) : (
                       job.approved_by || "—"
@@ -301,11 +302,11 @@ export function HostJobs() {
                       ? <ErrorCode code={job.result_error_code} />
                       : job.result_status && job.result_status !== job.state
                         ? <JobState state={job.result_status} />
-                        : <span className="source">—</span>}
+                        : <span className="ui-note">—</span>}
                   </td>
                   <td><Time value={job.created_at} /></td>
                   <td>
-                    <div className="operations">
+                    <div className="ui-actions">
                       {mayApprove && job.state === "awaiting_approval" && (
                         <button
                           onClick={() => { setReviewing(reviewing === job.id ? "" : job.id); setCanceling(""); }}
@@ -317,7 +318,7 @@ export function HostJobs() {
                       )}
                       {mayCancel && cancellable(job, contract) ? (
                         <button
-                          className="secondary"
+                          className="ui-btn-secondary"
                           title={STARTED.includes(job.state) ? cancelMeaning : t("The host has not started this yet; a cancel stops it before it does.")}
                           aria-expanded={canceling === job.id}
                           onClick={() => { setCanceling(canceling === job.id ? "" : job.id); setReviewing(""); }}
@@ -325,7 +326,7 @@ export function HostJobs() {
                           {t("Cancel")}
                         </button>
                       ) : STARTED.includes(job.state) && contract?.cancel_mode ? (
-                        <span className="source" title={cancelMeaning}>{t("runs to its end")}</span>
+                        <span className="ui-note" title={cancelMeaning}>{t("runs to its end")}</span>
                       ) : null}
                     </div>
                   </td>
@@ -334,15 +335,15 @@ export function HostJobs() {
                     the row opens with it, and the button that binds the
                     consent to its hash stands under it. */}
                 {reviewing === job.id && job.state === "awaiting_approval" && (
-                  <tr className="detail-row">
+                  <tr className="ui-detailrow">
                     <td colSpan={columns}>
-                      <p className="source">
+                      <p className="ui-note">
                         {t("You approve exactly this payload for {operation} on {host}; the consent is bound to hash {hash}.", {
                           operation: job.action_type, host: host.hostname, hash: job.payload_hash.slice(0, 12),
                         })}
                       </p>
                       <pre>{prettyJSON(job.payload)}</pre>
-                      <div className="operations">
+                      <div className="ui-actions">
                         {needsReason(job.action_type) && (
                           <input
                             autoFocus
@@ -360,7 +361,7 @@ export function HostJobs() {
                         >
                           {t("Approve this payload")}
                         </button>
-                        <button className="secondary" onClick={() => { setReviewing(""); setApproveReason(""); }}>{t("Back")}</button>
+                        <button className="ui-btn-secondary" onClick={() => { setReviewing(""); setApproveReason(""); }}>{t("Back")}</button>
                       </div>
                     </td>
                   </tr>
@@ -369,9 +370,9 @@ export function HostJobs() {
                     is typed before the button works; the host job list
                     used to send a fixed sentence, which told nobody why. */}
                 {canceling === job.id && (
-                  <tr className="detail-row">
+                  <tr className="ui-detailrow">
                     <td colSpan={columns}>
-                      <div className="operations">
+                      <div className="ui-actions">
                         <input
                           autoFocus
                           placeholder={t("reason for the cancel, at least 8 characters")}
@@ -380,22 +381,22 @@ export function HostJobs() {
                           onKeyDown={(e) => { if (e.key === "Enter" && reasonAccepted(cancelReason)) cancel.mutate({ job, reason: cancelReason }); }}
                         />
                         <button
-                          className="danger"
+                          className="ui-btn-danger"
                           disabled={!reasonAccepted(cancelReason) || cancel.isPending}
                           onClick={() => cancel.mutate({ job, reason: cancelReason })}
                         >
                           {t("Cancel this job")}
                         </button>
-                        <button className="secondary" onClick={() => { setCanceling(""); setCancelReason(""); }}>{t("Back")}</button>
+                        <button className="ui-btn-secondary" onClick={() => { setCanceling(""); setCancelReason(""); }}>{t("Back")}</button>
                       </div>
                     </td>
                   </tr>
                 )}
                 {open && (
-                  <tr className="detail-row">
+                  <tr className="ui-detailrow">
                     <td colSpan={columns}>
                       <Attempts jobId={job.id} />
-                      <p className="source">
+                      <p className="ui-note">
                         <Link to={`/jobs/${job.id}`}>{t("Open the job: full payload, plan and output")}</Link>
                         {" · "}
                         <Link to={`/hosts/${host.id}/logs?job=${job.id}`}>{t("Read the journal of this job")}</Link>
@@ -414,7 +415,7 @@ export function HostJobs() {
         {list.hasNextPage && (
           <Foot>
             <span>{t("{n} listed", { n: jobs?.length ?? 0 })}</span>
-            <button className="secondary" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
+            <button className="ui-btn-secondary" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
               {list.isFetchingNextPage ? t("Loading…") : t("Load more")}
             </button>
           </Foot>
@@ -437,12 +438,12 @@ function Attempts({ jobId }: { jobId: string }) {
     queryFn: () => api.get<Collection<Attempt>>(`/api/v1/jobs/${jobId}/attempts`),
   });
   if (error) return <ErrorBox error={error} />;
-  if (!data) return <p className="source">{t("Loading…")}</p>;
-  if (!data.items.length) return <p className="source">{t("No execution attempts.")}</p>;
+  if (!data) return <p className="ui-note">{t("Loading…")}</p>;
+  if (!data.items.length) return <p className="ui-note">{t("No execution attempts.")}</p>;
   return (
     <div>
       {data.items.map((attempt) => (
-        <div key={attempt.id} className="attempt">
+        <div key={attempt.id} className="ui-group">
           <AttemptHead attempt={attempt} />
           {attempt.stdout && <pre>{attempt.stdout.slice(0, 4000)}</pre>}
           {attempt.stderr && <pre>{attempt.stderr.slice(0, 2000)}</pre>}

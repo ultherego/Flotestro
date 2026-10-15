@@ -5,8 +5,8 @@ import { api, ApiError, LIST_PAGE, loadedItems, type Page } from "../lib/api";
 import type { ReadFanOut, ReadFanOutHost, ReadFanOutView, Whoami } from "../lib/types";
 import { bytes } from "../lib/format";
 import { Board } from "../components/board";
-import { ErrorBox, ErrorCode, Time, Empty, JobState } from "../components/ui";
-import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
+import { ErrorBox, ErrorCode, Time, JobState } from "../components/ui";
+import { Actions, Empty, Field, Fields, PageHead, Panel, Toolbar } from "../ui/kit";
 import { Breakdown, StatusBar } from "../components/widgets";
 import { useConfirm } from "../components/Modal";
 import { useToast } from "../components/Toast";
@@ -63,13 +63,13 @@ function ReadsList() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         icon="reads"
         title={t("Reads")}
         description={t("The same read on a handful of hosts at once.")}
         help={<p>{t("The same read on a handful of hosts at once: a diagnostic, not a change. Nothing is approved and nothing changes on the hosts.")}</p>}
         actions={
-          <button className={building ? "secondary" : ""} onClick={() => setBuilding(!building)}>
+          <button className={building ? "ui-btn-secondary" : ""} onClick={() => setBuilding(!building)}>
             {building ? t("Hide the form") : t("New read")}
           </button>
         }
@@ -87,34 +87,34 @@ function ReadsList() {
         drawn={{
           hosts_by_state: (
             <>
-              <Card className="span-12" title={t("Hosts by state")} description={t("every host of the {n} reads listed, counted once per read", { n: reads.length })}>
+              <Panel className="ui-col-12" title={t("Hosts by state")} description={t("every host of the {n} reads listed, counted once per read", { n: reads.length })}>
           <StatusBar segments={[
             { label: t("Queued"), value: sum("queued"), tone: "warn" },
             { label: t("Running"), value: sum("running"), tone: "info" },
             { label: t("Succeeded"), value: sum("succeeded"), tone: "ok" },
             { label: t("Failed"), value: sum("failed"), tone: "error" },
           ]} />
-        </Card>
+        </Panel>
             </>
           ),
           your_reads: (
             <>
-              <Card className="span-9" title={t("Your reads")} flush>
+              <Panel className="ui-col-9" title={t("Your reads")} flush>
           {reads.length === 0 ? (
-            <EmptyState action={!building && <button onClick={() => setBuilding(true)}>{t("New read")}</button>}>
+            <Empty action={!building && <button onClick={() => setBuilding(true)}>{t("New read")}</button>}>
               {t("No reads yet.")}
-            </EmptyState>
+            </Empty>
           ) : (
             <>
               <table>
                 <thead>
-                  <tr><th scope="col">{t("Operation")}</th><th scope="col" className="num">{t("Hosts")}</th><th scope="col">{t("Progress")}</th><th scope="col">{t("Reason")}</th><th scope="col">{t("Created")}</th></tr>
+                  <tr><th scope="col">{t("Operation")}</th><th scope="col" className="ui-numeric">{t("Hosts")}</th><th scope="col">{t("Progress")}</th><th scope="col">{t("Reason")}</th><th scope="col">{t("Created")}</th></tr>
                 </thead>
                 <tbody>
                   {reads.map((read) => (
                     <tr key={read.id}>
-                      <td><Link to={`/reads/${read.id}`} className="mono">{read.action}</Link></td>
-                      <td className="num">{read.host_count}</td>
+                      <td><Link to={`/reads/${read.id}`} className="ui-mono">{read.action}</Link></td>
+                      <td className="ui-numeric">{read.host_count}</td>
                       <td><CountChips counts={read.counts} /></td>
                       <td>{read.reason || "—"}</td>
                       <td><Time value={read.created_at} /></td>
@@ -124,27 +124,27 @@ function ReadsList() {
               </table>
               {list.hasNextPage && (
                 <p>
-                  <button className="secondary" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
+                  <button className="ui-btn-secondary" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
                     {t("Load more")}
                   </button>
                 </p>
               )}
             </>
           )}
-        </Card>
+        </Panel>
             </>
           ),
           by_operation: (
             <>
-              <Card className="span-3" title={t("By operation")} description={listed}>
+              <Panel className="ui-col-3" title={t("By operation")} description={listed}>
           {!data ? (
             <Empty>{t("Loading…")}</Empty>
           ) : operations.length === 0 ? (
-            <p className="fp-blank">{t("No reads yet.")}</p>
+            <p className="ui-empty">{t("No reads yet.")}</p>
           ) : (
-            <Breakdown tone="neutral" items={operations.map(([action, n]) => ({ label: <span className="mono">{action}</span>, value: n }))} />
+            <Breakdown tone="neutral" items={operations.map(([action, n]) => ({ label: <span className="ui-mono">{action}</span>, value: n }))} />
           )}
-        </Card>
+        </Panel>
             </>
           )
         }}
@@ -158,10 +158,10 @@ function CountChips({ counts }: { counts: ReadFanOut["counts"] }) {
   const t = useT();
   return (
     <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
-      {counts.queued > 0 && <span className="chip" title={t("queued")}>{counts.queued} {t("queued")}</span>}
-      {counts.running > 0 && <span className="chip" title={t("running")}>{counts.running} {t("running")}</span>}
-      <span className="chip" title={t("succeeded")}>{counts.succeeded} {t("succeeded")}</span>
-      {counts.failed > 0 && <span className="chip" title={t("failed")}>{counts.failed} {t("failed")}</span>}
+      {counts.queued > 0 && <span className="ui-tag" title={t("queued")}>{counts.queued} {t("queued")}</span>}
+      {counts.running > 0 && <span className="ui-tag" title={t("running")}>{counts.running} {t("running")}</span>}
+      <span className="ui-tag" title={t("succeeded")}>{counts.succeeded} {t("succeeded")}</span>
+      {counts.failed > 0 && <span className="ui-tag" title={t("failed")}>{counts.failed} {t("failed")}</span>}
     </span>
   );
 }
@@ -286,7 +286,7 @@ function NewRead({ onDone }: { onDone: () => void }) {
   const ready = Boolean(chosen) && payload.value !== undefined && named && !tooMany;
 
   return (
-    <Card
+    <Panel
       title={t("New read")}
       description={t("Every host gets an ordinary job with this payload; the results are merged here. A read needs no approval.")}
       footer={
@@ -294,12 +294,12 @@ function NewRead({ onDone }: { onDone: () => void }) {
           <button onClick={() => create.mutate()} disabled={!ready || create.isPending}>
             {create.isPending ? t("Ordering…") : t("Read")}
           </button>
-          <button className="secondary" onClick={onDone}>{t("Cancel")}</button>
-          {errorMessage && <p className="page-error">{errorMessage}</p>}
+          <button className="ui-btn-secondary" onClick={onDone}>{t("Cancel")}</button>
+          {errorMessage && <p className="ui-errorbox">{errorMessage}</p>}
         </Actions>
       }
     >
-      <FieldGrid>
+      <Fields>
         <Field
           label={t("Operation")}
           hint={chosen ? t("Fans out to at most {n} hosts.", { n: limit }) : t("Only reads the registry opens to a fan-out are listed.")}
@@ -318,16 +318,16 @@ function NewRead({ onDone }: { onDone: () => void }) {
         <Field label={t("Payload")} hint={payloadHint(t, payload)} wide>
           <textarea
             rows={6}
-            className="mono"
+            className="ui-mono"
             value={payloadText}
             onChange={(e) => { setPayloadText(e.target.value); setPayloadTyped(true); }}
             spellCheck={false}
           />
         </Field>
-      </FieldGrid>
+      </Fields>
 
-      <h4 className="widget-subhead">{t("Targets")}</h4>
-      <FieldGrid>
+      <h4 className="ui-subhead">{t("Targets")}</h4>
+      <Fields>
         <Field label={t("Named by")} hint={t("The ceiling applies to what the selector matches; a broader selector is refused, not trimmed.")}>
           <select value={mode} onChange={(e) => setMode(e.target.value as TargetMode)}>
             <option value="filters">{t("site, environment and OS")}</option>
@@ -354,13 +354,13 @@ function NewRead({ onDone }: { onDone: () => void }) {
             </Field>
           </>
         )}
-      </FieldGrid>
+      </Fields>
       {mode === "expression" && (
         <>
           <SelectorBuilder rules={rules} combine={combine} onRules={setRules} onCombine={setCombine} />
-          <p className="source">
+          <p className="ui-note">
             {expression
-              ? <>{t("the read will carry")} <span className="mono">{describeExpression(expression)}</span></>
+              ? <>{t("the read will carry")} <span className="ui-mono">{describeExpression(expression)}</span></>
               : t("give a rule a value; until then the selector names nobody")}
           </p>
         </>
@@ -369,11 +369,11 @@ function NewRead({ onDone }: { onDone: () => void }) {
         <>
           <HostChooser selected={hostIDs} onChange={setHostIDs} />
           {tooMany && (
-            <p className="page-error">{t("{n} hosts chosen; this read fans out to at most {limit}.", { n: hostIDs.size, limit })}</p>
+            <p className="ui-errorbox">{t("{n} hosts chosen; this read fans out to at most {limit}.", { n: hostIDs.size, limit })}</p>
           )}
         </>
       )}
-    </Card>
+    </Panel>
   );
 }
 
@@ -436,10 +436,10 @@ function FanOutPage({ id }: { id: string }) {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         icon="reads"
         breadcrumb={[{ label: t("Reads"), to: "/reads" }]}
-        title={<span className="mono">{view.action}</span>}
+        title={<span className="ui-mono">{view.action}</span>}
         description={
           <>
             {t("Ordered by {who}", { who: view.created_by })} · <Time value={view.created_at} />
@@ -450,22 +450,22 @@ function FanOutPage({ id }: { id: string }) {
         actions={
           <>
             {canCancel && open > 0 && <CancelFanOut view={view} />}
-            <Link className="button" to={readsPrefill(view.action, view.payload)}>{t("Order the same again")}</Link>
+            <Link className="ui-btn" to={readsPrefill(view.action, view.payload)}>{t("Order the same again")}</Link>
           </>
         }
       />
 
-      <div className="widgets">
-        <Card className="span-12" title={t("Hosts by state")}>
+      <div className="ui-grid">
+        <Panel className="ui-col-12" title={t("Hosts by state")}>
           <StatusBar segments={[
             { label: t("Queued"), value: view.counts.queued, tone: "warn" },
             { label: t("Running"), value: view.counts.running, tone: "info" },
             { label: t("Succeeded"), value: view.counts.succeeded, tone: "ok" },
             { label: t("Failed"), value: view.counts.failed, tone: "error" },
           ]} />
-        </Card>
+        </Panel>
 
-        <Card className="span-12" title={t("Hosts")} flush>
+        <Panel className="ui-col-12" title={t("Hosts")} flush>
           <table>
             <thead>
               <tr><th scope="col">{t("Host")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Result")}</th><th scope="col">{t("Finished")}</th><th scope="col">{t("Job")}</th></tr>
@@ -477,37 +477,37 @@ function FanOutPage({ id }: { id: string }) {
                   <td><JobState state={host.state} /></td>
                   <td>
                     {host.error_code && <ErrorCode code={host.error_code} />}
-                    {host.message && <span className="source"> {host.message}</span>}
-                    {host.truncated && <span className="badge warn">{t("output truncated")}</span>}
+                    {host.message && <span className="ui-note"> {host.message}</span>}
+                    {host.truncated && <span className="ui-pill ui-warn">{t("output truncated")}</span>}
                   </td>
                   <td><Time value={host.finished_at} /></td>
-                  <td><Link to={`/jobs?fanout_id=${view.id}`} className="mono">{host.job_id.slice(0, 8)}</Link></td>
+                  <td><Link to={`/jobs?fanout_id=${view.id}`} className="ui-mono">{host.job_id.slice(0, 8)}</Link></td>
                 </tr>
               ))}
               {view.skipped?.map((host) => (
                 <tr key={host.host_id}>
                   <td><Link to={`/hosts/${host.host_id}`}>{host.hostname}</Link></td>
                   <td><JobState state="skipped" /></td>
-                  <td><ErrorCode code={host.reason} /> <span className="source">{host.message}</span></td>
+                  <td><ErrorCode code={host.reason} /> <span className="ui-note">{host.message}</span></td>
                   <td>—</td>
                   <td>—</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </Card>
+        </Panel>
 
         {view.kind === "timeline" ? (
-          <Card
-            className="span-12"
+          <Panel
+            className="ui-col-12"
             title={t("Timeline")}
             description={grouping === "timeline"
               ? t("The lines of every host in one sequence by their timestamps. The order between hosts is best-effort - clocks differ - and the order within a host is the host's own.")
               : t("The lines of every host, host by host, as each gave them.")}
             actions={
-              <div className="tabs" style={{ borderBottom: 0 }}>
-                <button className={grouping === "timeline" ? "active" : ""} onClick={() => setGrouping("timeline")}>{t("merged timeline")}</button>
-                <button className={grouping === "host" ? "active" : ""} onClick={() => setGrouping("host")}>{t("group by host")}</button>
+              <div className="ui-tabs" style={{ borderBottom: 0 }}>
+                <button className={grouping === "timeline" ? "ui-active" : ""} onClick={() => setGrouping("timeline")}>{t("merged timeline")}</button>
+                <button className={grouping === "host" ? "ui-active" : ""} onClick={() => setGrouping("host")}>{t("group by host")}</button>
               </div>
             }
           >
@@ -518,7 +518,7 @@ function FanOutPage({ id }: { id: string }) {
                 {(view.timeline ?? []).length === 0 ? (
                   <Empty>{t("No line carries a timestamp; see the lines by host below.")}</Empty>
                 ) : (
-                  <pre className="hm-log">
+                  <pre className="ui-log">
                     {(view.timeline ?? []).map((line, index) => (
                       <div key={index}><HostChip name={line.hostname || line.host_id} /> {line.line}</div>
                     ))}
@@ -526,31 +526,31 @@ function FanOutPage({ id }: { id: string }) {
                 )}
                 {(view.untimed ?? []).map((group) => (
                   <div key={group.host_id}>
-                    <h4 className="widget-subhead">{t("Without a timestamp: {host}", { host: group.hostname || group.host_id })}</h4>
-                    <pre className="hm-log">{group.lines.join("\n")}</pre>
+                    <h4 className="ui-subhead">{t("Without a timestamp: {host}", { host: group.hostname || group.host_id })}</h4>
+                    <pre className="ui-log">{group.lines.join("\n")}</pre>
                   </div>
                 ))}
               </>
             ) : (
               answered.map((host) => (
                 <div key={host.host_id}>
-                  <h4 className="widget-subhead">{host.hostname || host.host_id} · {t("{n} lines", { n: host.lines?.length ?? 0 })}</h4>
-                  <pre className="hm-log">{(host.lines ?? []).join("\n") || t("Nothing matched.")}</pre>
+                  <h4 className="ui-subhead">{host.hostname || host.host_id} · {t("{n} lines", { n: host.lines?.length ?? 0 })}</h4>
+                  <pre className="ui-log">{(host.lines ?? []).join("\n") || t("Nothing matched.")}</pre>
                 </div>
               ))
             )}
-          </Card>
+          </Panel>
         ) : (
-          <Card className="span-12" title={t("Results")} description={t("The answer of every host, side by side; pick a host to read its result.")}>
+          <Panel className="ui-col-12" title={t("Results")} description={t("The answer of every host, side by side; pick a host to read its result.")}>
             {answered.length === 0 ? (
               <Empty>{open > 0 ? t("Waiting for the first host to answer…") : t("No host answered.")}</Empty>
             ) : (
               <>
-                <div className="tabs">
+                <div className="ui-tabs">
                   {answered.map((host) => (
                     <button
                       key={host.host_id}
-                      className={current?.host_id === host.host_id ? "active" : ""}
+                      className={current?.host_id === host.host_id ? "ui-active" : ""}
                       onClick={() => setSelected(host.host_id)}
                     >
                       {host.hostname || host.host_id}
@@ -560,7 +560,7 @@ function FanOutPage({ id }: { id: string }) {
                 {current && <StructuredResult action={view.action} host={current} />}
               </>
             )}
-          </Card>
+          </Panel>
         )}
       </div>
     </>
@@ -609,7 +609,7 @@ function CancelFanOut({ view }: { view: ReadFanOutView }) {
   };
 
   return (
-    <button className="danger" onClick={ask} disabled={cancel.isPending}>
+    <button className="ui-btn-danger" onClick={ask} disabled={cancel.isPending}>
       {cancel.isPending ? t("Withdrawing…") : t("Withdraw the open hosts")}
     </button>
   );
@@ -617,7 +617,7 @@ function CancelFanOut({ view }: { view: ReadFanOutView }) {
 
 /** The host a line came from, in front of it. */
 function HostChip({ name }: { name: string }) {
-  return <span className="chip chip-mono">{name}</span>;
+  return <span className="ui-tag ui-tag ui-mono">{name}</span>;
 }
 
 type ProcessRow = { pid: number; user?: string; name: string; command?: string; state: string; rss_bytes: number; threads: number };
@@ -634,20 +634,20 @@ function StructuredResult({ action, host }: { action: string; host: ReadFanOutHo
     if (!snapshot) return <Empty>{t("The snapshot of this host has not been recorded yet.")}</Empty>;
     return (
       <>
-        <Toolbar end={<span className="source">{t("{n} of {total} processes", { n: processes.length, total: snapshot.total ?? processes.length })}{snapshot.truncated ? ` · ${t("output truncated")}` : ""}</span>} />
+        <Toolbar end={<span className="ui-note">{t("{n} of {total} processes", { n: processes.length, total: snapshot.total ?? processes.length })}{snapshot.truncated ? ` · ${t("output truncated")}` : ""}</span>} />
         <table>
           <thead>
-            <tr><th scope="col" className="num">PID</th><th scope="col">{t("User")}</th><th scope="col">{t("Command")}</th><th scope="col">{t("State")}</th><th scope="col" className="num">RSS</th><th scope="col" className="num">{t("Threads")}</th></tr>
+            <tr><th scope="col" className="ui-numeric">PID</th><th scope="col">{t("User")}</th><th scope="col">{t("Command")}</th><th scope="col">{t("State")}</th><th scope="col" className="ui-numeric">RSS</th><th scope="col" className="ui-numeric">{t("Threads")}</th></tr>
           </thead>
           <tbody>
             {processes.map((process) => (
               <tr key={process.pid}>
-                <td className="num mono">{process.pid}</td>
+                <td className="ui-numeric ui-mono">{process.pid}</td>
                 <td>{process.user ?? "?"}</td>
-                <td className="mono">{process.command ?? process.name}</td>
+                <td className="ui-mono">{process.command ?? process.name}</td>
                 <td>{process.state}</td>
-                <td className="num">{bytes(process.rss_bytes)}</td>
-                <td className="num">{process.threads}</td>
+                <td className="ui-numeric">{bytes(process.rss_bytes)}</td>
+                <td className="ui-numeric">{process.threads}</td>
               </tr>
             ))}
           </tbody>
@@ -661,15 +661,15 @@ function StructuredResult({ action, host }: { action: string; host: ReadFanOutHo
     return (
       <table>
         <thead>
-          <tr><th scope="col">{t("Name")}</th><th scope="col">{t("Addresses")}</th><th scope="col">{t("Server")}</th><th scope="col" className="num">{t("Took")}</th></tr>
+          <tr><th scope="col">{t("Name")}</th><th scope="col">{t("Addresses")}</th><th scope="col">{t("Server")}</th><th scope="col" className="ui-numeric">{t("Took")}</th></tr>
         </thead>
         <tbody>
           {queries.map((query) => (
             <tr key={query.name}>
-              <td className="mono">{query.name}</td>
-              <td className="mono">{query.error ? <span className="badge error">{query.error}</span> : (query.addresses ?? []).join(", ")}</td>
-              <td className="mono">{query.server ?? "—"}</td>
-              <td className="num">{query.took_millis} ms</td>
+              <td className="ui-mono">{query.name}</td>
+              <td className="ui-mono">{query.error ? <span className="ui-pill ui-error">{query.error}</span> : (query.addresses ?? []).join(", ")}</td>
+              <td className="ui-mono">{query.server ?? "—"}</td>
+              <td className="ui-numeric">{query.took_millis} ms</td>
             </tr>
           ))}
           {queries.length === 0 && <tr><td colSpan={4}><Empty>{t("No query in the result.")}</Empty></td></tr>}
@@ -679,5 +679,5 @@ function StructuredResult({ action, host }: { action: string; host: ReadFanOutHo
   }
   const shown = host.snapshot ?? host.detail;
   if (!shown) return <Empty>{t("The host answered without a typed result.")}</Empty>;
-  return <pre className="hm-log">{JSON.stringify(shown, null, 2)}</pre>;
+  return <pre className="ui-log">{JSON.stringify(shown, null, 2)}</pre>;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { anythingOpen, describeKind, readingKind, verifierReading } from "./Unresolved";
-import { pageNumbers } from "../components/layout";
+import { pageNumbers } from "../ui/kit";
 
 /* The two decisions this screen rests on are pure, so they are checked here
    without a browser: that the two uncertainties are never read as one thing,

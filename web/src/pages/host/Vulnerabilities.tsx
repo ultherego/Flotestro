@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { ErrorBox, Time, Empty } from "../../components/ui";
+import { ErrorBox, Time } from "../../components/ui";
 import { Breakdown, Meter } from "../../components/widgets";
 import {
   Fact, Facts, Foot, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere, useHost,
@@ -11,6 +11,7 @@ import {
 import { bulkPrefill } from "../Bulk";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+import { Empty, toneClass } from "../../ui/kit";
 
 /** The one order this page places; refused, it leaves the page a read of what was last seen. */
 const VULNERABILITY_READS = ["packages.list"];
@@ -211,7 +212,7 @@ function SeverityBadge({ severity }: { severity?: string }) {
   const cls =
     severity === "critical" ? "error" : severity === "high" ? "error"
       : severity === "medium" ? "warn" : severity === "low" || severity === "unimportant" ? "" : "unknown";
-  return <span className={`badge ${cls}`}>{severity || t("unrated")}</span>;
+  return <span className={`ui-pill ${toneClass(cls)}`}>{severity || t("unrated")}</span>;
 }
 
 /**
@@ -289,7 +290,7 @@ export function Vulnerabilities() {
                 is planned on the host and approved there, and the panel
                 never installs anything from a tab. */}
             {patchAll ? (
-              <Link className="button" to={patchAll}>{t("Patch all fixable")}</Link>
+              <Link className="ui-btn" to={patchAll}>{t("Patch all fixable")}</Link>
             ) : (
               <button
                 disabled
@@ -310,7 +311,7 @@ export function Vulnerabilities() {
         }
       />
       <ReadOnlyModuleNotice host={host.id} actions={VULNERABILITY_READS} />
-      <p className="hm-freshness">
+      <p className="ui-freshness">
         <span>
           {!data
             ? t("Loading…")
@@ -324,7 +325,7 @@ export function Vulnerabilities() {
       <Message text={message} />
 
       {state?.evaluation_failed_reason && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>
             {t("The last assessment of this host could not be computed: reading {source} failed.", { source: state.evaluation_failed_source ?? "" })}{" "}
             {t("What is below was computed")} <Time value={state.last_successful_at ?? state.evaluated_at} />{" "}
@@ -333,14 +334,14 @@ export function Vulnerabilities() {
         </p>
       )}
       {state?.coverage_reason && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>
             {t("This assessment is incomplete: {reason}. Zero findings here does not mean the host is clean.", { reason: reason(state.coverage_reason) })}
           </span>
         </p>
       )}
       {data?.snapshot_stale && data.snapshot && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>
             {t("The security data was last fetched")} <Time value={data.snapshot.fetched_at} /> — {t("older than the policy allows. The assessment still uses it, because yesterday's data beats none.")}
           </span>
@@ -383,7 +384,7 @@ export function Vulnerabilities() {
           </Fact>
           <Fact label={t("By vendor fix")} wide>
             {!state ? "—" : !assessed ? (
-              <span className="source">{t("nothing assessed")}</span>
+              <span className="ui-note">{t("nothing assessed")}</span>
             ) : (
               <Breakdown
                 items={[
@@ -402,7 +403,7 @@ export function Vulnerabilities() {
         count={assessed ? visible.length : undefined}
         span={12}
         tools={
-          <span className="hm-choices">
+          <span className="ui-actions">
             <input
               placeholder={t("CVE, advisory or package")}
               value={search}
@@ -415,7 +416,7 @@ export function Vulnerabilities() {
               ))}
             </select>
             {(["fixable", "no-fix", "unknown"] as const).map((key) => (
-              <button key={key} className={filter === key ? "" : "secondary"} onClick={() => narrowed(() => setFilter(key))}>
+              <button key={key} className={filter === key ? "" : "ui-btn-secondary"} onClick={() => narrowed(() => setFilter(key))}>
                 {key === "fixable" ? t("Fixable") : key === "no-fix" ? t("No fix") : t("Not established")}
               </button>
             ))}
@@ -439,7 +440,7 @@ export function Vulnerabilities() {
           <Table>
             <thead>
               <tr>
-                <th scope="col">{t("Severity")}</th><th scope="col" className="hm-num">CVSS</th><th scope="col">{t("Advisory")}</th><th scope="col">{t("Package")}</th>
+                <th scope="col">{t("Severity")}</th><th scope="col" className="ui-numeric">CVSS</th><th scope="col">{t("Advisory")}</th><th scope="col">{t("Package")}</th>
                 <th scope="col">{t("Installed")}</th><th scope="col">{t("Compared")}</th><th scope="col">{t("Fixed in")}</th>
                 <th scope="col">{t("Vendor fix")}</th><th scope="col">{t("In repositories")}</th><th scope="col"></th>
               </tr>
@@ -453,16 +454,16 @@ export function Vulnerabilities() {
                       CVSS speaks about the vulnerability itself. When there
                       is no enrichment the column is empty and the assessment
                       does not change. */}
-                  <td className="hm-num source" title={highestScore(finding, data?.cve_details)?.cvss_vector}>
+                  <td className="ui-numeric ui-note" title={highestScore(finding, data?.cve_details)?.cvss_vector}>
                     {highestScore(finding, data?.cve_details)?.cvss_score?.toFixed(1) ?? "—"}
                   </td>
                   <td>
-                    <span className="hm-mono hm-primary">{finding.advisory_id}</span>
+                    <span className="ui-mono ui-name">{finding.advisory_id}</span>
                     {/* Every CVE leads to its fleet page: the same number
                         on twenty hosts is one matter, and that page names
                         the twenty. */}
                     {finding.cve_ids?.length ? (
-                      <div className="source hm-mono">
+                      <div className="ui-note ui-mono">
                         {finding.cve_ids.map((id, position) => (
                           <span key={id}>{position > 0 && ", "}<Link to={`/vulnerabilities/${id}`}>{id}</Link></span>
                         ))}
@@ -470,33 +471,33 @@ export function Vulnerabilities() {
                     ) : null}
                   </td>
                   <td>
-                    <span className="hm-mono">{finding.binary_package}</span>
+                    <span className="ui-mono">{finding.binary_package}</span>
                     {finding.source_package && finding.source_package !== finding.binary_package && (
-                      <div className="source">{t("source")}: {finding.source_package}</div>
+                      <div className="ui-note">{t("source")}: {finding.source_package}</div>
                     )}
                   </td>
-                  <td className="source hm-mono">{finding.installed_version}</td>
+                  <td className="ui-note ui-mono">{finding.installed_version}</td>
                   {/* Debian decides by source package, and the binary version
                       is sometimes from another numbering. We show both so it
                       is visible what was really compared. */}
-                  <td className="source hm-mono">
+                  <td className="ui-note ui-mono">
                     {finding.comparison_version || "—"}
                     {finding.comparison_basis && (
-                      <div className="source">{finding.comparison_basis}</div>
+                      <div className="ui-note">{finding.comparison_basis}</div>
                     )}
                   </td>
-                  <td className="source hm-mono">
-                    {finding.fixed_version || <span className="badge warn">{t("no fix")}</span>}
+                  <td className="ui-note ui-mono">
+                    {finding.fixed_version || <span className="ui-pill ui-warn">{t("no fix")}</span>}
                   </td>
                   <td>
                     {finding.state === "unknown" ? (
-                      <span className="badge unknown">{reason(finding.reason_code)}</span>
+                      <span className="ui-pill ui-unknown">{reason(finding.reason_code)}</span>
                     ) : finding.vendor_fix === "known" ? (
-                      <span className="badge ok">{t("published")}</span>
+                      <span className="ui-pill ui-ok">{t("published")}</span>
                     ) : finding.vendor_fix === "unavailable" ? (
-                      <span className="badge warn">{t("none")}</span>
+                      <span className="ui-pill ui-warn">{t("none")}</span>
                     ) : (
-                      <span className="badge unknown">{t("not known")}</span>
+                      <span className="ui-pill ui-unknown">{t("not known")}</span>
                     )}
                   </td>
                   <td>
@@ -504,17 +505,17 @@ export function Vulnerabilities() {
                         belongs to the package plan, so the panel does not
                         promise it here. */}
                     {finding.repository_candidate === "visible" ? (
-                      <span className="badge ok">{t("visible here")}</span>
+                      <span className="ui-pill ui-ok">{t("visible here")}</span>
                     ) : finding.repository_candidate === "absent" ? (
-                      <span className="badge warn">{t("not offered")}</span>
+                      <span className="ui-pill ui-warn">{t("not offered")}</span>
                     ) : (
-                      <span className="badge">{t("plan an update to find out")}</span>
+                      <span className="ui-pill">{t("plan an update to find out")}</span>
                     )}
                   </td>
                   <td>
                     {(() => {
                       const patch = patchAddress(host, [finding]);
-                      return patch ? <Link className="button" to={patch}>{t("Patch")}</Link> : null;
+                      return patch ? <Link className="ui-btn" to={patch}>{t("Patch")}</Link> : null;
                     })()}
                   </td>
                 </tr>
@@ -525,7 +526,7 @@ export function Vulnerabilities() {
         {visible.length > shown && (
           <Foot>
             <span>{t("Showing the first {shown} of {n}. The counts above cover all of them.", { shown, n: visible.length })}</span>
-            <button className="secondary" onClick={() => setShown((previous) => previous + FINDINGS_PAGE)}>
+            <button className="ui-btn-secondary" onClick={() => setShown((previous) => previous + FINDINGS_PAGE)}>
               {t("Load more ({n} left)", { n: visible.length - shown })}
             </button>
           </Foot>
@@ -534,13 +535,13 @@ export function Vulnerabilities() {
 
       <Section title={t("Most affected packages")} span={4} description={t("Findings per package; one advisory can touch several.")}>
         {!data ? (
-          <p className="source">{t("Loading…")}</p>
+          <p className="ui-note">{t("Loading…")}</p>
         ) : affected === undefined ? (
-          <p className="source">{t("Not assessed: no package on this host was checked against a feed.")}</p>
+          <p className="ui-note">{t("Not assessed: no package on this host was checked against a feed.")}</p>
         ) : !packages.length ? (
-          <p className="source">{t("No package on this host is known to be affected.")}</p>
+          <p className="ui-note">{t("No package on this host is known to be affected.")}</p>
         ) : (
-          <Breakdown items={packages.map(([name, count]) => ({ label: <span className="hm-mono">{name}</span>, value: count, tone: "warn" as const }))} />
+          <Breakdown items={packages.map(([name, count]) => ({ label: <span className="ui-mono">{name}</span>, value: count, tone: "warn" as const }))} />
         )}
       </Section>
 
@@ -552,15 +553,15 @@ export function Vulnerabilities() {
               ? <>
                   {data.snapshot.provider} · {t("{n} advisories", { n: data.snapshot.advisory_count })} ·{" "}
                   {t("fetched")} <Time value={data.snapshot.fetched_at} />
-                  <div className="source hm-mono">{data.snapshot.digest.slice(0, 16)}</div>
+                  <div className="ui-note ui-mono">{data.snapshot.digest.slice(0, 16)}</div>
                 </>
-              : <span className="badge unknown">{t("none")}</span>}
+              : <span className="ui-pill ui-unknown">{t("none")}</span>}
           </Fact>
           <Fact label={t("Package list")}>
             {t("{n} packages", { n: data?.package_state.package_count ?? 0 })},{" "}
             {t("read")} <Time value={data?.package_state.collected_at} />
             {data?.package_state.unavailable_reason && (
-              <div className="source">{data.package_state.unavailable_reason}</div>
+              <div className="ui-note">{data.package_state.unavailable_reason}</div>
             )}
           </Fact>
           <Fact label={t("Vendor advisories")}>
@@ -570,16 +571,16 @@ export function Vulnerabilities() {
                 {t("read")} <Time value={data.advisory_state.collected_at} />
               </>
             ) : (
-              <span className="badge unknown">{t("not read yet")}</span>
+              <span className="ui-pill ui-unknown">{t("not read yet")}</span>
             )}
             {data?.advisory_state.unavailable_reason && (
-              <div className="source">{reason(data.advisory_state.unavailable_reason)}</div>
+              <div className="ui-note">{reason(data.advisory_state.unavailable_reason)}</div>
             )}
           </Fact>
           <Fact label={t("Assessed")}>
             <Time value={state?.evaluated_at} />
             {findings[0]?.comparator_version && (
-              <div className="source">{t("version rules")}: {findings[0].comparator_version}</div>
+              <div className="ui-note">{t("version rules")}: {findings[0].comparator_version}</div>
             )}
           </Fact>
         </Facts>

@@ -4,8 +4,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import type { Campaign } from "../lib/types";
 import { Board } from "../components/board";
-import { ErrorBox, Time, Empty, JobState, stateName } from "../components/ui";
-import { Card, EmptyState, PageHeader, Toolbar } from "../components/layout";
+import { ErrorBox, Time, JobState, stateName } from "../components/ui";
+import { Empty, PageHead, Panel, Toolbar } from "../ui/kit";
 import {
   ColumnChooser, PageSizeSelect, Td, Th, useColumns, usePageSize, useSort, type ColumnDef,
 } from "../components/SortableTable";
@@ -100,7 +100,7 @@ export function Campaigns() {
     // The heading spells the three numbers of the cell out; a bare
     // "progress" over "2 / 0 / 4" leaves the reader to guess the order.
     { key: "progress", label: t("Done / failed / pending") },
-    { key: "canary", label: t("Canary / wave size"), sort: "canary", className: "num", secondary: true },
+    { key: "canary", label: t("Canary / wave size"), sort: "canary", className: "ui-numeric", secondary: true },
     { key: "requested_by", label: t("Requested by"), sort: "requested_by", secondary: true },
     { key: "approved_by", label: t("Approved by"), sort: "approved_by", secondary: true },
     { key: "created", label: t("Created"), sort: "created" },
@@ -157,13 +157,13 @@ export function Campaigns() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         title={t("Campaigns")}
         description={t("Campaigns are the main mechanism for fleet-wide change.")}
         actions={
           <>
-            <Link className="button secondary" to="/campaigns/schedules">{t("Schedules")}</Link>
-            <Link className="button primary" to="/bulk" title={t("The Bulk workspace: the targets, the reason, the offline policy and the whole rollout, step by step.")}>
+            <Link className="ui-btn ui-btn-secondary" to="/campaigns/schedules">{t("Schedules")}</Link>
+            <Link className="ui-btn ui-btn-primary" to="/bulk" title={t("The Bulk workspace: the targets, the reason, the offline policy and the whole rollout, step by step.")}>
               {t("New campaign")}
             </Link>
           </>
@@ -181,7 +181,7 @@ export function Campaigns() {
         drawn={{
           state: (
             <>
-              <Card className="span-12" title={t("State")} description={listed}>
+              <Panel className="ui-col-12" title={t("State")} description={listed}>
           <StatusBar segments={[
             { label: t("Awaiting approval"), value: awaiting, tone: "warn" },
             { label: t("In progress"), value: inProgress, tone: "info" },
@@ -191,17 +191,17 @@ export function Campaigns() {
             { label: t("Failed"), value: failed, tone: "error" },
             { label: t("Canceled"), value: canceled, tone: "unknown" },
           ]} />
-        </Card>
+        </Panel>
             </>
           ),
           list: (
             <>
-              <Card className="span-9" title={t("List")} flush>
+              <Panel className="ui-col-9" title={t("List")} flush>
           {/* The filter runs on the server and the rows arrive page by
               page: the screen shows what the operator asked about, not
               the newest fifty of everything. */}
           <Toolbar end={<>
-            {filtering && <button className="secondary" onClick={resetFilters}>{t("Clear the filters")}</button>}
+            {filtering && <button className="ui-btn-secondary" onClick={resetFilters}>{t("Clear the filters")}</button>}
             <PageSizeSelect value={pageSize} onChange={setPageSize} />
             <ColumnChooser columns={columns} />
           </>}>
@@ -219,12 +219,12 @@ export function Campaigns() {
           {!data ? (
             <Empty>{t("Loading…")}</Empty>
           ) : !data.items.length ? (
-            <EmptyState action={filtering
-              ? <button className="secondary" onClick={resetFilters}>{t("Clear the filters")}</button>
-              : <Link className="button primary" to="/bulk">{t("New campaign")}</Link>}
+            <Empty action={filtering
+              ? <button className="ui-btn-secondary" onClick={resetFilters}>{t("Clear the filters")}</button>
+              : <Link className="ui-btn ui-btn-primary" to="/bulk">{t("New campaign")}</Link>}
             >
               {filtering ? t("No campaign matches the filter.") : t("No campaigns.")}
-            </EmptyState>
+            </Empty>
           ) : (
             <table>
               <thead>
@@ -239,7 +239,7 @@ export function Campaigns() {
                   <tr key={campaign.id}>
                     <Td columns={columns} name="name"><Link to={`/campaigns/${campaign.id}`}>{campaign.name}</Link></Td>
                     <Td columns={columns} name="state"><JobState state={campaign.state} /></Td>
-                    <Td columns={columns} name="operation" className="mono">{campaign.action_type}</Td>
+                    <Td columns={columns} name="operation" className="ui-mono">{campaign.action_type}</Td>
                     {/* The tally of the hosts, the same colours as the
                         campaign's own bar: unknown is its own number and
                         never folded into failed or succeeded. */}
@@ -261,11 +261,11 @@ export function Campaigns() {
           )}
           {data && data.total > pageSize && (
             <Toolbar end={<span>{t("{shown} of {total} shown", { shown: Math.min(offset + campaigns.length, data.total), total: data.total })}</span>}>
-              <button className="secondary" onClick={() => setOffset(Math.max(0, offset - pageSize))} disabled={offset === 0}>{t("Newer")}</button>
-              <button className="secondary" onClick={() => setOffset(offset + pageSize)} disabled={lastPage}>{t("Older")}</button>
+              <button className="ui-btn-secondary" onClick={() => setOffset(Math.max(0, offset - pageSize))} disabled={offset === 0}>{t("Newer")}</button>
+              <button className="ui-btn-secondary" onClick={() => setOffset(offset + pageSize)} disabled={lastPage}>{t("Older")}</button>
             </Toolbar>
           )}
-        </Card>
+        </Panel>
 
         {/* The side widget reads the outcomes and operations of the page,
             not the fleet's history: it is the shape of what is listed. */}
@@ -273,19 +273,19 @@ export function Campaigns() {
           ),
           outcomes: (
             <>
-              <Card className="span-3" title={t("Outcomes")} description={listed}>
+              <Panel className="ui-col-3" title={t("Outcomes")} description={listed}>
           {!data ? (
             <Empty>{t("Loading…")}</Empty>
           ) : campaigns.length === 0 ? (
-            <p className="fp-blank">{t("No campaigns.")}</p>
+            <p className="ui-empty">{t("No campaigns.")}</p>
           ) : (
             <>
               <Breakdown items={outcomes.map(([value, n]) => ({ label: <JobState state={value} />, value: n, tone: outcomeTone(value) }))} />
-              <h4 className="widget-subhead">{t("By operation")}</h4>
-              <Breakdown tone="neutral" items={byOperation.map(([value, n]) => ({ label: <span className="mono">{value}</span>, value: n }))} />
+              <h4 className="ui-subhead">{t("By operation")}</h4>
+              <Breakdown tone="neutral" items={byOperation.map(([value, n]) => ({ label: <span className="ui-mono">{value}</span>, value: n }))} />
             </>
           )}
-        </Card>
+        </Panel>
             </>
           )
         }}
@@ -302,14 +302,14 @@ export function Campaigns() {
 function ProgressCells({ progress }: { progress: Progress }) {
   const t = useT();
   return (
-    <span className="mono" title={t("{total} hosts: {succeeded} succeeded, {failed} failed, {unknown} unknown, {skipped} skipped, {pending} pending", progress)}>
+    <span className="ui-mono" title={t("{total} hosts: {succeeded} succeeded, {failed} failed, {unknown} unknown, {skipped} skipped, {pending} pending", progress)}>
       <span style={{ color: "var(--ok-text)" }}>{progress.succeeded}</span>
       {" / "}
       <span style={progress.failed > 0 ? { color: "var(--error-text)" } : undefined}>{progress.failed}</span>
       {" / "}
       <span>{progress.pending}</span>
       {progress.unknown > 0 && <span style={{ color: "var(--warn-text)" }}> · {t("{n} unknown", { n: progress.unknown })}</span>}
-      {progress.skipped > 0 && <span className="source"> · {t("{n} skipped", { n: progress.skipped })}</span>}
+      {progress.skipped > 0 && <span className="ui-note"> · {t("{n} skipped", { n: progress.skipped })}</span>}
     </span>
   );
 }

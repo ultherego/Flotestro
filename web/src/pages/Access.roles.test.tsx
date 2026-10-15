@@ -75,7 +75,7 @@ afterEach(() => { cleanup(); sent.length = 0; });
 
 /** The table of the roles defined here; the name also appears in the matrix. */
 function ownTable(): HTMLElement {
-  const card = screen.getByText("Roles of this installation").closest(".card");
+  const card = screen.getByText("Roles of this installation").closest(".ui-panel");
   return card?.querySelector("table") as HTMLElement;
 }
 

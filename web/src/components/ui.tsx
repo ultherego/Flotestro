@@ -5,13 +5,15 @@ import { copyToClipboard } from "../lib/clipboard";
 import { Icon } from "./icons";
 import { useErrorGuides } from "../lib/errors";
 import { useT } from "../i18n";
+import { Empty } from "../ui/kit";
+import { toneClass } from "../ui/kit";
 
 /** The connection state badge. The unknown state has a look of its own. */
 export function ConnectionState({ state }: { state: string }) {
   const t = useT();
   const kind =
     state === "online" ? "ok" : state === "offline" ? "error" : state === "stale" ? "warn" : "unknown";
-  return <span className={`badge ${kind}`}>{t(stateName(state))}</span>;
+  return <span className={`ui-pill ${toneClass(kind)}`}>{t(stateName(state))}</span>;
 }
 
 /** The operation result or the job state. */
@@ -34,7 +36,7 @@ export function JobState({ state }: { state: string }) {
   // The legend travels with the badge: every state says what it means for
   // the host and what, if anything, the operator has to do about it.
   const meaning = stateMeaning(state);
-  return <span className={`badge ${kind}`} title={meaning ? t(meaning) : undefined}>{t(stateName(state))}</span>;
+  return <span className={`ui-pill ${toneClass(kind)}`} title={meaning ? t(meaning) : undefined}>{t(stateName(state))}</span>;
 }
 
 /** One sentence per state, shown on hover. States are not self-explanatory. */
@@ -126,10 +128,10 @@ export function OptionalNumber({
 }) {
   const t = useT();
   if (value === null || value === undefined) {
-    return <span className="badge unknown">{t("unknown")}</span>;
+    return <span className="ui-pill ui-unknown">{t("unknown")}</span>;
   }
   if (value >= warnFrom) {
-    return <span className="badge warn">{value}</span>;
+    return <span className="ui-pill ui-warn">{value}</span>;
   }
   return <span>{value}</span>;
 }
@@ -137,20 +139,16 @@ export function OptionalNumber({
 export function OptionalFlag({ value }: { value: boolean | null | undefined }) {
   const t = useT();
   if (value === null || value === undefined) {
-    return <span className="badge unknown">{t("unknown")}</span>;
+    return <span className="ui-pill ui-unknown">{t("unknown")}</span>;
   }
-  return value ? <span className="badge warn">{t("yes")}</span> : <span>{t("no")}</span>;
+  return value ? <span className="ui-pill ui-warn">{t("yes")}</span> : <span>{t("no")}</span>;
 }
 
 /** A time with its observation source: every value has a time when it was true. */
 export function Time({ value }: { value?: string | null }) {
   const t = useT();
-  if (!value) return <span className="badge unknown">{t("never")}</span>;
+  if (!value) return <span className="ui-pill ui-unknown">{t("never")}</span>;
   return <span title={absoluteTime(value)}>{relativeTime(value)}</span>;
-}
-
-export function Empty({ children }: { children: ReactNode }) {
-  return <div className="empty">{children}</div>;
 }
 
 /**
@@ -163,7 +161,7 @@ export function ErrorBox({ error }: { error: unknown }) {
     return <Empty>{t("You do not have permission to view this.")}</Empty>;
   }
   const message = error instanceof Error ? error.message : String(error);
-  return <div className="page-error">{t("Error: {message}", { message })}</div>;
+  return <div className="ui-errorbox">{t("Error: {message}", { message })}</div>;
 }
 
 /**
@@ -172,7 +170,7 @@ export function ErrorBox({ error }: { error: unknown }) {
  * that a fingerprint or a DSN cannot push past the card's edge.
  */
 export function Pairs({ children, stacked = false }: { children: ReactNode; stacked?: boolean }) {
-  return <dl className={stacked ? "pairs stacked" : "pairs"}>{children}</dl>;
+  return <dl className={stacked ? "ui-facts ui-stack-xs" : "ui-facts"}>{children}</dl>;
 }
 
 export function Pair({
@@ -187,8 +185,8 @@ export function Pair({
 }) {
   return (
     <>
-      <dt className={wide ? "wide" : undefined} title={hint}>{label}</dt>
-      <dd className={wide ? "wide" : undefined}>{children}</dd>
+      <dt className={wide ? "ui-wide" : undefined} title={hint}>{label}</dt>
+      <dd className={wide ? "ui-wide" : undefined}>{children}</dd>
     </>
   );
 }
@@ -206,29 +204,29 @@ export type FactKind =
 
 export function FactValue({ value, kind = "text" }: { value: unknown; kind?: FactKind }) {
   const t = useT();
-  if (value === null || value === undefined || value === "") return <span className="source">—</span>;
+  if (value === null || value === undefined || value === "") return <span className="ui-note">—</span>;
   switch (kind) {
     case "flag":
-      return <span className={value ? "badge ok" : "badge error"}>{value ? t("yes") : t("no")}</span>;
+      return <span className={value ? "ui-pill ui-ok" : "ui-pill ui-error"}>{value ? t("yes") : t("no")}</span>;
     case "bytes":
-      return <span className="mono">{bytes(Number(value))}</span>;
+      return <span className="ui-mono">{bytes(Number(value))}</span>;
     case "seconds":
-      return <span className="mono">{duration(Number(value))}</span>;
+      return <span className="ui-mono">{duration(Number(value))}</span>;
     case "ms":
-      return <span className="mono">{Number(value).toFixed(1)} ms</span>;
+      return <span className="ui-mono">{Number(value).toFixed(1)} ms</span>;
     case "time":
       return <Time value={String(value)} />;
     case "number":
-      return <span className="mono">{String(value)}</span>;
+      return <span className="ui-mono">{String(value)}</span>;
     case "duration":
-      return <span className="mono" title={String(value)}>{goDuration(String(value))}</span>;
+      return <span className="ui-mono" title={String(value)}>{goDuration(String(value))}</span>;
     case "id":
       return <Identifier value={String(value)} />;
     default:
       // An object reaching a text row is the one case that used to be drawn
       // as raw JSON on one unbreakable line. It gets its own shape instead.
       if (typeof value === "object") return <Structured value={value} />;
-      return <span className="mono">{String(value)}</span>;
+      return <span className="ui-mono">{String(value)}</span>;
   }
 }
 
@@ -246,7 +244,7 @@ export function Identifier({ value, keep = 8 }: { value: string; keep?: number }
   return (
     <button
       type="button"
-      className="identifier"
+      className="ui-identifier"
       title={copied ? t("Copied") : value}
       onClick={() => {
         void copyToClipboard(value).then((done) => {
@@ -256,7 +254,7 @@ export function Identifier({ value, keep = 8 }: { value: string; keep?: number }
         });
       }}
     >
-      <span className="mono">{short}</span>
+      <span className="ui-mono">{short}</span>
       <Icon name={copied ? "check" : "copy"} />
     </button>
   );
@@ -271,10 +269,10 @@ export function Identifier({ value, keep = 8 }: { value: string; keep?: number }
 export function Structured({ value }: { value: unknown }) {
   const t = useT();
   if (Array.isArray(value)) {
-    if (value.length === 0) return <span className="source">—</span>;
+    if (value.length === 0) return <span className="ui-note">—</span>;
     const records = value.filter((one) => one !== null && typeof one === "object" && !Array.isArray(one));
     if (records.length !== value.length) {
-      return <span className="mono wrap">{value.map((one) => String(one)).join(", ")}</span>;
+      return <span className="ui-mono ui-wrap">{value.map((one) => String(one)).join(", ")}</span>;
     }
     const columns = Array.from(new Set(records.flatMap((one) => Object.keys(one as object))));
     // A table of eight columns inside a tile is not a table: it is a row
@@ -282,9 +280,9 @@ export function Structured({ value }: { value: unknown }) {
     // little list, which wraps and shows every field it has.
     if (columns.length > 4) {
       return (
-        <div className="records">
+        <div className="ui-stack-s">
           {records.map((record, index) => (
-            <dl className="pairs stacked nested" key={index}>
+            <dl className="ui-facts ui-stack-xs ui-nested" key={index}>
               {columns
                 .filter((column) => (record as Record<string, unknown>)[column] !== undefined)
                 .map((column) => (
@@ -299,7 +297,7 @@ export function Structured({ value }: { value: unknown }) {
     }
     return (
       <TableScroll>
-        <table className="facts-table">
+        <table className="ui-table">
           <thead>
             <tr>{columns.map((column) => <th key={column} scope="col">{t(labelOfKey(column))}</th>)}</tr>
           </thead>
@@ -320,9 +318,9 @@ export function Structured({ value }: { value: unknown }) {
   }
   if (value !== null && typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>);
-    if (entries.length === 0) return <span className="source">—</span>;
+    if (entries.length === 0) return <span className="ui-note">—</span>;
     return (
-      <dl className="pairs stacked nested">
+      <dl className="ui-facts ui-stack-xs ui-nested">
         {entries.map(([key, one]) => (
           <Pair key={key} label={t(labelOfKey(key))}>
             <FactValue value={one} kind={kindOfKey(key)} />
@@ -331,7 +329,7 @@ export function Structured({ value }: { value: unknown }) {
       </dl>
     );
   }
-  return <span className="mono wrap">{String(value)}</span>;
+  return <span className="ui-mono ui-wrap">{String(value)}</span>;
 }
 
 /**
@@ -340,7 +338,7 @@ export function Structured({ value }: { value: unknown }) {
  * and the card holds its shape.
  */
 export function TableScroll({ children }: { children: ReactNode }) {
-  return <div className="table-scroll">{children}</div>;
+  return <div className="ui-table-holder">{children}</div>;
 }
 
 /* A key of the server read as words, for a structure no screen has named:
@@ -381,15 +379,15 @@ export function ProgressBar({
   const fill = fromPercent ?? fromSteps;
 
   return (
-    <div className="progress">
-      <div className="progress-track">
+    <div className="ui-meter">
+      <div className="ui-bar">
         {fill === undefined ? (
-          <span className="progress-unknown" />
+          <span className="ui-bar-fill ui-unknown" />
         ) : (
-          <span className="progress-fill" style={{ width: `${Math.min(100, fill)}%` }} />
+          <span className="ui-bar-fill" style={{ width: `${Math.min(100, fill)}%` }} />
         )}
       </div>
-      <span className="progress-caption">
+      <span className="ui-meter-value">
         {step && total ? `${step}/${total}` : fill !== undefined ? `${fill}%` : t("in progress")}
         {caption ? ` · ${caption}` : ""}
       </span>
@@ -415,5 +413,5 @@ export function ErrorCode({ code }: { code?: string | null }) {
     read_state: t("read the state of the host before repeating"),
   };
   const title = `${t(guide.meaning)}\n${t("Next")}: ${t(guide.action)}\n${t("Retry")}: ${retry[guide.retry] ?? guide.retry}`;
-  return <code title={title} className={guide.counts_as_failure ? "" : "source"}>{code}</code>;
+  return <code title={title} className={guide.counts_as_failure ? "" : "ui-note"}>{code}</code>;
 }

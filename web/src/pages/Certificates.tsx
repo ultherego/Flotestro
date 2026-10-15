@@ -4,9 +4,9 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { api, loadedItems, LIST_PAGE } from "../lib/api";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import { Board } from "../components/board";
-import { ErrorBox, Empty } from "../components/ui";
+import { ErrorBox } from "../components/ui";
 import { absoluteTime, relativeTime } from "../lib/format";
-import { Card, PageHeader, Toolbar } from "../components/layout";
+import { Empty, PageHead, Panel, toneClass, Toolbar } from "../ui/kit";
 import { ExportButton } from "../components/ExportButton";
 import { ColumnChooser, Td, Th, useColumns, useSort, type ColumnDef } from "../components/SortableTable";
 import { Breakdown, StatusBar } from "../components/widgets";
@@ -66,7 +66,7 @@ function ExpiryBadge({ status, days }: { status: string; days?: number }) {
       ? days === undefined ? t("expired") : t("expired {n} d ago", { n: Math.abs(days) })
       : status === "unknown" ? t("unknown")
         : days === undefined ? status : `${days} d`;
-  return <span className={`badge ${cls}`}>{caption}</span>;
+  return <span className={`ui-pill ${toneClass(cls)}`}>{caption}</span>;
 }
 
 /**
@@ -125,7 +125,7 @@ export function FleetCertificates() {
   const listed = t("among the {n} listed", { n: items.length });
   return (
     <>
-      <PageHeader
+      <PageHead
         title={t("Certificates")}
         description={t("Expiry dates of everything the panel watches.", {
           warning: data.thresholds.warning_days, critical: data.thresholds.critical_days,
@@ -149,7 +149,7 @@ export function FleetCertificates() {
         drawn={{
           expiry: (
             <>
-              <Card className="span-9" title={t("Expiry")} description={t("Every certificate the fleet reports, by how close its deadline is.")}>
+              <Panel className="ui-col-9" title={t("Expiry")} description={t("Every certificate the fleet reports, by how close its deadline is.")}>
           <StatusBar segments={[
             { label: t("Expired"), value: expired, tone: "error" },
             { label: t("Urgent"), value: critical, tone: "error" },
@@ -157,7 +157,7 @@ export function FleetCertificates() {
             { label: t("Unknown"), value: counts.unknown ?? 0, tone: "unknown" },
             { label: t("Valid"), value: counts.valid ?? 0, tone: "ok" },
           ]} />
-        </Card>
+        </Panel>
 
         {/* A host that reports none is not a host without certificates: it
             is a host nobody has pointed at a path yet. */}
@@ -165,7 +165,7 @@ export function FleetCertificates() {
           ),
           hosts: (
             <>
-              <Card className="span-3" title={t("Hosts")} description={t("{n} of {total} hosts report none", { n: data.hosts_without_certificates, total: data.total_hosts })}>
+              <Panel className="ui-col-3" title={t("Hosts")} description={t("{n} of {total} hosts report none", { n: data.hosts_without_certificates, total: data.total_hosts })}>
           <Breakdown items={[
             { label: t("Reporting certificates"), value: reporting, tone: "ok" },
             { label: t("Reporting none"), value: data.hosts_without_certificates, tone: "warn" },
@@ -173,7 +173,7 @@ export function FleetCertificates() {
             // certificates: its deadline may be tomorrow.
             { label: t("Nothing known"), value: data.unknown_hosts, tone: "unknown" },
           ]} />
-        </Card>
+        </Panel>
             </>
           ),
           trust: (
@@ -183,19 +183,19 @@ export function FleetCertificates() {
           ),
           list: (
             <>
-              <Card
-          className="span-9"
+              <Panel
+          className="ui-col-9"
           flush
           footer={list.hasNextPage && (
             <p>
-              <button className="secondary" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
+              <button className="ui-btn-secondary" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
                 {t("Load more ({n} left)", { n: data.total - items.length })}
               </button>
             </p>
           )}
         >
           <Toolbar end={<ColumnChooser columns={columns} />}>
-            <span className="source">{t("Sorted from the nearest deadline; a heading reorders the listed rows.")}</span>
+            <span className="ui-note">{t("Sorted from the nearest deadline; a heading reorders the listed rows.")}</span>
           </Toolbar>
           {!items.length ? (
             <Empty>
@@ -216,33 +216,33 @@ export function FleetCertificates() {
                     <Td columns={columns} name="expires">
                       <ExpiryBadge status={item.status} days={item.days_to_expiry} />
                       {item.not_after && (
-                        <div className="source"><Deadline value={item.not_after} /></div>
+                        <div className="ui-note"><Deadline value={item.not_after} /></div>
                       )}
                     </Td>
                     <Td columns={columns} name="host">
                       <Link to={`/hosts/${item.host_id}/certificates`}>{item.hostname}</Link>
                     </Td>
-                    <Td columns={columns} name="path" className="source mono">
+                    <Td columns={columns} name="path" className="ui-note ui-mono">
                       {item.path}
                       {item.owner_service && <div>{item.owner_service}</div>}
                     </Td>
                     <Td columns={columns} name="subject">
                       {item.unavailable_reason ? (
-                        <span className="badge unknown">{item.unavailable_reason}</span>
+                        <span className="ui-pill ui-unknown">{item.unavailable_reason}</span>
                       ) : (
                         item.subject
                       )}
                     </Td>
-                    <Td columns={columns} name="issuer" className="source">{item.issuer}</Td>
+                    <Td columns={columns} name="issuer" className="ui-note">{item.issuer}</Td>
                     <Td columns={columns} name="renewal">
                       {/* "Manual" is a finding, "unknown" a missing answer - and
                           the two must not look the same. */}
                       {item.renewal === "tracked" ? (
-                        <span className="badge ok">certmonger</span>
+                        <span className="ui-pill ui-ok">certmonger</span>
                       ) : item.renewal === "manual" ? (
-                        <span className="badge warn">{t("manual")}</span>
+                        <span className="ui-pill ui-warn">{t("manual")}</span>
                       ) : (
-                        <span className="badge unknown">{t("unknown")}</span>
+                        <span className="ui-pill ui-unknown">{t("unknown")}</span>
                       )}
                     </Td>
                   </tr>
@@ -250,25 +250,25 @@ export function FleetCertificates() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
             </>
           ),
           expires: (
             <>
-              <Card className="span-3" title={t("Expires")} description={t("When the next waves of deadlines come.")}>
+              <Panel className="ui-col-3" title={t("Expires")} description={t("When the next waves of deadlines come.")}>
           <ExpiryTimeline timeline={data.timeline ?? []} />
-          <h4 className="widget-subhead">{t("Renewal")}</h4>
+          <h4 className="ui-subhead">{t("Renewal")}</h4>
           {/* "Manual" is a finding, "unknown" a missing answer - and the
               two must not look the same. */}
-          <div className="fp-tones">
+          <div className="ui-stack-s">
             <Breakdown items={[
               { label: "certmonger", value: renewal("tracked"), tone: "ok" },
               { label: t("manual"), value: renewal("manual"), tone: "warn" },
               { label: t("unknown"), value: renewal("unknown"), tone: "unknown" },
             ]} />
           </div>
-          <p className="fp-rest">{listed}</p>
-        </Card>
+          <p className="ui-note">{listed}</p>
+        </Panel>
             </>
           )
         }}
@@ -323,21 +323,21 @@ function Trust({ leaves }: { leaves: Item[] }) {
   const shown = folded ? data.items.slice(0, AUTHORITIES_SHOWN) : data.items;
 
   return (
-    <Card
-      className="span-12"
+    <Panel
+      className="ui-col-12"
       title={t("Trusted authorities")}
       description={t("Anchors the panel put on hosts. During a rotation a host trusts both the old and the new authority; the old one may only be withdrawn once nothing signs with it any more.")}
       actions={
-        <Link className="button" to={bulk("certificate.trust.ensure", t("Distribute a new authority"), {
+        <Link className="ui-btn" to={bulk("certificate.trust.ensure", t("Distribute a new authority"), {
           certificate: { anchor_id: "fleet-ca-" + new Date().getFullYear(), certificate: "-----BEGIN CERTIFICATE-----\nREPLACE WITH THE AUTHORITY CERTIFICATE\n-----END CERTIFICATE-----\n" },
         })}>{t("Distribute a new authority")}</Link>
       }
       footer={
         <div>
-          <p className="source">
+          <p className="ui-note">
             {t("Rotation in four stages, each an ordinary campaign: distribute the new authority, verify it reached every host, rotate the leaves, withdraw the old authority. A withdrawal is refused while any host is unverified or still holds a certificate issued by it.")}
           </p>
-          <div className="source">
+          <div className="ui-note">
             {t("{n} hosts have not reported a trust store yet", { n: data.hosts_unknown })}
             {withoutStore.map((group) => `; ${group.count}: ${group.reason}`).join("")}
           </div>
@@ -354,7 +354,7 @@ function Trust({ leaves }: { leaves: Item[] }) {
       ) : (
         <table>
           <thead>
-            <tr><th scope="col">{t("Authority")}</th><th scope="col">{t("Hosts")}</th><th scope="col" className="num">{t("Leaves issued by it")}</th><th scope="col">{t("Valid until")}</th><th scope="col">{t("Fingerprint")}</th><th scope="col">{t("Stage")}</th></tr>
+            <tr><th scope="col">{t("Authority")}</th><th scope="col">{t("Hosts")}</th><th scope="col" className="ui-numeric">{t("Leaves issued by it")}</th><th scope="col">{t("Valid until")}</th><th scope="col">{t("Fingerprint")}</th><th scope="col">{t("Stage")}</th></tr>
           </thead>
           <tbody>
             {shown.map((anchor) => {
@@ -365,32 +365,32 @@ function Trust({ leaves }: { leaves: Item[] }) {
                 <td>
                   {anchor.subject || anchor.anchor_id || "—"}
                   {anchor.unavailable_reason && (
-                    <div className="source">{anchor.unavailable_reason}</div>
+                    <div className="ui-note">{anchor.unavailable_reason}</div>
                   )}
                 </td>
                 <td>
                   {t("{n} of {total}", { n: anchor.hosts, total: data.hosts_total })}
-                  <div className="source">{(anchor.sample ?? []).join(", ")}</div>
+                  <div className="ui-note">{(anchor.sample ?? []).join(", ")}</div>
                 </td>
-                <td className="num">
+                <td className="ui-numeric">
                   {issued}
-                  {issued > 0 && <div className="source">{t("rotate the leaves before withdrawing")}</div>}
+                  {issued > 0 && <div className="ui-note">{t("rotate the leaves before withdrawing")}</div>}
                 </td>
                 <td>{anchor.not_after ? <Deadline value={anchor.not_after} /> : "—"}</td>
-                <td className="source mono">{(anchor.fingerprint_sha256 ?? "").slice(0, 16) || "—"}</td>
+                <td className="ui-note ui-mono">{(anchor.fingerprint_sha256 ?? "").slice(0, 16) || "—"}</td>
                 <td>
                   {!covered ? (
                     <>
-                      <span className="badge warn">{t("distributing")}</span>{" "}
+                      <span className="ui-pill ui-warn">{t("distributing")}</span>{" "}
                       <Link to={bulk("certificate.trust.ensure", t("Distribute {anchor}", { anchor: anchor.anchor_id ?? anchor.subject ?? "" }), {
                         certificate: { anchor_id: anchor.anchor_id ?? "", certificate: "-----BEGIN CERTIFICATE-----\nREPLACE WITH THE AUTHORITY CERTIFICATE\n-----END CERTIFICATE-----\n" },
                       })}>{t("distribute to the rest")}</Link>
                     </>
                   ) : issued > 0 ? (
-                    <span className="badge ok">{t("in use")}</span>
+                    <span className="ui-pill ui-ok">{t("in use")}</span>
                   ) : (
                     <>
-                      <span className="badge">{t("withdrawable")}</span>{" "}
+                      <span className="ui-pill">{t("withdrawable")}</span>{" "}
                       <Link to={bulk("certificate.trust.remove", t("Withdraw {anchor}", { anchor: anchor.anchor_id ?? anchor.subject ?? "" }), {
                         certificate: { anchor_id: anchor.anchor_id ?? "" },
                       })}>{t("withdraw")}</Link>
@@ -404,15 +404,15 @@ function Trust({ leaves }: { leaves: Item[] }) {
         </table>
       )}
       {data.items.length > AUTHORITIES_SHOWN && (
-        <div className="card-body">
-          <button className="secondary" onClick={() => setAllAuthorities((current) => !current)} aria-expanded={!folded}>
+        <div className="ui-panel-body">
+          <button className="ui-btn-secondary" onClick={() => setAllAuthorities((current) => !current)} aria-expanded={!folded}>
             {folded
               ? t("Show all {n} authorities", { n: data.items.length })
               : t("Show the first {n} only", { n: AUTHORITIES_SHOWN })}
           </button>
         </div>
       )}
-    </Card>
+    </Panel>
   );
 }
 
@@ -423,7 +423,7 @@ function Trust({ leaves }: { leaves: Item[] }) {
 function ExpiryTimeline({ timeline }: { timeline: { reason: string; count: number }[] }) {
   const t = useT();
   const total = timeline.reduce((sum, window) => sum + window.count, 0);
-  if (!timeline.length || total === 0) return <p className="fp-blank">{t("No deadline in the windows watched.")}</p>;
+  if (!timeline.length || total === 0) return <p className="ui-empty">{t("No deadline in the windows watched.")}</p>;
   return (
     <Breakdown tone="warn" items={timeline.map((window) => ({ label: t(window.reason), value: window.count }))} />
   );

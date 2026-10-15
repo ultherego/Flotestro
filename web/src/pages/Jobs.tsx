@@ -7,8 +7,8 @@ import { bytes, toInstant } from "../lib/format";
 import { Board } from "../components/board";
 import { PlanSummary } from "../components/plan";
 import type { Attempt, Campaign, FleetActivity, Job } from "../lib/types";
-import { ErrorBox, ErrorCode, Time, ProgressBar, Empty, JobState, stateName } from "../components/ui";
-import { Actions, Card, PageHeader, Toolbar } from "../components/layout";
+import { ErrorBox, ErrorCode, Time, ProgressBar, JobState, stateName } from "../components/ui";
+import { Actions, Empty, PageHead, Panel, Toolbar } from "../ui/kit";
 import { ExportButton } from "../components/ExportButton";
 import {
   ColumnChooser, PageSizeSelect, Td, Th, formatSort, parseSort, toggleSort, useColumns, usePageSize,
@@ -341,7 +341,7 @@ export function Jobs() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         title={t("Jobs")}
         description={t("Approval confirms the plan hash, so tampering with its content is detectable.")}
         help={<p>{t("One row is one operation on one host. The plan hash covers the operation and its payload, so an approval granted for one plan cannot be spent on another.")}</p>}
@@ -358,7 +358,7 @@ export function Jobs() {
         drawn={{
           state: (
             <>
-              <Card className="span-12" title={t("State")} description={listed}>
+              <Panel className="ui-col-12" title={t("State")} description={listed}>
           <StatusBar segments={[
             { label: t("Awaiting approval"), value: awaiting, tone: "warn" },
             { label: t("Queued"), value: queued, tone: "neutral" },
@@ -367,12 +367,12 @@ export function Jobs() {
             { label: t("Failed"), value: failed, tone: "error" },
             { label: t("Canceled"), value: canceled, tone: "unknown" },
           ]} />
-        </Card>
+        </Panel>
             </>
           ),
           per_hour: (
             <>
-              <Card className="span-8" title={t("Operations, last 24 h")} description={t("Finished per hour, by outcome.")}>
+              <Panel className="ui-col-8" title={t("Operations, last 24 h")} description={t("Finished per hour, by outcome.")}>
           {a ? (
             <BarChart
               labels={a.hours.map(hourLabel)}
@@ -384,32 +384,32 @@ export function Jobs() {
               ]}
             />
           ) : activity.isError ? (
-            <p className="fp-blank">{t("The last day could not be counted.")}</p>
+            <p className="ui-empty">{t("The last day could not be counted.")}</p>
           ) : <Empty>{t("Loading…")}</Empty>}
-        </Card>
+        </Panel>
             </>
           ),
           by_operation: (
             <>
-              <Card className="span-4" title={t("By operation")} description={listed}>
+              <Panel className="ui-col-4" title={t("By operation")} description={listed}>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : shownOperations.length === 0 ? (
-            <p className="fp-blank">{t("No jobs.")}</p>
+            <p className="ui-empty">{t("No jobs.")}</p>
           ) : (
             <>
-              <Breakdown items={shownOperations.map(([action, n]) => ({ label: <span className="mono">{action}</span>, value: n }))} />
+              <Breakdown items={shownOperations.map(([action, n]) => ({ label: <span className="ui-mono">{action}</span>, value: n }))} />
               {byOperation.length > shownOperations.length && (
-                <p className="fp-rest">{t("and {n} more operations", { n: byOperation.length - shownOperations.length })}</p>
+                <p className="ui-note">{t("and {n} more operations", { n: byOperation.length - shownOperations.length })}</p>
               )}
             </>
           )}
-        </Card>
+        </Panel>
             </>
           ),
           jobs: (
             <>
-              <Card className="span-12" flush>
+              <Panel className="ui-col-12" flush>
           <Toolbar end={<>
             <span>{t("{n} listed", { n: jobs.length })}</span>
             <PageSizeSelect value={pageSize} onChange={setPageSize} />
@@ -425,17 +425,17 @@ export function Jobs() {
             <input placeholder={t("requested by")} value={filters.actor} onChange={(e) => setFilter("actor", e.target.value)} />
             <input placeholder={t("campaign ID")} value={filters.campaign_id} onChange={(e) => setFilter("campaign_id", e.target.value)} />
             <input placeholder={t("error code")} value={filters.error_code} onChange={(e) => setFilter("error_code", e.target.value)} />
-            <label className="toggle">
+            <label className="ui-check">
               {t("Since")}{" "}
               <input type="datetime-local" value={filters.since} onChange={(e) => setFilter("since", e.target.value)} />
             </label>
-            <label className="toggle">
+            <label className="ui-check">
               {t("Until")}{" "}
               <input type="datetime-local" value={filters.until} onChange={(e) => setFilter("until", e.target.value)} />
             </label>
             {/* A preset sets the lower bound and lifts the upper one: "the
                 last day" reaches now, whatever the until field said. */}
-            <span className="segmented">
+            <span className="ui-segmented">
               <button type="button" onClick={() => setFilters((f) => ({ ...f, since: hoursAgo(1), until: "" }))}>{t("last hour")}</button>
               <button type="button" onClick={() => setFilters((f) => ({ ...f, since: hoursAgo(24), until: "" }))}>{t("last 24 h")}</button>
               <button type="button" onClick={() => setFilters((f) => ({ ...f, since: hoursAgo(24 * 7), until: "" }))}>{t("last 7 days")}</button>
@@ -443,19 +443,19 @@ export function Jobs() {
             {/* The host and the fan-out come from a link, not from a
                 field: they show as chips the operator can take off. */}
             {filters.host_id && (
-              <span className="chip">
+              <span className="ui-tag">
                 {t("host {id}", { id: filters.host_id.slice(0, 8) })}
-                <button type="button" className="expander" aria-label={t("Remove the host filter")} onClick={() => setFilter("host_id", "")}>×</button>
+                <button type="button" className="ui-expander" aria-label={t("Remove the host filter")} onClick={() => setFilter("host_id", "")}>×</button>
               </span>
             )}
             {filters.fanout_id && (
-              <span className="chip">
+              <span className="ui-tag">
                 {t("fan-out {id}", { id: filters.fanout_id.slice(0, 8) })}
-                <button type="button" className="expander" aria-label={t("Remove the fan-out filter")} onClick={() => setFilter("fanout_id", "")}>×</button>
+                <button type="button" className="ui-expander" aria-label={t("Remove the fan-out filter")} onClick={() => setFilter("fanout_id", "")}>×</button>
               </span>
             )}
             {anyFilter(filters) && (
-              <button type="button" className="secondary" onClick={() => setFilters({ ...EMPTY_FILTERS, sort: filters.sort })}>{t("Clear filters")}</button>
+              <button type="button" className="ui-btn-secondary" onClick={() => setFilters({ ...EMPTY_FILTERS, sort: filters.sort })}>{t("Clear filters")}</button>
             )}
           </Toolbar>
 
@@ -481,14 +481,14 @@ export function Jobs() {
               </button>
               <button
                 type="button"
-                className="secondary"
+                className="ui-btn-secondary"
                 disabled={selectedJobs.length === 0 || !reasonAccepted(batchReason) || batch.isPending}
                 title={reasonAccepted(batchReason) ? undefined : t("A cancel needs a reason of at least 8 characters.")}
                 onClick={() => batch.mutate({ operation: "cancel", jobs: selectedJobs, reason: batchReason })}
               >
                 {t("Cancel selected")}
               </button>
-              {batchError && <span className="warning">{batchError}</span>}
+              {batchError && <span className="ui-banner">{batchError}</span>}
             </Toolbar>
           )}
 
@@ -528,17 +528,17 @@ export function Jobs() {
                       </td>
                       <Td columns={columns} name="operation">
                         <button
-                          className="expander"
+                          className="ui-expander"
                           aria-expanded={expanded === job.id}
                           onClick={() => setExpanded(expanded === job.id ? "" : job.id)}
                         >
                           {expanded === job.id ? "▾" : "▸"}
                         </button>
-                        <Link to={`/jobs/${job.id}`} className="mono">{job.action_type}</Link>
+                        <Link to={`/jobs/${job.id}`} className="ui-mono">{job.action_type}</Link>
                         {job.campaign_id && (
                           <>
                             {" "}
-                            <Link to={`/campaigns/${job.campaign_id}`} className="chip" title={t("Part of a campaign")}>
+                            <Link to={`/campaigns/${job.campaign_id}`} className="ui-tag" title={t("Part of a campaign")}>
                               {campaignName(job.campaign_id)
                                 ? t("campaign {name}", { name: campaignName(job.campaign_id) ?? "" })
                                 : t("campaign {id}", { id: job.campaign_id.slice(0, 8) })}
@@ -557,7 +557,7 @@ export function Jobs() {
                             state: without the key it stands in the queue for no
                             visible reason and looks like a forgotten job. */}
                         {job.state === "queued" && waitedBudget(job.wait_reason) && (
-                          <span className="badge warn" title={t("The fleet or the site has no free capacity for this operation; the job starts when a token of this budget is free.")}>
+                          <span className="ui-pill ui-warn" title={t("The fleet or the site has no free capacity for this operation; the job starts when a token of this budget is free.")}>
                             {t("waiting for budget {key}", { key: waitedBudget(job.wait_reason) })}
                           </span>
                         )}
@@ -581,7 +581,7 @@ export function Jobs() {
                         {job.required_approvals > 1 ? (
                           <>
                             {t("{collected} of {required} approvals", { collected: job.collected_approvals, required: job.required_approvals })}
-                            {job.approved_by && <span className="source"> · {job.approved_by}</span>}
+                            {job.approved_by && <span className="ui-note"> · {job.approved_by}</span>}
                           </>
                         ) : (
                           job.approved_by || "—"
@@ -590,9 +590,9 @@ export function Jobs() {
                       <Td columns={columns} name="result">{job.result_error_code ? <ErrorCode code={job.result_error_code} /> : (job.result_status || "—")}</Td>
                       <Td columns={columns} name="created"><Time value={job.created_at} /></Td>
                       <Td columns={columns} name="finished"><Time value={job.finished_at} /></Td>
-                      <td className="actions-cell">
+                      <td className="ui-actioncell">
                         {job.state === "awaiting_approval" && (
-                          <div className="row-actions">
+                          <div className="ui-rowactions">
                             <button
                               onClick={() => { setReviewing(reviewing === job.id ? "" : job.id); setCanceling(""); }}
                               disabled={approve.isPending}
@@ -601,7 +601,7 @@ export function Jobs() {
                               {t("Approve")}
                             </button>
                             <button
-                              className="secondary"
+                              className="ui-btn-secondary"
                               onClick={() => { setCanceling(canceling === job.id ? "" : job.id); setReviewing(""); }}
                               aria-expanded={canceling === job.id}
                             >
@@ -610,8 +610,8 @@ export function Jobs() {
                           </div>
                         )}
                         {REORDERABLE_STATES.includes(job.state) && (
-                          <div className="row-actions">
-                            <Link className="button secondary" to={orderAgainAddress(job)} title={t("Opens the Bulk workspace with the same operation, payload and host written in.")}>
+                          <div className="ui-rowactions">
+                            <Link className="ui-btn ui-btn-secondary" to={orderAgainAddress(job)} title={t("Opens the Bulk workspace with the same operation, payload and host written in.")}>
                               {t("Order again")}
                             </Link>
                           </div>
@@ -622,9 +622,9 @@ export function Jobs() {
                         read: the row opens with it, and the button that
                         binds the consent to its hash stands under it. */}
                     {reviewing === job.id && job.state === "awaiting_approval" && (
-                      <tr className="detail-row">
+                      <tr className="ui-detailrow">
                         <td colSpan={span}>
-                          <p className="source">
+                          <p className="ui-note">
                             {t("You approve exactly this payload for {operation} on {host}; the consent is bound to hash {hash}.", {
                               operation: job.action_type, host: job.hostname || job.host_id.slice(0, 8), hash: job.payload_hash.slice(0, 12),
                             })}
@@ -648,14 +648,14 @@ export function Jobs() {
                             >
                               {t("Approve this payload")}
                             </button>
-                            <button className="secondary" onClick={() => { setReviewing(""); setApproveReason(""); }}>{t("Back")}</button>
-                            {approve.error && <span className="page-error">{approve.error instanceof Error ? approve.error.message : String(approve.error)}</span>}
+                            <button className="ui-btn-secondary" onClick={() => { setReviewing(""); setApproveReason(""); }}>{t("Back")}</button>
+                            {approve.error && <span className="ui-errorbox">{approve.error instanceof Error ? approve.error.message : String(approve.error)}</span>}
                           </Actions>
                         </td>
                       </tr>
                     )}
                     {canceling === job.id && job.state === "awaiting_approval" && (
-                      <tr className="detail-row">
+                      <tr className="ui-detailrow">
                         <td colSpan={span}>
                           <Actions>
                             <input
@@ -666,23 +666,23 @@ export function Jobs() {
                               onKeyDown={(e) => { if (e.key === "Enter" && reasonAccepted(cancelReason)) cancel.mutate({ job, reason: cancelReason }); }}
                             />
                             <button
-                              className="danger"
+                              className="ui-btn-danger"
                               disabled={!reasonAccepted(cancelReason) || cancel.isPending}
                               onClick={() => cancel.mutate({ job, reason: cancelReason })}
                             >
                               {t("Cancel this job")}
                             </button>
-                            <button className="secondary" onClick={() => { setCanceling(""); setCancelReason(""); }}>{t("Back")}</button>
-                            {cancel.error && <span className="page-error">{cancel.error instanceof Error ? cancel.error.message : String(cancel.error)}</span>}
+                            <button className="ui-btn-secondary" onClick={() => { setCanceling(""); setCancelReason(""); }}>{t("Back")}</button>
+                            {cancel.error && <span className="ui-errorbox">{cancel.error instanceof Error ? cancel.error.message : String(cancel.error)}</span>}
                           </Actions>
                         </td>
                       </tr>
                     )}
                     {expanded === job.id && (
-                      <tr className="detail-row">
+                      <tr className="ui-detailrow">
                         <td colSpan={span}>
                           <Attempts jobId={job.id} />
-                          <p className="source"><Link to={`/jobs/${job.id}`}>{t("Open the job: full payload, plan and output")}</Link></p>
+                          <p className="ui-note"><Link to={`/jobs/${job.id}`}>{t("Open the job: full payload, plan and output")}</Link></p>
                         </td>
                       </tr>
                     )}
@@ -695,12 +695,12 @@ export function Jobs() {
               nobody counts the trail of tasks, they browse it. */}
           {list.hasNextPage && (
             <p>
-              <button className="secondary" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
+              <button className="ui-btn-secondary" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
                 {t("Load more")}
               </button>
             </p>
           )}
-        </Card>
+        </Panel>
             </>
           )
         }}
@@ -729,7 +729,7 @@ function Attempts({ jobId }: { jobId: string }) {
   return (
     <div>
       {data.items.map((attempt) => (
-        <div key={attempt.id} className="attempt">
+        <div key={attempt.id} className="ui-group">
           <AttemptHead attempt={attempt} />
           {attempt.stdout && <pre>{attempt.stdout.slice(0, 4000)}</pre>}
           {attempt.stderr && <pre>{attempt.stderr.slice(0, 2000)}</pre>}
@@ -747,20 +747,20 @@ export function AttemptHead({ attempt }: { attempt: Attempt }) {
   const t = useT();
   return (
     <>
-      <div className="attempt-head">
+      <div className="ui-group-head">
         {t("attempt {n}", { n: attempt.attempt_number })} · <JobState state={attempt.status ?? "—"} /> ·{" "}
         {t("exit code {code}", { code: attempt.exit_code ?? "—" })}
-        {attempt.replayed && <> · <span className="badge">{t("replayed from journal")}</span></>}
-        {attempt.error_code && <> · <span className="badge error">{attempt.error_code}</span></>}
+        {attempt.replayed && <> · <span className="ui-pill">{t("replayed from journal")}</span></>}
+        {attempt.error_code && <> · <span className="ui-pill ui-error">{attempt.error_code}</span></>}
       </div>
       {attempt.unit_state_before && attempt.unit_state_after && (
-        <div className="source">
+        <div className="ui-note">
           {t("unit")}: {attempt.unit_state_before.active_state}/{attempt.unit_state_before.sub_state}
           {" "}pid {attempt.unit_state_before.main_pid} → {attempt.unit_state_after.active_state}/
           {attempt.unit_state_after.sub_state} pid {attempt.unit_state_after.main_pid}
         </div>
       )}
-      {attempt.message && <div className="source">{attempt.message}</div>}
+      {attempt.message && <div className="ui-note">{attempt.message}</div>}
       {attempt.detail && <TypedResult detail={attempt.detail} />}
     </>
   );
@@ -786,7 +786,7 @@ function SpaceFacts({ facts }: { facts?: SpaceFact[] }) {
         const known = fact.basis && fact.basis !== "unknown";
         const short = known && (fact.needed_bytes ?? 0) > (fact.available_bytes ?? 0);
         return (
-          <div key={`${fact.purpose}:${fact.path}`} className={short ? "warning" : undefined}
+          <div key={`${fact.purpose}:${fact.path}`} className={short ? "ui-banner" : undefined}
             title={short ? t("The host will refuse this change: the file system has fewer free bytes than the change needs.") : undefined}>
             {fact.path}
             {fact.filesystem && fact.filesystem !== fact.path && ` (${fact.filesystem})`}
@@ -813,7 +813,7 @@ export function TypedResult({ detail }: { detail: Record<string, any> }) {
   switch (detail.kind) {
     case "package_plan":
       return (
-        <div className="source">
+        <div className="ui-note">
           {t("plan {manager}: {changes} changes, download {mb} MB", {
             manager: detail.manager, changes: detail.changes?.length ?? 0,
             mb: Math.round((detail.download_bytes ?? 0) / 1048576),
@@ -824,7 +824,7 @@ export function TypedResult({ detail }: { detail: Record<string, any> }) {
       );
     case "package_apply":
       return (
-        <div className="source">
+        <div className="ui-note">
           {t("{n} packages applied", { n: detail.applied?.length ?? 0 })}
           {detail.reboot_required && `, ${t("reboot required")}`}
           {detail.package_database_broken && `, ${t("PACKAGE DATABASE NEEDS REPAIR")}`}
@@ -833,7 +833,7 @@ export function TypedResult({ detail }: { detail: Record<string, any> }) {
           {/* rpm keeps a package whose %post failed: the transaction is a
               success with a defect, and the defect is named here. */}
           {(detail.scriptlet_errors?.length ?? 0) > 0 && (
-            <span className="warning">
+            <span className="ui-banner">
               {", "}{t("maintainer script failed: {names}", { names: detail.scriptlet_errors.join(", ") })}
             </span>
           )}
@@ -841,7 +841,7 @@ export function TypedResult({ detail }: { detail: Record<string, any> }) {
       );
     case "domain_enroll":
       return (
-        <div className="source">
+        <div className="ui-note">
           {(detail.checks ?? []).map((check: any) => (
             <div key={check.name}>
               {check.passed === true ? "OK" : check.passed === false ? (check.blocking ? t("BLOCKING") : t("warning")) : t("unknown")}
@@ -852,7 +852,7 @@ export function TypedResult({ detail }: { detail: Record<string, any> }) {
       );
     case "unit_status":
       return (
-        <div className="source">
+        <div className="ui-note">
           {(detail.units ?? []).map((unit: any) => (
             <div key={unit.name}>
               {unit.name}: {unit.active_state}/{unit.sub_state}
@@ -874,7 +874,7 @@ export function TypedResult({ detail }: { detail: Record<string, any> }) {
     case "trust_plan":
     case "renewal_plan":
       return (
-        <div className="source">
+        <div className="ui-note">
           <PlanSummary plan={(detail.plan ?? {}) as Record<string, any>} />
         </div>
       );

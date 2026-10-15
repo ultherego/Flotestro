@@ -171,11 +171,11 @@ export function isHostPlan(kind: string | undefined): boolean {
 export function PlanSummary({ plan }: { plan: HostPlan }) {
   const t = useT();
   if (plan.refusal) {
-    return <span className="badge error">{t("refused: {reason}", { reason: plan.refusal })}</span>;
+    return <span className="ui-pill ui-error">{t("refused: {reason}", { reason: plan.refusal })}</span>;
   }
   if (plan.validator_failed) {
     return (
-      <span className="badge error">
+      <span className="ui-pill ui-error">
         {t("validator failed")}{plan.validator_output ? `: ${plan.validator_output.slice(0, 200)}` : ""}
       </span>
     );
@@ -191,7 +191,7 @@ export function PlanSummary({ plan }: { plan: HostPlan }) {
     <>
       <span>{parts.join(" · ")}</span>
       {plan.warnings?.map((warning) => (
-        <span key={warning} className="badge warning">{warning}</span>
+        <span key={warning} className="ui-pill ui-banner">{warning}</span>
       ))}
       <PlanVerbatim plan={plan} />
     </>
@@ -213,8 +213,8 @@ export function PlanVerbatim({ plan }: { plan: HostPlan }) {
   if (!verbatim) return null;
   return (
     <>
-      <div className="source">{verbatim.label}</div>
-      <pre className="hm-log hm-mono">{verbatim.text}</pre>
+      <div className="ui-note">{verbatim.label}</div>
+      <pre className="ui-log ui-mono">{verbatim.text}</pre>
     </>
   );
 }
@@ -241,7 +241,7 @@ export function PlanChanges({ changes, shown = ROWS_SHOWN }: { changes?: (string
   const sentences = changes.filter((change): change is string => typeof change === "string");
   if (packages.length === 0) {
     return (
-      <ul className="plan-changes-list">
+      <ul className="ui-stack-s">
         {sentences.map((change, index) => <li key={`${index}:${change}`}>{change}</li>)}
       </ul>
     );
@@ -253,7 +253,7 @@ export function PlanChanges({ changes, shown = ROWS_SHOWN }: { changes?: (string
   const folded = packages.length > shown;
   return (
     <div>
-      <table className="plan-changes-table">
+      <table className="ui-table">
         <thead>
           <tr>
             <th scope="col">{t("Package")}</th>
@@ -268,27 +268,27 @@ export function PlanChanges({ changes, shown = ROWS_SHOWN }: { changes?: (string
             const action = changeAction(change);
             const delta = change.installed_delta_known ? change.installed_delta_bytes ?? 0 : undefined;
             return (
-              <tr key={change.name} className={action === "remove" || action === "downgrade" ? "plan-change-attention" : undefined}>
-                <td className="mono">{change.name}</td>
+              <tr key={change.name} className={action === "remove" || action === "downgrade" ? "ui-warn" : undefined}>
+                <td className="ui-mono">{change.name}</td>
                 {/* The direction is what the host said; a dash is a host
                     that did not say, never an upgrade by default. */}
-                <td className={action === "remove" || action === "downgrade" ? "badge warn" : "source"} title={action ? undefined : t("The plan does not name the direction of this change.")}>
+                <td className={action === "remove" || action === "downgrade" ? "ui-pill ui-warn" : "ui-note"} title={action ? undefined : t("The plan does not name the direction of this change.")}>
                   {action ? t(ACTION_WORDS[action] ?? action) : "—"}
                 </td>
                 {/* A package without a current version is new on the host;
                     one without a candidate goes away. A dash says so, not
                     an empty cell that looks like a number missing. */}
-                <td className="mono source">{change.current_version || "—"}</td>
-                <td className="mono">{change.candidate_version || "—"}</td>
+                <td className="ui-mono ui-note">{change.current_version || "—"}</td>
+                <td className="ui-mono">{change.candidate_version || "—"}</td>
                 <td>
-                  {change.security && <span className="badge warn">{t("security")}</span>}
-                  {change.protected && <span className="badge error">{t("protected")}</span>}
-                  {change.blocked && <span className="badge error">{t("blocked")}</span>}
-                  {change.origin && <span className="source plan-origin">{change.origin}</span>}
-                  {change.architecture && <span className="source">{change.architecture}</span>}
-                  {change.reason && change.reason !== "requested" && <span className="source">{t(change.reason)}</span>}
+                  {change.security && <span className="ui-pill ui-warn">{t("security")}</span>}
+                  {change.protected && <span className="ui-pill ui-error">{t("protected")}</span>}
+                  {change.blocked && <span className="ui-pill ui-error">{t("blocked")}</span>}
+                  {change.origin && <span className="ui-note">{change.origin}</span>}
+                  {change.architecture && <span className="ui-note">{change.architecture}</span>}
+                  {change.reason && change.reason !== "requested" && <span className="ui-note">{t(change.reason)}</span>}
                   {delta !== undefined && delta !== 0 && (
-                    <span className="source">{delta > 0 ? "+" : "−"}{bytes(Math.abs(delta))}</span>
+                    <span className="ui-note">{delta > 0 ? "+" : "−"}{bytes(Math.abs(delta))}</span>
                   )}
                 </td>
               </tr>
@@ -296,21 +296,21 @@ export function PlanChanges({ changes, shown = ROWS_SHOWN }: { changes?: (string
           })}
         </tbody>
       </table>
-      <div className="plan-changes-foot">
-        <span className="source">
+      <div className="ui-foot">
+        <span className="ui-note">
           {t("{n} packages", { n: packages.length })}
           {security > 0 && ` · ${t("{n} security", { n: security })}`}
           {removals > 0 && ` · ${t("{n} removed", { n: removals })}`}
           {downgrades > 0 && ` · ${t("{n} downgraded", { n: downgrades })}`}
         </span>
         {folded && (
-          <button type="button" className="secondary" onClick={() => setAll(!all)}>
+          <button type="button" className="ui-btn-secondary" onClick={() => setAll(!all)}>
             {all ? t("Show fewer") : t("Show all {n}", { n: packages.length })}
           </button>
         )}
       </div>
       {sentences.length > 0 && (
-        <ul className="plan-changes-list">
+        <ul className="ui-stack-s">
           {sentences.map((change, index) => <li key={`${index}:${change}`}>{change}</li>)}
         </ul>
       )}
@@ -372,9 +372,9 @@ export function PlanFacts({ plan }: { plan: PackagePlanFacts }) {
   }
   if (facts.length === 0) return null;
   return (
-    <div className="plan-facts">
+    <div className="ui-facts">
       {facts.map((fact) => (
-        <span key={fact.key} className={fact.warn ? "badge warn" : "source"}>{fact.text}</span>
+        <span key={fact.key} className={fact.warn ? "ui-pill ui-warn" : "ui-note"}>{fact.text}</span>
       ))}
     </div>
   );
@@ -398,29 +398,29 @@ export function PlanBlocked({ plan }: { plan: PackagePlanFacts }) {
           host, a hold is a decision on it, and a gap the resolution could not
           name is neither. */}
       {database.length > 0 && (
-        <p className="warning">
+        <p className="ui-banner">
           {t("{n} packages block the package operations of this host; a repair has to run before the plan is applied.", { n: database.length })}
         </p>
       )}
       {held.length > 0 && (
-        <p className="source">
+        <p className="ui-note">
           {t("{n} updates are held back on the host itself and stay out of this plan.", { n: held.length })}
         </p>
       )}
       {unknown.length > 0 && (
-        <p className="warning">
+        <p className="ui-banner">
           {t("{n} entries of this transaction could not be named; what they stand for is not in the plan.", { n: unknown.length })}
         </p>
       )}
       {advisory > 0 && (
-        <p className="source">
+        <p className="ui-note">
           {t("{n} packages stay out of this plan: no advisory of this host says whether their update closes a vulnerability.", { n: advisory })}
         </p>
       )}
-      <ul className="plan-changes-list">
+      <ul className="ui-stack-s">
         {blocked.map((entry) => (
           <li key={`${entry.kind ?? "database"}:${entry.name}`}>
-            <span className="mono">{entry.name}</span>{entry.status ? ` — ${entry.status}` : ""}
+            <span className="ui-mono">{entry.name}</span>{entry.status ? ` — ${entry.status}` : ""}
           </li>
         ))}
       </ul>
@@ -489,40 +489,40 @@ export function PlanGroupView({ group, action, stale = [] }: { group: PlanGroup;
   // their consent does not carry over, whatever the digest still says.
   const staleHere = stale.filter((host) => group.hosts.includes(host));
   return (
-    <section className={`plan-group${status === "unknown" ? " plan-group-unknown" : ""}`} data-testid="plan-group" data-status={status}>
-      <div className="plan-group-head">
-        <span className="plan-group-hosts" title={group.hosts.join("\n")}>
+    <section className={`ui-group${status === "unknown" ? " ui-group-faded" : ""}`} data-testid="plan-group" data-status={status}>
+      <div className="ui-group-head">
+        <span className="ui-note" title={group.hosts.join("\n")}>
           <strong>{t("{n} hosts", { n: group.count })}</strong>
-          <span className="source"> {named.join(", ")}{more > 0 && ` +${more}`}</span>
+          <span className="ui-note"> {named.join(", ")}{more > 0 && ` +${more}`}</span>
         </span>
-        <span className="source">{t("Plan fingerprint")} <span className="mono" title={group.plan_hash}>{group.plan_hash.slice(0, 16)}</span></span>
+        <span className="ui-note">{t("Plan fingerprint")} <span className="ui-mono" title={group.plan_hash}>{group.plan_hash.slice(0, 16)}</span></span>
         {/* The planner that made the plan: two plans of different planners
             are different plans even over the same packages, and the host
             asks for a new plan when its planner moved. */}
-        <span className="source">{t("Planner")} <span className="mono">{planner || "—"}</span></span>
+        <span className="ui-note">{t("Planner")} <span className="ui-mono">{planner || "—"}</span></span>
         {/* A plan is bound in time as well as by its digest: past the expiry
             the hosts are not started on it and the campaign is planned again. */}
-        <span className="source">{t("Valid until")} <Time value={group.expires_at} /></span>
-        {status === "expired" && <span className="badge error">{t("expired")}</span>}
-        {status === "unknown" && <span className="badge error" title={t("The panel cannot read this plan as a declaration of its effects; exclude these hosts with a reason or plan again.")}>{t("unknown plan")}</span>}
+        <span className="ui-note">{t("Valid until")} <Time value={group.expires_at} /></span>
+        {status === "expired" && <span className="ui-pill ui-error">{t("expired")}</span>}
+        {status === "unknown" && <span className="ui-pill ui-error" title={t("The panel cannot read this plan as a declaration of its effects; exclude these hosts with a reason or plan again.")}>{t("unknown plan")}</span>}
         {staleHere.length > 0 && (
-          <span className="badge error" title={staleHere.join("\n")}>{t("stale on {n} hosts", { n: staleHere.length })}</span>
+          <span className="ui-pill ui-error" title={staleHere.join("\n")}>{t("stale on {n} hosts", { n: staleHere.length })}</span>
         )}
       </div>
-      <div className="plan-group-body">
+      <div className="ui-group-body">
         {status === "unknown" ? (
-          <p className="warning"><span>{t("The host gave a plan the panel cannot read. Nothing here is approved: exclude the hosts with a reason, or plan the campaign again once the agent is upgraded.")}</span></p>
+          <p className="ui-banner"><span>{t("The host gave a plan the panel cannot read. Nothing here is approved: exclude the hosts with a reason, or plan the campaign again once the agent is upgraded.")}</span></p>
         ) : trouble ? (
           <PlanSummary plan={plan} />
         ) : (
           <>
-            <div className="plan-group-words">
-              {action && <span className="mono">{action}</span>}
+            <div className="ui-lede">
+              {action && <span className="ui-mono">{action}</span>}
               {action && " · "}
               <span>{planWords(plan, t)}</span>
               {/* The source resolved to a UUID is what goes to the host. */}
               {plan.resolved_source && plan.resolved_source !== plan.requested_source && (
-                <span className="source"> · {plan.requested_source} → {plan.resolved_source}</span>
+                <span className="ui-note"> · {plan.requested_source} → {plan.resolved_source}</span>
               )}
             </div>
             <PlanFacts plan={plan} />
@@ -543,8 +543,8 @@ export function JobPlan({ jobId }: { jobId: string }) {
     queryKey: ["attempts", jobId],
     queryFn: () => api.get<Collection<Attempt>>(`/api/v1/jobs/${jobId}/attempts`),
   });
-  if (error) return <span className="source">{t("plan unavailable")}</span>;
+  if (error) return <span className="ui-note">{t("plan unavailable")}</span>;
   const attempt = [...(data?.items ?? [])].reverse().find((item) => isHostPlan(item.detail?.kind as string));
-  if (!attempt) return <span className="source">—</span>;
+  if (!attempt) return <span className="ui-note">—</span>;
   return <PlanSummary plan={(attempt.detail?.plan ?? {}) as HostPlan} />;
 }

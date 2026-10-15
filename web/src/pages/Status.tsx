@@ -3,11 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { copyToClipboard } from "../lib/clipboard";
 import { absoluteTime, duration, goDuration, relativeTime } from "../lib/format";
-import {
-  Empty, ErrorBox, FactValue, Pair, Pairs, Structured, TableScroll, Time,
-  type FactKind,
-} from "../components/ui";
-import { Card, NeedsAttention, PageHeader, Verdict, type Tone } from "../components/layout";
+import { ErrorBox, FactValue, Pair, Pairs, Structured, TableScroll, Time, type FactKind } from "../components/ui";
+import { Attention, Empty, PageHead, Panel, type Tone, toneClass, Verdict } from "../ui/kit";
 import { StatusBar, type Segment } from "../components/widgets";
 import { Board } from "../components/board";
 import { useT } from "../i18n";
@@ -234,7 +231,7 @@ export function Status() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         icon="settings"
         title={t("Status")}
         description={t("The condition of this panel, judged by the server.")}
@@ -245,19 +242,19 @@ export function Status() {
         }
         actions={
           <>
-            <a className="button" href="/api/v1/openapi.json" target="_blank" rel="noreferrer">{t("OpenAPI")}</a>
-            <a className="button" href="/metrics" target="_blank" rel="noreferrer">{t("Metrics")}</a>
-            <button className="secondary" onClick={copyDiagnostics} disabled={!data}>
+            <a className="ui-btn" href="/api/v1/openapi.json" target="_blank" rel="noreferrer">{t("OpenAPI")}</a>
+            <a className="ui-btn" href="/metrics" target="_blank" rel="noreferrer">{t("Metrics")}</a>
+            <button className="ui-btn-secondary" onClick={copyDiagnostics} disabled={!data}>
               {copied ? t("Copied") : t("Copy diagnostics")}
             </button>
           </>
         }
       />
       {error && <ErrorBox error={error} />}
-      {!error && !data && <Card><Empty>{t("Loading…")}</Empty></Card>}
+      {!error && !data && <Panel><Empty>{t("Loading…")}</Empty></Panel>}
       {data && (
         <>
-          <div className="verdict-band">
+          <div className="ui-verdict-band">
           <Verdict
             tone={data.ok ? (data.unknown > 0 ? "warn" : "ok") : "error"}
             headline={data.ok ? t("Every judged part of this panel is fine") : t("A part of this panel is not fine")}
@@ -271,15 +268,15 @@ export function Status() {
             <span>{dataUpdatedAt ? t("read at {when}", { when: absoluteTime(new Date(dataUpdatedAt).toISOString()) }) : "—"}</span>
           </Verdict>
 
-          <NeedsAttention title={t("Parts that need a look")}>
+          <Attention title={t("Parts that need a look")}>
             {wanting.map((key) => (
-              <p key={key} className="attention-line">
+              <p key={key} className="ui-note">
                 <ToneBadge tone={blockTone(data.blocks[key])} />
                 <strong>{t(BLOCK_TITLES[key] ?? key)}</strong>
                 <span>{data.blocks[key].reason || data.blocks[key].attention || t("judged as unknown")}</span>
               </p>
             ))}
-          </NeedsAttention>
+          </Attention>
           </div>
 
           {/* Every part on the screen at once, as tiles that fit three or
@@ -320,15 +317,15 @@ function BlockTile({ name, block }: { name: string; block: StatusBlock }) {
   const rows = Object.entries(block.facts).filter(([key]) => !DRAWN_ELSEWHERE.has(key));
   const summary = blockSummary(name, block.facts, t);
   return (
-    <section className={`part ${tone}`}>
-      <h3 className="part-head">
-        <span className="part-name">{t(BLOCK_TITLES[name] ?? name)}</span>
+    <section className={`ui-tile ${toneClass(tone)}`}>
+      <h3 className="ui-tile-head">
+        <span className="ui-tile-name">{t(BLOCK_TITLES[name] ?? name)}</span>
         <ToneBadge tone={tone} />
-        {summary && <span className="part-summary">{summary}</span>}
+        {summary && <span className="ui-tile-note">{summary}</span>}
       </h3>
-      <div className="part-body">
+      <div className="ui-tile-body">
       {(block.reason || block.attention) && (
-        <p className="part-reason">{block.reason || block.attention}</p>
+        <p className="ui-tile-reason">{block.reason || block.attention}</p>
       )}
       <BlockWidget name={name} facts={block.facts} />
       <Pairs>
@@ -408,7 +405,7 @@ export function blockSummary(
 function ToneBadge({ tone }: { tone: Tone }) {
   const t = useT();
   const text = tone === "ok" ? t("fine") : tone === "warn" ? t("attention") : tone === "error" ? t("not fine") : t("unknown");
-  return <span className={`badge ${tone}`}>{text}</span>;
+  return <span className={`ui-pill ${toneClass(tone)}`}>{text}</span>;
 }
 
 function BlockWidget({ name, facts }: { name: string; facts: Record<string, unknown> }) {
@@ -450,7 +447,7 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
     }
     case "outbox": {
       const consumers = (facts.consumers as OutboxConsumer[] | undefined) ?? [];
-      if (consumers.length === 0) return <p className="source">{t("No external consumer; the panel alone reads the trail.")}</p>;
+      if (consumers.length === 0) return <p className="ui-note">{t("No external consumer; the panel alone reads the trail.")}</p>;
       return (
         <TableScroll>
           <table>
@@ -460,12 +457,12 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
           <tbody>
             {consumers.map((consumer) => (
               <tr key={consumer.name}>
-                <td className="mono">{consumer.name}</td>
-                <td className="mono">{consumer.behind}</td>
+                <td className="ui-mono">{consumer.name}</td>
+                <td className="ui-mono">{consumer.behind}</td>
                 <td>
                   {consumer.failures > 0
-                    ? <span className="badge error" title={consumer.last_error}>{consumer.failures}</span>
-                    : <span className="badge ok">0</span>}
+                    ? <span className="ui-pill ui-error" title={consumer.last_error}>{consumer.failures}</span>
+                    : <span className="ui-pill ui-ok">0</span>}
                 </td>
                 <td><Time value={consumer.updated_at} /></td>
               </tr>
@@ -487,15 +484,15 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
           <tbody>
             {feeds.map((feed) => (
               <tr key={feed.provider}>
-                <td className="mono">{feed.provider}</td>
-                <td className="mono">{duration(feed.age_seconds)}</td>
-                <td className="mono">{feed.advisories}</td>
+                <td className="ui-mono">{feed.provider}</td>
+                <td className="ui-mono">{duration(feed.age_seconds)}</td>
+                <td className="ui-mono">{feed.advisories}</td>
                 <td>
                   {feed.stale
-                    ? <span className="badge error">{t("stale")}</span>
+                    ? <span className="ui-pill ui-error">{t("stale")}</span>
                     : feed.error
-                      ? <span className="badge warn" title={feed.error}>{t("last fetch failed")}</span>
-                      : <span className="badge ok">{t("current")}</span>}
+                      ? <span className="ui-pill ui-warn" title={feed.error}>{t("last fetch failed")}</span>
+                      : <span className="ui-pill ui-ok">{t("current")}</span>}
                 </td>
               </tr>
             ))}
@@ -519,8 +516,8 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
             {kinds.map((kind) => (
               <tr key={kind}>
                 <td>{t(HOUSEKEEPING_KINDS[kind] ?? kind)}</td>
-                <td className="mono">{retention[kind] ? goDuration(retention[kind]) : t("forever")}</td>
-                <td className="mono">{removed[kind] ?? "—"}</td>
+                <td className="ui-mono">{retention[kind] ? goDuration(retention[kind]) : t("forever")}</td>
+                <td className="ui-mono">{removed[kind] ?? "—"}</td>
               </tr>
             ))}
           </tbody>
@@ -547,22 +544,22 @@ function AboutTile({ block }: { block: StatusBlock }) {
   };
   const up = typeof facts.uptime_seconds === "number" ? duration(facts.uptime_seconds) : "—";
   return (
-    <section className="part">
-      <h3 className="part-head">
-        <span className="part-name">{t("About")}</span>
-        <span className="part-summary">{t("version {version}, up {uptime}", { version: text("version"), uptime: up })}</span>
+    <section className="ui-tile">
+      <h3 className="ui-tile-head">
+        <span className="ui-tile-name">{t("About")}</span>
+        <span className="ui-tile-note">{t("version {version}, up {uptime}", { version: text("version"), uptime: up })}</span>
       </h3>
-      <div className="part-body">
+      <div className="ui-tile-body">
       <Pairs>
         <Pair label={t("Product")}><span>Flotestro</span></Pair>
-        <Pair label={t("Version")}><span className="mono">{text("version")}</span></Pair>
+        <Pair label={t("Version")}><span className="ui-mono">{text("version")}</span></Pair>
         <Pair label={t("Commit")}><FactValue value={facts.commit} kind="id" /></Pair>
-        <Pair label={t("Build date")}><span className="mono">{text("build_date")}</span></Pair>
-        <Pair label={t("Go version")}><span className="mono">{text("go_version")} ({text("platform")})</span></Pair>
-        <Pair label={t("Agent protocol")}><span className="mono">{text("agent_protocol")}</span></Pair>
+        <Pair label={t("Build date")}><span className="ui-mono">{text("build_date")}</span></Pair>
+        <Pair label={t("Go version")}><span className="ui-mono">{text("go_version")} ({text("platform")})</span></Pair>
+        <Pair label={t("Agent protocol")}><span className="ui-mono">{text("agent_protocol")}</span></Pair>
         <Pair label={t("Gateway identifier")}><FactValue value={facts.gateway_id} kind="id" /></Pair>
-        <Pair label={t("Hostname")}><span className="mono">{text("hostname")}</span></Pair>
-        <Pair label={t("Uptime")}><span className="mono">{up}</span></Pair>
+        <Pair label={t("Hostname")}><span className="ui-mono">{text("hostname")}</span></Pair>
+        <Pair label={t("Uptime")}><span className="ui-mono">{up}</span></Pair>
         <Pair label={t("Started")}><Time value={typeof facts.started_at === "string" ? facts.started_at : null} /></Pair>
         <Pair label={t("Documentation")} wide>
           <span>

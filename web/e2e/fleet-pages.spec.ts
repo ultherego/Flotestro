@@ -17,7 +17,7 @@ test.beforeAll(async ({ request }) => {
 
 /** The page header of a fleet page, with its title. */
 function header(page: Page, title: string) {
-  return page.locator(".page-header").getByRole("heading", { name: title });
+  return page.locator(".ui-pagehead").getByRole("heading", { name: title });
 }
 
 /** A whole-text match: "Hosts" must not find "Hosts by state". */
@@ -27,7 +27,7 @@ function exact(text: string): RegExp {
 
 /** The card of a fleet page by its title. */
 function card(page: Page, title: string) {
-  return page.locator(".card").filter({ has: page.locator(".card-title", { hasText: exact(title) }) });
+  return page.locator(".ui-panel").filter({ has: page.locator(".ui-panel-title", { hasText: exact(title) }) });
 }
 
 /** Every value of a status bar has settled on a number. */
@@ -58,12 +58,12 @@ test.describe("groups", () => {
     try {
       // The tag is typed in the host header, where the operator edits it.
       await page.goto(`/hosts/${host.id}/overview`);
-      const facts = page.locator(".host-header-facts");
+      const facts = page.locator(".ui-hosthead-facts");
       await facts.getByRole("button", { name: "edit tags" }).click();
       const input = facts.getByPlaceholder("tags separated by spaces, e.g. role=db tier=gold");
       await input.fill([...original, tag].join(" "));
       await facts.getByRole("button", { name: "Save" }).click();
-      await expect(facts.locator(".chip", { hasText: tag })).toBeVisible();
+      await expect(facts.locator(".ui-tag", { hasText: tag })).toBeVisible();
       expect(await hostTags(request, host.id)).toContain(tag);
 
       // The chip leads to the host list narrowed to the tag: the tagged
@@ -77,23 +77,23 @@ test.describe("groups", () => {
       // A dynamic group around the tag.
       await page.goto("/groups");
       await expect(header(page, "Groups")).toBeVisible();
-      await page.locator(".page-header").getByRole("button", { name: "New group" }).click();
+      await page.locator(".ui-pagehead").getByRole("button", { name: "New group" }).click();
       const form = card(page, "New group");
       await expect(form).toBeVisible();
       await form.getByPlaceholder("e.g. databases-gold").fill(groupName);
       // The select is found through its field: the wrapping label lends
       // the control the text of the chosen option.
-      await form.locator("label.field").filter({ hasText: /^Kind/ }).locator("select").selectOption("dynamic");
+      await form.locator("label.ui-field").filter({ hasText: /^Kind/ }).locator("select").selectOption("dynamic");
       await form.getByPlaceholder("key or key=value").fill(tag);
       // The builder shows the expression exactly as it will be sent.
-      await expect(form.locator(".actions .source")).toHaveText(`tag=${tag}`);
+      await expect(form.locator(".ui-actions .ui-note")).toHaveText(`tag=${tag}`);
       await form.getByRole("button", { name: "Create group" }).click();
 
       await expect(page).toHaveURL(/\/groups\/[^/]+$/);
       groupID = page.url().split("/groups/")[1];
-      await expect(page.locator(".page-header").getByRole("heading")).toContainText(groupName);
-      await expect(page.locator(".page-header .badge", { hasText: "dynamic" })).toBeVisible();
-      await expect(card(page, "Selector").locator("p.mono")).toHaveText(`tag=${tag}`);
+      await expect(page.locator(".ui-pagehead").getByRole("heading")).toContainText(groupName);
+      await expect(page.locator(".ui-pagehead .ui-pill", { hasText: "dynamic" })).toBeVisible();
+      await expect(card(page, "Selector").locator("p.ui-mono")).toHaveText(`tag=${tag}`);
       // Today's answer: the one tagged host.
       const members = page.locator("table").first();
       await expect(members.getByRole("link", { name: host.hostname, exact: true })).toBeVisible();
@@ -104,7 +104,7 @@ test.describe("groups", () => {
       await page.goto("/groups");
       const row = page.getByRole("row").filter({ has: page.getByRole("link", { name: groupName, exact: true }) });
       await expect(row).toHaveCount(1);
-      await expect(row.locator(".badge", { hasText: "dynamic" })).toBeVisible();
+      await expect(row.locator(".ui-pill", { hasText: "dynamic" })).toBeVisible();
       await expect(row.getByRole("cell").nth(3)).toHaveText("1");
       await expectHealthy(page, errors);
     } finally {
@@ -121,7 +121,7 @@ test.describe("groups", () => {
     test.skip(!granted.has("host.group.write"), absent("the token may not create a group (host.group.write)"));
     await page.goto("/groups");
     await expect(header(page, "Groups")).toBeVisible();
-    await page.locator(".page-header").getByRole("button", { name: "New group" }).click();
+    await page.locator(".ui-pagehead").getByRole("button", { name: "New group" }).click();
     const form = card(page, "New group");
     await expect(form.getByRole("button", { name: "Create group" })).toBeDisabled();
     await form.getByPlaceholder("e.g. databases-gold").fill("nobody");
@@ -147,31 +147,31 @@ test.describe("reads", () => {
     await expect(card(page, "Your reads")).toBeVisible();
     await expect(card(page, "By operation")).toBeVisible();
 
-    await page.locator(".page-header").getByRole("button", { name: "New read" }).click();
+    await page.locator(".ui-pagehead").getByRole("button", { name: "New read" }).click();
     const form = card(page, "New read");
     await expect(form).toBeVisible();
-    const operation = form.locator("label.field").filter({ hasText: /^Operation/ }).locator("select");
+    const operation = form.locator("label.ui-field").filter({ hasText: /^Operation/ }).locator("select");
     await expect(operation.locator("option").first()).toBeAttached();
     test.skip((await operation.locator("option[value='journal.read']").count()) === 0, absent("this installation opens no journal read to a fan-out"));
     await operation.selectOption("journal.read");
     await expect(form.locator("textarea")).toHaveValue(/"journal"/);
     await form.getByPlaceholder("e.g. checking the leak on the web tier").fill("e2e journal read on two hosts");
 
-    await form.locator("label.field").filter({ hasText: /^Named by/ }).locator("select").selectOption("hosts");
+    await form.locator("label.ui-field").filter({ hasText: /^Named by/ }).locator("select").selectOption("hosts");
     const chooser = form.locator("table");
     await expect(chooser).toBeVisible();
     for (const host of targets) {
       await chooser.getByRole("row").filter({ has: page.getByRole("cell", { name: host.hostname, exact: true }) }).getByRole("checkbox").check();
     }
     await expect(form.getByText("2 chosen")).toBeVisible();
-    await form.locator(".card-foot").getByRole("button", { name: "Read", exact: true }).click();
+    await form.locator(".ui-panel-foot").getByRole("button", { name: "Read", exact: true }).click();
 
     // The order leads to the fan-out page, which follows the jobs until
     // every host has answered.
     await expect(page).toHaveURL(/\/reads\/[^/]+$/);
     const id = page.url().split("/reads/")[1];
-    await expect(page.locator(".page-header").getByRole("heading")).toContainText("journal.read");
-    await expect(page.locator(".page-header .page-description")).toContainText("every host answered", { timeout: 120_000 });
+    await expect(page.locator(".ui-pagehead").getByRole("heading")).toContainText("journal.read");
+    await expect(page.locator(".ui-pagehead .ui-pagehead-lead")).toContainText("every host answered", { timeout: 120_000 });
 
     const response = await request.get(`/api/v1/reads/${id}`);
     expect(response.ok(), `GET /api/v1/reads/${id} answered ${response.status()}`).toBeTruthy();
@@ -189,19 +189,19 @@ test.describe("reads", () => {
     for (const host of view.hosts) {
       const row = table.getByRole("row").filter({ has: page.getByRole("link", { name: host.hostname, exact: true }) });
       await expect(row).toHaveCount(1);
-      await expect(row.locator(".badge").first()).toHaveText(stateLabel(host.state));
+      await expect(row.locator(".ui-pill").first()).toHaveText(stateLabel(host.state));
     }
 
     // The merged timeline: every line carries the chip of its host, or
     // the page says that no line carried a timestamp to merge by.
     const timeline = card(page, "Timeline");
     await expect(timeline).toBeVisible();
-    const merged = timeline.locator("pre.hm-log > div");
+    const merged = timeline.locator("pre.ui-log > div");
     const untimed = timeline.getByText("No line carries a timestamp");
     await expect(merged.first().or(untimed)).toBeVisible();
     if (await merged.count()) {
       const named = new Set<string>();
-      for (const chip of await merged.locator(".chip").all()) named.add((await chip.textContent()) ?? "");
+      for (const chip of await merged.locator(".ui-tag").all()) named.add((await chip.textContent()) ?? "");
       for (const host of view.hosts.filter((entry) => entry.state === "succeeded")) {
         expect(named, `the merged timeline carries no line of ${host.hostname}`).toContain(host.hostname);
       }
@@ -209,9 +209,9 @@ test.describe("reads", () => {
     // Grouped by host, every answered host has its own block of lines.
     await timeline.getByRole("button", { name: "group by host" }).click();
     for (const host of view.hosts.filter((entry) => entry.state === "succeeded")) {
-      await expect(timeline.locator("h4.widget-subhead", { hasText: host.hostname })).toContainText(/\d+ lines/);
+      await expect(timeline.locator("h4.ui-subhead", { hasText: host.hostname })).toContainText(/\d+ lines/);
     }
-    await expect(timeline.locator("pre.hm-log")).toHaveCount(view.counts.succeeded);
+    await expect(timeline.locator("pre.ui-log")).toHaveCount(view.counts.succeeded);
 
     // The list counts the new read among the others.
     await page.goto("/reads");
@@ -244,9 +244,9 @@ test.describe("monitoring", () => {
     // The coverage of the sampling is in the verdict line, with the numbers
     // of the API answer.
     const verdict = page.getByTestId("verdict");
-    await expect(verdict.locator(".verdict-facts")).toContainText(`${summary.hosts_reporting} hosts reporting`);
-    await expect(verdict.locator(".verdict-facts")).toContainText(`${summary.hosts_silent} gone quiet`);
-    await expect(verdict.locator(".verdict-facts")).toContainText(`${summary.rules} rules enabled`);
+    await expect(verdict.locator(".ui-verdict-facts")).toContainText(`${summary.hosts_reporting} hosts reporting`);
+    await expect(verdict.locator(".ui-verdict-facts")).toContainText(`${summary.hosts_silent} gone quiet`);
+    await expect(verdict.locator(".ui-verdict-facts")).toContainText(`${summary.rules} rules enabled`);
 
     // The rules table lists as many rules as the catalogue holds, or says
     // that there are none.
@@ -258,13 +258,13 @@ test.describe("monitoring", () => {
     const history = card(page, "Recent alerts");
     await expect(history.locator("tbody tr").first().or(history.getByText("No alerts recorded in this state."))).toBeVisible();
     const filtered = page.waitForResponse((response) => response.url().includes("/api/v1/monitoring/alerts?") && response.url().includes("state=resolved"));
-    await history.locator(".card-actions select").first().selectOption("resolved");
+    await history.locator(".ui-panel-actions select").first().selectOption("resolved");
     expect((await filtered).ok()).toBeTruthy();
     await expect(history.locator("tbody tr").first().or(history.getByText("No alerts recorded in this state."))).toBeVisible();
     // The state cell carries the state first and, on a taken alert, the
     // acknowledgement beside it; the state is what the filter promised.
     for (const cell of await history.locator("tbody tr td:nth-child(4)").all()) {
-      await expect(cell.locator(".badge").first()).toHaveText("resolved");
+      await expect(cell.locator(".ui-pill").first()).toHaveText("resolved");
     }
     await expect(card(page, "Silences in force")).toBeVisible();
     await expectHealthy(page, errors);
@@ -283,21 +283,21 @@ test.describe("monitoring", () => {
     const series = (await metrics.json()) as { points?: unknown[]; sampling_interval_seconds: number };
 
     await page.goto(`/hosts/${target.id}/monitoring`);
-    await expect(page.locator(".hm-header").getByRole("heading", { name: "Monitoring", exact: true })).toBeVisible();
-    const freshness = page.locator(".hm-freshness");
+    await expect(page.locator(".ui-sectionhead").getByRole("heading", { name: "Monitoring", exact: true })).toBeVisible();
+    const freshness = page.locator(".ui-freshness");
     await expect(freshness).toContainText(`sampled every ${series.sampling_interval_seconds} s`);
 
     // The alert bar of the host settles on numbers once the report is in.
-    const alerts = page.locator(".hm-section").filter({ has: page.locator("h3", { hasText: exact("Alerts") }) }).first();
+    const alerts = page.locator(".ui-panel").filter({ has: page.locator("h3", { hasText: exact("Alerts") }) }).first();
     await expectCounted(alerts.getByTestId("status-bar"), 5);
 
     // A sample means a chart; none means the page says so instead of a
     // chart of zeros.
-    const cpu = page.locator(".hm-section").filter({ has: page.locator("h3", { hasText: exact("CPU") }) });
+    const cpu = page.locator(".ui-panel").filter({ has: page.locator("h3", { hasText: exact("CPU") }) });
     if ((series.points ?? []).length > 0) {
-      await expect(cpu.locator("svg.chart")).toBeVisible();
+      await expect(cpu.locator("svg.ui-chart")).toBeVisible();
     } else {
-      await expect(cpu.locator(".empty")).toBeVisible();
+      await expect(cpu.locator(".ui-empty")).toBeVisible();
     }
 
     // The window switch asks the server for another range.
@@ -307,7 +307,7 @@ test.describe("monitoring", () => {
     await expect(page.getByRole("group", { name: "Window" }).getByRole("button", { name: "24 hours" })).toHaveClass(/active/);
 
     for (const title of ["Load", "Memory", "Network", "Filesystems", "Facts", "Silence", "Silences in force"]) {
-      await expect(page.locator(".hm-section h3", { hasText: exact(title) }).first()).toBeVisible();
+      await expect(page.locator(".ui-panel h3", { hasText: exact(title) }).first()).toBeVisible();
     }
     // The silence button stays off without a reason: a silence is a
     // decision with a reason and an owner.
@@ -341,7 +341,7 @@ test.describe("relays", () => {
     for (const relay of relays) {
       const row = table.getByRole("row").filter({ has: page.getByRole("link", { name: relay.name, exact: true }) });
       await expect(row).toHaveCount(1);
-      await expect(row.locator(".badge").first()).toHaveText(relay.state.replace(/_/g, " "));
+      await expect(row.locator(".ui-pill").first()).toHaveText(relay.state.replace(/_/g, " "));
     }
 
     // One relay: the details and the hosts that come through it.
@@ -349,7 +349,7 @@ test.describe("relays", () => {
     await table.getByRole("link", { name: first.name, exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/relays/${first.id}$`));
     await expect(header(page, first.name)).toBeVisible();
-    await expect(page.locator(".page-header .breadcrumb").getByRole("link", { name: "Relays" })).toBeVisible();
+    await expect(page.locator(".ui-pagehead .ui-crumbs").getByRole("link", { name: "Relays" })).toBeVisible();
     await expect(card(page, "Details")).toContainText(first.site);
     await expect(card(page, "Last report")).toBeVisible();
     const attested = card(page, "Hosts attested");
@@ -382,17 +382,17 @@ test.describe("settings", () => {
     // that string exists for: these values are read at start and a change
     // needs a restart.
     await expect(page.getByTestId("page-help")).toContainText("needs a restart");
-    await expect(page.locator(".parts-head")).toContainText("Read at start");
+    await expect(page.locator(".ui-sectionhead")).toContainText("Read at start");
 
     // The areas the API reports, not the retention editor beside them: that
     // one writes and has no entry in /api/v1/settings.
-    const areas = page.locator("[data-testid='settings-areas'] .part");
+    const areas = page.locator("[data-testid='settings-areas'] .ui-tile");
     await expect(areas).toHaveCount(settings.areas.length);
     for (const area of settings.areas) {
       const tile = areas.filter({ has: page.getByText(area.title, { exact: true }) }).first();
       await expect(tile).toHaveCount(1);
       await expect(tile.locator("dt")).toHaveCount(area.facts.length);
-      await expect(tile.locator(".part-summary")).toContainText(`${area.facts.length} value`);
+      await expect(tile.locator(".ui-tile-note")).toContainText(`${area.facts.length} value`);
       // A secret is never shown, only whether it is set.
       for (const fact of area.facts.filter((entry) => entry.secret)) {
         const value = tile.locator("dd").nth(area.facts.indexOf(fact));
@@ -406,7 +406,7 @@ test.describe("settings", () => {
     // mind, and only what carries it on the screen.
     const first = settings.areas[0];
     await page.getByTestId("settings-search").fill(first.title);
-    await expect(page.locator("[data-testid='settings-areas'] .part")).toHaveCount(1);
+    await expect(page.locator("[data-testid='settings-areas'] .ui-tile")).toHaveCount(1);
 
     await expectHealthy(page, errors);
   });
@@ -425,23 +425,23 @@ test.describe("access", () => {
     await expect(header(page, "Settings")).toBeVisible();
     await expect(page.getByTestId("settings-tab-review")).toHaveClass(/active/);
 
-    const stats = page.locator(".stats");
-    await expect(stats.locator(".stat").filter({ hasText: "Identities" }).locator(".stat-value")).toHaveText(String(review.count));
-    await expect(stats.locator(".stat").filter({ hasText: "Flagged" }).locator(".stat-value")).toHaveText(String(review.flagged));
+    const stats = page.locator(".ui-stats");
+    await expect(stats.locator(".ui-stat").filter({ hasText: "Identities" }).locator(".ui-stat-value")).toHaveText(String(review.count));
+    await expect(stats.locator(".ui-stat").filter({ hasText: "Flagged" }).locator(".ui-stat-value")).toHaveText(String(review.flagged));
 
     const table = card(page, "Access review");
     await expect(table.locator("tbody tr")).toHaveCount(review.items.length);
     await expect(table.getByRole("link", { name: "Export CSV" })).toHaveAttribute("href", "/api/v1/access/review?format=csv");
 
     // The filter is applied in the browser: the flagged rows stay.
-    await table.locator(".card-actions select").selectOption("flagged");
+    await table.locator(".ui-panel-actions select").selectOption("flagged");
     const flagged = review.items.filter((item) => item.flags.length > 0).length;
     if (flagged === 0) {
       await expect(table.getByText("No identity matches the filter.")).toBeVisible();
     } else {
       await expect(table.locator("tbody tr")).toHaveCount(flagged);
       for (const row of await table.locator("tbody tr").all()) {
-        await expect(row.locator(".badge.warn").first()).toBeVisible();
+        await expect(row.locator(".ui-pill.ui-warn").first()).toBeVisible();
       }
     }
     await expectHealthy(page, errors);
@@ -461,22 +461,22 @@ test.describe("audit", () => {
     await expect(outcome.getByTestId("status-bar")).toHaveClass(/compact/);
     await expectCounted(outcome.getByTestId("status-bar"), 3);
 
-    const count = page.locator(".toolbar").getByText(/^\d+ events$/);
+    const count = page.locator(".ui-toolbar").getByText(/^\d+ events$/);
     await expect(count).toBeVisible();
     const listed = Number((await count.textContent())?.split(" ")[0]);
-    const rows = page.locator("table tbody tr:not(.detail-row)");
+    const rows = page.locator("table tbody tr:not(.ui-detailrow)");
     if (listed > 0) await expect(rows).toHaveCount(listed);
 
     // Denials only: the server narrows the page and the badges agree.
     const denied = page.waitForResponse((response) => response.url().includes("/api/v1/audit?") && response.url().includes("outcome=denied"));
-    await page.locator(".toolbar select").selectOption("denied");
+    await page.locator(".ui-toolbar select").selectOption("denied");
     expect((await denied).ok()).toBeTruthy();
     // Scoped to the table: the charts above say "No events." too, and on a trail
     // with no denial at all the unscoped text matched three elements at once.
-    const emptyTable = page.locator("div.empty").filter({ hasText: "No events." });
+    const emptyTable = page.locator("div.ui-empty").filter({ hasText: "No events." });
     await expect(rows.first().or(emptyTable)).toBeVisible();
     for (const row of await rows.all()) {
-      await expect(row.locator("td").nth(5).locator(".badge")).toHaveText("denied");
+      await expect(row.locator("td").nth(5).locator(".ui-pill")).toHaveText("denied");
     }
     await expectHealthy(page, errors);
   });
@@ -492,7 +492,7 @@ test.describe("audit", () => {
 
     await page.goto(`/audit?action=${encodeURIComponent((approved as { action: string }).action)}`);
     await expect(header(page, "Audit")).toBeVisible();
-    const shown = page.locator(".fp-audit-chain").first();
+    const shown = page.locator(".ui-note-mono").first();
     await expect(shown).toBeVisible();
     await expect(shown).toContainText("Approval chain");
     await expect(shown).toContainText(`ordered by ${chain.created_by}`);

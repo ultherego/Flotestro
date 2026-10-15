@@ -86,7 +86,7 @@ describe("a screen that was put on a board", () => {
       // an upgrade adds appears instead of staying invisible for ever.
       const widths = Array.from(grid.children).map((child) => (child as HTMLElement).className);
       expect(grid.children.length).toBeGreaterThanOrEqual(expected.length);
-      const storedAt = expected.map((widget) => widths.findIndex((name) => name.includes(`span-${widget.width}`)));
+      const storedAt = expected.map((widget) => widths.findIndex((name) => name.includes(`ui-col-${widget.width}`)));
       expect(storedAt.every((at) => at !== -1)).toBe(true);
       expect([...storedAt].sort((a, b) => a - b)).toEqual(storedAt);
     });

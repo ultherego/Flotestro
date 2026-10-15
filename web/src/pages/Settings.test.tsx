@@ -108,7 +108,7 @@ afterEach(() => {
 
 /** The tiles of the read-only facts, now that writable tiles stand above them. */
 function areaTiles() {
-  return document.querySelectorAll('[data-testid="settings-areas"] .part');
+  return document.querySelectorAll('[data-testid="settings-areas"] .ui-tile');
 }
 
 describe("the settings screen", () => {
@@ -116,7 +116,7 @@ describe("the settings screen", () => {
     draw(<Settings />);
     await waitFor(() => expect(areaTiles().length).toBe(2));
     for (const tile of Array.from(areaTiles())) {
-      expect(tile.querySelector(".part-summary")?.textContent).toContain("2 values");
+      expect(tile.querySelector(".ui-tile-note")?.textContent).toContain("2 values");
     }
     // The values themselves are there, not behind anything.
     expect(screen.getByText("Agent gateway")).toBeInTheDocument();
@@ -129,7 +129,7 @@ describe("the settings screen", () => {
     await waitFor(() => expect(areaTiles().length).toBe(1));
     const tile = areaTiles()[0] as HTMLElement;
     expect(tile.textContent).toContain("Server");
-    expect(tile.querySelector(".part-summary")?.textContent).toContain("1 value");
+    expect(tile.querySelector(".ui-tile-note")?.textContent).toContain("1 value");
     expect(screen.queryByText("Agent gateway")).toBeNull();
   });
 

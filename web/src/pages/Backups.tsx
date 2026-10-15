@@ -3,8 +3,8 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { api, loadedItems, LIST_PAGE } from "../lib/api";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import { Board } from "../components/board";
-import { ErrorBox, Time, Empty } from "../components/ui";
-import { Card, PageHeader, Toolbar } from "../components/layout";
+import { ErrorBox, Time } from "../components/ui";
+import { Empty, PageHead, Panel, toneClass, Toolbar } from "../ui/kit";
 import { ExportButton } from "../components/ExportButton";
 import { ColumnChooser, Td, Th, useColumns, useSort, type ColumnDef } from "../components/SortableTable";
 import { Breakdown, StatusBar } from "../components/widgets";
@@ -66,7 +66,7 @@ function AgeBadge({ status, age }: { status: string; age?: number }) {
         : age < 48
           ? `${Math.round(age)} h`
           : `${Math.round(age / 24)} d`;
-  return <span className={`badge ${cls}`}>{caption}</span>;
+  return <span className={`ui-pill ${toneClass(cls)}`}>{caption}</span>;
 }
 
 /**
@@ -128,7 +128,7 @@ export function FleetBackups() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         title={t("Backups")}
         description={t("What is copied, where to, and how old the newest copy is.", {
           warning: data.thresholds.warning_hours, critical: data.thresholds.critical_hours, days: data.thresholds.verification_days,
@@ -153,7 +153,7 @@ export function FleetBackups() {
         drawn={{
           age: (
             <>
-              <Card className="span-8" title={t("Age")} description={t("{n} definitions on {hosts} of {total} hosts", { n: data.total, hosts: data.evaluated_hosts, total: data.total_hosts })}>
+              <Panel className="ui-col-8" title={t("Age")} description={t("{n} definitions on {hosts} of {total} hosts", { n: data.total, hosts: data.evaluated_hosts, total: data.total_hosts })}>
           <StatusBar segments={[
             { label: t("Never ran"), value: never, tone: "error" },
             { label: t("Stale"), value: stale, tone: "error" },
@@ -161,12 +161,12 @@ export function FleetBackups() {
             { label: t("Fresh"), value: counts.ok ?? 0, tone: "ok" },
             { label: t("Unknown"), value: counts.unknown ?? 0, tone: "unknown" },
           ]} />
-        </Card>
+        </Panel>
             </>
           ),
           verified: (
             <>
-              <Card className="span-4" title={t("Verified")} description={t("A copy is a safeguard once somebody has read it back.")}>
+              <Panel className="ui-col-4" title={t("Verified")} description={t("A copy is a safeguard once somebody has read it back.")}>
           <StatusBar segments={[
             { label: t("Unverified"), value: data.unverified, tone: "warn" },
             { label: t("Never restored"), value: neverRestored, tone: "unknown" },
@@ -176,7 +176,7 @@ export function FleetBackups() {
           <Breakdown items={[
             { label: t("Hosts with nothing defined"), value: data.unknown_hosts, tone: "unknown" },
           ]} />
-        </Card>
+        </Panel>
 
         {/* The calendar and the backends are two short blocks: side by side
             they make one row above the list instead of two thin strips. */}
@@ -194,19 +194,19 @@ export function FleetBackups() {
           ),
           definitions: (
             <>
-              <Card
-          className="span-9"
+              <Panel
+          className="ui-col-9"
           flush
           footer={list.hasNextPage && (
             <p>
-              <button className="secondary" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
+              <button className="ui-btn-secondary" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
                 {t("Load more ({n} left)", { n: data.total - items.length })}
               </button>
             </p>
           )}
         >
           <Toolbar end={<ColumnChooser columns={columns} />}>
-            <span className="source">{t("The worst rows on top; a heading reorders the listed rows.")}</span>
+            <span className="ui-note">{t("The worst rows on top; a heading reorders the listed rows.")}</span>
           </Toolbar>
           {!items.length ? (
             <Empty>
@@ -229,22 +229,22 @@ export function FleetBackups() {
                     <Td columns={columns} name="age">
                       <AgeBadge status={item.status} age={item.age_hours} />
                       {item.last_success_at && (
-                        <div className="source"><Time value={item.last_success_at} /></div>
+                        <div className="ui-note"><Time value={item.last_success_at} /></div>
                       )}
                     </Td>
                     <Td columns={columns} name="host">
                       <Link to={`/hosts/${item.host_id}/backups`}>{item.hostname}</Link>
                     </Td>
                     <Td columns={columns} name="definition">{item.definition}</Td>
-                    <Td columns={columns} name="tool" className="source">{item.tool}</Td>
-                    <Td columns={columns} name="destination" className="source mono">{item.repository}</Td>
+                    <Td columns={columns} name="tool" className="ui-note">{item.tool}</Td>
+                    <Td columns={columns} name="destination" className="ui-note ui-mono">{item.repository}</Td>
                     <Td columns={columns} name="verified">
                       {item.unverified ? (
-                        <span className="badge warn">{t("not verified")}</span>
+                        <span className="ui-pill ui-warn">{t("not verified")}</span>
                       ) : (
-                        <span className="badge ok">{t("verified")}</span>
+                        <span className="ui-pill ui-ok">{t("verified")}</span>
                       )}
-                      <div className="source">
+                      <div className="ui-note">
                         {item.last_restore_at ? (
                           <>{t("restored")} <Time value={item.last_restore_at} /></>
                         ) : (
@@ -257,18 +257,18 @@ export function FleetBackups() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
             </>
           ),
           by_tool: (
             <>
-              <Card className="span-3" title={t("By tool")} description={items.length ? listed : undefined}>
+              <Panel className="ui-col-3" title={t("By tool")} description={items.length ? listed : undefined}>
           {!items.length ? (
-            <p className="fp-blank">{t("No backup definition yet.")}</p>
+            <p className="ui-empty">{t("No backup definition yet.")}</p>
           ) : (
             <>
-              <Breakdown tone="info" items={byTool.map(([tool, n]) => ({ label: <span className="mono">{tool}</span>, value: n }))} />
-              <h4 className="widget-subhead">{t("Verification")}</h4>
+              <Breakdown tone="info" items={byTool.map(([tool, n]) => ({ label: <span className="ui-mono">{tool}</span>, value: n }))} />
+              <h4 className="ui-subhead">{t("Verification")}</h4>
               <Breakdown items={[
                 { label: t("verified"), value: verified, tone: "ok" },
                 { label: t("not verified"), value: items.length - verified, tone: "warn" },
@@ -277,7 +277,7 @@ export function FleetBackups() {
               ]} />
             </>
           )}
-        </Card>
+        </Panel>
             </>
           )
         }}
@@ -294,37 +294,37 @@ function Repositories({ repositories }: { repositories: Repository[] }) {
   const t = useT();
   if (!repositories.length) return null;
   return (
-    <Card className="span-6" title={t("Repositories")} flush>
+    <Panel className="ui-col-6" title={t("Repositories")} flush>
       <table>
         <thead>
-          <tr><th scope="col">{t("Repository")}</th><th scope="col" className="num">{t("Hosts")}</th><th scope="col" className="num">{t("Oldest backup")}</th><th scope="col" className="num">{t("Parallel writes")}</th></tr>
+          <tr><th scope="col">{t("Repository")}</th><th scope="col" className="ui-numeric">{t("Hosts")}</th><th scope="col" className="ui-numeric">{t("Oldest backup")}</th><th scope="col" className="ui-numeric">{t("Parallel writes")}</th></tr>
         </thead>
         <tbody>
           {repositories.map((item) => (
             <tr key={item.repository}>
               <td>
-                <span className="mono">{item.repository}</span>
-                <div className="source">{item.budget_key}</div>
+                <span className="ui-mono">{item.repository}</span>
+                <div className="ui-note">{item.budget_key}</div>
               </td>
-              <td className="num">
+              <td className="ui-numeric">
                 {item.hosts}
                 {item.unverified > 0 && (
-                  <div className="source">{t("{n} unverified", { n: item.unverified })}</div>
+                  <div className="ui-note">{t("{n} unverified", { n: item.unverified })}</div>
                 )}
               </td>
-              <td className="num">
+              <td className="ui-numeric">
                 {item.oldest_age_hours === undefined
                   ? "—"
                   : `${Math.round(item.oldest_age_hours)} h`}
               </td>
-              <td className="num">
+              <td className="ui-numeric">
                 {item.capacity === undefined ? (
-                  <span className="badge unknown">{t("no limit set")}</span>
+                  <span className="ui-pill ui-unknown">{t("no limit set")}</span>
                 ) : (
                   <>
                     {item.used ?? 0} / {item.capacity}
                     {(item.claimants ?? 0) > 0 && (
-                      <div className="source">{t("{n} campaigns want it", { n: item.claimants ?? 0 })}</div>
+                      <div className="ui-note">{t("{n} campaigns want it", { n: item.claimants ?? 0 })}</div>
                     )}
                   </>
                 )}
@@ -333,7 +333,7 @@ function Repositories({ repositories }: { repositories: Repository[] }) {
           ))}
         </tbody>
       </table>
-    </Card>
+    </Panel>
   );
 }
 
@@ -356,23 +356,23 @@ function Calendar({ items, wide }: { items: Item[]; wide: boolean }) {
   const most = Math.max(1, ...counts);
   if (!items.length) return null;
   return (
-    <Card
-      className={wide ? "span-12" : "span-6"}
+    <Panel
+      className={wide ? "ui-col-12" : "ui-col-6"}
       title={t("Last {n} days", { n: days })}
       description={t("How many definitions had their newest successful copy on each day. Empty days in a row are a schedule that stopped, visible before any copy is old enough to turn red.")}
     >
-      <div className="calendar">
+      <div className="ui-stack-s">
         {counts.map((count, index) => {
           const date = new Date(today.getTime() - (days - 1 - index) * 86400000);
           const label = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
           return (
-            <div key={label} title={`${label}: ${count}`} className="calendar-day">
-              <div className={count ? "calendar-bar filled" : "calendar-bar"} style={{ height: `${Math.max(2, (count / most) * 44)}px` }} />
-              <span className="calendar-label">{date.getDate()}</span>
+            <div key={label} title={`${label}: ${count}`} className="ui-calendar-day">
+              <div className={count ? "ui-sparkbar ui-filled" : "ui-sparkbar"} style={{ height: `${Math.max(2, (count / most) * 44)}px` }} />
+              <span className="ui-note">{date.getDate()}</span>
             </div>
           );
         })}
       </div>
-    </Card>
+    </Panel>
   );
 }

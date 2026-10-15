@@ -86,7 +86,7 @@ export type ColumnDef = {
 };
 
 /** The columns of one table: which are on the screen, and the way to change that. */
-export type Columns = {
+export type Cols = {
   all: ColumnDef[];
   visible: ColumnDef[];
   shown: (key: string) => boolean;
@@ -109,7 +109,7 @@ export function withIdentityColumn(columns: ColumnDef[]): ColumnDef[] {
 /**
  * The visible columns of a table, remembered per table in the browser.
  */
-export function useColumns(table: string, definitions: ColumnDef[]): Columns {
+export function useColumns(table: string, definitions: ColumnDef[]): Cols {
   const columns = withIdentityColumn(definitions);
   const [switched, setSwitched] = useState<string[]>(() => readStored(columnsKey(table), [], isStringList));
   const isHidden = (key: string) => {
@@ -134,7 +134,7 @@ export function useColumns(table: string, definitions: ColumnDef[]): Columns {
 
 /** The class of a cell: the column's own, and the mark of a secondary column the narrow screen leaves out. */
 function cellClass(column: ColumnDef | undefined, extra?: string): string | undefined {
-  const classes = [column?.className, column?.secondary ? "col-secondary" : undefined, extra].filter(Boolean);
+  const classes = [column?.className, column?.secondary ? "ui-minor" : undefined, extra].filter(Boolean);
   return classes.length ? classes.join(" ") : undefined;
 }
 
@@ -147,7 +147,7 @@ const SORT_BUTTON: CSSProperties = {
  * A header cell of a column set.
  */
 export function Th({ columns, name, sort, onSort, children, className, ...rest }: {
-  columns: Columns;
+  columns: Cols;
   name: string;
   /** The current order, when the column set can be sorted. */
   sort?: SortValue;
@@ -168,13 +168,13 @@ export function Th({ columns, name, sort, onSort, children, className, ...rest }
         <button
           type="button"
           style={SORT_BUTTON}
-          className="sort-button"
+          className="ui-sort"
           onClick={() => onSort(toggleSort(sort ?? null, column.sort ?? name), column.sort ?? name)}
           title={t("sort by {column}", { column: column.label })}
           data-testid={`sort-${name}`}
         >
           {label}
-          <span className="sort-arrow" aria-hidden="true" style={active ? undefined : { opacity: 0.35 }}>
+          <span className="ui-sort-arrow" aria-hidden="true" style={active ? undefined : { opacity: 0.35 }}>
             {active ? (active.descending ? "▼" : "▲") : "⇅"}
           </span>
         </button>
@@ -185,7 +185,7 @@ export function Th({ columns, name, sort, onSort, children, className, ...rest }
 
 /** A body cell of a column set: nothing when the column is off the screen. */
 export function Td({ columns, name, children, className, ...rest }: {
-  columns: Columns;
+  columns: Cols;
   name: string;
   children?: ReactNode;
 } & TdHTMLAttributes<HTMLTableCellElement>) {
@@ -207,7 +207,7 @@ const POPOVER: CSSProperties = {
  * The column chooser: a button that opens the list of the columns with a box
  * each, and a way back to the default set.
  */
-export function ColumnChooser({ columns }: { columns: Columns }) {
+export function ColumnChooser({ columns }: { columns: Cols }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const container = useRef<HTMLSpanElement>(null);
@@ -231,21 +231,21 @@ export function ColumnChooser({ columns }: { columns: Columns }) {
     };
   }, [open]);
   return (
-    <span ref={container} className="column-chooser">
+    <span ref={container} className="ui-menu-anchor">
       <button
         type="button"
-        className="secondary"
+        className="ui-btn-secondary"
         aria-expanded={open}
         aria-controls={id}
         onClick={() => setOpen((current) => !current)}
         data-testid="column-chooser"
       >
-        {columns.changed ? t("Columns ({n} of {total})", { n: columns.visible.length, total: columns.all.length }) : t("Columns")}
+        {columns.changed ? t("Cols ({n} of {total})", { n: columns.visible.length, total: columns.all.length }) : t("Cols")}
       </button>
       {open && (
-        <div id={id} role="group" aria-label={t("Columns")} className="column-chooser-popover" style={POPOVER}>
+        <div id={id} role="group" aria-label={t("Cols")} className="ui-menu" style={POPOVER}>
           {columns.all.map((column) => (
-            <label key={column.key} className="toggle" style={{ margin: 0 }}>
+            <label key={column.key} className="ui-check" style={{ margin: 0 }}>
               <input
                 type="checkbox"
                 checked={columns.shown(column.key)}
@@ -255,7 +255,7 @@ export function ColumnChooser({ columns }: { columns: Columns }) {
               {column.label}
             </label>
           ))}
-          <button type="button" className="secondary" onClick={columns.reset} disabled={!columns.changed} data-testid="reset-columns">
+          <button type="button" className="ui-btn-secondary" onClick={columns.reset} disabled={!columns.changed} data-testid="reset-columns">
             {t("Reset")}
           </button>
         </div>
@@ -280,7 +280,7 @@ export function usePageSize(table: string, fallback: number): [number, (next: nu
 export function PageSizeSelect({ value, onChange }: { value: number; onChange: (next: number) => void }) {
   const t = useT();
   return (
-    <label className="toggle" style={{ margin: 0 }}>
+    <label className="ui-check" style={{ margin: 0 }}>
       <select value={value} onChange={(e) => onChange(Number(e.target.value))} aria-label={t("rows per page")} data-testid="page-size">
         {PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
       </select>

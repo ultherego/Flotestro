@@ -8,8 +8,8 @@ import type {
   EnrollmentOrder, EnrollmentStep, EnrollmentStepState, InstallationCommand,
   InstallationProfile, Relay, Whoami,
 } from "../lib/types";
-import { ErrorBox, Time, Empty } from "../components/ui";
-import { Actions, Card, Columns, Field, FieldGrid, PageHeader } from "../components/layout";
+import { ErrorBox, Time } from "../components/ui";
+import { Actions, Cols, Empty, Field, Fields, PageHead, Panel } from "../ui/kit";
 import { FacetList, useFleetFacets } from "./Bulk";
 import { useT } from "../i18n";
 
@@ -333,66 +333,66 @@ export function AddHost() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         title={t("Add host")}
         breadcrumb={[{ label: t("Hosts"), to: "/hosts" }]}
         description={t("How a host joins the fleet, and the token that lets it.")}
         help={<p>{t("A host joins the fleet by proving it holds a one-time token, then keeping the certificate the panel issues for it. The token is shown once, here, and never again — it is not stored in this browser and cannot be read back from the panel.")}</p>}
       />
 
-      <ol className="bulk-steps">
+      <ol className="ui-tabs ui-tabs-steps">
         {STEPS.map((title, index) => (
           <li key={title}>
             {/* The decisions before the order are settled by it: a token
                 for one placement does not move to another. A new order
                 starts over. */}
             <button
-              className={index === step ? "step active" : "step"}
+              className={index === step ? "ui-stack ui-active" : "ui-stack"}
               onClick={() => setStep(index)}
               disabled={!open(index) || (!!created && index < 4)}
             >
-              <span className="number">{index + 1}</span>
-              <span className="title">{t(title)}</span>
-              {!open(index) && <span className="reason">{blocker(index)}</span>}
+              <span className="ui-numeric">{index + 1}</span>
+              <span className="ui-name">{t(title)}</span>
+              {!open(index) && <span className="ui-reason">{blocker(index)}</span>}
             </button>
           </li>
         ))}
       </ol>
 
       {step === 0 && (
-        <Card
+        <Panel
           title={t("1. What is being installed")}
           description={t("An agent manages one host. A relay carries the traffic of a site the panel cannot reach directly - it is a separate trust boundary with its own permission and its own certificate kind.")}
           footer={<Actions><button onClick={() => setStep(1)}>{t("Continue")}</button></Actions>}
         >
-          <div className="segmented" role="group">
-            <button className={kind === "agent" ? "active" : ""} onClick={() => setKind("agent")}>
+          <div className="ui-segmented" role="group">
+            <button className={kind === "agent" ? "ui-active" : ""} onClick={() => setKind("agent")}>
               {t("Agent")}
             </button>
             {canEnrollRelay && (
-              <button className={kind === "relay" ? "active" : ""} onClick={() => setKind("relay")}>
+              <button className={kind === "relay" ? "ui-active" : ""} onClick={() => setKind("relay")}>
                 {t("Relay")}
               </button>
             )}
           </div>
           {!canEnrollRelay && (
-            <p className="source">{t("Registering a relay requires the relay.enroll.create permission.")}</p>
+            <p className="ui-note">{t("Registering a relay requires the relay.enroll.create permission.")}</p>
           )}
-        </Card>
+        </Panel>
       )}
 
       {step === 1 && (
-        <Card
+        <Panel
           title={t("2. Where the host belongs")}
           description={t("The site and the environment decide who may manage the host and which policies apply to it. They come from the order, not from a file on the host.")}
           footer={
             <Actions>
               <button onClick={() => setStep(2)} disabled={!gates[1].open}>{t("Continue")}</button>
-              <button className="secondary" onClick={() => setStep(0)}>{t("Back")}</button>
+              <button className="ui-btn-secondary" onClick={() => setStep(0)}>{t("Back")}</button>
             </Actions>
           }
         >
-          <FieldGrid>
+          <Fields>
             <Field label={t("What this host is for")} wide>
               <input
                 value={description}
@@ -468,12 +468,12 @@ export function AddHost() {
                 />
               </Field>
             )}
-          </FieldGrid>
-        </Card>
+          </Fields>
+        </Panel>
       )}
 
       {step === 2 && (
-        <Card
+        <Panel
           title={t("3. How the host connects")}
           description={kind === "relay"
             ? t("A relay connects to the panel directly: it is the route for the hosts of its site, not a host behind another relay.")
@@ -481,18 +481,18 @@ export function AddHost() {
           footer={
             <Actions>
               <button onClick={() => setStep(3)} disabled={!gates[2].open}>{t("Continue")}</button>
-              <button className="secondary" onClick={() => setStep(1)}>{t("Back")}</button>
+              <button className="ui-btn-secondary" onClick={() => setStep(1)}>{t("Back")}</button>
             </Actions>
           }
         >
           {kind === "agent" && (
             <>
-              <div className="segmented" role="group">
-                <button className={route === "direct" ? "active" : ""} onClick={() => setRoute("direct")}>
+              <div className="ui-segmented" role="group">
+                <button className={route === "direct" ? "ui-active" : ""} onClick={() => setRoute("direct")}>
                   {t("Directly to the panel")}
                 </button>
                 <button
-                  className={route === "relay" ? "active" : ""}
+                  className={route === "relay" ? "ui-active" : ""}
                   onClick={() => setRoute("relay")}
                   disabled={usableRelays.length === 0}
                 >
@@ -501,10 +501,10 @@ export function AddHost() {
               </div>
               {relays.error && <ErrorBox error={relays.error} />}
               {usableRelays.length === 0 && !relays.isPending && (
-                <p className="source">{t("Site {site} has no relay; the host connects directly.", { site })}</p>
+                <p className="ui-note">{t("Site {site} has no relay; the host connects directly.", { site })}</p>
               )}
               {route === "relay" && (
-                <FieldGrid>
+                <Fields>
                   <Field label={t("Relay")} wide>
                     <select value={relayId} onChange={(e) => setRelayId(e.target.value)}>
                       <option value="">{t("choose a relay")}</option>
@@ -516,10 +516,10 @@ export function AddHost() {
                       ))}
                     </select>
                   </Field>
-                </FieldGrid>
+                </Fields>
               )}
               {route === "relay" && relayId && (
-                <p className="source">
+                <p className="ui-note">
                   {t("Last seen")}{" "}
                   <Time value={usableRelays.find((relay) => relay.id === relayId)?.last_seen_at} />
                 </p>
@@ -527,18 +527,18 @@ export function AddHost() {
             </>
           )}
           {profile.data && (
-            <p className="source">
+            <p className="ui-note">
               {t("Enrollment")}: <code>{profile.data.connection.enrollment_url}</code>
               {" · "}
               {t("Gateways")}: <code>{profile.data.connection.gateway_urls.join(", ")}</code>
             </p>
           )}
           {profile.error && <ErrorBox error={profile.error} />}
-        </Card>
+        </Panel>
       )}
 
       {step === 3 && (
-        <Card
+        <Panel
           title={t("4. Which system")}
           description={singleFamily
             ? t("This installation comes as a container image; only the architecture and the channel are left to pick. The channel is stable.")
@@ -546,22 +546,22 @@ export function AddHost() {
           footer={
             <Actions>
               <button onClick={() => setStep(4)} disabled={!gates[3].open}>{t("Continue")}</button>
-              <button className="secondary" onClick={() => setStep(2)}>{t("Back")}</button>
+              <button className="ui-btn-secondary" onClick={() => setStep(2)}>{t("Back")}</button>
             </Actions>
           }
         >
           {/* The commands differ by package manager; the choice changes
               nothing on the server. One family is not a choice, so it is named. */}
           {singleFamily ? (
-            <p className="source">
+            <p className="ui-note">
               {t("Installed from an image, not from a package repository: {family}.", { family: offered[0].label })}
             </p>
           ) : (
-            <div className="segmented" role="group">
+            <div className="ui-segmented" role="group">
               {FAMILIES.map((entry) => (
                 <button
                   key={entry.key}
-                  className={family === entry.key ? "active" : ""}
+                  className={family === entry.key ? "ui-active" : ""}
                   onClick={() => setFamily(entry.key)}
                 >
                   {entry.label}
@@ -569,7 +569,7 @@ export function AddHost() {
               ))}
             </div>
           )}
-          <FieldGrid>
+          <Fields>
             <Field label={t("Architecture")}>
               <select value={architecture} onChange={(e) => setArchitecture(e.target.value)}>
                 {(profile.data?.architectures ?? ["amd64", "arm64"]).map((entry) => (
@@ -580,15 +580,15 @@ export function AddHost() {
             <Field label={t("Channel")}>
               <input value={profile.data?.channel ?? "stable"} readOnly />
             </Field>
-          </FieldGrid>
+          </Fields>
           {profile.data?.warnings?.map((warning) => (
-            <p key={warning} className="source">{warning}</p>
+            <p key={warning} className="ui-note">{warning}</p>
           ))}
-        </Card>
+        </Panel>
       )}
 
       {step === 4 && !created && (
-        <Card
+        <Panel
           title={t("5. Place the order")}
           description={t("The order creates the token for {kind} in site {site}, environment {environment}. The token is shown once, right after.", { kind: t(kind === "relay" ? "a relay" : "an agent"), site, environment })}
           footer={
@@ -596,24 +596,24 @@ export function AddHost() {
               <button onClick={() => order.mutate()} disabled={order.isPending}>
                 {t("Create enrollment token")}
               </button>
-              <button className="secondary" onClick={() => setStep(3)}>{t("Back")}</button>
+              <button className="ui-btn-secondary" onClick={() => setStep(3)}>{t("Back")}</button>
             </Actions>
           }
         >
           {refusal && <Refusal error={refusal} close={() => setRefusal(null)} />}
           {refusal?.code === "reason_required" && !reasonRequired && (
-            <FieldGrid>
+            <Fields>
               <Field label={t("Reason")} wide>
                 <input value={reason} onChange={(e) => setReason(e.target.value)} />
               </Field>
-            </FieldGrid>
+            </Fields>
           )}
-        </Card>
+        </Panel>
       )}
 
       {step === 4 && created && (
         <>
-          <Card
+          <Panel
             title={t("5. Install on the host")}
             description={
               <>
@@ -628,14 +628,14 @@ export function AddHost() {
               <Actions>
                 <button onClick={() => setStep(5)}>{t("Continue to the status")}</button>
                 <button
-                  className="secondary"
+                  className="ui-btn-secondary"
                   onClick={() => regenerate.mutate(created.id)}
                   disabled={regenerate.isPending}
                 >
                   {t("Regenerate")}
                 </button>
                 <button
-                  className="secondary"
+                  className="ui-btn-secondary"
                   onClick={() => revoke.mutate(created.id)}
                   disabled={!active || revoke.isPending}
                 >
@@ -648,15 +648,15 @@ export function AddHost() {
               <button onClick={() => copy("token", created.token)} disabled={!active}>
                 {copied === "token" ? t("Token copied") : t("Copy token")}
               </button>
-              <span className="source">
+              <span className="ui-note">
                 {t("Shown once. Paste it into the hidden prompt on the host; do not put it in a shell command — the command line is visible to every user of that machine.")}
               </span>
             </Actions>
             {refusal && <Refusal error={refusal} close={() => setRefusal(null)} />}
-          </Card>
+          </Panel>
 
-          <Columns wide>
-            <Card
+          <Cols wide>
+            <Panel
               title={t("Installation on {family}", { family: currentFamily?.label ?? FAMILIES.find((entry) => entry.key === family)?.label ?? family })}
               description={profile.data && !profile.data.repository.configured
                 && currentFamily?.steps.some((command) => command.key === "repository")
@@ -666,25 +666,25 @@ export function AddHost() {
               {profile.error && <ErrorBox error={profile.error} />}
               {!currentFamily && !profile.error && <Empty>{t("waiting for the installation profile…")}</Empty>}
               {imageUnknown && currentFamily?.steps.some((command) => command.key === "image") && (
-                <p className="warning">
+                <p className="ui-banner">
                   <span>{t("This installation was given no release manifest, so the relay's image cannot be named here. The control plane supplies it from the file in FLOTESTRO_RELEASE_MANIFEST_FILE; until it has one, there is no digest to pull.")}</span>
                 </p>
               )}
               {currentFamily && (
-                <ol className="steps">
+                <ol className="ui-stack">
                   {currentFamily.steps.map((command) => (
                     <li key={command.key}>
                       {t(commandTitles[command.key])}
                       {command.key === "config" && <> <code>{profile.data?.config.path}</code></>}
                       {command.key === "ca" && <> <code>{profile.data?.ca.path}</code></>}
                       {command.key === "image" && imageUnknown ? (
-                        <p className="source">
+                        <p className="ui-note">
                           {t("No image reference to copy: set FLOTESTRO_RELEASE_MANIFEST_FILE on the control plane and open this page again.")}
                         </p>
                       ) : (
                         <>
                           <pre>{command.command}</pre>
-                          <button className="secondary" onClick={() => copy(command.key, command.command)}>
+                          <button className="ui-btn-secondary" onClick={() => copy(command.key, command.command)}>
                             {copied === command.key ? t("Copied") : t("Copy command")}
                           </button>
                         </>
@@ -693,48 +693,48 @@ export function AddHost() {
                   ))}
                 </ol>
               )}
-            </Card>
+            </Panel>
 
             {profile.data && (
-              <Card
+              <Panel
                 title={t("Files")}
                 description={t("The same content the commands carry, for a host set up by other means. The configuration can also be fetched from the panel with the right to read installations.")}
               >
                 <p>
                   <strong>{profile.data.config.path}</strong>{" "}
-                  <span className="source"><code>{created.config_url}</code></span>
+                  <span className="ui-note"><code>{created.config_url}</code></span>
                 </p>
                 <pre>{profile.data.config.content}</pre>
                 <Actions>
-                  <button className="secondary" onClick={() => copy("config-file", profile.data!.config.content)}>
+                  <button className="ui-btn-secondary" onClick={() => copy("config-file", profile.data!.config.content)}>
                     {copied === "config-file" ? t("Copied") : t("Copy configuration")}
                   </button>
                 </Actions>
                 <p>
                   <strong>{profile.data.ca.path}</strong>{" "}
-                  <span className="source">{profile.data.ca.subject} · {t("valid until")} <Time value={profile.data.ca.not_after} /></span>
+                  <span className="ui-note">{profile.data.ca.subject} · {t("valid until")} <Time value={profile.data.ca.not_after} /></span>
                 </p>
                 <pre>{profile.data.ca.pem}</pre>
-                <p className="source">
+                <p className="ui-note">
                   {t("SHA-256 fingerprint of the signing CA; compare it with what openssl prints on the host.")}
                 </p>
                 <pre>{profile.data.ca.fingerprint_sha256}</pre>
                 <Actions>
-                  <button className="secondary" onClick={() => copy("ca-file", profile.data!.ca.pem)}>
+                  <button className="ui-btn-secondary" onClick={() => copy("ca-file", profile.data!.ca.pem)}>
                     {copied === "ca-file" ? t("Copied") : t("Copy CA")}
                   </button>
-                  <button className="secondary" onClick={() => copy("fingerprint", profile.data!.ca.fingerprint_sha256)}>
+                  <button className="ui-btn-secondary" onClick={() => copy("fingerprint", profile.data!.ca.fingerprint_sha256)}>
                     {copied === "fingerprint" ? t("Copied") : t("Copy fingerprint")}
                   </button>
                 </Actions>
-              </Card>
+              </Panel>
             )}
-          </Columns>
+          </Cols>
         </>
       )}
 
       {step === 5 && created && (
-        <Card
+        <Panel
           title={t("6. Enrollment status")}
           description={ready
             ? t("The host is ready: the session is up, the capabilities are known and the first inventory has arrived. Opening its workspace.")
@@ -746,12 +746,12 @@ export function AddHost() {
                   {t("Open host")}
                 </button>
               )}
-              <button className="secondary" onClick={() => setStep(4)}>{t("Back to the installation")}</button>
-              <button className="secondary" onClick={() => revoke.mutate(created.id)} disabled={!active}>
+              <button className="ui-btn-secondary" onClick={() => setStep(4)}>{t("Back to the installation")}</button>
+              <button className="ui-btn-secondary" onClick={() => revoke.mutate(created.id)} disabled={!active}>
                 {t("Revoke token")}
               </button>
               <button
-                className="secondary"
+                className="ui-btn-secondary"
                 onClick={() => {
                   setCreated(null);
                   setStep(0);
@@ -764,15 +764,15 @@ export function AddHost() {
           }
         >
           {progress.error && <ErrorBox error={progress.error} />}
-          <ul className="steps" aria-live="polite">
+          <ul className="ui-stack" aria-live="polite">
             {steps.map((entry) => (
               <li key={entry.key}>
-                <span className={`badge ${entry.state === "done" ? "ok" : entry.state === "failed" ? "error" : entry.error_code ? "warn" : "unknown"}`}>
+                <span className={`ui-pill ${entry.state === "done" ? "ui-ok" : entry.state === "failed" ? "ui-error" : entry.error_code ? "ui-warn" : "ui-unknown"}`}>
                   {stepMark(entry.state)}
                 </span>{" "}
                 {t(stepDescriptions[entry.key])}
                 {entry.error_code && (
-                  <div className="source">
+                  <div className="ui-note">
                     <code>{entry.error_code}</code>{" "}
                     {errorDescriptions[entry.error_code]
                       ? t(errorDescriptions[entry.error_code])
@@ -781,22 +781,22 @@ export function AddHost() {
                 )}
               </li>
             ))}
-            {!steps.length && <li className="source">{t("waiting for the host…")}</li>}
+            {!steps.length && <li className="ui-note">{t("waiting for the host…")}</li>}
           </ul>
           {/* Where the news comes from: the stream announces the host the
               moment it redeems the token; without it the screen asks every
               few seconds, which is slower but says the same. */}
           {!ready && (
-            <p className="source">
+            <p className="ui-note">
               {live.connected
                 ? t("Watching the order live; a refusal or the host's arrival shows at once.")
                 : t("Refreshing every few seconds.")}
             </p>
           )}
-        </Card>
+        </Panel>
       )}
 
-      {message && <p className="source">{message}</p>}
+      {message && <p className="ui-note">{message}</p>}
 
       {/* The history of orders: what waits for a host, what came in and
           what was closed, within the operator's own scope. An open order
@@ -804,7 +804,7 @@ export function AddHost() {
           copied - the same placement, route, owner, tags and pool of
           uses, with a token of its own shown once. No token of an earlier
           order comes back here. */}
-      <Card
+      <Panel
         title={t("Enrollment history")}
         actions={
           <select value={historyStatus} onChange={(e) => setHistoryStatus(e.target.value as EnrollmentOrder["status"] | "")} aria-label={t("Status")}>
@@ -824,7 +824,7 @@ export function AddHost() {
           <table>
             <thead>
               <tr>
-                <th scope="col">{t("What for")}</th><th scope="col">{t("Scope")}</th><th scope="col">{t("Status")}</th><th scope="col" className="num">{t("Uses")}</th><th scope="col">{t("Expires")}</th><th scope="col">{t("Requested by")}</th><th scope="col"></th>
+                <th scope="col">{t("What for")}</th><th scope="col">{t("Scope")}</th><th scope="col">{t("Status")}</th><th scope="col" className="ui-numeric">{t("Uses")}</th><th scope="col">{t("Expires")}</th><th scope="col">{t("Requested by")}</th><th scope="col"></th>
               </tr>
             </thead>
             <tbody>
@@ -832,22 +832,22 @@ export function AddHost() {
                 <tr key={entry.id}>
                   <td>
                     {entry.description || "—"}
-                    <div className="source">{entry.kind} · {entry.purpose}{entry.relay_id ? ` · ${t("via relay")}` : ""}</div>
+                    <div className="ui-note">{entry.kind} · {entry.purpose}{entry.relay_id ? ` · ${t("via relay")}` : ""}</div>
                   </td>
-                  <td className="source">{entry.site} / {entry.environment}</td>
-                  <td><span className={`badge ${entry.status === "pending" ? "ok" : entry.status === "enrolled" ? "info" : entry.status === "failed" ? "error" : "unknown"}`}>{t(entry.status)}</span></td>
-                  <td className="num">{entry.uses} / {entry.max_uses}</td>
-                  <td className="source"><Time value={entry.expires_at} /></td>
-                  <td className="source">{entry.created_by}</td>
-                  <td className="actions-cell">
-                    <div className="row-actions">
+                  <td className="ui-note">{entry.site} / {entry.environment}</td>
+                  <td><span className={`ui-pill ${entry.status === "pending" ? "ui-ok" : entry.status === "enrolled" ? "ui-info" : entry.status === "failed" ? "ui-error" : "ui-unknown"}`}>{t(entry.status)}</span></td>
+                  <td className="ui-numeric">{entry.uses} / {entry.max_uses}</td>
+                  <td className="ui-note"><Time value={entry.expires_at} /></td>
+                  <td className="ui-note">{entry.created_by}</td>
+                  <td className="ui-actioncell">
+                    <div className="ui-rowactions">
                       {entry.status === "pending" ? (
                         <>
-                          <button className="secondary" onClick={() => revoke.mutate(entry.id)} disabled={revoke.isPending}>
+                          <button className="ui-btn-secondary" onClick={() => revoke.mutate(entry.id)} disabled={revoke.isPending}>
                             {t("Revoke")}
                           </button>
                           <button
-                            className="secondary"
+                            className="ui-btn-secondary"
                             onClick={() => replace.mutate(entry)}
                             disabled={replace.isPending || entry.purpose === "replace_identity"}
                             title={entry.purpose === "replace_identity" ? t("An identity recovery order is placed on the host itself.") : t("Revokes this order and places one like it; the new token is shown once.")}
@@ -857,7 +857,7 @@ export function AddHost() {
                         </>
                       ) : (
                         <button
-                          className="secondary"
+                          className="ui-btn-secondary"
                           onClick={() => replace.mutate(entry)}
                           disabled={replace.isPending || entry.purpose === "replace_identity"}
                           title={entry.purpose === "replace_identity" ? t("An identity recovery order is placed on the host itself.") : t("Places an order like this one: the same placement, route, owner, tags and uses, with a new token shown once.")}
@@ -872,7 +872,7 @@ export function AddHost() {
             </tbody>
           </table>
         )}
-      </Card>
+      </Panel>
     </>
   );
 }
@@ -886,11 +886,11 @@ function Refusal({ error, close }: { error: ApiError; close: () => void }) {
   const t = useT();
   if (error.code === "reauthentication_required") {
     return (
-      <div className="warning">
+      <div className="ui-banner">
         <div>
           <strong>{t("Re-authentication required.")}</strong> {error.message}
         </div>
-        <div className="operations">
+        <div className="ui-actions">
           <button
             onClick={() => {
               const target = encodeURIComponent(window.location.pathname);
@@ -899,19 +899,19 @@ function Refusal({ error, close }: { error: ApiError; close: () => void }) {
           >
             {t("Sign in again")}
           </button>
-          <button className="secondary" onClick={close}>{t("Close")}</button>
+          <button className="ui-btn-secondary" onClick={close}>{t("Close")}</button>
         </div>
       </div>
     );
   }
   return (
-    <div className="warning">
+    <div className="ui-banner">
       <div>
         {error.code === "reason_required"
           ? t("The order needs a reason: this placement, a batch token or a relay is a change the audit trail keeps the reason of.")
           : error.message}
       </div>
-      <div className="operations"><button className="secondary" onClick={close}>{t("Close")}</button></div>
+      <div className="ui-actions"><button className="ui-btn-secondary" onClick={close}>{t("Close")}</button></div>
     </div>
   );
 }

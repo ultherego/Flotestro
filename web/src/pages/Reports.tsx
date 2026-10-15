@@ -6,8 +6,8 @@ import type { Whoami } from "../lib/types";
 import { absoluteTime, toInstant } from "../lib/format";
 import { toLocalInput } from "./Audit";
 import { Board } from "../components/board";
-import { ErrorBox, Empty, OptionalFlag, OptionalNumber } from "../components/ui";
-import { Card, PageHeader, Toolbar } from "../components/layout";
+import { ErrorBox, OptionalFlag, OptionalNumber } from "../components/ui";
+import { Empty, PageHead, Panel, toneClass, Toolbar } from "../ui/kit";
 import { ExportButton } from "../components/ExportButton";
 import { Breakdown, StatusBar, type WidgetTone } from "../components/widgets";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
@@ -351,13 +351,13 @@ export function Reports() {
   return (
     <>
       <style>{PRINT_STYLES}</style>
-      <PageHeader
+      <PageHead
         icon="audit"
         title={t("Reports")}
         description={t("The fleet over a period, to print or to open in a spreadsheet.")}
         help={<p>{t("The patch status, the campaigns and the compliance of the fleet over a period, as a document to print or a file to open in a spreadsheet. Every number is the server's, the same one the screens show.")}</p>}
         actions={
-          <button type="button" className="secondary no-print" onClick={() => window.print()} disabled={!ready}>
+          <button type="button" className="ui-btn-secondary ui-noprint" onClick={() => window.print()} disabled={!ready}>
             {t("Print")}
           </button>
         }
@@ -365,7 +365,7 @@ export function Reports() {
 
       {/* The head of the printed document: what it is a report of, and
           who made it when. On the screen the toolbar says the same. */}
-      <div className="report-print-head">
+      <div className="ui-printhead">
         <h1>{t("Flotestro fleet report")}</h1>
         <dl>
           <dt>{t("Fleet")}</dt><dd>{window.location.host}</dd>
@@ -376,14 +376,14 @@ export function Reports() {
         </dl>
       </div>
 
-      <Card className="no-print">
+      <Panel className="ui-noprint">
         <Toolbar>
-          <div className="segmented" role="group" aria-label={t("Period")}>
+          <div className="ui-segmented" role="group" aria-label={t("Period")}>
             {PRESETS.map((option) => (
               <button
                 key={option.key}
                 type="button"
-                className={preset === option.key ? "active" : ""}
+                className={preset === option.key ? "ui-active" : ""}
                 onClick={() => change({ preset: option.key })}
               >
                 {t(option.label)}
@@ -392,11 +392,11 @@ export function Reports() {
           </div>
           {preset === "custom" && (
             <>
-              <label className="toggle">
+              <label className="ui-check">
                 {t("Since")}{" "}
                 <input type="datetime-local" value={custom.from} onChange={(e) => change({ custom: { ...custom, from: e.target.value } })} />
               </label>
-              <label className="toggle">
+              <label className="ui-check">
                 {t("Until")}{" "}
                 <input type="datetime-local" value={custom.to} onChange={(e) => change({ custom: { ...custom, to: e.target.value } })} />
               </label>
@@ -407,12 +407,12 @@ export function Reports() {
           <input placeholder={t("environment: any")} value={environment} list="report-environments" onChange={(e) => change({ environment: e.target.value })} />
           <FacetList id="report-environments" facets={facets.data?.by_environment} />
         </Toolbar>
-        <p className="fp-note">
+        <p className="ui-note">
           {ready
             ? t("{scope}, {from} – {to}.", { scope, from: absoluteTime(range.from), to: absoluteTime(range.to) })
             : t("Set both ends of the period to read the reports.")}
         </p>
-      </Card>
+      </Panel>
 
       <Board
         screen="reports"
@@ -467,8 +467,8 @@ function PatchStatusCard({ report, hosts, more, loading, error, ready, params }:
   const totals = report?.totals;
   const pendingSecurity = totals ? totals.hosts - totals.fully_patched - totals.security_unknown : undefined;
   return (
-    <Card
-      className="span-12"
+    <Panel
+      className="ui-col-12"
       title={t("Patch status")}
       description={t("The pending updates as the hosts last reported them, and the upgrades and campaigns of the period.")}
       actions={<ExportButton path="/api/v1/reports/patch-status" params={params} disabled={!ready} />}
@@ -484,12 +484,12 @@ function PatchStatusCard({ report, hosts, more, loading, error, ready, params }:
               { label: t("Reboot backlog"), value: totals.reboot_backlog, tone: totals.reboot_backlog ? "warn" : "ok" },
               { label: t("Reboot not reported"), value: totals.reboot_unknown, tone: "unknown" },
             ]} />
-            <p className="fp-note">
+            <p className="ui-note">
               {t("{hosts} hosts · {updates} pending updates of which {security} security · a host that reported nothing is counted apart, never as patched.", {
                 hosts: totals.hosts, updates: totals.pending_updates, security: totals.pending_security_updates,
               })}
             </p>
-            <div className="columns">
+            <div className="ui-cols">
               <GroupBreakdown title={t("Security updates pending, by site")} groups={report.by_site} />
               <GroupBreakdown title={t("Security updates pending, by environment")} groups={report.by_environment} />
             </div>
@@ -500,9 +500,9 @@ function PatchStatusCard({ report, hosts, more, loading, error, ready, params }:
                 <thead>
                   <tr>
                     <th scope="col">{t("Host")}</th><th scope="col">{t("Site")}</th><th scope="col">{t("Environment")}</th>
-                    <th scope="col" className="num">{t("Pending")}</th><th scope="col" className="num">{t("Security")}</th><th scope="col">{t("Reboot")}</th>
+                    <th scope="col" className="ui-numeric">{t("Pending")}</th><th scope="col" className="ui-numeric">{t("Security")}</th><th scope="col">{t("Reboot")}</th>
                     <th scope="col">{t("Last upgrade")}</th>
-                    {report.campaigns_read && <th scope="col" className="num">{t("Campaigns")}</th>}
+                    {report.campaigns_read && <th scope="col" className="ui-numeric">{t("Campaigns")}</th>}
                     <th scope="col">{t("Agent")}</th><th scope="col">{t("Last seen")}</th>
                   </tr>
                 </thead>
@@ -512,11 +512,11 @@ function PatchStatusCard({ report, hosts, more, loading, error, ready, params }:
                       <td><Link to={`/hosts/${host.host_id}`}>{host.hostname}</Link></td>
                       <td>{host.site}</td>
                       <td>{host.environment}</td>
-                      <td className="num"><OptionalNumber value={host.pending_updates} /></td>
-                      <td className="num"><OptionalNumber value={host.pending_security_updates} /></td>
+                      <td className="ui-numeric"><OptionalNumber value={host.pending_updates} /></td>
+                      <td className="ui-numeric"><OptionalNumber value={host.pending_security_updates} /></td>
                       <td><OptionalFlag value={host.reboot_required} /></td>
-                      <td>{host.last_upgrade_at ? absoluteTime(host.last_upgrade_at) : <span className="badge unknown">{t("none in period")}</span>}</td>
-                      {report.campaigns_read && <td className="num">{host.campaigns ?? "—"}</td>}
+                      <td>{host.last_upgrade_at ? absoluteTime(host.last_upgrade_at) : <span className="ui-pill ui-unknown">{t("none in period")}</span>}</td>
+                      {report.campaigns_read && <td className="ui-numeric">{host.campaigns ?? "—"}</td>}
                       <td>{host.agent_version || "—"}</td>
                       <td>{host.last_seen_at ? absoluteTime(host.last_seen_at) : "—"}</td>
                     </tr>
@@ -525,12 +525,12 @@ function PatchStatusCard({ report, hosts, more, loading, error, ready, params }:
               </table>
             )}
             {hosts.length < totals.hosts && (
-              <p className="fp-note">
+              <p className="ui-note">
                 {t("The table shows the first {listed} of {total} hosts; the file carries them all.", { listed: hosts.length, total: totals.hosts })}
                 {more && (
                   <>
                     {" "}
-                    <button type="button" className="secondary no-print" onClick={more} disabled={loading}>
+                    <button type="button" className="ui-btn-secondary ui-noprint" onClick={more} disabled={loading}>
                       {t("Load more")}
                     </button>
                   </>
@@ -540,7 +540,7 @@ function PatchStatusCard({ report, hosts, more, loading, error, ready, params }:
           </>
         )}
       </Pending>
-    </Card>
+    </Panel>
   );
 }
 
@@ -550,7 +550,7 @@ function GroupBreakdown({ title, groups }: { title: string; groups: ({ key: stri
   if (groups.length === 0) return null;
   return (
     <div>
-      <h3 className="card-title">{title}</h3>
+      <h3 className="ui-panel-title">{title}</h3>
       <Breakdown tone="warn" items={groups.map((group) => ({
         label: t("{key} ({hosts} hosts)", { key: group.key || "—", hosts: group.hosts }),
         value: group.hosts - group.fully_patched - group.security_unknown,
@@ -571,8 +571,8 @@ function CampaignsCard({ report, error, ready, params }: { report?: CampaignsRep
   const [unfolded, setUnfolded] = useState(false);
   const folded = report ? Math.max(0, report.campaigns.length - FOLDED_ROWS) : 0;
   return (
-    <Card
-      className="span-12"
+    <Panel
+      className="ui-col-12"
       title={t("Campaigns")}
       description={t("The campaigns that closed in the period, however they ended, with the outcome of their hosts.")}
       actions={<ExportButton path="/api/v1/reports/campaigns" params={params} disabled={!ready} />}
@@ -590,14 +590,14 @@ function CampaignsCard({ report, error, ready, params }: { report?: CampaignsRep
               { label: t("Skipped"), value: totals.skipped, tone: "neutral" },
               { label: t("Canceled"), value: totals.canceled, tone: "neutral" },
             ]} />
-            <p className="fp-note">
+            <p className="ui-note">
               {t("{campaigns} campaigns · {targets} hosts targeted · success rate {rate} over the hosts attempted; {no_change} of the successes changed nothing.", {
                 campaigns: totals.campaigns, targets: totals.targets, rate: percent(totals.success_rate), no_change: totals.no_change,
               })}
             </p>
             {report.by_site.length > 0 && (
               <>
-                <h3 className="card-title">{t("Succeeded hosts by site")}</h3>
+                <h3 className="ui-panel-title">{t("Succeeded hosts by site")}</h3>
                 <Breakdown tone="ok" items={report.by_site.map((group) => ({
                   label: t("{key} ({targets} targeted)", { key: group.key || "—", targets: group.targets }), value: group.succeeded,
                 }))} />
@@ -611,43 +611,43 @@ function CampaignsCard({ report, error, ready, params }: { report?: CampaignsRep
                   <tr>
                     <th scope="col">{t("Campaign")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("State")}</th>
                     <th scope="col">{t("Requested by")}</th><th scope="col">{t("Approved by")}</th><th scope="col">{t("Finished")}</th><th scope="col">{t("Duration")}</th>
-                    <th scope="col" className="num">{t("Targets")}</th><th scope="col" className="num">{t("Succeeded")}</th><th scope="col" className="num">{t("Failed")}</th>
-                    <th scope="col" className="num">{t("Unknown")}</th><th scope="col" className="num">{t("Skipped")}</th><th scope="col" className="num">{t("Rate")}</th>
+                    <th scope="col" className="ui-numeric">{t("Targets")}</th><th scope="col" className="ui-numeric">{t("Succeeded")}</th><th scope="col" className="ui-numeric">{t("Failed")}</th>
+                    <th scope="col" className="ui-numeric">{t("Unknown")}</th><th scope="col" className="ui-numeric">{t("Skipped")}</th><th scope="col" className="ui-numeric">{t("Rate")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {report.campaigns.map((row, index) => (
-                    <tr key={row.id} className={!unfolded && index >= FOLDED_ROWS ? "report-folded" : undefined}>
+                    <tr key={row.id} className={!unfolded && index >= FOLDED_ROWS ? "ui-note" : undefined}>
                       <td>
                         <Link to={`/campaigns/${row.id}`}>{row.name}</Link>
                         {row.by_site.length > 1 && (
-                          <div className="fp-note">{row.by_site.map((group) => `${group.key}: ${group.succeeded}/${group.targets}`).join(" · ")}</div>
+                          <div className="ui-note">{row.by_site.map((group) => `${group.key}: ${group.succeeded}/${group.targets}`).join(" · ")}</div>
                         )}
                       </td>
                       <td>{row.operation}</td>
-                      <td><span className={`badge ${campaignStateTone(row.state)}`}>{t(campaignStateLabel(row.state))}</span></td>
+                      <td><span className={`ui-pill ${toneClass(campaignStateTone(row.state))}`}>{t(campaignStateLabel(row.state))}</span></td>
                       <td>{row.requester}</td>
                       <td>{row.approver || "—"}</td>
                       <td>{absoluteTime(row.finished_at)}</td>
                       <td>{duration(row.duration_seconds)}</td>
-                      <td className="num">{row.targets}</td>
-                      <td className="num">{row.succeeded}</td>
-                      <td className="num">{row.failed}</td>
-                      <td className="num">{row.unknown}</td>
-                      <td className="num">{row.skipped + row.canceled}</td>
-                      <td className="num">{percent(row.success_rate)}</td>
+                      <td className="ui-numeric">{row.targets}</td>
+                      <td className="ui-numeric">{row.succeeded}</td>
+                      <td className="ui-numeric">{row.failed}</td>
+                      <td className="ui-numeric">{row.unknown}</td>
+                      <td className="ui-numeric">{row.skipped + row.canceled}</td>
+                      <td className="ui-numeric">{percent(row.success_rate)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             )}
             {folded > 0 && (
-              <p className="fp-note no-print">
+              <p className="ui-note ui-noprint">
                 {unfolded
                   ? t("All {n} campaigns are shown.", { n: report.campaigns.length })
                   : t("The first {shown} of {total} campaigns are shown; the printed report and the file carry them all.", { shown: FOLDED_ROWS, total: report.campaigns.length })}
                 {" "}
-                <button type="button" className="secondary" onClick={() => setUnfolded(!unfolded)}>
+                <button type="button" className="ui-btn-secondary" onClick={() => setUnfolded(!unfolded)}>
                   {unfolded ? t("Show the first {n} only", { n: FOLDED_ROWS }) : t("Show all {n}", { n: report.campaigns.length })}
                 </button>
               </p>
@@ -655,7 +655,7 @@ function CampaignsCard({ report, error, ready, params }: { report?: CampaignsRep
           </>
         )}
       </Pending>
-    </Card>
+    </Panel>
   );
 }
 
@@ -683,8 +683,8 @@ function ComplianceCard({ report, error, ready, params }: { report?: ComplianceR
     return withSection;
   };
   return (
-    <Card
-      className="span-12"
+    <Panel
+      className="ui-col-12"
       title={t("Compliance")}
       description={t("Where the hosts stand against the policies at the end of the period, and the findings of the security checks now.")}
       actions={
@@ -709,7 +709,7 @@ function ComplianceCard({ report, error, ready, params }: { report?: ComplianceR
                   { label: t("Not applicable"), value: policies.totals.not_applicable, tone: "neutral" },
                   { label: t("Unknown"), value: policies.totals.unknown, tone: "unknown" },
                 ]} />
-                <p className="fp-note">
+                <p className="ui-note">
                   {t("{policies} policies · {hosts} distinct hosts in drift · a host under several policies is counted under each. A verdict recorded after the end of the period is unknown for it: the panel keeps the latest evaluation only.", {
                     policies: policies.totals.policies, hosts: policies.totals.hosts_in_drift,
                   })}
@@ -720,9 +720,9 @@ function ComplianceCard({ report, error, ready, params }: { report?: ComplianceR
                   <table data-testid="report-policies">
                     <thead>
                       <tr>
-                        <th scope="col">{t("Policy")}</th><th scope="col" className="num">{t("Version")}</th><th scope="col">{t("Mode")}</th>
-                        <th scope="col" className="num">{t("Hosts")}</th><th scope="col" className="num">{t("Compliant")}</th><th scope="col" className="num">{t("Drift")}</th>
-                        <th scope="col" className="num">{t("Error")}</th><th scope="col" className="num">{t("Not applicable")}</th><th scope="col" className="num">{t("Unknown")}</th>
+                        <th scope="col">{t("Policy")}</th><th scope="col" className="ui-numeric">{t("Version")}</th><th scope="col">{t("Mode")}</th>
+                        <th scope="col" className="ui-numeric">{t("Hosts")}</th><th scope="col" className="ui-numeric">{t("Compliant")}</th><th scope="col" className="ui-numeric">{t("Drift")}</th>
+                        <th scope="col" className="ui-numeric">{t("Error")}</th><th scope="col" className="ui-numeric">{t("Not applicable")}</th><th scope="col" className="ui-numeric">{t("Unknown")}</th>
                         <th scope="col">{t("Hosts in drift")}</th>
                       </tr>
                     </thead>
@@ -731,16 +731,16 @@ function ComplianceCard({ report, error, ready, params }: { report?: ComplianceR
                         <tr key={row.id}>
                           <td>
                             <Link to={`/policies/${row.id}`}>{row.name}</Link>
-                            {!row.enabled && <span className="badge unknown">{t("disabled")}</span>}
+                            {!row.enabled && <span className="ui-pill ui-unknown">{t("disabled")}</span>}
                           </td>
-                          <td className="num">{row.version || "—"}</td>
+                          <td className="ui-numeric">{row.version || "—"}</td>
                           <td>{row.remediation_mode}</td>
-                          <td className="num">{row.hosts}</td>
-                          <td className="num">{row.compliant}</td>
-                          <td className="num">{row.drift ? <span className="badge error">{row.drift}</span> : 0}</td>
-                          <td className="num">{row.error ? <span className="badge warn">{row.error}</span> : 0}</td>
-                          <td className="num">{row.not_applicable}</td>
-                          <td className="num">{row.unknown ? <span className="badge unknown">{row.unknown}</span> : 0}</td>
+                          <td className="ui-numeric">{row.hosts}</td>
+                          <td className="ui-numeric">{row.compliant}</td>
+                          <td className="ui-numeric">{row.drift ? <span className="ui-pill ui-error">{row.drift}</span> : 0}</td>
+                          <td className="ui-numeric">{row.error ? <span className="ui-pill ui-warn">{row.error}</span> : 0}</td>
+                          <td className="ui-numeric">{row.not_applicable}</td>
+                          <td className="ui-numeric">{row.unknown ? <span className="ui-pill ui-unknown">{row.unknown}</span> : 0}</td>
                           <td>
                             {row.drift_hosts.map((host) => host.hostname).join(", ")}
                             {row.drift > row.drift_hosts.length && ` ${t("and {n} more", { n: row.drift - row.drift_hosts.length })}`}
@@ -752,10 +752,10 @@ function ComplianceCard({ report, error, ready, params }: { report?: ComplianceR
                 )}
                 {policies.drift_hosts.length > 0 && (
                   <>
-                    <h3 className="card-title">{t("Hosts in drift")}</h3>
+                    <h3 className="ui-panel-title">{t("Hosts in drift")}</h3>
                     <table data-testid="report-drift-hosts">
                       <thead>
-                        <tr><th scope="col">{t("Host")}</th><th scope="col">{t("Site")}</th><th scope="col">{t("Environment")}</th><th scope="col" className="num">{t("Policies")}</th><th scope="col" className="num">{t("Rules")}</th></tr>
+                        <tr><th scope="col">{t("Host")}</th><th scope="col">{t("Site")}</th><th scope="col">{t("Environment")}</th><th scope="col" className="ui-numeric">{t("Policies")}</th><th scope="col" className="ui-numeric">{t("Rules")}</th></tr>
                       </thead>
                       <tbody>
                         {policies.drift_hosts.map((host) => (
@@ -763,14 +763,14 @@ function ComplianceCard({ report, error, ready, params }: { report?: ComplianceR
                             <td><Link to={`/hosts/${host.host_id}/policies`}>{host.hostname}</Link></td>
                             <td>{host.site}</td>
                             <td>{host.environment}</td>
-                            <td className="num">{host.policies}</td>
-                            <td className="num">{host.rules}</td>
+                            <td className="ui-numeric">{host.policies}</td>
+                            <td className="ui-numeric">{host.rules}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                     {policies.drift_hosts_truncated && (
-                      <p className="fp-note">
+                      <p className="ui-note">
                         {t("The table shows the first {listed} of {total} hosts in drift; the file carries them all.", {
                           listed: policies.drift_hosts.length, total: policies.totals.hosts_in_drift,
                         })}
@@ -781,7 +781,7 @@ function ComplianceCard({ report, error, ready, params }: { report?: ComplianceR
               </>
             )}
 
-            <h3 className="card-title">{t("Security checks")}</h3>
+            <h3 className="ui-panel-title">{t("Security checks")}</h3>
             {!security ? (
               <Empty>{t("The security section needs the right to read the security module.")}</Empty>
             ) : (
@@ -790,7 +790,7 @@ function ComplianceCard({ report, error, ready, params }: { report?: ComplianceR
                   label: t("{severity} failed", { severity: row.severity }), value: row.failed, tone: row.failed ? severityTone(row.severity) : "ok",
                 }))} />
                 <FleetCoverage coverage={security} />
-                <p className="fp-note">
+                <p className="ui-note">
                   {t("{hosts} hosts judged from their last reported facts, {failing} with at least one failed check.", {
                     hosts: security.evaluated_hosts, failing: security.hosts_with_findings,
                   })}
@@ -798,19 +798,19 @@ function ComplianceCard({ report, error, ready, params }: { report?: ComplianceR
                 <table data-testid="report-security">
                   <thead>
                     <tr>
-                      <th scope="col">{t("Check")}</th><th scope="col">{t("Severity")}</th><th scope="col" className="num">{t("Failed")}</th>
-                      <th scope="col" className="num">{t("Passed")}</th><th scope="col" className="num">{t("Unknown")}</th><th scope="col" className="num">{t("Not applicable")}</th>
+                      <th scope="col">{t("Check")}</th><th scope="col">{t("Severity")}</th><th scope="col" className="ui-numeric">{t("Failed")}</th>
+                      <th scope="col" className="ui-numeric">{t("Passed")}</th><th scope="col" className="ui-numeric">{t("Unknown")}</th><th scope="col" className="ui-numeric">{t("Not applicable")}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {security.checks.map((check) => (
                       <tr key={check.check_id}>
-                        <td>{check.title}<div className="fp-note">{check.check_id}</div></td>
-                        <td><span className={`badge ${severityTone(check.severity)}`}>{check.severity}</span></td>
-                        <td className="num">{check.failed ? <span className="badge error">{check.failed}</span> : 0}</td>
-                        <td className="num">{check.passed}</td>
-                        <td className="num">{check.unknown}</td>
-                        <td className="num">{check.not_applicable}</td>
+                        <td>{check.title}<div className="ui-note">{check.check_id}</div></td>
+                        <td><span className={`ui-pill ${toneClass(severityTone(check.severity))}`}>{check.severity}</span></td>
+                        <td className="ui-numeric">{check.failed ? <span className="ui-pill ui-error">{check.failed}</span> : 0}</td>
+                        <td className="ui-numeric">{check.passed}</td>
+                        <td className="ui-numeric">{check.unknown}</td>
+                        <td className="ui-numeric">{check.not_applicable}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -820,6 +820,6 @@ function ComplianceCard({ report, error, ready, params }: { report?: ComplianceR
           </>
         )}
       </Pending>
-    </Card>
+    </Panel>
   );
 }

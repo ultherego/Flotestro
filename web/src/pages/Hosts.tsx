@@ -6,8 +6,8 @@ import { api, loadedItems, LIST_PAGE, type Page } from "../lib/api";
 import { useDebounced } from "../lib/debounce";
 import { RELEASE_CHANNELS, refusalName, type FleetActivity, type Host, type Relay } from "../lib/types";
 import { relativeTime } from "../lib/format";
-import { ErrorBox, Time, OptionalFlag, OptionalNumber, Empty, ConnectionState } from "../components/ui";
-import { Card, EmptyState, MoreFilters, PageHeader, Toolbar } from "../components/layout";
+import { ErrorBox, Time, OptionalFlag, OptionalNumber, ConnectionState } from "../components/ui";
+import { Empty, MoreFilters, PageHead, Panel, Toolbar } from "../ui/kit";
 import { ExportButton } from "../components/ExportButton";
 import {
   ColumnChooser, PageSizeSelect, Td, Th, formatSort, parseSort, useColumns, usePageSize, type ColumnDef, type SortValue,
@@ -263,8 +263,8 @@ export function Hosts() {
     { key: "agent", label: t("Agent"), sort: "agent_version", hidden: true },
     { key: "domain", label: t("Domain"), secondary: true },
     { key: "updates", label: t("Updates"), sort: "pending_updates" },
-    { key: "security", label: t("Security updates"), sort: "pending_security_updates", className: "num", hidden: true },
-    { key: "failed_units", label: t("Failed units"), sort: "failed_units", className: "num" },
+    { key: "security", label: t("Security updates"), sort: "pending_security_updates", className: "ui-numeric", hidden: true },
+    { key: "failed_units", label: t("Failed units"), sort: "failed_units", className: "ui-numeric" },
     { key: "reboot", label: t("Reboot"), secondary: true },
     { key: "last_seen", label: t("Last seen"), sort: "last_seen_at" },
   ] satisfies ColumnDef[]);
@@ -349,16 +349,16 @@ export function Hosts() {
       {/* The link is seen by whoever can order an installation; for the
           rest it would lead only to a refusal. The server decides what is
           allowed anyway. */}
-      <PageHeader
+      <PageHead
         title={t("Hosts")}
         description={<>{t("Filters are applied server-side.")} <Refreshed at={hosts.dataUpdatedAt} fetching={hosts.isFetching} onRefresh={() => hosts.refetch()} /></>}
-        actions={canAdd && <Link to="/hosts/new" className="button primary">{t("Add host")}</Link>}
+        actions={canAdd && <Link to="/hosts/new" className="ui-btn ui-btn-primary">{t("Add host")}</Link>}
         help={<p>{t("Every machine that completed enrolment, narrowed to the ones you may see. A host the panel has not heard from is not shown as healthy: the connection state and the age of the inventory are separate facts and both are on the row.")}</p>}
       />
 
-      <div className="widgets">
-        <Card
-          className="span-12"
+      <div className="ui-grid">
+        <Panel
+          className="ui-col-12"
           title={t("Connection")}
           description={fleetSize === undefined ? t("Counted in the database over the hosts you can see.") : t("{n} hosts you can see", { n: fleetSize })}
         >
@@ -368,9 +368,9 @@ export function Hosts() {
             { label: t("Offline"), value: byConnection("offline"), tone: "error", to: "/hosts?connection_state=offline" },
             { label: t("Unknown"), value: byConnection("unknown"), tone: "unknown", to: "/hosts?connection_state=unknown" },
           ]} />
-        </Card>
+        </Panel>
 
-        <Card className="span-9" flush>
+        <Panel className="ui-col-9" flush>
           <Toolbar end={<>
             {hosts.data && <span>{t("{n} hosts", { n: total })}</span>}
             <PageSizeSelect value={pageSize} onChange={setPageSize} />
@@ -506,29 +506,29 @@ export function Hosts() {
             </select>
             {/* The "needs attention" boxes: each is the filter a dashboard
                 tile links here with, ticked means "only these". */}
-            <label className="toggle" title={t("hosts with at least one failed unit")}>
+            <label className="ui-check" title={t("hosts with at least one failed unit")}>
               <input type="checkbox" checked={filters.failed_units === "true"} onChange={(e) => setFilter("failed_units", e.target.checked ? "true" : "")} data-testid="filter-failed-units" />
               {t("failed units")}
             </label>
-            <label className="toggle" title={t("hosts whose package database the last operation found broken")}>
+            <label className="ui-check" title={t("hosts whose package database the last operation found broken")}>
               <input type="checkbox" checked={filters.package_db_broken === "true"} onChange={(e) => setFilter("package_db_broken", e.target.checked ? "true" : "")} data-testid="filter-package-db" />
               {t("package database broken")}
             </label>
-            <label className="toggle" title={t("domain-joined hosts whose SSSD reports itself offline")}>
+            <label className="ui-check" title={t("domain-joined hosts whose SSSD reports itself offline")}>
               <input type="checkbox" checked={filters.sssd_offline === "true"} onChange={(e) => setFilter("sssd_offline", e.target.checked ? "true" : "")} data-testid="filter-sssd" />
               {t("SSSD offline")}
             </label>
-            <label className="toggle" title={t("hosts whose agent is older than the newest one in the fleet")}>
+            <label className="ui-check" title={t("hosts whose agent is older than the newest one in the fleet")}>
               <input type="checkbox" checked={filters.agent_behind === "true"} onChange={(e) => setFilter("agent_behind", e.target.checked ? "true" : "")} data-testid="filter-agent-behind" />
               {t("agent behind")}
             </label>
             </MoreFilters>
           </Toolbar>
           {activeFilters.length > 0 && (
-            <div className="filters flush-block" data-testid="active-filters">
+            <div className="ui-filters ui-flush" data-testid="active-filters">
               {activeFilters.map((key) => (
-                <span key={key} className="chip">
-                  <span className="chip-tag">{chipLabels[key]}</span>
+                <span key={key} className="ui-tag">
+                  <span className="ui-tag">{chipLabels[key]}</span>
                   {chipValue(key, filters[key].trim())}
                   <button
                     type="button"
@@ -540,7 +540,7 @@ export function Hosts() {
                   </button>
                 </span>
               ))}
-              <button type="button" className="secondary" onClick={() => setFilters({ ...EMPTY_FILTERS, sort: filters.sort })} data-testid="clear-filters">
+              <button type="button" className="ui-btn-secondary" onClick={() => setFilters({ ...EMPTY_FILTERS, sort: filters.sort })} data-testid="clear-filters">
                 {t("Clear filters")}
               </button>
             </div>
@@ -549,9 +549,9 @@ export function Hosts() {
           {hosts.isLoading ? (
             <Empty>{t("Loading…")}</Empty>
           ) : rows.length === 0 ? (
-            <EmptyState action={canAdd && <Link to="/hosts/new" className="button">{t("Add host")}</Link>}>
+            <Empty action={canAdd && <Link to="/hosts/new" className="ui-btn">{t("Add host")}</Link>}>
               {t("No host matches the filters.")}
-            </EmptyState>
+            </Empty>
           ) : (
             <table>
               <thead>
@@ -587,18 +587,18 @@ export function Hosts() {
                     {/* The name and, under it, the tags. The address has a
                         column of its own, with its origin. */}
                     <Td columns={columns} name="host">
-                      <div className="fp-host-cell">
+                      <div className="ui-twoline">
                         <Link to={`/hosts/${host.id}/overview`}>{host.hostname}</Link>
                         {/* The tags as chips; a chip narrows the list to
                             its tag, so a role is one click from "every
                             host with this role". */}
                         {host.tags.length > 0 && (
-                          <span className="fp-host-tags">
+                          <span className="ui-tags">
                             {host.tags.map((tag) => (
                               <button
                                 key={tag}
                                 type="button"
-                                className="badge"
+                                className="ui-pill"
                                 onClick={() => setFilter("tags", tag)}
                                 title={t("show every host tagged {tag}", { tag })}
                               >
@@ -617,7 +617,7 @@ export function Hosts() {
                     <Td columns={columns} name="state">
                       <ConnectionState state={host.connection_state} />
                       {host.last_connection_refusal && host.connection_state !== "online" && (
-                        <div className="source" title={host.last_connection_refusal.detail}>
+                        <div className="ui-note" title={host.last_connection_refusal.detail}>
                           {t("refused: {reason} {when}", {
                             reason: t(refusalName(host.last_connection_refusal.code)),
                             when: relativeTime(host.last_connection_refusal.at),
@@ -631,22 +631,22 @@ export function Hosts() {
                         Undetermined is shown as undetermined. */}
                     <Td columns={columns} name="address" data-testid="host-address">
                       {host.management_address ? (
-                        <span className="fp-host-cell">
-                          <span className="fp-host-address">{host.management_address}</span>
+                        <span className="ui-twoline">
+                          <span className="ui-twoline-sub">{host.management_address}</span>
                           <span>
-                            <span className="badge" title={t(ADDRESS_SOURCES[host.management_address_source ?? ""] ?? "address source")}>
+                            <span className="ui-pill" title={t(ADDRESS_SOURCES[host.management_address_source ?? ""] ?? "address source")}>
                               {host.management_address_source}
                             </span>
                           </span>
                         </span>
-                      ) : <span className="badge unknown">{t("unknown")}</span>}
+                      ) : <span className="ui-pill ui-unknown">{t("unknown")}</span>}
                     </Td>
                     {/* The owner as recorded; a click narrows the list to
                         their hosts, like a tag chip does. */}
                     <Td columns={columns} name="owner" data-testid="host-owner">
                       {host.owner
                         ? <button type="button" style={WORD_BUTTON} onClick={() => setFilter("owner", host.owner ?? "")} title={t("show every host of {owner}", { owner: host.owner })}>{host.owner}</button>
-                        : <span className="source">—</span>}
+                        : <span className="ui-note">—</span>}
                     </Td>
                     <Td columns={columns} name="system">{host.os_distribution || host.os_family || "—"} {host.os_version}</Td>
                     <Td columns={columns} name="site">{host.site}</Td>
@@ -659,11 +659,11 @@ export function Hosts() {
                         {host.lifecycle_state}
                       </button>
                     </Td>
-                    <Td columns={columns} name="agent">{host.agent_version || <span className="badge unknown">{t("unknown")}</span>}</Td>
+                    <Td columns={columns} name="agent">{host.agent_version || <span className="ui-pill ui-unknown">{t("unknown")}</span>}</Td>
                     <Td columns={columns} name="domain">
                       {host.identity.enrolled
                         ? <button type="button" style={WORD_BUTTON} onClick={() => setFilter("identity_domain", host.identity.domain ?? "")} title={t("show every host in this domain")}>{host.identity.domain}</button>
-                        : <span className="badge">{t("not in domain")}</span>}
+                        : <span className="ui-pill">{t("not in domain")}</span>}
                     </Td>
                     {/* The bar is the host's share of the busiest host on the
                         list; the security part is named, because it is the
@@ -672,7 +672,7 @@ export function Hosts() {
                     <Td
                       columns={columns}
                       name="updates"
-                      className="fp-meter-cell"
+                      className="ui-metercell"
                       data-testid="host-updates"
                       title={host.pending_updates === null ? undefined : t("{n} pending updates, {security} of them security; the bar is the host's share of the busiest host on the list", {
                         n: host.pending_updates, security: host.pending_security_updates ?? t("an unknown number"),
@@ -688,7 +688,7 @@ export function Hosts() {
                             tone={(host.pending_security_updates ?? 0) > 0 ? "error" : host.pending_updates > 0 ? "warn" : "ok"}
                           />
                           {(host.pending_security_updates ?? 0) > 0 && (
-                            <span className="fp-security">{t("{n} security", { n: host.pending_security_updates ?? 0 })}</span>
+                            <span className="ui-undernote">{t("{n} security", { n: host.pending_security_updates ?? 0 })}</span>
                           )}
                         </>
                       )}
@@ -706,7 +706,7 @@ export function Hosts() {
               asked for again by hand, and the count says how much is left. */}
           {hosts.hasNextPage && (
             <p>
-              <button className="secondary" onClick={() => hosts.fetchNextPage()} disabled={hosts.isFetchingNextPage}>
+              <button className="ui-btn-secondary" onClick={() => hosts.fetchNextPage()} disabled={hosts.isFetchingNextPage}>
                 {t("Load more ({n} left)", { n: total - rows.length })}
               </button>
             </p>
@@ -715,17 +715,17 @@ export function Hosts() {
               The bar sticks to the bottom of the view, so a selection made
               two hundred rows up is one click away without scrolling back. */}
           {selected.size > 0 && (
-            <div className="selection-bar" data-testid="selection-bar">
+            <div className="ui-selectionbar" data-testid="selection-bar">
               <span>{t("{n} selected", { n: selected.size })}</span>
-              <button type="button" className="primary" onClick={openInBulk}>
+              <button type="button" className="ui-btn-primary" onClick={openInBulk}>
                 {t("Open in Bulk workspace ({n})", { n: selected.size })}
               </button>
               {canSetMetadata && (
-                <button type="button" className="secondary" onClick={() => setMetadataOpen(true)} data-testid="set-metadata">
+                <button type="button" className="ui-btn-secondary" onClick={() => setMetadataOpen(true)} data-testid="set-metadata">
                   {t("Set metadata…")}
                 </button>
               )}
-              <button type="button" className="secondary" onClick={() => { setSelected(new Set()); setMetadataOpen(false); }}>{t("Clear selection")}</button>
+              <button type="button" className="ui-btn-secondary" onClick={() => { setSelected(new Set()); setMetadataOpen(false); }}>{t("Clear selection")}</button>
             </div>
           )}
           {/* The panel edits the loaded rows that are ticked: a host ticked
@@ -737,28 +737,28 @@ export function Hosts() {
               onClose={() => setMetadataOpen(false)}
             />
           )}
-        </Card>
+        </Panel>
 
-        <Card className="span-3" title={t("Fleet composition")} description={t("By system, site, environment, agent build and lifecycle.")}>
+        <Panel className="ui-col-3" title={t("Fleet composition")} description={t("By system, site, environment, agent build and lifecycle.")}>
           {a ? (
             <>
-              <h4 className="widget-subhead">{t("By system")}</h4>
+              <h4 className="ui-subhead">{t("By system")}</h4>
               <Breakdown items={facets(a.by_os_family, "os_family")} />
               {/* Two dimensions under two headings: "lab 6, test 6" in
                   one list reads as two sites. */}
-              <h4 className="widget-subhead">{t("Sites")}</h4>
+              <h4 className="ui-subhead">{t("Sites")}</h4>
               <Breakdown tone="ok" items={facets(a.by_site, "site")} />
-              <h4 className="widget-subhead">{t("Environments")}</h4>
+              <h4 className="ui-subhead">{t("Environments")}</h4>
               <Breakdown tone="ok" items={facets(a.by_environment, "environment")} />
-              <h4 className="widget-subhead">{t("Agent builds")}</h4>
+              <h4 className="ui-subhead">{t("Agent builds")}</h4>
               <Breakdown tone="neutral" items={a.by_agent_version.map((f) => ({ label: f.key, value: f.count }))} />
-              <h4 className="widget-subhead">{t("Lifecycle")}</h4>
+              <h4 className="ui-subhead">{t("Lifecycle")}</h4>
               <Breakdown tone="info" items={facets(a.by_lifecycle_state, "lifecycle_state")} />
             </>
           ) : activity.isError ? (
-            <p className="fp-blank">{t("The composition could not be counted.")}</p>
+            <p className="ui-empty">{t("The composition could not be counted.")}</p>
           ) : <Empty>{t("Loading…")}</Empty>}
-        </Card>
+        </Panel>
       </div>
     </>
   );
@@ -772,7 +772,7 @@ export function Hosts() {
 function Refreshed({ at, fetching, onRefresh }: { at: number; fetching: boolean; onRefresh: () => void }) {
   const t = useT();
   return (
-    <span className="source" data-testid="refreshed">
+    <span className="ui-note" data-testid="refreshed">
       {at > 0 ? t("refreshed {when}", { when: relativeTime(new Date(at).toISOString()) }) : t("not yet loaded")}
       {" · "}
       <button type="button" style={WORD_BUTTON} onClick={onRefresh} disabled={fetching}>

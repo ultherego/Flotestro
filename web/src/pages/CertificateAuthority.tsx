@@ -3,8 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import type { Authority } from "../lib/types";
 import { Board } from "../components/board";
-import { ErrorBox, Time, Empty } from "../components/ui";
-import { Actions, Card, Field, FieldGrid } from "../components/layout";
+import { ErrorBox, Time } from "../components/ui";
+import { Actions, Empty, Field, Fields, Panel } from "../ui/kit";
 import { Breakdown, StatusBar, type WidgetTone } from "../components/widgets";
 import { useConfirm } from "../components/Modal";
 import { useToast } from "../components/Toast";
@@ -80,7 +80,7 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
   };
 
   if (query.error instanceof ApiError && query.error.forbidden) {
-    return <Card><Empty>{t("You do not have permission to view the fleet CA.")}</Empty></Card>;
+    return <Panel><Empty>{t("You do not have permission to view the fleet CA.")}</Empty></Panel>;
   }
   if (query.error) return <ErrorBox error={query.error} />;
 
@@ -107,13 +107,13 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
       drawn={{
         trust_set: (
           <>
-            <Card className="span-8" title={t("Trust set")} description={t("{n} authorities", { n: list.length })}>
+            <Panel className="ui-col-8" title={t("Trust set")} description={t("{n} authorities", { n: list.length })}>
         <StatusBar segments={[
           { label: t("signing"), value: count("active"), tone: "ok" },
           { label: t("prepared"), value: count("pending"), tone: "warn" },
           { label: t("retired"), value: count("retired"), tone: "unknown" },
         ]} />
-      </Card>
+      </Panel>
 
       {/* Which authority the agents' certificates hang on: a retired CA
           with hosts still holding its certificates cannot leave the trust
@@ -122,25 +122,25 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
         ),
         by_authority: (
           <>
-            <Card className="span-4" title={t("Certificates by authority")} description={t("Agent certificates each authority issued.")}>
+            <Panel className="ui-col-4" title={t("Certificates by authority")} description={t("Agent certificates each authority issued.")}>
         {!query.data ? (
           <Empty>{t("Loading…")}</Empty>
         ) : holding.length === 0 ? (
-          <p className="fp-blank">{t("No host holds a certificate of any authority.")}</p>
+          <p className="ui-empty">{t("No host holds a certificate of any authority.")}</p>
         ) : (
           <Breakdown items={holding.map((ca) => ({
-            label: <><span className="mono">{ca.serial.slice(0, 8)}</span> <AuthorityState state={ca.state} /></>,
+            label: <><span className="ui-mono">{ca.serial.slice(0, 8)}</span> <AuthorityState state={ca.state} /></>,
             value: ca.hosts_using,
             tone: holdingTone(ca.state),
           }))} />
         )}
-      </Card>
+      </Panel>
           </>
         ),
         fleet_ca: (
           <>
-            <Card
-        className="span-8"
+            <Panel
+        className="ui-col-8"
         title={t("Fleet CA")}
         description={t("Agent certificates are issued by the fleet CA. Rotation happens in two phases: the new CA first reaches agents as their certificates are renewed, and only then takes over signing.")}
         flush
@@ -149,16 +149,16 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
           <thead>
             <tr>
               <th scope="col">{t("State")}</th><th scope="col">{t("Serial")}</th><th scope="col">{t("Valid until")}</th>
-              <th scope="col" className="num">{t("Certificates")}</th><th scope="col">{t("Notes")}</th><th scope="col" /></tr>
+              <th scope="col" className="ui-numeric">{t("Certificates")}</th><th scope="col">{t("Notes")}</th><th scope="col" /></tr>
           </thead>
           <tbody>
             {list.map((ca) => (
               <tr key={ca.fingerprint}>
                 <td><AuthorityState state={ca.state} /></td>
-                <td className="mono" title={ca.fingerprint}>{ca.serial.slice(0, 14)}…</td>
+                <td className="ui-mono" title={ca.fingerprint}>{ca.serial.slice(0, 14)}…</td>
                 <td><Time value={ca.not_after} /></td>
-                <td className="num">{ca.hosts_using}</td>
-                <td className="source">
+                <td className="ui-numeric">{ca.hosts_using}</td>
+                <td className="ui-note">
                   {ca.state === "pending" && (
                     ca.ready_to_activate
                       ? t("the whole fleet already knows this CA")
@@ -168,11 +168,11 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
                     t("still used by hosts")}
                   {ca.state === "active" && t("signs new certificates")}
                 </td>
-                <td className="actions-cell">
+                <td className="ui-actioncell">
                   {ca.state === "retired" && ca.hosts_using === 0 && (
-                    <div className="row-actions">
+                    <div className="ui-rowactions">
                       <button
-                        className="danger"
+                        className="ui-btn-danger"
                         disabled={remove.isPending}
                         onClick={() => askToRemove(ca)}
                       >
@@ -185,13 +185,13 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
             ))}
           </tbody>
         </table>
-      </Card>
+      </Panel>
           </>
         ),
         rotation: (
           <>
-            <Card
-        className="span-4"
+            <Panel
+        className="ui-col-4"
         title={pending ? t("Phase 2: hand over signing") : t("Phase 1: prepare a new CA")}
         description={pending
           ? pending.ready_to_activate
@@ -215,7 +215,7 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
           </Actions>
         }
       >
-        <FieldGrid>
+        <Fields>
           <Field label={t("Reason for the change")} wide>
             <input
               value={reason}
@@ -223,8 +223,8 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
               placeholder={t("e.g. planned CA rotation before expiry")}
             />
           </Field>
-        </FieldGrid>
-      </Card>
+        </Fields>
+      </Panel>
           </>
         )
       }}
@@ -236,10 +236,10 @@ function AuthorityState({ state }: { state: Authority["state"] }) {
   const t = useT();
   switch (state) {
     case "active":
-      return <span className="badge ok">{t("signing")}</span>;
+      return <span className="ui-pill ui-ok">{t("signing")}</span>;
     case "pending":
-      return <span className="badge warn">{t("prepared")}</span>;
+      return <span className="ui-pill ui-warn">{t("prepared")}</span>;
     default:
-      return <span className="badge">{t("retired")}</span>;
+      return <span className="ui-pill">{t("retired")}</span>;
   }
 }

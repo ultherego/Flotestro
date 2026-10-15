@@ -38,7 +38,7 @@ test("the panel signs in, shows the host and follows one operation to its answer
   await page.getByTestId("bootstrap-token").fill(token);
   await page.getByRole("button", { name: "Continue to the first run" }).click();
   await expect(page).toHaveURL(/\/setup$/);
-  await expect(page.locator(".page-header").getByRole("heading", { name: "First run" })).toBeVisible();
+  await expect(page.locator(".ui-pagehead").getByRole("heading", { name: "First run" })).toBeVisible();
 
   // The fleet: the host the fake agent enrolled stands in the list, and its
   // name leads to its workspace.
@@ -47,7 +47,7 @@ test("the panel signs in, shows the host and follows one operation to its answer
   await expect(link).toBeVisible();
   await link.click();
   await expect(page).toHaveURL(new RegExp(`/hosts/${hostID}/overview$`));
-  await expect(page.locator(".hm-header").getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect(page.locator(".ui-sectionhead").getByRole("heading", { name: "Overview" })).toBeVisible();
 
   // One operation through. The read of the unit list is the cheapest order
   // the panel offers: the panel sends it, the gateway delivers it, the agent
@@ -56,8 +56,8 @@ test("the panel signs in, shows the host and follows one operation to its answer
   // an answer, and the round trip is what this test guards. A different code
   // means something on the way changed the task, not that the host said no.
   await page.goto(`/hosts/${hostID}/services`);
-  await expect(page.locator(".hm-header").getByRole("heading", { name: "Services" })).toBeVisible();
-  const button = page.locator(".hm-header").getByRole("button", { name: "Read from host" });
+  await expect(page.locator(".ui-sectionhead").getByRole("heading", { name: "Services" })).toBeVisible();
+  const button = page.locator(".ui-sectionhead").getByRole("button", { name: "Read from host" });
   await expect(button, "the panel refuses to order a read from this host").toBeEnabled();
   const ordered = page.waitForResponse((response) =>
     response.url().includes(`/api/v1/hosts/${hostID}/operations`) && response.request().method() === "POST");
@@ -80,7 +80,7 @@ test("the panel signs in, shows the host and follows one operation to its answer
   await page.goto(`/hosts/${hostID}/jobs`);
   const row = page.locator("tbody tr").filter({ hasText: "unit.status" }).first();
   await expect(row).toBeVisible();
-  await expect(row.locator(".badge").first()).toHaveText("failed");
+  await expect(row.locator(".ui-pill").first()).toHaveText("failed");
   await expect(row.locator("code")).toHaveText("unsupported");
 
   await expectHealthy(page, errors);

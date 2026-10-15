@@ -4,12 +4,11 @@ import { Navigate, useSearchParams } from "react-router-dom";
 import { api, ApiError, type Collection } from "../lib/api";
 import { copyToClipboard } from "../lib/clipboard";
 import type { AccessReview, ApiToken, GroupMapping, Principal, ReviewFlag, ReviewedPrincipal, RoleBinding, Whoami } from "../lib/types";
-import { ErrorBox, Time, Empty } from "../components/ui";
+import { ErrorBox, Time } from "../components/ui";
 import { absoluteTime, toInstant } from "../lib/format";
-import { Actions, Card, EmptyState, Field, FieldGrid, StatGrid, Stat, Toolbar, Pager} from "../components/layout";
+import { Actions, DataTable, Empty, Field, Fields, Pager, Panel, Stat, Stats, Toolbar } from "../ui/kit";
 import { Breakdown } from "../components/widgets";
 import { useTeams } from "./Teams";
-import { DataTable } from "../components/table";
 import { useT } from "../i18n";
 
 /** A scope part that names no site or environment: an asterisk, as the server keeps it, or nothing. */
@@ -75,15 +74,15 @@ export function ScopeText({ scope, teamName }: { scope: BindingScope | undefined
   const empty = (scope?.owners?.length === 0) || (scope?.tags?.length === 0);
   const narrowing = (
     <>
-      {owners && <> · {t("owner")} <span className="mono">{owners}</span></>}
-      {tags && <> · {t("tag")} <span className="mono">{tags}</span></>}
-      {empty && <> · <span className="badge warn">{t("reaches nothing")}</span></>}
+      {owners && <> · {t("owner")} <span className="ui-mono">{owners}</span></>}
+      {tags && <> · {t("tag")} <span className="ui-mono">{tags}</span></>}
+      {empty && <> · <span className="ui-pill ui-warn">{t("reaches nothing")}</span></>}
     </>
   );
   if (team) {
     return (
       <span>
-        <span className="badge" title={t("The role reaches the hosts of this team wherever they stand, and nothing else. It follows the team as hosts are placed in it and taken out.")}>
+        <span className="ui-pill" title={t("The role reaches the hosts of this team wherever they stand, and nothing else. It follows the team as hosts are placed in it and taken out.")}>
           {t("team")} {teamName || team}
         </span>
         {narrowing}
@@ -91,13 +90,13 @@ export function ScopeText({ scope, teamName }: { scope: BindingScope | undefined
     );
   }
   if (anyScope(scope?.site) && anyScope(scope?.environment) && !owners && !tags && !empty) {
-    return <span className="badge warn">{t("whole fleet")}</span>;
+    return <span className="ui-pill ui-warn">{t("whole fleet")}</span>;
   }
   return (
     <span>
-      {anyScope(scope?.site) ? t("any site") : <>{t("site")} <span className="mono">{scope?.site}</span></>}
+      {anyScope(scope?.site) ? t("any site") : <>{t("site")} <span className="ui-mono">{scope?.site}</span></>}
       {" · "}
-      {anyScope(scope?.environment) ? t("any environment") : <>{t("environment")} <span className="mono">{scope?.environment}</span></>}
+      {anyScope(scope?.environment) ? t("any environment") : <>{t("environment")} <span className="ui-mono">{scope?.environment}</span></>}
       {narrowing}
     </span>
   );
@@ -286,26 +285,26 @@ function ConfirmCard({ title, text, action, danger = false, busy = false, disabl
   const t = useT();
   const [reason, setReason] = useState("");
   return (
-    <Card
-      className="span-3 fp-narrow"
+    <Panel
+      className="ui-col-3 ui-narrow"
       title={title}
       footer={
         <Actions>
-          <button className={danger ? "danger" : undefined} disabled={!reasonGiven(reason) || busy || disabled} onClick={() => onConfirm(reason.trim())}>
+          <button className={danger ? "ui-btn-danger" : undefined} disabled={!reasonGiven(reason) || busy || disabled} onClick={() => onConfirm(reason.trim())}>
             {busy ? t("Working…") : action}
           </button>
-          <button className="secondary" onClick={onCancel} disabled={busy}>{t("Cancel")}</button>
+          <button className="ui-btn-secondary" onClick={onCancel} disabled={busy}>{t("Cancel")}</button>
         </Actions>
       }
     >
-      <p className="source">{text}</p>
-      <FieldGrid>
+      <p className="ui-note">{text}</p>
+      <Fields>
         {children}
         <Field label={t("Reason (kept in the audit trail)")} hint={t("At least {n} characters; the button opens when they are there.", { n: REASON_MIN_LENGTH })} wide>
           <input value={reason} onChange={(e) => setReason(e.target.value)} />
         </Field>
-      </FieldGrid>
-    </Card>
+      </Fields>
+    </Panel>
   );
 }
 
@@ -362,7 +361,7 @@ export function Mappings() {
   });
 
   if (list.error instanceof ApiError && list.error.forbidden) {
-    return <Card><Empty>{t("You do not have permission to manage access.")}</Empty></Card>;
+    return <Panel><Empty>{t("You do not have permission to manage access.")}</Empty></Panel>;
   }
   if (list.error) return <ErrorBox error={list.error} />;
 
@@ -388,9 +387,9 @@ export function Mappings() {
 
       {/* The form opens beside the list it adds to; while it is closed the
           list has the row to itself. */}
-      <div className="widgets">
-        <Card
-          className={aside ? "span-6" : "span-9"}
+      <div className="ui-grid">
+        <Panel
+          className={aside ? "ui-col-6" : "ui-col-9"}
           title={t("Group mappings")}
           actions={!form && <button onClick={() => { setRemoving(null); setForm(true); }}>{t("Add mapping")}</button>}
           flush
@@ -402,13 +401,13 @@ export function Mappings() {
               columns={[
                 {
                   key: "group", head: t("Group"), rowHeader: true,
-                  cell: (mapping) => <span className="mono">{mapping.group_name}</span>,
+                  cell: (mapping) => <span className="ui-mono">{mapping.group_name}</span>,
                 },
                 { key: "role", head: t("Role"), cell: (mapping) => mapping.role },
                 {
                   key: "scope", head: t("Scope"),
                   cell: (mapping) => (
-                    <span className="source">
+                    <span className="ui-note">
                       <ScopeText scope={{
                         site: mapping.site, environment: mapping.environment,
                         owners: mapping.owners, tags: mapping.tags,
@@ -418,7 +417,7 @@ export function Mappings() {
                 },
                 {
                   key: "by", head: t("Added by"), wideOnly: true,
-                  cell: (mapping) => <span className="source">{mapping.created_by}</span>,
+                  cell: (mapping) => <span className="ui-note">{mapping.created_by}</span>,
                 },
                 {
                   key: "when", head: t("When"), wideOnly: true,
@@ -427,8 +426,8 @@ export function Mappings() {
                 {
                   key: "actions", actions: true,
                   cell: (mapping) => (
-                    <div className="row-actions">
-                      <button className="danger" onClick={() => { setForm(false); setRemoving(mapping); }}>
+                    <div className="ui-rowactions">
+                      <button className="ui-btn-danger" onClick={() => { setForm(false); setRemoving(mapping); }}>
                         {t("Remove")}
                       </button>
                     </div>
@@ -437,15 +436,15 @@ export function Mappings() {
               ]}
             />
           ) : (
-            <EmptyState action={!form && <button onClick={() => setForm(true)}>{t("Add mapping")}</button>}>
+            <Empty action={!form && <button onClick={() => setForm(true)}>{t("Add mapping")}</button>}>
               {t("No mappings. Without them nobody gets a role from the identity provider.")}
-            </EmptyState>
+            </Empty>
           )}
-        </Card>
+        </Panel>
 
         {form && (
-          <Card
-            className="span-3 fp-narrow"
+          <Panel
+            className="ui-col-3 ui-narrow"
             title={t("New mapping")}
             footer={
               <Actions>
@@ -453,11 +452,11 @@ export function Mappings() {
                         onClick={() => add.mutate()}>
                   {t("Add mapping")}
                 </button>
-                <button className="secondary" onClick={() => setForm(false)}>{t("Cancel")}</button>
+                <button className="ui-btn-secondary" onClick={() => setForm(false)}>{t("Cancel")}</button>
               </Actions>
             }
           >
-            <FieldGrid>
+            <Fields>
               <Field label={t("Identity provider group")}>
                 <input value={group} onChange={(e) => setGroup(e.target.value)} placeholder="flotestro-operators" />
               </Field>
@@ -491,8 +490,8 @@ export function Mappings() {
               <Field label={t("Reason for the change")} wide>
                 <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("e.g. new on-call team")} />
               </Field>
-            </FieldGrid>
-          </Card>
+            </Fields>
+          </Panel>
         )}
 
         {removing && (
@@ -510,20 +509,20 @@ export function Mappings() {
           />
         )}
 
-        <Card className="span-3" title={t("By role")} description={listed}>
+        <Panel className="ui-col-3" title={t("By role")} description={listed}>
           {!list.data ? (
             <Empty>{t("Loading…")}</Empty>
           ) : (
             <>
               <Breakdown tone="info" items={byRole.map((row) => ({ label: row.role, value: row.count }))} />
-              <h4 className="widget-subhead">{t("Reach")}</h4>
+              <h4 className="ui-subhead">{t("Reach")}</h4>
               <Breakdown items={[
                 { label: t("Fleet-wide"), value: fleetWide, tone: "warn" },
                 { label: t("Scoped"), value: mappings.length - fleetWide, tone: "ok" },
               ]} />
             </>
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   );
@@ -742,7 +741,7 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
   const openCreate = () => { setGrant(null); setPending(null); setCreating(true); };
 
   if (error instanceof ApiError && error.forbidden) {
-    return <Card><Empty>{t("You do not have permission to manage access.")}</Empty></Card>;
+    return <Panel><Empty>{t("You do not have permission to manage access.")}</Empty></Panel>;
   }
   if (error) return <ErrorBox error={error} />;
 
@@ -776,25 +775,25 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
       {/* The value of a new token is in this answer and nowhere else: the
           panel keeps only its digest. */}
       {issued && (
-        <div className="warning">
+        <div className="ui-banner">
           <div>
             <strong>{t("Token for {subject} issued.", { subject: issued.subject })}</strong>{" "}
             {t("Shown once; copy it now.")}{" "}
             <code>{issued.token}</code>
             {issued.token_expires_at && <> · {t("expires")} <Time value={issued.token_expires_at} /></>}
           </div>
-          <div className="operations">
+          <div className="ui-actions">
             <button onClick={() => { void copyToClipboard(issued.token).then(setCopied); }}>
               {copied ? t("Token copied") : t("Copy token")}
             </button>
-            <button className="secondary" onClick={() => setIssued(null)}>{t("Close")}</button>
+            <button className="ui-btn-secondary" onClick={() => setIssued(null)}>{t("Close")}</button>
           </div>
         </div>
       )}
 
-      <div className="widgets">
-        <Card
-          className={aside ? "span-6" : "span-9"}
+      <div className="ui-grid">
+        <Panel
+          className={aside ? "ui-col-6" : "ui-col-9"}
           title={t("Identities")}
           actions={!creating && <button onClick={openCreate}>{t("Create identity")}</button>}
           flush
@@ -827,14 +826,14 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
             <tbody>
               {shown.map((principal) => (
                 <Fragment key={principal.id}>
-                <tr className={openRecord?.id === principal.id ? "row-open" : undefined}>
-                  <td className="mono">
+                <tr className={openRecord?.id === principal.id ? "ui-row-open" : undefined}>
+                  <td className="ui-mono">
                     {/* The name is the way in. Everything this identity can
                         be done to lives in its record, which is what the row
                         used to carry as seven buttons. */}
                     <button
                       type="button"
-                      className="cell-link"
+                      className="ui-wordbtn"
                       aria-expanded={openRecord?.id === principal.id}
                       data-testid={`open-${principal.subject}`}
                       onClick={() => setOpenRecord(openRecord?.id === principal.id ? null : principal)}
@@ -842,17 +841,17 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
                       {principal.subject}
                     </button>
                     {principal.disabled_at && (
-                      <div className="source"><span className="badge unknown">{t("disabled")}</span> <Time value={principal.disabled_at} /></div>
+                      <div className="ui-note"><span className="ui-pill ui-unknown">{t("disabled")}</span> <Time value={principal.disabled_at} /></div>
                     )}
                   </td>
                   <td>{principal.display_name || "—"}</td>
-                  <td className="source">{principal.kind}</td>
+                  <td className="ui-note">{principal.kind}</td>
                   <td>
                     {/* The field may not arrive at all. The interface must not
                         fall over because of it: one missing key used to take the
                         whole screen down. */}
                     {(principal.bindings ?? []).length === 0
-                      ? <span className="source">{t("no direct assignments; roles may come from group mappings")}</span>
+                      ? <span className="ui-note">{t("no direct assignments; roles may come from group mappings")}</span>
                       : (principal.bindings ?? []).map((binding, index) => {
                           // The team is read first: a team binding leaves
                           // the site and the environment at the asterisk,
@@ -860,18 +859,18 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
                           const scope = binding.scope as BindingScope;
                           const team = scopeTeam(scope);
                           return (
-                          <div key={index} className="row-actions" style={{ justifyContent: "flex-start" }} data-testid="binding">
+                          <div key={index} className="ui-rowactions" style={{ justifyContent: "flex-start" }} data-testid="binding">
                             <span>
                               {binding.role}
-                              <span className="source">
+                              <span className="ui-note">
                                 {" "}<ScopeText scope={scope} teamName={team ? teamName(team) : undefined} />
                               </span>
                               {/* A binding with a date ends by itself; one past its date
                                   stays on the record and grants nothing. */}
                               {binding.valid_until && (
                                 new Date(binding.valid_until).getTime() <= Date.now()
-                                  ? <> <span className="badge unknown">{t("expired")}</span></>
-                                  : <span className="source"> · {t("until")} <Time value={binding.valid_until} /></span>
+                                  ? <> <span className="ui-pill ui-unknown">{t("expired")}</span></>
+                                  : <span className="ui-note"> · {t("until")} <Time value={binding.valid_until} /></span>
                               )}
                             </span>
                           </div>
@@ -880,16 +879,16 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
                   </td>
                   <td>
                     {(principal.tokens ?? []).length === 0
-                      ? <span className="source">{t("none")}</span>
+                      ? <span className="ui-note">{t("none")}</span>
                       : (principal.tokens ?? []).map((token) => (
-                          <div key={token.id} className="row-actions" style={{ justifyContent: "flex-start" }}>
+                          <div key={token.id} className="ui-rowactions" style={{ justifyContent: "flex-start" }}>
                             <span>
                               {token.description || token.id.slice(0, 8)}
-                              <span className="source">
+                              <span className="ui-note">
                                 {" "}{token.expires_at ? <>{t("expires")} <Time value={token.expires_at} /></> : t("never expires")}
                                 {token.last_used_at && <> · {t("last used")} <Time value={token.last_used_at} /></>}
                               </span>
-                              {expiresSoon(token) && <> <span className="badge warn">{t("expires soon")}</span></>}
+                              {expiresSoon(token) && <> <span className="ui-pill ui-warn">{t("expires soon")}</span></>}
                             </span>
                           </div>
                         ))}
@@ -907,21 +906,21 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
                           {t("set")}
                           {principal.password.locked_until
                             && new Date(principal.password.locked_until).getTime() > Date.now()
-                            && <> <span className="badge error">{t("locked")}</span></>}
+                            && <> <span className="ui-pill ui-error">{t("locked")}</span></>}
                         </span>
                       )
-                      : <span className="source" data-testid={`password-state-${principal.subject}`}>—</span>}
+                      : <span className="ui-note" data-testid={`password-state-${principal.subject}`}>—</span>}
                   </td>
                   <td>
                     {/* State is a word in colour, not a button. The things
                         that change it live in the record. */}
                     {principal.disabled_at
-                      ? <span className="state-off">{t("Disabled")}</span>
-                      : <span className="state-on">{t("Enabled")}</span>}
+                      ? <span className="ui-faint">{t("Disabled")}</span>
+                      : <span className="ui-ok">{t("Enabled")}</span>}
                   </td>
                 </tr>
                 {openRecord?.id === principal.id && (
-                  <tr className="detail-row">
+                  <tr className="ui-detailrow">
                     <td colSpan={7}>
                       <IdentityRecord
                         principal={principal}
@@ -957,7 +956,7 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
             </tbody>
           </table>
           )}
-        </Card>
+        </Panel>
 
         {creating && (
           <CreateIdentity
@@ -968,8 +967,8 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
         )}
 
         {grant && (
-          <Card
-            className="span-3 fp-narrow"
+          <Panel
+            className="ui-col-3 ui-narrow"
             title={t("Grant role to {subject}", { subject: grant.subject })}
             footer={
               <Actions>
@@ -977,11 +976,11 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
                         onClick={() => grantMutation.mutate()}>
                   {t("Grant role")}
                 </button>
-                <button className="secondary" onClick={() => setGrant(null)}>{t("Cancel")}</button>
+                <button className="ui-btn-secondary" onClick={() => setGrant(null)}>{t("Cancel")}</button>
               </Actions>
             }
           >
-            <FieldGrid>
+            <Fields>
               <Field label={t("Role")}>
                 <select value={grantRole} onChange={(e) => setGrantRole(e.target.value)}
                         disabled={roleNames(catalogue.data?.items).length === 0}>
@@ -1049,7 +1048,7 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
                 hint={t("The scope as the server will read it. Every category has to be satisfied at once, and a category is widened only by an asterisk.")}
                 wide
               >
-                <div className="source" data-testid="grant-preview">
+                <div className="ui-note" data-testid="grant-preview">
                   <ScopeText
                     scope={previewScope(grantScopeKind, {
                       site: grantSite, environment: grantEnvironment, team: grantTeam,
@@ -1065,8 +1064,8 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
               <Field label={t("Reason for the change")} wide>
                 <input value={grantReason} onChange={(e) => setGrantReason(e.target.value)} placeholder={t("e.g. on-call rotation until the end of the quarter")} />
               </Field>
-            </FieldGrid>
-          </Card>
+            </Fields>
+          </Panel>
         )}
 
         {pending?.kind === "disable" && (
@@ -1172,8 +1171,8 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
             server counts these over everything the search matches - so on a
             page of fifty out of 1805 the card named the wrong population,
             and the one it named was the one the reader could see. */}
-        <Card
-          className="span-3"
+        <Panel
+          className="ui-col-3"
           title={t("By kind")}
           description={showDisabled
             ? t("among the {n} disabled identities", { n: shown.length })
@@ -1184,16 +1183,16 @@ export function Identities({ initialSearch }: { initialSearch: string }) {
           ) : (
             <>
               <Breakdown tone="info" items={byKind.map(([kind, n]) => ({ label: kind, value: n }))} />
-              <h4 className="widget-subhead">{t("Direct roles")}</h4>
+              <h4 className="ui-subhead">{t("Direct roles")}</h4>
               {byRole.length === 0 ? (
-                <p className="fp-blank">{t("No direct assignments.")}</p>
+                <p className="ui-empty">{t("No direct assignments.")}</p>
               ) : (
                 <Breakdown tone="ok" items={byRole.map(([role, n]) => ({ label: role, value: n }))} />
               )}
-              <p className="fp-rest">{t("{n} without direct assignments", { n: unassigned })}</p>
+              <p className="ui-note">{t("{n} without direct assignments", { n: unassigned })}</p>
             </>
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   );
@@ -1255,13 +1254,13 @@ function IdentityRecord({
   const live = !principal.disabled_at;
 
   return (
-    <div className="record" data-testid={`record-${principal.subject}`}>
-      <div className="tabs record-tabs">
+    <div className="ui-record" data-testid={`record-${principal.subject}`}>
+      <div className="ui-tabs ui-tabs-inner">
         {tabs.map((one) => (
           <button
             key={one.key}
             type="button"
-            className={tab === one.key ? "active" : undefined}
+            className={tab === one.key ? "ui-active" : undefined}
             data-testid={`record-tab-${one.key}`}
             onClick={() => setTab(one.key)}
           >
@@ -1271,28 +1270,28 @@ function IdentityRecord({
       </div>
 
       {tab === "identity" && (
-        <div className="record-body">
-          <dl className="facts">
-            <dt>{t("Subject")}</dt><dd className="mono">{principal.subject}</dd>
+        <div className="ui-stack">
+          <dl className="ui-facts">
+            <dt>{t("Subject")}</dt><dd className="ui-mono">{principal.subject}</dd>
             <dt>{t("Name")}</dt><dd>{principal.display_name || "—"}</dd>
             <dt>{t("Kind")}</dt><dd>{principal.kind}</dd>
             <dt>{t("Status")}</dt>
             <dd>
               {live
-                ? <span className="state-on">{t("Enabled")}</span>
-                : <><span className="state-off">{t("Disabled")}</span> <Time value={principal.disabled_at} /></>}
+                ? <span className="ui-ok">{t("Enabled")}</span>
+                : <><span className="ui-faint">{t("Disabled")}</span> <Time value={principal.disabled_at} /></>}
             </dd>
           </dl>
           <Actions>
             {live
-              ? <button className="danger" disabled={busy} onClick={onDisable}>{t("Disable")}</button>
+              ? <button className="ui-btn-danger" disabled={busy} onClick={onDisable}>{t("Disable")}</button>
               : <button disabled={busy} onClick={onEnable}>{t("Enable")}</button>}
           </Actions>
         </div>
       )}
 
       {tab === "roles" && (
-        <div className="record-body">
+        <div className="ui-stack">
           {bindings.length === 0
             ? <Empty>{t("no direct assignments; roles may come from group mappings")}</Empty>
             : (
@@ -1310,13 +1309,13 @@ function IdentityRecord({
                           <ScopeText scope={scope} teamName={team ? teamName(team) : undefined} />
                           {binding.valid_until && (
                             over
-                              ? <> <span className="badge unknown">{t("expired")}</span></>
-                              : <span className="source"> · {t("until")} <Time value={binding.valid_until} /></span>
+                              ? <> <span className="ui-pill ui-unknown">{t("expired")}</span></>
+                              : <span className="ui-note"> · {t("until")} <Time value={binding.valid_until} /></span>
                           )}
                         </td>
-                        <td className="actions-cell">
+                        <td className="ui-actioncell">
                           {live && (
-                            <button className="secondary" disabled={busy} onClick={() => onRevokeRole(binding)}>
+                            <button className="ui-btn-secondary" disabled={busy} onClick={() => onRevokeRole(binding)}>
                               {t("Remove")}
                             </button>
                           )}
@@ -1329,14 +1328,14 @@ function IdentityRecord({
             )}
           {live && (
             <Actions>
-              <button className="secondary" onClick={onGrantRole}>{t("Grant role")}</button>
+              <button className="ui-btn-secondary" onClick={onGrantRole}>{t("Grant role")}</button>
             </Actions>
           )}
         </div>
       )}
 
       {tab === "tokens" && (
-        <div className="record-body">
+        <div className="ui-stack">
           {tokens.length === 0
             ? <Empty>{t("This identity has no tokens.")}</Empty>
             : (
@@ -1347,12 +1346,12 @@ function IdentityRecord({
                     <tr key={token.id}>
                       <td>{token.description || token.id.slice(0, 8)}</td>
                       <td>
-                        {token.expires_at ? <Time value={token.expires_at} /> : <span className="source">{t("never expires")}</span>}
-                        {expiresSoon(token) && <> <span className="badge warn">{t("expires soon")}</span></>}
+                        {token.expires_at ? <Time value={token.expires_at} /> : <span className="ui-note">{t("never expires")}</span>}
+                        {expiresSoon(token) && <> <span className="ui-pill ui-warn">{t("expires soon")}</span></>}
                       </td>
-                      <td>{token.last_used_at ? <Time value={token.last_used_at} /> : <span className="source">{t("never")}</span>}</td>
-                      <td className="actions-cell">
-                        <button className="danger" disabled={busy} onClick={() => onRevokeToken(token)}>{t("Revoke")}</button>
+                      <td>{token.last_used_at ? <Time value={token.last_used_at} /> : <span className="ui-note">{t("never")}</span>}</td>
+                      <td className="ui-actioncell">
+                        <button className="ui-btn-danger" disabled={busy} onClick={() => onRevokeToken(token)}>{t("Revoke")}</button>
                       </td>
                     </tr>
                   ))}
@@ -1361,7 +1360,7 @@ function IdentityRecord({
             )}
           {live && (
             <Actions>
-              <button className="secondary" disabled={busy} onClick={onIssueToken}>{t("Issue token")}</button>
+              <button className="ui-btn-secondary" disabled={busy} onClick={onIssueToken}>{t("Issue token")}</button>
             </Actions>
           )}
           <Sessions principal={principal} revoking={revokingSession} onRevoke={onRevokeSession} />
@@ -1369,7 +1368,7 @@ function IdentityRecord({
       )}
 
       {tab === "password" && (
-        <div className="record-body">
+        <div className="ui-stack">
           <PasswordPanel
             principal={principal}
             onDone={onPasswordDone}
@@ -1414,8 +1413,8 @@ function PasswordPanel({ principal, onDone, onCancel, onError }: {
   });
 
   return (
-    <div className="detail-panel">
-      <p className="source">
+    <div className="ui-detailpanel">
+      <p className="ui-note">
         {principal.password
           ? t("Set by {who} {when}.", {
               who: principal.password.set_by,
@@ -1430,7 +1429,7 @@ function PasswordPanel({ principal, onDone, onCancel, onError }: {
           })}</>
         )}
       </p>
-      <FieldGrid>
+      <Fields>
         <Field label={t("New password")} hint={t("At least 12 characters. Length is the rule; the identity's own name and the words on every list are refused.")}>
           <input type="password" value={password} autoComplete="new-password"
                  onChange={(event) => setPassword(event.target.value)} data-testid="set-password" />
@@ -1439,24 +1438,24 @@ function PasswordPanel({ principal, onDone, onCancel, onError }: {
           <input value={reason} onChange={(event) => setReason(event.target.value)}
                  placeholder={t("e.g. new operator on the rota")} data-testid="password-reason" />
         </Field>
-        <label className="toggle">
+        <label className="ui-check">
           <input type="checkbox" checked={mustChange} onChange={(event) => setMustChange(event.target.checked)} />
           {t("The owner replaces it at their next sign-in")}
         </label>
-      </FieldGrid>
-      {refusal !== "" && <p className="page-error" data-testid="weak-password">{refusal}</p>}
+      </Fields>
+      {refusal !== "" && <p className="ui-errorbox" data-testid="weak-password">{refusal}</p>}
       <Actions>
         <button disabled={password === "" || !reasonGiven(reason) || set.isPending}
                 onClick={() => set.mutate()} data-testid="save-password">
           {principal.password ? t("Replace the password") : t("Set the password")}
         </button>
         {principal.password && (
-          <button className="danger" disabled={!reasonGiven(reason) || clear.isPending}
+          <button className="ui-btn-danger" disabled={!reasonGiven(reason) || clear.isPending}
                   onClick={() => clear.mutate()} data-testid="clear-password">
             {t("Remove the password")}
           </button>
         )}
-        <button className="secondary" onClick={onCancel}>{t("Cancel")}</button>
+        <button className="ui-btn-secondary" onClick={onCancel}>{t("Cancel")}</button>
       </Actions>
     </div>
   );
@@ -1474,8 +1473,8 @@ function Sessions({ principal, revoking, onRevoke }: {
     retry: false,
   });
   if (error) return <ErrorBox error={error} />;
-  if (!data) return <p className="source">{t("Loading…")}</p>;
-  if (data.items.length === 0) return <p className="source">{t("No live browser session. Tokens are not sessions.")}</p>;
+  if (!data) return <p className="ui-note">{t("Loading…")}</p>;
+  if (data.items.length === 0) return <p className="ui-note">{t("No live browser session. Tokens are not sessions.")}</p>;
   return (
     <table>
       <thead>
@@ -1484,22 +1483,22 @@ function Sessions({ principal, revoking, onRevoke }: {
       <tbody>
         {data.items.map((session) => (
           <tr key={session.id}>
-            <td className="mono" title={session.id}>
+            <td className="ui-mono" title={session.id}>
               {session.id.slice(0, 12)}
-              {session.acr && <span className="source"> acr={session.acr}</span>}
+              {session.acr && <span className="ui-note"> acr={session.acr}</span>}
             </td>
             <td><Time value={session.created_at} /></td>
             <td><Time value={session.last_seen_at} /></td>
             <td>
               <Time value={session.expires_at} />
-              <div className="source">{t("or idle")} <Time value={session.idle_expires_at} /></div>
+              <div className="ui-note">{t("or idle")} <Time value={session.idle_expires_at} /></div>
             </td>
-            <td className="source">
+            <td className="ui-note">
               {session.remote_addr || "—"}
               {session.user_agent && <div title={session.user_agent}>{session.user_agent.slice(0, 60)}</div>}
             </td>
-            <td className="actions-cell">
-              <button className="danger" disabled={revoking === session.id} onClick={() => onRevoke(session)}>
+            <td className="ui-actioncell">
+              <button className="ui-btn-danger" disabled={revoking === session.id} onClick={() => onRevoke(session)}>
                 {t("End session")}
               </button>
             </td>
@@ -1547,19 +1546,19 @@ function CreateIdentity({ onCreated, onCancel, onError }: {
     onError,
   });
   return (
-    <Card
-      className="span-3 fp-narrow"
+    <Panel
+      className="ui-col-3 ui-narrow"
       title={t("New identity")}
       footer={
         <Actions>
           <button disabled={!subject.trim() || !reasonGiven(reason) || !ttlValid || create.isPending} onClick={() => create.mutate()}>
             {create.isPending ? t("Working…") : t("Create identity")}
           </button>
-          <button className="secondary" onClick={onCancel} disabled={create.isPending}>{t("Cancel")}</button>
+          <button className="ui-btn-secondary" onClick={onCancel} disabled={create.isPending}>{t("Cancel")}</button>
         </Actions>
       }
     >
-      <FieldGrid>
+      <Fields>
         <Field label={t("Subject")} hint={t("The name the trail records; it cannot be changed later.")}>
           <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="backup-runner" />
         </Field>
@@ -1591,7 +1590,7 @@ function CreateIdentity({ onCreated, onCancel, onError }: {
             </Field>
           </>
         )}
-        <label className="toggle">
+        <label className="ui-check">
           <input type="checkbox" checked={issueToken} onChange={(e) => setIssueToken(e.target.checked)} />
           {t("Issue the first token now")}
         </label>
@@ -1603,8 +1602,8 @@ function CreateIdentity({ onCreated, onCancel, onError }: {
         <Field label={t("Reason (kept in the audit trail)")} hint={t("At least {n} characters; the button opens when they are there.", { n: REASON_MIN_LENGTH })} wide>
           <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("e.g. nightly backup automation")} />
         </Field>
-      </FieldGrid>
-    </Card>
+      </Fields>
+    </Panel>
   );
 }
 
@@ -1667,7 +1666,7 @@ export function Roles() {
   });
 
   if (catalogue.error) return <ErrorBox error={catalogue.error} />;
-  if (!catalogue.data) return <Card><Empty>{t("Loading…")}</Empty></Card>;
+  if (!catalogue.data) return <Panel><Empty>{t("Loading…")}</Empty></Panel>;
 
   const roles = catalogue.data.items;
   const own = roles.filter((role) => !role.built_in);
@@ -1679,9 +1678,9 @@ export function Roles() {
   return (
     <>
       <Warning error={warning} close={() => setWarning(null)} />
-      <div className="widgets">
-        <Card
-          className={aside ? "span-8" : "span-12"}
+      <div className="ui-grid">
+        <Panel
+          className={aside ? "ui-col-8" : "ui-col-12"}
           title={t("Roles of this installation")}
           description={t("A role defined here carries exactly the permissions it was given. The product's own roles are below and cannot be changed.")}
           actions={!aside && (
@@ -1690,9 +1689,9 @@ export function Roles() {
           flush
         >
           {own.length === 0 ? (
-            <EmptyState action={!aside && <button onClick={() => setEditing("new")}>{t("Define a role")}</button>}>
+            <Empty action={!aside && <button onClick={() => setEditing("new")}>{t("Define a role")}</button>}>
               {t("No role of this installation's own. The product's six are described below; define one when none of them is the job somebody actually does.")}
-            </EmptyState>
+            </Empty>
           ) : (
             <DataTable
               rows={own}
@@ -1700,11 +1699,11 @@ export function Roles() {
               columns={[
                 {
                   key: "role", head: t("Role"), rowHeader: true,
-                  cell: (role) => <span className="mono">{role.role}</span>,
+                  cell: (role) => <span className="ui-mono">{role.role}</span>,
                 },
                 {
                   key: "what", head: t("What it is for"), wideOnly: true,
-                  cell: (role) => <span className="source">{role.description || "—"}</span>,
+                  cell: (role) => <span className="ui-note">{role.description || "—"}</span>,
                 },
                 {
                   key: "permissions", head: t("Permissions"), numeric: true,
@@ -1713,16 +1712,16 @@ export function Roles() {
                 { key: "use", head: t("In use"), cell: (role) => <RoleUsage role={role} /> },
                 {
                   key: "by", head: t("Defined by"), wideOnly: true,
-                  cell: (role) => <span className="source">{role.created_by || "—"}</span>,
+                  cell: (role) => <span className="ui-note">{role.created_by || "—"}</span>,
                 },
                 {
                   key: "actions", actions: true,
                   cell: (role) => (
-                    <div className="row-actions">
-                      <button className="secondary" onClick={() => { setRemoving(null); setEditing(role); }}>
+                    <div className="ui-rowactions">
+                      <button className="ui-btn-secondary" onClick={() => { setRemoving(null); setEditing(role); }}>
                         {t("Edit")}
                       </button>
-                      <button className="danger" onClick={() => { setEditing(null); setRemoving(role); }}>
+                      <button className="ui-btn-danger" onClick={() => { setEditing(null); setRemoving(role); }}>
                         {t("Remove")}
                       </button>
                     </div>
@@ -1731,7 +1730,7 @@ export function Roles() {
               ]}
             />
           )}
-        </Card>
+        </Panel>
 
         {editing && (
           <RoleEditor
@@ -1759,8 +1758,8 @@ export function Roles() {
           />
         )}
 
-        <Card
-          className="span-12"
+        <Panel
+          className="ui-col-12"
           title={t("What each role may do")}
           description={t("Read down a column to learn what a role may do, along a row to learn who may do a thing.")}
           flush
@@ -1778,7 +1777,7 @@ export function Roles() {
                   {roles.map((role) => (
                     <th scope="col" key={role.role}>
                       {role.role}
-                      {!role.built_in && <> <span className="badge">{t("own")}</span></>}
+                      {!role.built_in && <> <span className="ui-pill">{t("own")}</span></>}
                     </th>
                   ))}
                 </tr>
@@ -1786,10 +1785,10 @@ export function Roles() {
               <tbody>
                 {rows.map((permission) => (
                   <tr key={permission}>
-                    <td className="mono">{permission}</td>
+                    <td className="ui-mono">{permission}</td>
                     {roles.map((role) => (
                       <td key={role.role} title={`${role.role}: ${permission}`}>
-                        {matrix.has(role.role, permission) ? <span className="badge ok">{t("yes")}</span> : <span className="source">—</span>}
+                        {matrix.has(role.role, permission) ? <span className="ui-pill ui-ok">{t("yes")}</span> : <span className="ui-note">—</span>}
                       </td>
                     ))}
                   </tr>
@@ -1797,7 +1796,7 @@ export function Roles() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   );
@@ -1814,10 +1813,10 @@ export function Roles() {
 function RoleUsage({ role }: { role: RoleInfo }) {
   const t = useT();
   if (role.bindings === undefined || role.mappings === undefined) {
-    return <span className="badge unknown">{t("not known")}</span>;
+    return <span className="ui-pill ui-unknown">{t("not known")}</span>;
   }
   const total = role.bindings + role.mappings;
-  if (total === 0) return <span className="source">{t("nobody")}</span>;
+  if (total === 0) return <span className="ui-note">{t("nobody")}</span>;
   return (
     <span title={t("{bindings} direct, {mappings} through a group", { bindings: role.bindings, mappings: role.mappings })}>
       {t("{n} grants", { n: total })}
@@ -1877,8 +1876,8 @@ function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
   const nameValid = role !== null || /^[a-z][a-z0-9_]{1,62}$/.test(name.trim());
 
   return (
-    <Card
-      className="span-4 fp-narrow"
+    <Panel
+      className="ui-col-4 ui-narrow"
       title={role ? t("Edit the role {role}", { role: role.role }) : t("Define a role")}
       footer={
         <Actions>
@@ -1888,25 +1887,25 @@ function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
           >
             {role ? t("Save the role") : t("Define the role")}
           </button>
-          <button className="secondary" onClick={onCancel}>{t("Cancel")}</button>
+          <button className="ui-btn-secondary" onClick={onCancel}>{t("Cancel")}</button>
         </Actions>
       }
     >
-      <FieldGrid>
+      <Fields>
         {!role && (
           <Field
             label={t("Name")}
             hint={t("Lower case letters, digits and underscores. It is what every binding, mapping and audit line carries, and it cannot be changed later.")}
             wide
           >
-            <input className="mono" value={name} onChange={(e) => setName(e.target.value)} placeholder="shift_lead" />
+            <input className="ui-mono" value={name} onChange={(e) => setName(e.target.value)} placeholder="shift_lead" />
           </Field>
         )}
         <Field label={t("What it is for")} wide>
           <input value={description} onChange={(e) => setDescription(e.target.value)}
                  placeholder={t("e.g. restarts services on the night shift")} />
         </Field>
-      </FieldGrid>
+      </Fields>
 
       {vocabulary === undefined ? (
         <Empty>{t("The permissions are still being read; a role cannot be written against a list that is not here.")}</Empty>
@@ -1916,9 +1915,9 @@ function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
             <input placeholder={t("permission, e.g. unit.restart")} value={filter}
                    onChange={(e) => setFilter(e.target.value)} />
           </Toolbar>
-          <div className="permission-picker" data-testid="permission-picker">
+          <div className="ui-stack" data-testid="permission-picker">
             {groups.map((group) => (
-              <fieldset className="permission-group" key={group}>
+              <fieldset className="ui-stack-xs" key={group}>
                 <legend>{group}</legend>
                 {offered.filter((one) => one.group === group).map((one) => (
                   <label key={one.permission}>
@@ -1928,7 +1927,7 @@ function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
                       onChange={() => toggle(one.permission)}
                       data-testid={`permission-${one.permission}`}
                     />{" "}
-                    <span className="mono">{one.permission}</span>
+                    <span className="ui-mono">{one.permission}</span>
                   </label>
                 ))}
               </fieldset>
@@ -1939,17 +1938,17 @@ function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
       )}
 
       {losing.length > 0 && (
-        <p className="part-reason">
+        <p className="ui-tile-reason">
           {t("Everybody holding this role loses: {permissions}", { permissions: losing.join(", ") })}
         </p>
       )}
-      <FieldGrid>
+      <Fields>
         <Field label={t("Reason for the change")} wide>
           <input value={reason} onChange={(e) => setReason(e.target.value)}
                  placeholder={t("e.g. the night shift needs no reboots")} />
         </Field>
-      </FieldGrid>
-    </Card>
+      </Fields>
+    </Panel>
   );
 }
 
@@ -1966,10 +1965,10 @@ export function Review() {
     retry: false,
   });
   if (error instanceof ApiError && error.forbidden) {
-    return <Card><Empty>{t("You do not have permission to manage access.")}</Empty></Card>;
+    return <Panel><Empty>{t("You do not have permission to manage access.")}</Empty></Panel>;
   }
   if (error) return <ErrorBox error={error} />;
-  if (!data) return <Card><Empty>{t("Loading…")}</Empty></Card>;
+  if (!data) return <Panel><Empty>{t("Loading…")}</Empty></Panel>;
 
   const count = (flag: ReviewFlag) => data.items.filter((principal) => principal.flags.includes(flag)).length;
   const shown = data.items.filter((principal) =>
@@ -1977,18 +1976,18 @@ export function Review() {
 
   return (
     <>
-      <StatGrid>
+      <Stats>
         <Stat label={t("Identities")} value={data.count} hint={t("enabled identities")} />
         <Stat label={t("Flagged")} value={data.flagged} tone={data.flagged > 0 ? "warn" : "ok"} />
         <Stat label={t("Unused {n} days", { n: data.thresholds.unused_days })} value={count("unused_90_days")} tone={count("unused_90_days") > 0 ? "warn" : "ok"} />
         <Stat label={t("Admins without expiry")} value={count("admin_without_expiry")} tone={count("admin_without_expiry") > 0 ? "warn" : "ok"} />
         <Stat label={t("Expiring within {n} days", { n: data.thresholds.expires_soon_days })} value={count("expires_soon")} tone={count("expires_soon") > 0 ? "warn" : "ok"} />
         <Stat label={t("Tokens older than a year")} value={count("token_older_than_year")} tone={count("token_older_than_year") > 0 ? "warn" : "ok"} />
-      </StatGrid>
+      </Stats>
 
-      <div className="widgets">
-        <Card
-          className="span-12"
+      <div className="ui-grid">
+        <Panel
+          className="ui-col-12"
           title={t("Access review")}
           description={t("Reviewed {when}. Every enabled identity with its roles, tokens and last use; the flags say what to look at.", { when: new Date(data.reviewed_at).toLocaleString() })}
           actions={
@@ -2002,13 +2001,13 @@ export function Review() {
                 <option value="token_older_than_year">{t("Tokens older than a year")}</option>
               </select>
               {/* A plain link: the browser carries the session, and the answer is a file. */}
-              <a className="button" href="/api/v1/access/review?format=csv" download>{t("Export CSV")}</a>
+              <a className="ui-btn" href="/api/v1/access/review?format=csv" download>{t("Export CSV")}</a>
             </>
           }
           flush
         >
           {shown.length === 0 ? (
-            <EmptyState>{t("No identity matches the filter.")}</EmptyState>
+            <Empty>{t("No identity matches the filter.")}</Empty>
           ) : (
             <table>
               <thead>
@@ -2022,7 +2021,7 @@ export function Review() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   );
@@ -2038,23 +2037,23 @@ function ReviewRow({ principal }: { principal: ReviewedPrincipal }) {
   return (
     <tr>
       <td>
-        <span className="mono">{principal.subject}</span>
-        {principal.display_name && <div className="source">{principal.display_name}</div>}
+        <span className="ui-mono">{principal.subject}</span>
+        {principal.display_name && <div className="ui-note">{principal.display_name}</div>}
       </td>
-      <td className="source">{principal.kind}</td>
+      <td className="ui-note">{principal.kind}</td>
       <td>
         {principal.bindings.length === 0
-          ? <span className="source">{t("no direct assignments; roles may come from group mappings")}</span>
+          ? <span className="ui-note">{t("no direct assignments; roles may come from group mappings")}</span>
           : principal.bindings.map((binding, index) => {
             const scope = binding.scope as BindingScope;
             const team = scopeTeam(scope);
             return (
               <div key={index}>
                 {binding.role}
-                <span className="source"> <ScopeText scope={scope} teamName={team ? teamName(team) : undefined} /></span>
+                <span className="ui-note"> <ScopeText scope={scope} teamName={team ? teamName(team) : undefined} /></span>
                 {binding.expired
-                  ? <> <span className="badge unknown">{t("expired")}</span></>
-                  : binding.valid_until && <span className="source"> · {t("until")} <Time value={binding.valid_until} /></span>}
+                  ? <> <span className="ui-pill ui-unknown">{t("expired")}</span></>
+                  : binding.valid_until && <span className="ui-note"> · {t("until")} <Time value={binding.valid_until} /></span>}
               </div>
             );
           })}
@@ -2063,29 +2062,29 @@ function ReviewRow({ principal }: { principal: ReviewedPrincipal }) {
         {principal.last_seen_at
           ? <>
               <Time value={principal.last_seen_at} />
-              <div className="source">
+              <div className="ui-note">
                 {principal.last_login_at && <>{t("login")} <Time value={principal.last_login_at} /></>}
                 {principal.last_login_at && principal.last_token_use_at && " · "}
                 {principal.last_token_use_at && <>{t("token")} <Time value={principal.last_token_use_at} /></>}
               </div>
             </>
-          : <span className="badge unknown">{t("never")}</span>}
+          : <span className="ui-pill ui-unknown">{t("never")}</span>}
       </td>
       <td>
         {principal.tokens.length === 0
-          ? <span className="source">{t("none")}</span>
+          ? <span className="ui-note">{t("none")}</span>
           : principal.tokens.map((token) => (
               <div key={token.id}>
                 {token.description || token.id.slice(0, 8)}
-                <span className="source"> · {t("issued")} <Time value={token.created_at} /></span>
-                {expiresSoon(token) && <> <span className="badge warn">{t("expires soon")}</span></>}
+                <span className="ui-note"> · {t("issued")} <Time value={token.created_at} /></span>
+                {expiresSoon(token) && <> <span className="ui-pill ui-warn">{t("expires soon")}</span></>}
               </div>
             ))}
       </td>
       <td>
         {principal.flags.length === 0
-          ? <span className="badge ok">{t("nothing to review")}</span>
-          : principal.flags.map((flag) => <span key={flag} className="badge warn">{t(FLAG_LABELS[flag])}</span>)}
+          ? <span className="ui-pill ui-ok">{t("nothing to review")}</span>
+          : principal.flags.map((flag) => <span key={flag} className="ui-pill ui-warn">{t(FLAG_LABELS[flag])}</span>)}
       </td>
     </tr>
   );
@@ -2127,7 +2126,7 @@ function ReauthenticationNeeded({ error, close }: { error: ApiError; close: () =
 
   if (whoami.data?.authentication === "password") {
     return (
-      <div className="warning" data-testid="reauthenticate-password">
+      <div className="ui-banner" data-testid="reauthenticate-password">
         <div>
           <strong>{t("Re-authentication required.")}</strong> {error.message}{" "}
           {done
@@ -2135,7 +2134,7 @@ function ReauthenticationNeeded({ error, close }: { error: ApiError; close: () =
             : t("Give the password you sign in with.")}
         </div>
         {!done && (
-          <div className="operations">
+          <div className="ui-actions">
             <input type="password" value={password} autoComplete="current-password"
                    onChange={(event) => setPassword(event.target.value)}
                    data-testid="reauthenticate-field" />
@@ -2143,23 +2142,23 @@ function ReauthenticationNeeded({ error, close }: { error: ApiError; close: () =
                     data-testid="reauthenticate-submit">
               {t("Confirm")}
             </button>
-            <button className="secondary" onClick={close}>{t("Close")}</button>
+            <button className="ui-btn-secondary" onClick={close}>{t("Close")}</button>
           </div>
         )}
         {done && (
-          <div className="operations"><button className="secondary" onClick={close}>{t("Close")}</button></div>
+          <div className="ui-actions"><button className="ui-btn-secondary" onClick={close}>{t("Close")}</button></div>
         )}
-        {refusal !== "" && <div className="page-error">{refusal}</div>}
+        {refusal !== "" && <div className="ui-errorbox">{refusal}</div>}
       </div>
     );
   }
 
   return (
-    <div className="warning">
+    <div className="ui-banner">
       <div>
         <strong>{t("Re-authentication required.")}</strong> {error.message}
       </div>
-      <div className="operations">
+      <div className="ui-actions">
         <button
           onClick={() => {
             const target = encodeURIComponent(window.location.pathname + window.location.search);
@@ -2168,7 +2167,7 @@ function ReauthenticationNeeded({ error, close }: { error: ApiError; close: () =
         >
           {t("Sign in again")}
         </button>
-        <button className="secondary" onClick={close}>{t("Close")}</button>
+        <button className="ui-btn-secondary" onClick={close}>{t("Close")}</button>
       </div>
     </div>
   );
@@ -2186,9 +2185,9 @@ export function Warning({ error, close }: { error: ApiError | null; close: () =>
     return <ReauthenticationNeeded error={error} close={close} />;
   }
   return (
-    <div className="warning">
+    <div className="ui-banner">
       <div>{error.message}</div>
-      <div className="operations"><button onClick={close}>{t("Close")}</button></div>
+      <div className="ui-actions"><button onClick={close}>{t("Close")}</button></div>
     </div>
   );
 }

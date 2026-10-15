@@ -146,24 +146,24 @@ describe("the status screen", () => {
 
   it("puts every part on the screen at once and marks the ones that are not fine", async () => {
     draw(<Status />);
-    await waitFor(() => expect(document.querySelectorAll(".part").length).toBeGreaterThan(0));
-    const parts = Array.from(document.querySelectorAll(".part"));
-    const of = (name: string) => parts.find((one) => one.querySelector(".part-head")?.textContent?.includes(name));
+    await waitFor(() => expect(document.querySelectorAll(".ui-tile").length).toBeGreaterThan(0));
+    const parts = Array.from(document.querySelectorAll(".ui-tile"));
+    const of = (name: string) => parts.find((one) => one.querySelector(".ui-tile-head")?.textContent?.includes(name));
     // The four parts the server judged, all drawn, none behind a click.
     expect(parts).toHaveLength(4);
-    expect(of("Database")?.className).toContain("ok");
-    expect(of("Cryptographic state")?.className).toContain("error");
+    expect(of("Database")?.className).toContain("ui-ok");
+    expect(of("Cryptographic state")?.className).toContain("ui-error");
     // Unknown is not fine, and it is marked as its own thing rather than green.
-    expect(of("Monitoring")?.className).toContain("unknown");
+    expect(of("Monitoring")?.className).toContain("ui-unknown");
   });
 
   it("says the one fact worth reading first on every part", async () => {
     draw(<Status />);
-    await waitFor(() => expect(document.querySelectorAll(".part-summary").length).toBeGreaterThan(0));
-    const parts = Array.from(document.querySelectorAll(".part"));
+    await waitFor(() => expect(document.querySelectorAll(".ui-tile-note").length).toBeGreaterThan(0));
+    const parts = Array.from(document.querySelectorAll(".ui-tile"));
     const summary = (name: string) =>
-      parts.find((one) => one.querySelector(".part-head")?.textContent?.includes(name))
-        ?.querySelector(".part-summary")?.textContent;
+      parts.find((one) => one.querySelector(".ui-tile-head")?.textContent?.includes(name))
+        ?.querySelector(".ui-tile-note")?.textContent;
     expect(summary("Replicas")).toContain("2 alive");
     expect(summary("Database")).toContain("1.4 ms round trip");
   });
@@ -175,11 +175,11 @@ describe("the status screen", () => {
   it("draws each replica as its own list of named fields, never as JSON", async () => {
     draw(<Status />);
     await waitFor(() => expect(screen.getAllByText("Pool max conns").length).toBe(2));
-    const part = screen.getAllByText("Pool max conns")[0].closest(".part") as HTMLElement;
+    const part = screen.getAllByText("Pool max conns")[0].closest(".ui-tile") as HTMLElement;
     // Seven fields per replica: a table of seven columns inside a tile is a
     // row with its end cut off, so each record is a list of its own.
     expect(within(part).queryByRole("table")).toBeNull();
-    expect(part.querySelectorAll(".records > dl")).toHaveLength(2);
+    expect(part.querySelectorAll(".ui-stack-s > dl")).toHaveLength(2);
     expect(part.textContent).not.toContain('"gateway_id"');
     expect(part.textContent).not.toContain("[object Object]");
   });
@@ -187,7 +187,7 @@ describe("the status screen", () => {
   it("draws the keys of the installation and their versions without JSON", async () => {
     draw(<Status />);
     await waitFor(() => expect(screen.getByText("Versions per key")).toBeInTheDocument());
-    const part = screen.getByText("Versions per key").closest(".part") as HTMLElement;
+    const part = screen.getByText("Versions per key").closest(".ui-tile") as HTMLElement;
     expect(part.textContent).not.toContain("{");
     expect(part.textContent).toContain("k-7f3a");
   });

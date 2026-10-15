@@ -25,14 +25,14 @@ test.beforeEach(() => {
 
 /** The page header of the directory page. */
 function header(page: Page) {
-  return page.locator(".page-header").getByRole("heading", { name: "Identity directory" });
+  return page.locator(".ui-pagehead").getByRole("heading", { name: "Identity directory" });
 }
 
 /** Opens the directory page and switches to the named tab. */
 async function openTab(page: Page, name: string) {
   await page.goto("/directory");
   await expect(header(page)).toBeVisible();
-  const tabs = page.locator(".tabs").first();
+  const tabs = page.locator(".ui-tabs").first();
   await tabs.getByRole("button", { name, exact: true }).click();
   await expect(tabs.getByRole("button", { name, exact: true })).toHaveClass(/active/);
 }
@@ -46,7 +46,7 @@ async function collection<T>(request: APIRequestContext, path: string): Promise<
 
 /** The tab has settled: its table is there, or the sentence that says it is empty. */
 async function expectSettled(page: Page, empty: RegExp) {
-  const table = page.locator(".card table").first();
+  const table = page.locator(".ui-panel table").first();
   await expect(table.or(page.getByText(empty)).first()).toBeVisible();
 }
 
@@ -57,7 +57,7 @@ test("users are listed one row per account", async ({ page, request }) => {
   if (users.length === 0) {
     await expect(page.getByText("No accounts.")).toBeVisible();
   } else {
-    const table = page.locator(".card table").first();
+    const table = page.locator(".ui-panel table").first();
     await expect(table.locator("tbody tr")).toHaveCount(users.length);
     await expect(table.getByRole("cell", { name: users[0].uid, exact: true })).toBeVisible();
   }
@@ -143,7 +143,7 @@ test("services are listed read-only", async ({ page }) => {
 test("DNS shows the zones and the records of the first one", async ({ page }) => {
   const { errors } = watchErrors(page);
   await openTab(page, "DNS");
-  await expect(page.locator(".toolbar select").first()).toBeVisible();
+  await expect(page.locator(".ui-toolbar select").first()).toBeVisible();
   await expectSettled(page, /^This zone has no records the panel can read\.$/);
   await expectHealthy(page, errors);
 });

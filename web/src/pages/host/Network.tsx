@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { Time, Empty } from "../../components/ui";
+import { Time } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import {
   Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
@@ -13,6 +13,7 @@ import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useModuleAccess } from "../../lib/actions";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 type Address = {
   family: string;
@@ -325,7 +326,7 @@ export function Network() {
       <Message text={message} />
 
       {snapshot?.unavailable_reason && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>{t("Network state could not be read: {reason}", { reason: snapshot.unavailable_reason })}</span>
         </p>
       )}
@@ -333,7 +334,7 @@ export function Network() {
       {/* A missing write mechanism is an answer, not a failure: the module
           works, only read-only, and says why. */}
       {!snapshot?.write_adapter && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>
             {snapshot?.read_only_reason
               ? t("Read-only on this host: {reason}", { reason: snapshot.read_only_reason })
@@ -346,7 +347,7 @@ export function Network() {
           says so, because a plan computed against silence would happily
           take a member another bond already owns. */}
       {snapshot?.layering_unavailable_reason && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>
             {t("Bonds, bridges and VLANs could not be read: {reason}. The addresses above are still what the host reports.", { reason: snapshot.layering_unavailable_reason })}
           </span>
@@ -356,7 +357,7 @@ export function Network() {
       {/* IPv6 switched off host-wide is a fact the operator has to see
           before ordering an IPv6 address the host would silently drop. */}
       {snapshot?.ipv6_disabled && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>
             {t("This host has IPv6 switched off for every interface. An IPv6 address, route or router advertisement setting ordered here would never take effect, and the host refuses it rather than writing it into the void.")}
           </span>
@@ -380,20 +381,20 @@ export function Network() {
         <Facts>
           <Fact label={t("Interface")}>
             {snapshot?.management_interface
-              ? <span className="hm-mono">{snapshot.management_interface}</span>
-              : <span className="badge unknown">{t("unknown")}</span>}
+              ? <span className="ui-mono">{snapshot.management_interface}</span>
+              : <span className="ui-pill ui-unknown">{t("unknown")}</span>}
           </Fact>
           <Fact label={t("Address")}>
-            {snapshot?.management_address ? <span className="hm-mono">{snapshot.management_address}</span> : "—"}
+            {snapshot?.management_address ? <span className="ui-mono">{snapshot.management_address}</span> : "—"}
           </Fact>
           <Fact label={t("Write adapter")}>
             {snapshot?.write_adapter
-              ? <span className="badge ok">{adapterLabel(snapshot.write_adapter)}</span>
-              : <span className="badge unknown">{t("none")}</span>}
+              ? <span className="ui-pill ui-ok">{adapterLabel(snapshot.write_adapter)}</span>
+              : <span className="ui-pill ui-unknown">{t("none")}</span>}
           </Fact>
           {/* The routes are a count of their own, not a state of an
               interface: they stand here, not in the bar of link states. */}
-          <Fact label={t("Routes")}>{snapshot?.unavailable_reason ? <span className="badge unknown">{t("unknown")}</span> : routes.length}</Fact>
+          <Fact label={t("Routes")}>{snapshot?.unavailable_reason ? <span className="ui-pill ui-unknown">{t("unknown")}</span> : routes.length}</Fact>
           <Fact label={t("By kind")} wide>
             {kinds.length ? <Breakdown items={kinds.map(([kind, count]) => ({ label: kind, value: count }))} /> : "—"}
           </Fact>
@@ -405,7 +406,7 @@ export function Network() {
         count={visible.length}
         span={12}
         tools={
-          <label className="toggle">
+          <label className="ui-check">
             <input
               type="checkbox"
               checked={all}
@@ -420,18 +421,18 @@ export function Network() {
           <thead>
             <tr>
               <th scope="col">{t("Interface")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("Layering")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Addresses")}</th>
-              <th scope="col" className="hm-num">MTU</th><th scope="col">{t("Link")}</th><th scope="col">MAC</th><th scope="col">{t("Driver")}</th>{writable && <th scope="col">{t("Actions")}</th>}
+              <th scope="col" className="ui-numeric">MTU</th><th scope="col">{t("Link")}</th><th scope="col">MAC</th><th scope="col">{t("Driver")}</th>{writable && <th scope="col">{t("Actions")}</th>}
             </tr>
           </thead>
           <tbody>
             {visible.map((iface) => (
-              <tr key={iface.name} className={edited?.name === iface.name ? "selected" : undefined}>
+              <tr key={iface.name} className={edited?.name === iface.name ? "ui-row-marked" : undefined}>
                 <td>
-                  <span className="hm-mono hm-primary">{iface.name}</span>
+                  <span className="ui-mono ui-name">{iface.name}</span>
                   {/* The management interface is the one the command came
                       through. Changing that one is changing the branch we sit
                       on. */}
-                  {iface.management && <span className="badge"> {t("management")}</span>}
+                  {iface.management && <span className="ui-pill"> {t("management")}</span>}
                 </td>
                 <td>{iface.kind || "—"}</td>
                 {/* What the interface is made of, or what owns it. An
@@ -439,10 +440,10 @@ export function Network() {
                     worth speaking of - the layer above carries it - and
                     changing it as if it had is how a bond comes apart by
                     accident. */}
-                <td className="hm-mono">
+                <td className="ui-mono">
                   {layerSummary(iface) || "—"}
                   {iface.master && layerKind(iface) === "" && (
-                    <span className="source"> · {t("its address lives on {owner}", { owner: iface.master })}</span>
+                    <span className="ui-note"> · {t("its address lives on {owner}", { owner: iface.master })}</span>
                   )}
                 </td>
                 {/* The state is the kernel's word. A loopback has no
@@ -450,7 +451,7 @@ export function Network() {
                     and not a fault; the hover says so. */}
                 <td>
                   <span
-                    className={iface.oper_state === "up" ? "badge ok" : iface.oper_state === "down" ? "badge" : "badge unknown"}
+                    className={iface.oper_state === "up" ? "ui-pill ui-ok" : iface.oper_state === "down" ? "ui-pill" : "ui-pill ui-unknown"}
                     title={iface.oper_state === "unknown" && iface.kind === "loopback"
                       ? t("The kernel reports no operational state for a loopback; this is its normal state.")
                       : t("The operational state as the kernel reports it.")}
@@ -458,30 +459,30 @@ export function Network() {
                     {iface.oper_state}
                   </span>
                 </td>
-                <td className="hm-mono">
+                <td className="ui-mono">
                   {(iface.addresses ?? []).length === 0
                     ? "—"
                     : (iface.addresses ?? []).map((address) => (
                         <div key={address.address}>
                           {address.address}
-                          {!address.permanent && <span className="source"> · {t("temporary")}</span>}
-                          {address.source && <span className="source"> · {address.source}</span>}
+                          {!address.permanent && <span className="ui-note"> · {t("temporary")}</span>}
+                          {address.source && <span className="ui-note"> · {address.source}</span>}
                         </div>
                       ))}
                 </td>
-                <td className="hm-num">{iface.mtu}</td>
+                <td className="ui-numeric">{iface.mtu}</td>
                 {/* An unknown carrier and an unknown speed stay unknown: a
                     missing value is not the same as a missing cable. */}
                 <td>
                   {iface.carrier === undefined ? (
-                    <span className="badge unknown">{t("unknown")}</span>
+                    <span className="ui-pill ui-unknown">{t("unknown")}</span>
                   ) : iface.carrier ? (
                     iface.speed_mbps ? `${t("up")}, ${iface.speed_mbps} Mbps` : t("up")
                   ) : (
                     t("no carrier")
                   )}
                 </td>
-                <td className="hm-mono">{iface.mac || "—"}</td>
+                <td className="ui-mono">{iface.mac || "—"}</td>
                 <td>{iface.driver || "—"}</td>
                 {/* Without a write mechanism there is nothing to edit: the
                     panel does not change a configuration the host will not
@@ -489,7 +490,7 @@ export function Network() {
                 {writable && (
                   <td>
                     {access.anyAllowed && (
-                      <button className="secondary" onClick={() => setEdited(iface)}>
+                      <button className="ui-btn-secondary" onClick={() => setEdited(iface)}>
                         {t("Change")}
                       </button>
                     )}
@@ -518,7 +519,7 @@ export function Network() {
         span={12}
         tools={writable ? (
           <ActionGuard action="network.link.apply" host={host.id}>
-            <button className="secondary" onClick={() => setBuilding((open) => !open)}>
+            <button className="ui-btn-secondary" onClick={() => setBuilding((open) => !open)}>
               {building ? t("Cancel") : t("Build a layer")}
             </button>
           </ActionGuard>
@@ -539,11 +540,11 @@ export function Network() {
               {layers.map((iface) => (
                 <tr key={iface.name}>
                   <td>
-                    <span className="hm-mono hm-primary">{iface.name}</span>
-                    {iface.management && <span className="badge"> {t("management")}</span>}
+                    <span className="ui-mono ui-name">{iface.name}</span>
+                    {iface.management && <span className="ui-pill"> {t("management")}</span>}
                   </td>
                   <td>{layerKind(iface)}</td>
-                  <td className="hm-mono">
+                  <td className="ui-mono">
                     {iface.vlan
                       ? t("on {parent}", { parent: iface.vlan.parent || "—" })
                       : layerMembers(iface).length === 0
@@ -555,20 +556,20 @@ export function Network() {
                             return (
                               <div key={member}>
                                 {member}
-                                {state !== "" && <span className="source"> · {state}</span>}
-                                {carrying && <span className="badge ok"> {t("carrying")}</span>}
+                                {state !== "" && <span className="ui-note"> · {state}</span>}
+                                {carrying && <span className="ui-pill ui-ok"> {t("carrying")}</span>}
                               </div>
                             );
                           })}
                   </td>
                   <td>{layerSettings(iface, t)}</td>
                   <td>
-                    <span className={iface.oper_state === "up" ? "badge ok" : "badge"}>{iface.oper_state}</span>
+                    <span className={iface.oper_state === "up" ? "ui-pill ui-ok" : "ui-pill"}>{iface.oper_state}</span>
                     {/* A bond that failed over is a bond running on its
                         spare: the operator asks this page exactly that. */}
                     {iface.bond?.primary && iface.bond.active_member &&
                       iface.bond.active_member !== iface.bond.primary && (
-                        <span className="badge warn"> {t("failed over")}</span>
+                        <span className="ui-pill ui-warn"> {t("failed over")}</span>
                       )}
                   </td>
                   {writable && (
@@ -602,18 +603,18 @@ export function Network() {
             <thead>
               <tr>
                 <th scope="col">{t("Destination")}</th><th scope="col">{t("Gateway")}</th><th scope="col">{t("Interface")}</th>
-                <th scope="col">{t("Source")}</th><th scope="col">{t("Protocol")}</th><th scope="col" className="hm-num">{t("Metric")}</th><th scope="col">{t("Family")}</th>
+                <th scope="col">{t("Source")}</th><th scope="col">{t("Protocol")}</th><th scope="col" className="ui-numeric">{t("Metric")}</th><th scope="col">{t("Family")}</th>
               </tr>
             </thead>
             <tbody>
               {routes.map((route, i) => (
                 <tr key={`${route.family}-${route.destination}-${route.interface}-${i}`}>
-                  <td className="hm-mono">{route.destination}</td>
-                  <td className="hm-mono">{route.gateway || "—"}</td>
-                  <td className="hm-mono">{route.interface || "—"}</td>
-                  <td className="hm-mono">{route.source || "—"}</td>
+                  <td className="ui-mono">{route.destination}</td>
+                  <td className="ui-mono">{route.gateway || "—"}</td>
+                  <td className="ui-mono">{route.interface || "—"}</td>
+                  <td className="ui-mono">{route.source || "—"}</td>
                   <td title={route.protocol || undefined}>{t(routeProtocolWords(route.protocol))}</td>
-                  <td className="hm-num">{route.metric}</td>
+                  <td className="ui-numeric">{route.metric}</td>
                   <td>{route.family === "inet6" ? "IPv6" : "IPv4"}</td>
                 </tr>
               ))}
@@ -701,13 +702,13 @@ function InterfaceChange({
     <Section
       title={t("Change {iface}", { iface: iface.name })}
       description={t("The host arms a rollback before it applies anything and cancels it only after the agent proves it can still reach the panel.")}
-      tools={<button className="secondary" onClick={onCancel}>{t("Cancel")}</button>}
+      tools={<button className="ui-btn-secondary" onClick={onCancel}>{t("Cancel")}</button>}
       span={12}
     >
       {/* Changing the management interface is changing the branch we sit
           on: the operator is to read this before, not see it after. */}
       {management && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>
             {t("This is the interface the panel talks to. If the change breaks it, the host will roll back on its own after the rollback window — but until then it is unreachable, and no further command will arrive.")}
           </span>
@@ -846,7 +847,7 @@ function InterfaceChange({
             setting and report none of them back. The panel says so instead
             of offering the fields. */}
         {ipv6Off && (
-          <p className="warning">
+          <p className="ui-banner">
             <span>{t("IPv6 is switched off on {iface}, so nothing written there would take effect. That is a kernel setting, not a profile one.", { iface: iface.name })}</span>
           </p>
         )}
@@ -993,7 +994,7 @@ function LayerBuild({
     <Section
       title={t("Build a layer")}
       description={t("The host computes its own plan first and refuses what would not hold: a member another layer owns, a bond of one member, a VLAN on a parent it does not have, or a layer that would swallow the interface the panel talks over.")}
-      tools={<button className="secondary" onClick={onCancel}>{t("Cancel")}</button>}
+      tools={<button className="ui-btn-secondary" onClick={onCancel}>{t("Cancel")}</button>}
       span={12}
     >
       <Form>
@@ -1071,7 +1072,7 @@ function LayerBuild({
         {kind === "bridge" && (
           <Fields>
             <Field label={t("Spanning tree")}>
-              <label className="toggle">
+              <label className="ui-check">
                 <input type="checkbox" checked={stp} onChange={(e) => setStp(e.target.checked)} />
                 {t("Keep a loop between switches from flooding the segment")}
               </label>
@@ -1080,7 +1081,7 @@ function LayerBuild({
         )}
 
         {problems.length > 0 && (
-          <p className="warning">
+          <p className="ui-banner">
             <span>{problems[0]}</span>
           </p>
         )}
@@ -1134,7 +1135,7 @@ function LayerRemoveButton({ iface, onIntent }: { iface: Interface; onIntent: (i
   const order = layerRemoveOrder(iface.name, ROW_ROLLBACK_SECONDS);
   return (
     <button
-      className="secondary"
+      className="ui-btn-secondary"
       disabled={!orderReady(order)}
       title={refusalOf(t, order)}
       onClick={() =>

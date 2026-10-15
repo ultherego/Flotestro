@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Card } from "./layout";
-import { Empty, ErrorBox } from "./ui";
+import { Panel } from "../ui/kit";
+import { ErrorBox } from "./ui";
+import { Empty } from "../ui/kit";
 import {
   readableDetail, remainingSteps, setupChecklistQuery, stateLabels, stepGuide, stepTone,
 } from "../lib/setup";
 import { useT } from "../i18n";
+import { toneClass } from "../ui/kit";
 
 /**
  * What a panel on its first run still has to settle, condensed.
@@ -27,31 +29,31 @@ export function FirstRunCard() {
   // for no provider and no group mapping here.
   const remaining = list ? remainingSteps(list.steps) : [];
   return (
-    <Card
+    <Panel
       tone="warn"
       title={t("No host is enrolled yet")}
       description={list
         ? t("{done} of {total} required steps done", { done: list.done, total: list.total })
         : undefined}
-      actions={<Link className="button primary" to="/setup">{t("Open the first-run checklist")}</Link>}
+      actions={<Link className="ui-btn ui-btn-primary" to="/setup">{t("Open the first-run checklist")}</Link>}
     >
       {checklist.error ? <ErrorBox error={checklist.error} /> : !list ? (
         <Empty>{t("Loading…")}</Empty>
       ) : remaining.length === 0 ? (
         <Empty>{t("Every required step is done")}</Empty>
       ) : (
-        <ol className="steps">
+        <ol className="ui-stack">
           {remaining.map((step) => (
             <li key={step.key}>
               {/* Each step leads where it is dealt with, which the server names
                   along with the state; the sentence under it is the server's too. */}
               <Link to={step.path}>{words[step.key]?.title ?? step.key}</Link>{" "}
-              <span className={`badge ${stepTone(step.state)}`}>{labels[step.state]}</span>
-              <div className="source">{readableDetail(step.detail)}</div>
+              <span className={`ui-pill ${toneClass(stepTone(step.state))}`}>{labels[step.state]}</span>
+              <div className="ui-note">{readableDetail(step.detail)}</div>
             </li>
           ))}
         </ol>
       )}
-    </Card>
+    </Panel>
   );
 }

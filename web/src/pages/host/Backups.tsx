@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { ErrorBox, Time, Empty } from "../../components/ui";
+import { ErrorBox, Time } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import {
   Check, Field, Fields, Foot, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets,
@@ -13,6 +13,7 @@ import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard"
 import { useConfirm } from "../../components/Modal";
 import { useToast } from "../../components/Toast";
 import { useT } from "../../i18n";
+import { Empty, toneClass } from "../../ui/kit";
 
 export type Definition = {
   id: string;
@@ -94,7 +95,7 @@ type Intent = { action: string; label: string; description: string; payload: Rec
 /** A size in human-readable form. A missing value is not zero. */
 function Size({ bytes }: { bytes?: number }) {
   const t = useT();
-  if (bytes === undefined || bytes === null) return <span className="badge unknown">{t("unknown")}</span>;
+  if (bytes === undefined || bytes === null) return <span className="ui-pill ui-unknown">{t("unknown")}</span>;
   const units = ["B", "KiB", "MiB", "GiB", "TiB"];
   let value = bytes;
   let i = 0;
@@ -117,7 +118,7 @@ function StatusBadge({ status, age }: { status: string; age?: number }) {
         : age < 48
           ? t("{n} h old", { n: Math.round(age) })
           : t("{n} d old", { n: Math.round(age / 24) });
-  return <span className={`badge ${cls}`}>{caption}</span>;
+  return <span className={`ui-pill ${toneClass(cls)}`}>{caption}</span>;
 }
 
 /**
@@ -317,9 +318,9 @@ export function Backups() {
         }
       />
       <ReadOnlyModuleNotice host={host.id} actions={BACKUP_CHANGES} />
-      <p className="hm-freshness">
+      <p className="ui-freshness">
         {tools.map((tool) => (
-          <span key={tool.name} className={`badge ${tool.available ? "ok" : ""}`}>
+          <span key={tool.name} className={`ui-pill ${tool.available ? "ui-ok" : ""}`}>
             {tool.name}
             {tool.available && tool.version ? ` · ${tool.version.split("\n")[0]}` : ""}
             {!tool.available ? ` · ${t("not installed")}` : ""}
@@ -357,11 +358,11 @@ export function Backups() {
             ]}
           />
         ) : (
-          <p className="source">{t("Loading…")}</p>
+          <p className="ui-note">{t("Loading…")}</p>
         )}
         {byTool.length > 0 && (
           <>
-            <p className="widget-subhead">{t("By tool")}</p>
+            <p className="ui-subhead">{t("By tool")}</p>
             <Breakdown items={byTool.map(([tool, count]) => ({ label: tool, value: count }))} />
           </>
         )}
@@ -386,16 +387,16 @@ export function Backups() {
             <thead>
               <tr>
                 <th scope="col">{t("Definition")}</th><th scope="col">{t("Destination")}</th><th scope="col">{t("Last copy")}</th>
-                <th scope="col">{t("Verified")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col">{t("Actions")}</th>
+                <th scope="col">{t("Verified")}</th><th scope="col" className="ui-numeric">{t("Size")}</th><th scope="col">{t("Actions")}</th>
               </tr>
             </thead>
             <tbody>
               {definitions.map((item) => (
-                <tr key={item.name} className={selected === item.name ? "selected" : undefined}>
+                <tr key={item.name} className={selected === item.name ? "ui-row-marked" : undefined}>
                   <td>
                     <button
                       type="button"
-                      className="hm-link hm-primary"
+                      className="ui-btn-link ui-name"
                       onClick={() => {
                         // The plan belongs to the definition it was read for.
                         setPlanJob("");
@@ -404,13 +405,13 @@ export function Backups() {
                     >
                       {item.name}
                     </button>
-                    <div className="source">
+                    <div className="ui-note">
                       {item.tool}
                       {item.runbook ? ` · ${item.runbook}` : ""}
                       {item.paths?.length ? ` · ${item.paths.join(", ")}` : ""}
                     </div>
                   </td>
-                  <td className="source hm-mono">
+                  <td className="ui-note ui-mono">
                     {item.repository}
                     {item.password_secret && (
                       <div>{t("password from {secret}", { secret: item.password_secret })}</div>
@@ -419,25 +420,25 @@ export function Backups() {
                   <td>
                     <StatusBadge status={item.status} age={item.age_hours} />
                     {item.last_success_at && (
-                      <div className="source"><Time value={item.last_success_at} /></div>
+                      <div className="ui-note"><Time value={item.last_success_at} /></div>
                     )}
                   </td>
                   <td>
                     {/* A copy nobody has ever read back is a promise, not a
                         safeguard - and it is to look like one. */}
                     {item.unverified ? (
-                      <span className="badge warn">{t("not verified")}</span>
+                      <span className="ui-pill ui-warn">{t("not verified")}</span>
                     ) : (
                       <>
-                        <span className="badge ok">{t("verified")}</span>
-                        <div className="source"><Time value={item.last_verify_at} /></div>
+                        <span className="ui-pill ui-ok">{t("verified")}</span>
+                        <div className="ui-note"><Time value={item.last_verify_at} /></div>
                       </>
                     )}
                   </td>
-                  <td className="hm-num">
+                  <td className="ui-numeric">
                     <Size bytes={item.repository_size} />
                     {item.snapshots !== undefined && (
-                      <div className="source">{t("{n} copies", { n: item.snapshots })}</div>
+                      <div className="ui-note">{t("{n} copies", { n: item.snapshots })}</div>
                     )}
                   </td>
                   <td>
@@ -445,10 +446,10 @@ export function Backups() {
                         what this operator may place on this host; the
                         definition itself is the panel's record and stays
                         editable. */}
-                    <div className="operations">
+                    <div className="ui-actions">
                       <ActionGuard action="backup.plan" host={host.id}>
                         <button
-                          className="secondary"
+                          className="ui-btn-secondary"
                           disabled={host.connection_state !== "online"}
                           onClick={() =>
                             request.mutate({
@@ -466,7 +467,7 @@ export function Backups() {
                       </ActionGuard>
                       <ActionGuard action="backup.run" host={host.id}>
                         <button
-                          className="secondary"
+                          className="ui-btn-secondary"
                           onClick={() =>
                             setIntent({
                               action: "backup.run",
@@ -483,7 +484,7 @@ export function Backups() {
                       </ActionGuard>
                       <ActionGuard action="backup.verify" host={host.id}>
                         <button
-                          className="secondary"
+                          className="ui-btn-secondary"
                           onClick={() =>
                             setIntent({
                               action: "backup.verify",
@@ -499,12 +500,12 @@ export function Backups() {
                         </button>
                       </ActionGuard>
                       <button
-                        className="secondary"
+                        className="ui-btn-secondary"
                         onClick={() => { setEditing(item); setForm(true); }}
                       >
                         {t("Edit")}
                       </button>
-                      <button className="hm-danger" onClick={() => remove.mutate(item.name)}>
+                      <button className="ui-btn-danger" onClick={() => remove.mutate(item.name)}>
                         {t("Forget")}
                       </button>
                     </div>
@@ -521,7 +522,7 @@ export function Backups() {
       {repositoryState && (
         <Section title={t("Copies in the repository")} count={repositoryState.snapshots?.length} span={selected ? 6 : 12} flush>
           {repositoryState.unavailable_reason ? (
-            <p className="warning">
+            <p className="ui-banner">
               <span>{t("The repository could not be read: {reason}", { reason: repositoryState.unavailable_reason })}</span>
             </p>
           ) : !repositoryState.snapshots?.length ? (
@@ -534,13 +535,13 @@ export function Backups() {
               <tbody>
                 {[...repositoryState.snapshots].reverse().map((snapshot) => (
                   <tr key={snapshot.id}>
-                    <td className="hm-mono">{snapshot.id}</td>
+                    <td className="ui-mono">{snapshot.id}</td>
                     <td><Time value={snapshot.time} /></td>
-                    <td className="source hm-mono">{snapshot.paths?.join(", ")}</td>
+                    <td className="ui-note ui-mono">{snapshot.paths?.join(", ")}</td>
                     <td>
                       <ActionGuard action="backup.restore" host={host.id}>
                         <button
-                          className="danger"
+                          className="ui-btn-danger"
                           disabled={!definition}
                           onClick={() => askRestoreTarget(snapshot)}
                         >
@@ -571,7 +572,7 @@ export function Backups() {
           ) : (
             <Table>
               <thead>
-                <tr><th scope="col">{t("When")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Result")}</th><th scope="col">{t("Copy")}</th><th scope="col" className="hm-num">{t("Added")}</th><th scope="col">{t("By")}</th></tr>
+                <tr><th scope="col">{t("When")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Result")}</th><th scope="col">{t("Copy")}</th><th scope="col" className="ui-numeric">{t("Added")}</th><th scope="col">{t("By")}</th></tr>
               </thead>
               <tbody>
                 {(history.data?.items ?? []).map((run, index) => (
@@ -580,15 +581,15 @@ export function Backups() {
                     <td>{run.kind}</td>
                     <td>
                       {run.outcome === "succeeded" ? (
-                        <span className="badge ok">{t("succeeded")}</span>
+                        <span className="ui-pill ui-ok">{t("succeeded")}</span>
                       ) : (
-                        <span className="badge error">{t("failed")}</span>
+                        <span className="ui-pill ui-error">{t("failed")}</span>
                       )}
-                      {run.message && <div className="source">{run.message}</div>}
+                      {run.message && <div className="ui-note">{run.message}</div>}
                     </td>
-                    <td className="source hm-mono">{run.snapshot_id || "—"}</td>
-                    <td className="hm-num">{run.bytes_added === undefined ? "—" : <Size bytes={run.bytes_added} />}</td>
-                    <td className="source">{run.started_by}</td>
+                    <td className="ui-note ui-mono">{run.snapshot_id || "—"}</td>
+                    <td className="ui-numeric">{run.bytes_added === undefined ? "—" : <Size bytes={run.bytes_added} />}</td>
+                    <td className="ui-note">{run.started_by}</td>
                   </tr>
                 ))}
               </tbody>

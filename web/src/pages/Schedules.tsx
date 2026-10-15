@@ -4,8 +4,8 @@ import { Link } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
 import type { Campaign } from "../lib/types";
 import { Board } from "../components/board";
-import { ErrorBox, Empty, JobState, Time } from "../components/ui";
-import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
+import { ErrorBox, JobState, Time } from "../components/ui";
+import { Actions, Empty, Field, Fields, PageHead, Panel, toneClass, Toolbar } from "../ui/kit";
 import { useConfirm } from "../components/Modal";
 import { absoluteTime, toInstant } from "../lib/format";
 import { useT } from "../i18n";
@@ -406,7 +406,7 @@ export function Schedules() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         title={t("Scheduled campaigns")}
         description={t("A schedule places a campaign order at its moment.")}
         help={<p>{t("A schedule places a campaign order at its moment; the campaign then waits for its approval like any other. The calendar shows what the fleet has ahead.")}</p>}
@@ -418,7 +418,7 @@ export function Schedules() {
         }
       />
 
-      {errorMessage && <p className="page-error">{errorMessage}</p>}
+      {errorMessage && <p className="ui-errorbox">{errorMessage}</p>}
       {runOutcome && (
         <p>
           {t("The order was placed:")}{" "}
@@ -428,16 +428,16 @@ export function Schedules() {
       )}
 
       {editing && (
-        <Card
+        <Panel
           title={editingID ? t("Edit the schedule") : t("New schedule")}
           description={t("The order is the body of a campaign as the Bulk workspace sends it. It is checked now for what can never be placed, and at every moment for everything else - the hosts, the rights, the window - with the refusal kept on the schedule.")}
         >
-          <FieldGrid>
+          <Fields>
             <Field label={t("Name")}>
               <input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
             </Field>
             <Field label={t("Timezone")} hint={t("The IANA zone the hours of the recurrence are read in; the first run is typed in the browser's zone.")}>
-              <input value={editing.timezone} onChange={(e) => setEditing({ ...editing, timezone: e.target.value })} className="mono" />
+              <input value={editing.timezone} onChange={(e) => setEditing({ ...editing, timezone: e.target.value })} className="ui-mono" />
             </Field>
             <Field label={t("First run")}
               hint={editing.recurrence.freq
@@ -448,28 +448,28 @@ export function Schedules() {
             <RecurrenceFields value={editing.recurrence} onChange={(recurrence) => setEditing({ ...editing, recurrence })} />
             <Field label={t("Order (JSON)")} wide
               hint={t("What POST /api/v1/campaigns takes: name, action, payload, selector and the rollout policy. The reason below is carried into it when it names none.")}>
-              <textarea rows={12} className="mono" spellCheck={false} value={editing.orderText}
+              <textarea rows={12} className="ui-mono" spellCheck={false} value={editing.orderText}
                 onChange={(e) => setEditing({ ...editing, orderText: e.target.value })} />
             </Field>
             <Field label={t("Reason or change reference")} wide
               hint={t("Kept in the audit trail with the schedule and shown to the approver of every campaign it places.")}>
               <input value={editing.reason} onChange={(e) => setEditing({ ...editing, reason: e.target.value })} />
             </Field>
-            <div className="field">
-              <label className="toggle">
+            <div className="ui-field">
+              <label className="ui-check">
                 <input type="checkbox" checked={editing.enabled} onChange={(e) => setEditing({ ...editing, enabled: e.target.checked })} />{" "}
                 {t("enabled")}
               </label>
             </div>
-          </FieldGrid>
+          </Fields>
           <Actions>
             <button onClick={() => check?.body && save.mutate(check.body)} disabled={save.isPending || !check?.body}>
               {save.isPending ? t("Saving…") : editingID ? t("Save the schedule") : t("Create the schedule")}
             </button>
-            <button className="secondary" onClick={() => { setEditing(null); setEditingID(""); }}>{t("Cancel")}</button>
-            {check?.problem && <span className="source">{problemWords(t, check.problem)}</span>}
+            <button className="ui-btn-secondary" onClick={() => { setEditing(null); setEditingID(""); }}>{t("Cancel")}</button>
+            {check?.problem && <span className="ui-note">{problemWords(t, check.problem)}</span>}
           </Actions>
-        </Card>
+        </Panel>
       )}
 
       <Board
@@ -481,14 +481,14 @@ export function Schedules() {
         drawn={{
           schedules: (
             <>
-              <Card className="span-12" title={t("Schedules")} flush
+              <Panel className="ui-col-12" title={t("Schedules")} flush
           description={t("The next to fire first. A schedule places orders under the rights of whoever last wrote it, read again at every moment.")}>
           {!schedules.data ? (
             <Empty>{t("Loading…")}</Empty>
           ) : items.length === 0 ? (
-            <EmptyState action={<Link className="button primary" to="/bulk">{t("Schedule one from the Bulk workspace")}</Link>}>
+            <Empty action={<Link className="ui-btn ui-btn-primary" to="/bulk">{t("Schedule one from the Bulk workspace")}</Link>}>
               {t("No schedules.")}
-            </EmptyState>
+            </Empty>
           ) : (
             <table>
               <thead>
@@ -502,12 +502,12 @@ export function Schedules() {
                   <tr key={schedule.id}>
                     <td>
                       {schedule.name}
-                      {!schedule.enabled && <> <span className="badge unknown">{t("disabled")}</span></>}
+                      {!schedule.enabled && <> <span className="ui-pill ui-unknown">{t("disabled")}</span></>}
                     </td>
-                    <td className="mono">{String(schedule.order.action ?? "")}</td>
+                    <td className="ui-mono">{String(schedule.order.action ?? "")}</td>
                     <td>
                       {describeRecurrence(t, schedule.recurrence)}
-                      {schedule.recurrence && <span className="source"> · {schedule.timezone}</span>}
+                      {schedule.recurrence && <span className="ui-note"> · {schedule.timezone}</span>}
                     </td>
                     <td>{nextRunWords(t, schedule, now)}</td>
                     <td>
@@ -516,18 +516,18 @@ export function Schedules() {
                         <> · <Link to={`/campaigns/${schedule.last_campaign_id}`}>{t("campaign")}</Link></>
                       )}
                       {schedule.last_error && (
-                        <span className="badge error" title={schedule.last_error}> {t("refused")}</span>
+                        <span className="ui-pill ui-error" title={schedule.last_error}> {t("refused")}</span>
                       )}
                     </td>
                     <td>{schedule.created_by}</td>
                     <td>
                       <Toolbar>
-                        <button className="secondary" onClick={() => askRunNow(schedule)} disabled={runNow.isPending}>{t("Run now")}</button>
-                        <button className="secondary" onClick={() => { setEditing(formOf(schedule)); setEditingID(schedule.id); setErrorMessage(""); }}>{t("Edit")}</button>
-                        <button className="secondary" onClick={() => askToggle(schedule)} disabled={toggle.isPending}>
+                        <button className="ui-btn-secondary" onClick={() => askRunNow(schedule)} disabled={runNow.isPending}>{t("Run now")}</button>
+                        <button className="ui-btn-secondary" onClick={() => { setEditing(formOf(schedule)); setEditingID(schedule.id); setErrorMessage(""); }}>{t("Edit")}</button>
+                        <button className="ui-btn-secondary" onClick={() => askToggle(schedule)} disabled={toggle.isPending}>
                           {schedule.enabled ? t("Disable") : t("Enable")}
                         </button>
-                        <button className="danger" onClick={() => askRemove(schedule)} disabled={remove.isPending}>{t("Delete")}</button>
+                        <button className="ui-btn-danger" onClick={() => askRemove(schedule)} disabled={remove.isPending}>{t("Delete")}</button>
                       </Toolbar>
                     </td>
                   </tr>
@@ -535,18 +535,18 @@ export function Schedules() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
             </>
           ),
           calendar: (
             <>
-              <Card className="span-12" title={t("Maintenance calendar")}
+              <Panel className="ui-col-12" title={t("Maintenance calendar")}
           description={t("Hosts in maintenance, campaign windows and the moments of the schedules, in the browser's zone.")}
           actions={
             <Toolbar>
-              <button className="secondary" onClick={() => setMonth(shiftMonth(month, -1))}>{t("Previous month")}</button>
-              <span className="mono">{month.year}-{pad(month.month + 1)}</span>
-              <button className="secondary" onClick={() => setMonth(shiftMonth(month, 1))}>{t("Next month")}</button>
+              <button className="ui-btn-secondary" onClick={() => setMonth(shiftMonth(month, -1))}>{t("Previous month")}</button>
+              <span className="ui-mono">{month.year}-{pad(month.month + 1)}</span>
+              <button className="ui-btn-secondary" onClick={() => setMonth(shiftMonth(month, 1))}>{t("Next month")}</button>
             </Toolbar>
           }>
           {calendar.error ? (
@@ -554,7 +554,7 @@ export function Schedules() {
           ) : (
             <MonthView year={month.year} month={month.month} entries={calendar.data?.items ?? []} loading={!calendar.data} />
           )}
-        </Card>
+        </Panel>
             </>
           )
         }}
@@ -586,11 +586,11 @@ export function RecurrenceFields({ value, onChange }: { value: RecurrenceForm; o
         </Field>
       )}
       {value.freq === "WEEKLY" && (
-        <div className="field">
-          <span className="field-label">{t("Weekdays")}</span>
+        <div className="ui-field">
+          <span className="ui-field-label">{t("Weekdays")}</span>
           <Toolbar>
             {WEEKDAYS.map((day) => (
-              <label key={day} className="toggle">
+              <label key={day} className="ui-check">
                 <input type="checkbox" checked={value.weekdays.includes(day)}
                   onChange={(e) => onChange({
                     ...value,
@@ -638,25 +638,25 @@ function MonthView({ year, month, entries, loading }: { year: number; month: num
   const time = (value?: string | null) => value ? absoluteTime(value).slice(11, 16) : "";
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4 }}>
-      {labels.map((label) => <div key={label} className="source" style={{ textAlign: "center" }}>{label}</div>)}
+      {labels.map((label) => <div key={label} className="ui-note" style={{ textAlign: "center" }}>{label}</div>)}
       {weeks.flat().map((date) => {
         const key = dayKey(date);
         const inMonth = date.getMonth() === month;
         const list = byDay.get(key) ?? [];
         return (
-          <div key={key} className={`calendar-day${inMonth ? "" : " other-month"}${key === today ? " today" : ""}`}>
-            <div className="source">{date.getDate()}</div>
-            {loading && inMonth && list.length === 0 && <span className="source">…</span>}
+          <div key={key} className={`ui-calendar-day${inMonth ? "" : " ui-calendar-other"}${key === today ? " ui-calendar-today" : ""}`}>
+            <div className="ui-note">{date.getDate()}</div>
+            {loading && inMonth && list.length === 0 && <span className="ui-note">…</span>}
             {list.map((entry, index) => (
-              <div key={`${entry.kind}-${entry.id}-${index}`} className="calendar-entry"
+              <div key={`${entry.kind}-${entry.id}-${index}`} className="ui-calendar-entry"
                 title={entryTitle(t, entry)}>
-                <span className={`badge ${entryTone(entry)}`}>{kindWord(t, entry.kind)}</span>{" "}
+                <span className={`ui-pill ${toneClass(entryTone(entry))}`}>{kindWord(t, entry.kind)}</span>{" "}
                 {/* A window shows the hour it opens on the day it opens;
                     on the days it runs through, the name alone. */}
                 {entry.kind === "campaign_window"
-                  ? <><span className="source">{startsOn(entry, key) ? `${time(entry.start)} ` : ""}</span><Link to={`/campaigns/${entry.id}`}>{entry.name}</Link></>
+                  ? <><span className="ui-note">{startsOn(entry, key) ? `${time(entry.start)} ` : ""}</span><Link to={`/campaigns/${entry.id}`}>{entry.name}</Link></>
                   : entry.kind === "host_window"
-                    ? <><span className="source">{startsOn(entry, key) ? `${time(entry.start)} ` : ""}</span><Link to={`/hosts/${entry.id}`}>{entry.name}</Link></>
+                    ? <><span className="ui-note">{startsOn(entry, key) ? `${time(entry.start)} ` : ""}</span><Link to={`/hosts/${entry.id}`}>{entry.name}</Link></>
                     : <span>{time(entry.start)} {entry.name}</span>}
               </div>
             ))}

@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { SystemHistoryEntry, SystemSnapshot } from "../../lib/types";
-import { Time as Timestamp, Empty } from "../../components/ui";
+import { Time as Timestamp } from "../../components/ui";
 import { Meter } from "../../components/widgets";
 import { absoluteTime, bytes } from "../../lib/format";
 import {
@@ -11,6 +11,7 @@ import {
 } from "./shared";
 import { adapterSegment } from "./Overview";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 /**
  * The reason a fact is missing, or nothing when the fact was read. A fact
@@ -76,7 +77,7 @@ export function System() {
   /** A value, or the reason it is unknown; an empty string that was read is a dash. */
   const fact = (key: string, value: string | number | undefined | null) => {
     const reason = factReason(missing, key);
-    if (reason) return <span className="badge unknown" title={reason}>{t("unknown")}</span>;
+    if (reason) return <span className="ui-pill ui-unknown" title={reason}>{t("unknown")}</span>;
     if (value === undefined || value === null || value === "") return "—";
     return value;
   };
@@ -97,7 +98,7 @@ export function System() {
           alone; the page says so rather than showing every section as
           unknown for no reason. */}
       {!platformRead && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>{t("This agent reports the basic facts only; the platform picture needs an agent with the system module.")}</span>
         </p>
       )}
@@ -108,9 +109,9 @@ export function System() {
       <Section title={t("At a glance")} span={12} flush>
         <Facts>
           <Fact label={t("Kernel")}>
-            <span className="hm-mono">{snapshot.kernel?.release || snapshot.os?.kernel || <Unknown />}</span>
+            <span className="ui-mono">{snapshot.kernel?.release || snapshot.os?.kernel || <Unknown />}</span>
             {(snapshot.kernel?.architecture || snapshot.os?.architecture) && (
-              <span className="source"> · {snapshot.kernel?.architecture || snapshot.os?.architecture}</span>
+              <span className="ui-note"> · {snapshot.kernel?.architecture || snapshot.os?.architecture}</span>
             )}
           </Fact>
           <Fact label={t("Release")}>
@@ -122,13 +123,13 @@ export function System() {
           <Fact label={t("Uptime")}>
             {uptime === undefined ? <Unknown /> : <span title={t("as of the last read")}>{uptimeText(uptime)}</span>}
             {uptime !== undefined && snapshot.observed_at && (
-              <span className="source"> · {t("as of")} <Timestamp value={snapshot.observed_at} /></span>
+              <span className="ui-note"> · {t("as of")} <Timestamp value={snapshot.observed_at} /></span>
             )}
-            {snapshot.boot?.booted_at && <span className="source"> · {t("booted")} {absoluteTime(snapshot.boot.booted_at)}</span>}
+            {snapshot.boot?.booted_at && <span className="ui-note"> · {t("booted")} {absoluteTime(snapshot.boot.booted_at)}</span>}
           </Fact>
           <Fact label={t("Runs on")}>
             {virtualization ? (virtualization === "none" ? t("bare metal") : virtualization) : <Unknown />}
-            {snapshot.virtualization?.source && <span className="source"> · {snapshot.virtualization.source}</span>}
+            {snapshot.virtualization?.source && <span className="ui-note"> · {snapshot.virtualization.source}</span>}
           </Fact>
         </Facts>
       </Section>
@@ -136,25 +137,25 @@ export function System() {
       <Section title={t("Operating system")} span={6} flush>
         <Facts>
           <Fact label={t("Distribution")}>{fact("distribution", snapshot.distribution?.pretty_name || snapshot.os?.pretty_name)}</Fact>
-          <Fact label={t("Identifier")}><span className="hm-mono">{fact("distribution", snapshot.distribution?.id || snapshot.os?.distribution)}</span></Fact>
+          <Fact label={t("Identifier")}><span className="ui-mono">{fact("distribution", snapshot.distribution?.id || snapshot.os?.distribution)}</span></Fact>
           <Fact label={t("Version")}>{fact("distribution", snapshot.distribution?.version || snapshot.os?.version)}</Fact>
           <Fact label={t("Codename")}>{fact("distribution", snapshot.distribution?.codename || snapshot.os?.codename)}</Fact>
           <Fact label={t("Family")}>{snapshot.os?.family || "—"}</Fact>
           <Fact label={t("Like")}>{(snapshot.distribution?.like ?? []).join(", ") || "—"}</Fact>
           <Fact label={t("Timezone")}>{fact("timezone", snapshot.timezone)}</Fact>
-          <Fact label={t("Hostname")}><span className="hm-mono">{snapshot.hostname || "—"}</span></Fact>
+          <Fact label={t("Hostname")}><span className="ui-mono">{snapshot.hostname || "—"}</span></Fact>
         </Facts>
       </Section>
 
       <Section title={t("Kernel")} span={6} flush>
         <Facts>
-          <Fact label={t("Release")}><span className="hm-mono">{fact("kernel", snapshot.kernel?.release || snapshot.os?.kernel)}</span></Fact>
+          <Fact label={t("Release")}><span className="ui-mono">{fact("kernel", snapshot.kernel?.release || snapshot.os?.kernel)}</span></Fact>
           <Fact label={t("Architecture")}>{fact("kernel", snapshot.kernel?.architecture || snapshot.os?.architecture)}</Fact>
           <Fact label={t("Build")} wide>{fact("kernel", snapshot.kernel?.version)}</Fact>
           <Fact label={t("Command line")} wide>
             {factReason(missing, "kernel.cmdline")
               ? fact("kernel.cmdline", undefined)
-              : <code className="hm-mono">{snapshot.kernel?.cmdline || "—"}</code>}
+              : <code className="ui-mono">{snapshot.kernel?.cmdline || "—"}</code>}
           </Fact>
         </Facts>
       </Section>
@@ -174,9 +175,9 @@ export function System() {
               ? fact("cpu", undefined)
               : (
                 <>
-                  {(snapshot.cpu?.flags ?? []).map((flag) => <span key={flag} className="badge">{flag}</span>)}
+                  {(snapshot.cpu?.flags ?? []).map((flag) => <span key={flag} className="ui-pill">{flag}</span>)}
                   {snapshot.cpu?.flag_count !== undefined && (
-                    <span className="source"> {t("{count} flags in total", { count: snapshot.cpu.flag_count })}</span>
+                    <span className="ui-note"> {t("{count} flags in total", { count: snapshot.cpu.flag_count })}</span>
                   )}
                 </>
               )}
@@ -218,10 +219,10 @@ export function System() {
           <Fact label={t("Family")}>{fact("dmi", snapshot.dmi?.family)}</Fact>
           <Fact label={t("Board")}>{fact("dmi", [snapshot.dmi?.board_vendor, snapshot.dmi?.board_name].filter(Boolean).join(" "))}</Fact>
           <Fact label={t("Chassis")}>{fact("dmi", snapshot.dmi?.chassis_type)}</Fact>
-          <Fact label={t("Serial number")}><span className="hm-mono">{fact("dmi.serial", snapshot.dmi?.serial)}</span></Fact>
-          <Fact label={t("UUID")}><span className="hm-mono">{fact("dmi.uuid", snapshot.dmi?.uuid)}</span></Fact>
-          <Fact label={t("Board serial")}><span className="hm-mono">{fact("dmi.serial", snapshot.dmi?.board_serial)}</span></Fact>
-          <Fact label={t("Chassis serial")}><span className="hm-mono">{fact("dmi.serial", snapshot.dmi?.chassis_serial)}</span></Fact>
+          <Fact label={t("Serial number")}><span className="ui-mono">{fact("dmi.serial", snapshot.dmi?.serial)}</span></Fact>
+          <Fact label={t("UUID")}><span className="ui-mono">{fact("dmi.uuid", snapshot.dmi?.uuid)}</span></Fact>
+          <Fact label={t("Board serial")}><span className="ui-mono">{fact("dmi.serial", snapshot.dmi?.board_serial)}</span></Fact>
+          <Fact label={t("Chassis serial")}><span className="ui-mono">{fact("dmi.serial", snapshot.dmi?.chassis_serial)}</span></Fact>
         </Facts>
       </Section>
 
@@ -237,16 +238,16 @@ export function System() {
           <Fact label={t("Firmware date")}>{fact("firmware", snapshot.firmware?.date)}</Fact>
           <Fact label={t("Booted")}>
             {snapshot.boot?.booted_at
-              ? <><Timestamp value={snapshot.boot.booted_at} /> <span className="source">· {absoluteTime(snapshot.boot.booted_at)}</span></>
+              ? <><Timestamp value={snapshot.boot.booted_at} /> <span className="ui-note">· {absoluteTime(snapshot.boot.booted_at)}</span></>
               : fact("boot", undefined)}
           </Fact>
           <Fact label={t("Uptime")}>
             {uptime === undefined ? fact("boot", undefined) : <span title={t("as of the last read")}>{uptimeText(uptime)}</span>}
           </Fact>
-          <Fact label={t("Boot id")}><span className="hm-mono">{snapshot.boot_id || "—"}</span></Fact>
+          <Fact label={t("Boot id")}><span className="ui-mono">{snapshot.boot_id || "—"}</span></Fact>
           <Fact label={t("Virtualization")}>
             {fact("virtualization", virtualization === "none" ? t("bare metal") : virtualization)}
-            {snapshot.virtualization?.source && <span className="source"> · {snapshot.virtualization.source}</span>}
+            {snapshot.virtualization?.source && <span className="ui-note"> · {snapshot.virtualization.source}</span>}
           </Fact>
         </Facts>
       </Section>
@@ -258,10 +259,10 @@ export function System() {
           <thead><tr><th scope="col">{t("Adapter")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Reason")}</th></tr></thead>
           <tbody>
             {(host.capabilities ?? []).length === 0 ? (
-              <tr><td colSpan={3} className="empty">{t("The host has not reported its adapters.")}</td></tr>
+              <tr><td colSpan={3} className="ui-empty">{t("The host has not reported its adapters.")}</td></tr>
             ) : (host.capabilities ?? []).map((capability) => (
               <tr key={capability.name}>
-                <td className="hm-mono hm-primary">
+                <td className="ui-mono ui-name">
                   {adapterSegment(capability.name)
                     ? <Link to={`/hosts/${host.id}/${adapterSegment(capability.name)}`}>{capability.name}</Link>
                     : capability.name}
@@ -271,10 +272,10 @@ export function System() {
                     would take to write. */}
                 <td>
                   {!capability.available
-                    ? <span className="badge">{t("unavailable")}</span>
+                    ? <span className="ui-pill">{t("unavailable")}</span>
                     : capability.read_only
-                      ? <span className="badge warn">{t("read only")}</span>
-                      : <span className="badge ok">{t("available")}</span>}
+                      ? <span className="ui-pill ui-warn">{t("read only")}</span>
+                      : <span className="ui-pill ui-ok">{t("available")}</span>}
                 </td>
                 <td>{capability.reason || "—"}</td>
               </tr>
@@ -297,12 +298,12 @@ export function System() {
           <thead><tr><th scope="col">{t("Kernel")}</th><th scope="col">{t("Release")}</th><th scope="col">{t("First seen")}</th><th scope="col">{t("Last seen")}</th></tr></thead>
           <tbody>
             {history.error ? (
-              <tr><td colSpan={4} className="empty">{t("The history could not be read.")}</td></tr>
+              <tr><td colSpan={4} className="ui-empty">{t("The history could not be read.")}</td></tr>
             ) : historyItems.length === 0 ? (
-              <tr><td colSpan={4} className="empty">{t("No platform has been recorded for this host yet.")}</td></tr>
+              <tr><td colSpan={4} className="ui-empty">{t("No platform has been recorded for this host yet.")}</td></tr>
             ) : historyItems.map((entry) => (
               <tr key={`${entry.kernel}/${entry.distribution}/${entry.distribution_version}`}>
-                <td className="hm-mono hm-primary">{entry.kernel || "—"}</td>
+                <td className="ui-mono ui-name">{entry.kernel || "—"}</td>
                 <td>{[entry.distribution, entry.distribution_version].filter(Boolean).join(" ") || "—"}</td>
                 <td><Timestamp value={entry.first_seen_at} /></td>
                 <td><Timestamp value={entry.last_seen_at} /></td>
@@ -321,7 +322,7 @@ export function System() {
             <thead><tr><th scope="col">{t("Fact")}</th><th scope="col">{t("Reason")}</th></tr></thead>
             <tbody>
               {Object.entries(missing).map(([key, reason]) => (
-                <tr key={key}><td className="hm-mono">{key}</td><td>{reason}</td></tr>
+                <tr key={key}><td className="ui-mono">{key}</td><td>{reason}</td></tr>
               ))}
             </tbody>
           </Table>
@@ -330,7 +331,7 @@ export function System() {
       </Widgets>
 
       {snapshot.observed_at && (
-        <p className="hm-freshness">
+        <p className="ui-freshness">
           <span>{t("Platform read")} <Timestamp value={snapshot.observed_at} /></span>
         </p>
       )}

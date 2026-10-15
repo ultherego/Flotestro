@@ -58,7 +58,7 @@ describe("Structured", () => {
 
   it("draws a map as a nested list of pairs", () => {
     const { container } = render(<Structured value={{ pending_rewrap: 3, unreadable_versions: 0 }} />);
-    const list = container.querySelector("dl.pairs.nested");
+    const list = container.querySelector("dl.ui-facts.ui-nested");
     expect(list).not.toBeNull();
     expect(within(list as HTMLElement).getByText("Pending rewrap")).toBeInTheDocument();
   });
@@ -130,18 +130,18 @@ describe("the fact list has one definition", () => {
 
   it("lets every value wrap, whatever it holds", () => {
     // The base rule only: the narrow-screen copy is indented in its query.
-    const rule = /^\.pairs dd \{[^}]*\}/m.exec(css)?.[0] ?? "";
+    const rule = /^\.ui-facts > dd[^{]*\{[^}]*\}/m.exec(css)?.[0] ?? "";
     expect(rule).toContain("overflow-wrap: anywhere");
     expect(rule).toContain("min-width: 0");
   });
 
   it("stacks the pairs inside a narrow card instead of squeezing them", () => {
-    expect(css).toContain("@container card (max-width: 420px)");
-    expect(/\.card \{[^}]*container: card \/ inline-size/.test(css)).toBe(true);
+    expect(css).toContain("@container uipanel (max-width: 420px)");
+    expect(/\.ui-panel \{[^}]*container: uipanel \/ inline-size/.test(css)).toBe(true);
   });
 
   it("keeps a table inside its card", () => {
-    expect(/\.table-scroll \{[^}]*overflow-x: auto/.test(css)).toBe(true);
+    expect(/\.ui-table-holder \{[^}]*overflow-x: auto/.test(css)).toBe(true);
   });
 
   it("has no screen left on the wrapping class the panel used to carry", () => {
@@ -159,6 +159,6 @@ describe("a record set too wide for a table", () => {
       <Structured value={[{ a: 1, b: 2, c: 3, d: 4, e: 5 }, { a: 6, b: 7, c: 8, d: 9, e: 10 }]} />,
     );
     expect(queryByRole("table")).toBeNull();
-    expect(container.querySelectorAll(".records > dl")).toHaveLength(2);
+    expect(container.querySelectorAll(".ui-stack-s > dl")).toHaveLength(2);
   });
 });

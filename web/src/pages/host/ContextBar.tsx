@@ -25,30 +25,30 @@ export function ContextBar({ host, segment, campaign }: {
   const moduleName = findModule(segment)?.name;
   useDocumentTitle(hostTitle(host, moduleName ? t(moduleName) : segment));
   return (
-    <div className="host-header">
+    <div className="ui-hosthead">
       {campaign && (
-        <p className="host-header-crumb source">
+        <p className="ui-hosthead-crumb ui-note">
           <Link to={`/campaigns/${campaign}`}>← {t("Back to the campaign")}</Link>
         </p>
       )}
       {/* The name and the address stand in the top bar; repeating them
           here would only push the facts down. */}
-      <div className="host-header-title">
+      <div className="ui-hosthead-title">
         <ConnectionState state={host.connection_state} />
         <ConnectionRefusal host={host} />
         <MaintenanceWindow host={host} />
       </div>
-      <div className="host-header-facts">
+      <div className="ui-hosthead-facts">
         <HostIdentifier host={host} />
         <ManagementAddress host={host} />
-        <span className="chip" title={t("site / environment")}>{host.site} / {host.environment}</span>
-        <span className="chip" title={t("operating system")}>
+        <span className="ui-tag" title={t("site / environment")}>{host.site} / {host.environment}</span>
+        <span className="ui-tag" title={t("operating system")}>
           {host.os_distribution || host.os_family || t("unknown OS")} {host.os_version}
         </span>
-        <span className="chip" title={t("architecture and agent version")}>
+        <span className="ui-tag" title={t("architecture and agent version")}>
           {host.architecture || t("unknown arch")} · {t("agent {version}", { version: host.agent_version || t("unknown") })}
         </span>
-        <span className="chip" title={t("last seen")}>
+        <span className="ui-tag" title={t("last seen")}>
           {t("seen")} <Time value={host.last_seen_at} />
         </span>
         <RefreshInventory host={host} segment={segment} />
@@ -93,22 +93,22 @@ function Tags({ host }: { host: Host }) {
   };
 
   return (
-    <div className="host-header-facts">
+    <div className="ui-hosthead-facts">
       {host.tags.map((tag) => (
-        <Link key={tag} className="chip" to={`/hosts?tag=${encodeURIComponent(tag)}`} title={t("show every host tagged {tag}", { tag })}>
+        <Link key={tag} className="ui-tag" to={`/hosts?tag=${encodeURIComponent(tag)}`} title={t("show every host tagged {tag}", { tag })}>
           {tag}
         </Link>
       ))}
       {host.tags.length === 0 && !editing && (
-        <span className="chip unknown" title={t("nobody has tagged this host yet")}>{t("no tags")}</span>
+        <span className="ui-tag ui-unknown" title={t("nobody has tagged this host yet")}>{t("no tags")}</span>
       )}
       {canEdit && !editing && (
-        <span className="chip inventory-refresh">
-          <button type="button" className="link" onClick={open}>{t("edit tags")}</button>
+        <span className="ui-tag ui-row">
+          <button type="button" className="ui-btn-link" onClick={open}>{t("edit tags")}</button>
         </span>
       )}
       {editing && (
-        <span className="inventory-refresh">
+        <span className="ui-row">
           <input
             value={text}
             placeholder={t("tags separated by spaces, e.g. role=db tier=gold")}
@@ -120,13 +120,13 @@ function Tags({ host }: { host: Host }) {
             autoFocus
             style={{ minWidth: 260 }}
           />
-          <button type="button" className="link" disabled={save.isPending} onClick={() => save.mutate(splitTags(text))}>
+          <button type="button" className="ui-btn-link" disabled={save.isPending} onClick={() => save.mutate(splitTags(text))}>
             {save.isPending ? t("saving…") : t("Save")}
           </button>
-          <button type="button" className="link" disabled={save.isPending} onClick={() => setEditing(false)}>
+          <button type="button" className="ui-btn-link" disabled={save.isPending} onClick={() => setEditing(false)}>
             {t("Cancel")}
           </button>
-          {message && <span className="message">{message}</span>}
+          {message && <span className="ui-lede">{message}</span>}
         </span>
       )}
     </div>
@@ -152,17 +152,17 @@ function RefreshInventory({ host, segment }: { host: Host; segment: string }) {
     ? t("ask the host to re-read its {module} module now", { module: scope })
     : t("ask the host to re-read its whole inventory now");
   return (
-    <span className="chip inventory-refresh">
+    <span className="ui-tag ui-row">
       <button
         type="button"
-        className="link"
+        className="ui-btn-link"
         disabled={refresh.busy || host.connection_state !== "online"}
         title={host.connection_state === "online" ? description : t("the host is not connected")}
         onClick={refresh.order}
       >
         {refresh.busy ? t("refreshing…") : t("refresh")}
       </button>
-      {refresh.message && <span className="message">{refresh.message}</span>}
+      {refresh.message && <span className="ui-lede">{refresh.message}</span>}
     </span>
   );
 }
@@ -235,10 +235,10 @@ function HostIdentifier({ host }: { host: Host }) {
     void copyToClipboard(host.id).then((done) => setState(done ? "copied" : "failed"));
   };
   return (
-    <span className="chip inventory-refresh" title={host.id}>
-      <span className="chip-tag">{t("id")}</span>
-      <span className="chip-mono" data-testid="host-id">{host.id.slice(0, 8)}</span>
-      <button type="button" className="link" onClick={copy} title={t("copy the full identifier")}>
+    <span className="ui-tag ui-row" title={host.id}>
+      <span className="ui-tag">{t("id")}</span>
+      <span className="ui-tag ui-mono" data-testid="host-id">{host.id.slice(0, 8)}</span>
+      <button type="button" className="ui-btn-link" onClick={copy} title={t("copy the full identifier")}>
         {state === "copied" ? t("copied") : state === "failed" ? t("copy by hand") : t("copy")}
       </button>
     </span>
@@ -255,19 +255,19 @@ function HostActions({ host }: { host: Host }) {
   const refresh = useInventoryRefresh(host);
   const online = host.connection_state === "online";
   return (
-    <details className="chip has-menu inventory-refresh">
+    <details className="ui-tag ui-menu-anchor ui-row">
       <summary>{t("Actions")} ▾</summary>
-      <div className="menu-popover">
+      <div className="ui-menu">
         <button
           type="button"
-          className="link"
+          className="ui-btn-link"
           disabled={refresh.busy || !online}
           title={online ? t("ask the host to re-read its whole inventory now") : t("the host is not connected")}
           onClick={refresh.order}
         >
           {refresh.busy ? t("refreshing…") : t("Refresh the whole inventory")}
         </button>
-        {refresh.message && <span className="message">{refresh.message}</span>}
+        {refresh.message && <span className="ui-lede">{refresh.message}</span>}
         <Link to={`/hosts/${host.id}/logs`}>{t("Open the logs")}</Link>
         <Link to={`/hosts/${host.id}/power`}>{t("Reboot (power tab)")}</Link>
         <Link to={`/hosts/${host.id}/jobs`}>{t("Jobs of this host")}</Link>
@@ -290,7 +290,7 @@ function ConnectionRefusal({ host }: { host: Host }) {
   if (!refusal || host.connection_state === "online") return null;
   return (
     <Link
-      className="badge error"
+      className="ui-pill ui-error"
       to={`/hosts/${host.id}/overview`}
       title={refusal.detail || t("the gateway refused the last connection of this host")}
       data-testid="connection-refusal-badge"
@@ -315,7 +315,7 @@ function MaintenanceWindow({ host }: { host: Host }) {
     .filter(Boolean)
     .join(" · ");
   return (
-    <span className="badge warn" title={description || t("maintenance window")}>
+    <span className="ui-pill ui-warn" title={description || t("maintenance window")}>
       {t("maintenance until {time} UTC", { time: until.toISOString().slice(0, 16).replace("T", " ") })}
     </span>
   );
@@ -328,7 +328,7 @@ function ManagementAddress({ host }: { host: Host }) {
   const t = useT();
   if (!host.management_address) {
     return (
-      <span className="chip unknown" title={t("no address has been observed for this host yet")}>
+      <span className="ui-tag ui-unknown" title={t("no address has been observed for this host yet")}>
         {t("address unknown")}
       </span>
     );
@@ -340,9 +340,9 @@ function ManagementAddress({ host }: { host: Host }) {
         ? t("address reported by the host itself; it connects through a relay")
         : t("address set manually by an operator");
   return (
-    <span className="chip" title={description}>
-      <span className="chip-mono">{host.management_address}</span>
-      <span className="chip-tag">{host.management_address_source}</span>
+    <span className="ui-tag" title={description}>
+      <span className="ui-tag ui-mono">{host.management_address}</span>
+      <span className="ui-tag">{host.management_address_source}</span>
     </span>
   );
 }

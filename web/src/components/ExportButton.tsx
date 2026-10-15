@@ -45,7 +45,7 @@ export function ExportButton({ path, params, disabled = false, label }: {
   };
 
   return (
-    <button type="button" className="secondary" onClick={download} disabled={disabled || exporting} data-testid="export-csv">
+    <button type="button" className="ui-btn-secondary" onClick={download} disabled={disabled || exporting} data-testid="export-csv">
       {exporting ? t("Exporting…") : (label ?? t("Export CSV"))}
     </button>
   );

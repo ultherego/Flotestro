@@ -2,9 +2,8 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { Actions, Card, Field, FieldGrid, Pager, Toolbar } from "../components/layout";
-import { DataTable } from "../components/table";
-import { Empty, ErrorBox } from "../components/ui";
+import { Actions, DataTable, Empty, Field, Fields, Pager, Panel, Toolbar } from "../ui/kit";
+import { ErrorBox } from "../components/ui";
 import { useT } from "../i18n";
 
 /**
@@ -124,8 +123,8 @@ function GrantToHolder({ holder, onDone, onCancel, onError }: {
   const choices = (catalogue.data?.items ?? []).map((one) => one.role);
 
   return (
-    <Card
-      className="span-4 fp-narrow"
+    <Panel
+      className="ui-col-4 ui-narrow"
       title={t("Grant a role to {subject}", { subject: holder.subject })}
       description={holder.signed_in
         ? t("The role is bound to this identity, beside whatever a group grants them.")
@@ -138,11 +137,11 @@ function GrantToHolder({ holder, onDone, onCancel, onError }: {
           >
             {t("Grant the role")}
           </button>
-          <button className="secondary" onClick={onCancel}>{t("Cancel")}</button>
+          <button className="ui-btn-secondary" onClick={onCancel}>{t("Cancel")}</button>
         </Actions>
       }
     >
-      <FieldGrid>
+      <Fields>
         <Field label={t("Role")}>
           <select value={role} onChange={(event) => setRole(event.target.value)}
                   disabled={choices.length === 0} data-testid="grant-role">
@@ -160,8 +159,8 @@ function GrantToHolder({ holder, onDone, onCancel, onError }: {
           <input value={reason} onChange={(event) => setReason(event.target.value)}
                  placeholder={t("e.g. took over the night rota")} data-testid="grant-reason" />
         </Field>
-      </FieldGrid>
-    </Card>
+      </Fields>
+    </Panel>
   );
 }
 
@@ -190,9 +189,9 @@ export function AccessHolders() {
 
   return (
     <>
-    {refusal !== "" && <p className="page-error" data-testid="grant-refusal">{refusal}</p>}
-    <Card
-      className={granting ? "span-8" : "span-12"}
+    {refusal !== "" && <p className="ui-errorbox" data-testid="grant-refusal">{refusal}</p>}
+    <Panel
+      className={granting ? "ui-col-8" : "ui-col-12"}
       title={t("Who may sign in")}
       description={t("Everyone with a role here: bound by hand, or granted by a group of the identity provider. Somebody who has never signed in is here too - the panel makes their record at the first sign-in.")}
       flush
@@ -211,23 +210,23 @@ export function AccessHolders() {
             records - a token, a runner, whatever a suite left behind. The
             filter opens on the people, because that is what the question
             "who has access" means. */}
-        <div className="segmented" role="group" aria-label={t("Whose access to show")}>
+        <div className="ui-segmented" role="group" aria-label={t("Whose access to show")}>
           <button
-            className={which === "directory" ? "active" : ""}
+            className={which === "directory" ? "ui-active" : ""}
             onClick={() => { setWhich("directory"); setPage(1); }}
             data-testid="holders-directory"
           >
             {t("From the directory ({n})", { n: fromDirectory })}
           </button>
           <button
-            className={which === "bound" ? "active" : ""}
+            className={which === "bound" ? "ui-active" : ""}
             onClick={() => { setWhich("bound"); setPage(1); }}
             data-testid="holders-bound"
           >
             {t("Bound by hand ({n})", { n: everyone.length - fromDirectory })}
           </button>
           <button
-            className={which === "everyone" ? "active" : ""}
+            className={which === "everyone" ? "ui-active" : ""}
             onClick={() => { setWhich("everyone"); setPage(1); }}
             data-testid="holders-everyone"
           >
@@ -240,14 +239,14 @@ export function AccessHolders() {
           directory is not a directory with nobody in it, and the screen says
           which of the two it is looking at. */}
       {data && data.directory.configured && !data.directory.read && (
-        <p className="page-error" data-testid="directory-unread">
+        <p className="ui-errorbox" data-testid="directory-unread">
           {t("The directory did not answer, so only the access this panel records itself is listed: {reason}", {
             reason: data.directory.reason ?? t("no reason given"),
           })}
         </p>
       )}
       {data && !data.directory.configured && (
-        <p className="source" data-testid="directory-absent">
+        <p className="ui-note" data-testid="directory-absent">
           {t("No directory is configured, so this is the access the panel records itself.")}
         </p>
       )}
@@ -270,9 +269,9 @@ export function AccessHolders() {
               rowHeader: true,
               cell: (holder) => (
                 <>
-                  <span className="mono">{holder.subject}</span>
-                  {holder.display_name && <> <span className="source">{holder.display_name}</span></>}
-                  {holder.directory_disabled && <> <span className="badge warn">{t("locked in the directory")}</span></>}
+                  <span className="ui-mono">{holder.subject}</span>
+                  {holder.display_name && <> <span className="ui-note">{holder.display_name}</span></>}
+                  {holder.directory_disabled && <> <span className="ui-pill ui-warn">{t("locked in the directory")}</span></>}
                 </>
               ),
             },
@@ -281,8 +280,8 @@ export function AccessHolders() {
               head: t("Roles"),
               cell: (holder) => holder.roles.map((role, index) => (
                 <div key={`${role.role}-${role.scope}-${index}`}>
-                  <span className="mono">{role.role}</span>{" "}
-                  <span className="source">{shortScope(role.scope) || t("everywhere")}</span>
+                  <span className="ui-mono">{role.role}</span>{" "}
+                  <span className="ui-note">{shortScope(role.scope) || t("everywhere")}</span>
                 </div>
               )),
             },
@@ -291,7 +290,7 @@ export function AccessHolders() {
               head: t("Where the access comes from"),
               wideOnly: true,
               cell: (holder) => (
-                <span className="source">
+                <span className="ui-note">
                   {holder.roles.some((role) => role.from === "binding") && (
                     <div>{t("bound to this identity")}</div>
                   )}
@@ -305,26 +304,26 @@ export function AccessHolders() {
               key: "known",
               head: t("Known to the panel"),
               cell: (holder) => holder.signed_in
-                ? <span className="badge ok">{t("yes")}</span>
-                : <span className="badge unknown" title={t("The record is made at the first sign-in; the access is already theirs.")}>{t("not yet")}</span>,
+                ? <span className="ui-pill ui-ok">{t("yes")}</span>
+                : <span className="ui-pill ui-unknown" title={t("The record is made at the first sign-in; the access is already theirs.")}>{t("not yet")}</span>,
             },
             {
               key: "actions",
               actions: true,
               cell: (holder) => (
-                <div className="row-actions">
-                  <button className="secondary" onClick={() => { setRefusal(""); setGranting(holder); }}
+                <div className="ui-rowactions">
+                  <button className="ui-btn-secondary" onClick={() => { setRefusal(""); setGranting(holder); }}
                           data-testid={`grant-${holder.subject}`}>
                     {t("Grant a role")}
                   </button>
                   {holder.principal_id
                     ? (
-                      <Link className="button secondary" to={`/settings?tab=users&q=${encodeURIComponent(holder.subject)}`}>
+                      <Link className="ui-btn ui-btn-secondary" to={`/settings?tab=users&q=${encodeURIComponent(holder.subject)}`}>
                         {t("Open the identity")}
                       </Link>
                     )
                     : (
-                      <Link className="button secondary" to="/settings?tab=mappings">
+                      <Link className="ui-btn ui-btn-secondary" to="/settings?tab=mappings">
                         {t("Open the mapping")}
                       </Link>
                     )}
@@ -334,7 +333,7 @@ export function AccessHolders() {
           ]}
         />
       )}
-    </Card>
+    </Panel>
     {granting && (
       <GrantToHolder
         key={granting.subject}

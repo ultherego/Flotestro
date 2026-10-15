@@ -2,8 +2,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { ErrorBox, Time, Empty } from "../../components/ui";
-import { EmptyState } from "../../components/layout";
+import { ErrorBox, Time } from "../../components/ui";
+import { Empty } from "../../ui/kit";
 import { absoluteTime, bytes } from "../../lib/format";
 import { Breakdown } from "../../components/widgets";
 import {
@@ -188,13 +188,13 @@ export function Files() {
             />
             {editors.length > 0 && (
               <>
-                <p className="widget-subhead">{t("Last changed by")}</p>
+                <p className="ui-subhead">{t("Last changed by")}</p>
                 <Breakdown items={editors.map(([who, count]) => ({ label: who, value: count }))} />
               </>
             )}
           </>
         ) : (
-          <p className="source">{t("Loading…")}</p>
+          <p className="ui-note">{t("Loading…")}</p>
         )}
       </Section>
       </>
@@ -206,9 +206,9 @@ export function Files() {
         {!files.data ? (
           <Empty>{t("Loading…")}</Empty>
         ) : !list.length ? (
-          <EmptyState action={!adding && <ActionGuard action="file.ensure" host={host.id}><button onClick={() => setAdding(true)}>{t("Manage a file")}</button></ActionGuard>}>
+          <Empty action={!adding && <ActionGuard action="file.ensure" host={host.id}><button onClick={() => setAdding(true)}>{t("Manage a file")}</button></ActionGuard>}>
             {t("The panel does not manage any file on this host yet. A managed file is written from here, compared with what the host has at every report, and kept in versions.")}
-          </EmptyState>
+          </Empty>
         ) : (
           <Table>
             <thead>
@@ -216,11 +216,11 @@ export function Files() {
             </thead>
             <tbody>
               {list.map((file) => (
-                <tr key={file.path} className={selected === file.path ? "selected" : undefined}>
+                <tr key={file.path} className={selected === file.path ? "ui-row-marked" : undefined}>
                   <td>
                     <button
                       type="button"
-                      className="hm-link hm-mono"
+                      className="ui-btn-link ui-mono"
                       onClick={() => setSelected(selected === file.path ? "" : file.path)}
                     >
                       {file.path}
@@ -231,36 +231,36 @@ export function Files() {
                       drifted. */}
                   <td>
                     {file.unavailable_reason ? (
-                      <span className="badge unknown">{file.unavailable_reason}</span>
+                      <span className="ui-pill ui-unknown">{file.unavailable_reason}</span>
                     ) : !file.exists ? (
-                      <span className="badge error">{t("missing on host")}</span>
+                      <span className="ui-pill ui-error">{t("missing on host")}</span>
                     ) : file.drift ? (
-                      <span className="badge warn">{t("changed outside the panel")}</span>
+                      <span className="ui-pill ui-warn">{t("changed outside the panel")}</span>
                     ) : file.drift_unknown_reason ? (
                       // The panel holds no fingerprint of content from a
                       // secret, so it does not pretend the file matches - it
                       // says what it does not check.
-                      <span className="badge unknown" title={file.drift_unknown_reason}>
+                      <span className="ui-pill ui-unknown" title={file.drift_unknown_reason}>
                         {t("content not compared")}
                       </span>
                     ) : (
-                      <span className="badge ok">{t("matches")}</span>
+                      <span className="ui-pill ui-ok">{t("matches")}</span>
                     )}
                   </td>
-                  <td className="hm-mono">
+                  <td className="ui-mono">
                     {file.observed_mode || file.mode || "—"}
                     {file.mode && file.observed_mode && file.mode.replace(/^0+/, "") !== file.observed_mode.replace(/^0+/, "") && (
-                      <span className="badge unknown"> {t("want {mode}", { mode: file.mode })}</span>
+                      <span className="ui-pill ui-unknown"> {t("want {mode}", { mode: file.mode })}</span>
                     )}
                   </td>
                   <td>
-                    <Time value={file.updated_at} /> <span className="source">{t("by {who}", { who: file.updated_by })}</span>
+                    <Time value={file.updated_at} /> <span className="ui-note">{t("by {who}", { who: file.updated_by })}</span>
                   </td>
                   <td>
-                    <div className="operations">
+                    <div className="ui-actions">
                       <ActionGuard action="file.read" host={host.id} explain>
                         <button
-                          className="secondary"
+                          className="ui-btn-secondary"
                           title={t("Ask the host for the file as it is now: its checksum, mode and owner refresh in this list once the job reports back.")}
                           onClick={() =>
                             request.mutate({ action: "file.read", payload: { file: { path: file.path } } })
@@ -271,7 +271,7 @@ export function Files() {
                       </ActionGuard>
                       <ActionGuard action="file.remove" host={host.id}>
                         <button
-                          className="hm-danger"
+                          className="ui-btn-danger"
                           title={t("Deletes the file on the host and stops managing it; the versions stay in the history.")}
                           onClick={() =>
                             setIntent({
@@ -361,13 +361,13 @@ function History({
 
   return (
     <>
-      <Section title={<span className="hm-mono">{file.path}</span>} count={(history.data?.items ?? []).length} flush>
+      <Section title={<span className="ui-mono">{file.path}</span>} count={(history.data?.items ?? []).length} flush>
         <Table>
-          <thead><tr><th scope="col">{t("Version")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col">{t("Applied")}</th><th scope="col">{t("By")}</th><th scope="col">{t("Actions")}</th></tr></thead>
+          <thead><tr><th scope="col">{t("Version")}</th><th scope="col" className="ui-numeric">{t("Size")}</th><th scope="col">{t("Applied")}</th><th scope="col">{t("By")}</th><th scope="col">{t("Actions")}</th></tr></thead>
           <tbody>
             {(history.data?.items ?? []).map((version) => (
               <tr key={`${version.sha256 || version.secret_name}-${version.applied_at}`}>
-                <td className="hm-mono">
+                <td className="ui-mono">
                   {/* An entry from a secret has no content in the panel: we
                       show which secret version was deployed, because that is
                       all the panel knows. */}
@@ -375,20 +375,20 @@ function History({
                     ? version.sha256.slice(0, 12)
                     : `${version.secret_name}@v${version.secret_version}`}
                   {version.sha256 && version.sha256 === file.desired_sha256 && (
-                    <span className="badge ok"> {t("current")}</span>
+                    <span className="ui-pill ui-ok"> {t("current")}</span>
                   )}
                 </td>
-                <td className="hm-num" title={version.sha256 ? t("{n} bytes", { n: version.size_bytes }) : undefined}>{version.sha256 ? bytes(version.size_bytes) : "—"}</td>
+                <td className="ui-numeric" title={version.sha256 ? t("{n} bytes", { n: version.size_bytes }) : undefined}>{version.sha256 ? bytes(version.size_bytes) : "—"}</td>
                 <td><Time value={version.applied_at} /></td>
                 <td>{version.applied_by}</td>
                 <td>
-                  <div className="operations">
-                    <button className="secondary" onClick={() => setComparison(version.sha256 ?? "")} disabled={!version.sha256}>
+                  <div className="ui-actions">
+                    <button className="ui-btn-secondary" onClick={() => setComparison(version.sha256 ?? "")} disabled={!version.sha256}>
                       {t("Compare")}
                     </button>
                     <ActionGuard action="file.rollback" host={hostID}>
                       <button
-                        className="secondary"
+                        className="ui-btn-secondary"
                         disabled={!version.sha256 || (version.sha256 === file.desired_sha256 && !file.drift)}
                         onClick={() =>
                           onIntent({
@@ -464,7 +464,7 @@ function HostVersions({
         <thead>
           <tr>
             <th scope="col">{t("Version")}</th>
-            <th scope="col" className="hm-num">{t("Size")}</th>
+            <th scope="col" className="ui-numeric">{t("Size")}</th>
             <th scope="col">{t("Mode")}</th>
             <th scope="col">{t("Kept")}</th>
             <th scope="col">{t("Ordered by")}</th>
@@ -476,19 +476,19 @@ function HostVersions({
             const refusal = hostVersionRefusal(version);
             return (
               <tr key={`${version.sha256 ?? "secret"}-${version.kept_at}`}>
-                <td className="hm-mono">
+                <td className="ui-mono">
                   {version.sha256 ? version.sha256.slice(0, 12) : t("not named")}
-                  {version.from_secret && <span className="badge unknown"> {t("from a secret")}</span>}
+                  {version.from_secret && <span className="ui-pill ui-unknown"> {t("from a secret")}</span>}
                 </td>
-                <td className="hm-num" title={t("{n} bytes", { n: version.size_bytes })}>{bytes(version.size_bytes)}</td>
-                <td className="hm-mono">{version.mode || "—"}</td>
+                <td className="ui-numeric" title={t("{n} bytes", { n: version.size_bytes })}>{bytes(version.size_bytes)}</td>
+                <td className="ui-mono">{version.mode || "—"}</td>
                 <td><Time value={version.kept_at} /></td>
                 <td>{version.ordered_by || "—"}</td>
                 <td>
-                  <div className="operations">
+                  <div className="ui-actions">
                     <ActionGuard action="file.rollback" host={hostID}>
                       <button
-                        className="secondary"
+                        className="ui-btn-secondary"
                         disabled={refusal !== ""}
                         title={refusal ? refusals[refusal] : t("The host writes back exactly this copy, through the same validator as any other write.")}
                         onClick={() =>
@@ -557,9 +557,9 @@ function Difference({ before, after }: { before: string; after: string }) {
   }
 
   return (
-    <pre className="hm-diff">
+    <pre className="ui-diff">
       {rows.map((row, index) => (
-        <div key={index} className={row.sign === "+" ? "add" : row.sign === "-" ? "del" : undefined}>
+        <div key={index} className={row.sign === "+" ? "ui-ok" : row.sign === "-" ? "ui-bad" : undefined}>
           {row.sign} {row.text}
         </div>
       ))}

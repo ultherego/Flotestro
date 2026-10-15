@@ -27,14 +27,14 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   });
 
   await page.goto("/bulk");
-  await expect(page.locator(".page-header").getByRole("heading", { name: "Bulk Workspace" })).toBeVisible();
+  await expect(page.locator(".ui-pagehead").getByRole("heading", { name: "Bulk Workspace" })).toBeVisible();
   const noEngine = page.getByText("the backend has no campaign engine");
   const scope = page.getByRole("heading", { name: "1. Scope" });
   await expect(scope.or(noEngine).first()).toBeVisible();
   test.skip(await noEngine.isVisible(), absent("this installation has no campaign engine; the wizard is not offered"));
 
   // Step 1: the order.
-  const steps = page.locator(".bulk-steps");
+  const steps = page.locator(".ui-tabs");
   const targetsStep = steps.getByRole("button", { name: /Targets/ });
   await expect(targetsStep).toBeDisabled();
   // The first step says the first thing that is missing, in order: the
@@ -48,16 +48,16 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   await page.getByPlaceholder("campaign name").fill("e2e preview only");
   // The select is found through its field: a wrapping label lends the
   // control the text of the chosen option, so its accessible name moves.
-  const operation = page.locator("label.field").filter({ hasText: /^Operation/ }).locator("select");
+  const operation = page.locator("label.ui-field").filter({ hasText: /^Operation/ }).locator("select");
   await expect(operation.locator("option[value='unit.restart']")).toHaveCount(1);
   await operation.selectOption("unit.restart");
   // The field is found by its label: the form no longer suggests a unit
   // name, because a unit is called whatever its host calls it.
-  await page.locator("label.field").filter({ hasText: /^Unit/ }).locator("input")
+  await page.locator("label.ui-field").filter({ hasText: /^Unit/ }).locator("input")
     .fill("cron.service");
 
   // The scope bar pins the order for the whole wizard.
-  const scopeBar = page.locator(".scope-bar");
+  const scopeBar = page.locator(".ui-scopebar");
   await expect(scopeBar).toContainText("e2e preview only");
   await expect(scopeBar).toContainText("unit.restart");
 
@@ -68,7 +68,7 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   // Step 2: the site.
   await expect(page.getByRole("heading", { name: "2. Targets" })).toBeVisible();
   await expect(page.getByRole("radio", { name: "by site, environment and OS" })).toBeChecked();
-  const siteField = page.locator("label.field").filter({ hasText: /^Site/ }).locator("input");
+  const siteField = page.locator("label.ui-field").filter({ hasText: /^Site/ }).locator("input");
   await siteField.fill(site);
   const matched = page.getByText(/The selector matches \d+ hosts/);
   await expect(matched).toBeVisible();
@@ -80,7 +80,7 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   const count = matchedCount(await matched.textContent());
   expect(count).toBeGreaterThan(0);
   // The sample under the count names hosts of the site.
-  const sample = (await page.locator(".card-foot .source").first().textContent()) ?? "";
+  const sample = (await page.locator(".ui-panel-foot .ui-note").first().textContent()) ?? "";
   expect(inSite.some((host) => sample.includes(host.hostname)), `the sample "${sample}" names no host of ${site}`).toBe(true);
   await expect(scopeBar).toContainText("targets:");
 
@@ -99,7 +99,7 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   await eligibilityStep.click();
   await expect(page.getByRole("heading", { name: "3. Eligibility" })).toBeVisible();
 
-  const eligibleRow = page.getByRole("row").filter({ has: page.locator(".badge.ok", { hasText: "eligible" }) });
+  const eligibleRow = page.getByRole("row").filter({ has: page.locator(".ui-pill.ui-ok", { hasText: "eligible" }) });
   await expect(eligibleRow).toHaveCount(1);
   const eligibleCount = Number((await eligibleRow.getByRole("cell").nth(1).textContent())?.trim());
   expect(eligibleCount).toBeGreaterThan(0);
@@ -108,7 +108,7 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   // bounded by the adapters the API reports, when it reports them.
   if (inSite.some((host) => host.capabilities?.length)) {
     const capable = inSite.filter((host) => host.capabilities?.some((item) => item.name === "systemd" && item.available)).length;
-    const unknownRow = page.getByRole("row").filter({ has: page.locator(".badge", { hasText: "adapter unknown" }) });
+    const unknownRow = page.getByRole("row").filter({ has: page.locator(".ui-pill", { hasText: "adapter unknown" }) });
     const unknown = (await unknownRow.count()) > 0
       ? Number((await unknownRow.first().getByRole("cell").nth(1).textContent())?.trim())
       : 0;
@@ -116,7 +116,7 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   }
   if (eligibleCount < count) {
     // Somebody is left out; the reason stands next to the count.
-    await expect(page.getByRole("row").filter({ has: page.locator(".badge.error, .badge.warn") }).first()).toBeVisible();
+    await expect(page.getByRole("row").filter({ has: page.locator(".ui-pill.ui-error, .ui-pill.ui-warn") }).first()).toBeVisible();
   }
   await expect(scopeBar).toContainText(`targets: ${eligibleCount}`);
 
@@ -139,7 +139,7 @@ test("the operations that cannot run as a campaign are listed with their reasons
   const refusals = page.locator("details").filter({ hasText: "cannot run as a campaign" });
   // The list waits for the operation catalogue; a catalogue in which
   // every mutating operation runs as a campaign draws no list at all.
-  await expect(page.locator("label.field").filter({ hasText: /^Operation/ }).locator("option")).not.toHaveCount(1);
+  await expect(page.locator("label.ui-field").filter({ hasText: /^Operation/ }).locator("option")).not.toHaveCount(1);
   test.skip((await refusals.count()) === 0, absent("every mutating operation of this installation runs as a campaign"));
   await refusals.locator("summary").click();
   const rows = refusals.getByRole("row").filter({ has: page.locator("td") });

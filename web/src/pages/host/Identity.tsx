@@ -13,6 +13,7 @@ import {
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+import { toneClass } from "../../ui/kit";
 
 /**
  * The offline policy as the helper read it from sssd. conf.
@@ -47,7 +48,7 @@ export function Identity() {
   const identity = module.data?.payload ?? {};
   // A host outside any domain has no principal, no keytab and no cache to
   // speak of: those facts do not apply, which is not the same as unknown.
-  const notInDomain = <span className="source">{t("not in a domain")}</span>;
+  const notInDomain = <span className="ui-note">{t("not in a domain")}</span>;
   const enrolled = host.identity.enrolled;
 
   return (
@@ -62,13 +63,13 @@ export function Identity() {
       <Section title={t("Domain")} flush>
         <Facts>
           <Fact label={t("In domain")}>
-            {host.identity.enrolled ? <span className="badge ok">{t("yes")}</span> : <span className="badge">{t("no")}</span>}
+            {host.identity.enrolled ? <span className="ui-pill ui-ok">{t("yes")}</span> : <span className="ui-pill">{t("no")}</span>}
           </Fact>
           <Fact label={t("Domain")}>{host.identity.domain || "—"}</Fact>
           <Fact label={t("Realm")}>{host.identity.realm || "—"}</Fact>
-          <Fact label={t("Servers")}><span className="hm-mono">{(identity.servers ?? []).join(", ") || "—"}</span></Fact>
+          <Fact label={t("Servers")}><span className="ui-mono">{(identity.servers ?? []).join(", ") || "—"}</span></Fact>
           <Fact label={t("Host principal")}>
-            {identity.host_principal ? <span className="hm-mono">{identity.host_principal}</span> : enrolled ? <Unknown /> : notInDomain}
+            {identity.host_principal ? <span className="ui-mono">{identity.host_principal}</span> : enrolled ? <Unknown /> : notInDomain}
           </Fact>
           <Fact label={t("Keytab KVNO")}>
             {identity.keytab_kvno ?? (enrolled ? <Unknown /> : notInDomain)}
@@ -220,7 +221,7 @@ function JoinDomain({ host }: { host: Host }) {
           {mayPreflight && (
             <ActionGuard action="identity.host.preflight" host={host.id} explain>
               <button
-                className="secondary"
+                className="ui-btn-secondary"
                 disabled={!valid || preflight.busy || host.connection_state !== "online"}
                 title={!valid
                   ? t("Fill in the domain, the realm and the fully qualified host name first.")
@@ -282,11 +283,11 @@ function PreflightResult({ attempt, blocked }: {
   const t = useT();
   const checks = attempt.detail?.checks ?? [];
   const verdict = attempt.status === "succeeded"
-    ? <span className="badge ok">{t("the host meets the conditions")}</span>
-    : <span className="badge error">{attempt.error_code || attempt.status}</span>;
+    ? <span className="ui-pill ui-ok">{t("the host meets the conditions")}</span>
+    : <span className="ui-pill ui-error">{attempt.error_code || attempt.status}</span>;
   return (
     <div data-testid="preflight-result">
-      <p className="hm-message">
+      <p className="ui-message">
         {verdict} {attempt.message}
       </p>
       {checks.length > 0 && (
@@ -295,13 +296,13 @@ function PreflightResult({ attempt, blocked }: {
           <tbody>
             {checks.map((check) => (
               <tr key={check.name}>
-                <td className="hm-mono">{check.name}{check.blocking && <> <span className="badge">{t("blocking")}</span></>}</td>
+                <td className="ui-mono">{check.name}{check.blocking && <> <span className="ui-pill">{t("blocking")}</span></>}</td>
                 <td>
                   {check.passed === null || check.passed === undefined
                     ? <Unknown />
                     : check.passed
-                      ? <span className="badge ok">{t("passed")}</span>
-                      : <span className={check.blocking ? "badge error" : "badge warn"}>{t("failed")}</span>}
+                      ? <span className="ui-pill ui-ok">{t("passed")}</span>
+                      : <span className={check.blocking ? "ui-pill ui-error" : "ui-pill ui-warn"}>{t("failed")}</span>}
                 </td>
                 <td>{check.detail || "—"}</td>
               </tr>
@@ -459,7 +460,7 @@ function LeaveDomain({ host }: { host: Host }) {
       ) : (
         <FormActions>
           <ActionGuard action="identity.host.leave" host={host.id}>
-            <button className="secondary" onClick={() => setConfirming(true)}>{t("Leave domain")}</button>
+            <button className="ui-btn-secondary" onClick={() => setConfirming(true)}>{t("Leave domain")}</button>
           </ActionGuard>
         </FormActions>
       )}
@@ -480,7 +481,7 @@ function OfflinePolicy({ policy, verdict }: { policy?: SssdOfflinePolicy; verdic
     return (
       <>
         {value ? t("yes") : t("no")}
-        {defaulted.has(key) && <> <span className="badge">{t("default")}</span></>}
+        {defaulted.has(key) && <> <span className="ui-pill">{t("default")}</span></>}
       </>
     );
   };
@@ -489,7 +490,7 @@ function OfflinePolicy({ policy, verdict }: { policy?: SssdOfflinePolicy; verdic
     return (
       <>
         {render(value)}
-        {defaulted.has(key) && <> <span className="badge">{t("default")}</span></>}
+        {defaulted.has(key) && <> <span className="ui-pill">{t("default")}</span></>}
       </>
     );
   };
@@ -546,8 +547,8 @@ function VerdictChip({ verdict }: { verdict?: OfflineVerdict }) {
   };
   return (
     <>
-      <span className={`badge ${tone[verdict.verdict]}`}>{labels[verdict.verdict]}</span>
-      {verdict.in_force && <> <span className="badge warn">{t("outage in progress")}</span></>}
+      <span className={`ui-pill ${toneClass(tone[verdict.verdict])}`}>{labels[verdict.verdict]}</span>
+      {verdict.in_force && <> <span className="ui-pill ui-warn">{t("outage in progress")}</span></>}
       {" "}
       <span>{verdict.reason}</span>
     </>
@@ -574,7 +575,7 @@ function EffectiveAccess({ host }: { host: Host }) {
       : t("The access view could not be read: {error}", { error: error instanceof Error ? error.message : String(error) });
     return (
       <Section title={t("Effective access")} description={t("Who may enter this host and with what privileges, as the directory's rules and the local sudoers say.")}>
-        <p className="hm-message"><Unknown /> {detail}</p>
+        <p className="ui-message"><Unknown /> {detail}</p>
       </Section>
     );
   }
@@ -583,7 +584,7 @@ function EffectiveAccess({ host }: { host: Host }) {
   if (!data) {
     return (
       <Section title={t("Effective access")}>
-        <p className="hm-message">{t("Reading the directory…")}</p>
+        <p className="ui-message">{t("Reading the directory…")}</p>
       </Section>
     );
   }
@@ -594,7 +595,7 @@ function EffectiveAccess({ host }: { host: Host }) {
           the answer to "who can become root here" whatever the directory
           says. */}
       {data.root_equivalent_warnings.length > 0 && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>
             {t("Local sudoers make somebody root on this host:")}{" "}
             {data.root_equivalent_warnings.join("; ")}
@@ -604,15 +605,15 @@ function EffectiveAccess({ host }: { host: Host }) {
 
       {!data.known ? (
         <Section title={t("Effective access")} description={t("Who may enter this host and with what privileges, as the directory's rules say.")}>
-          <p className="hm-message"><Unknown /> {data.detail}</p>
+          <p className="ui-message"><Unknown /> {data.detail}</p>
         </Section>
       ) : (
         <>
           <Section title={t("Effective access")} description={t("Who may enter this host and with what privileges, as the directory's rules say.")} flush>
             <Facts>
-              <Fact label={t("Directory entry")}><span className="hm-mono">{data.fqdn}</span></Fact>
+              <Fact label={t("Directory entry")}><span className="ui-mono">{data.fqdn}</span></Fact>
               <Fact label={t("Enrolled in the directory")}>
-                {data.enrolled ? <span className="badge ok">{t("yes")}</span> : <span className="badge">{t("no")}</span>}
+                {data.enrolled ? <span className="ui-pill ui-ok">{t("yes")}</span> : <span className="ui-pill">{t("no")}</span>}
               </Fact>
               <Fact label={t("Host groups")} wide>{data.host_groups.join(", ") || t("none")}</Fact>
             </Facts>
@@ -623,14 +624,14 @@ function EffectiveAccess({ host }: { host: Host }) {
               <thead><tr><th scope="col">{t("Rule")}</th><th scope="col">{t("Enabled")}</th><th scope="col">{t("Via")}</th><th scope="col">{t("Who")}</th><th scope="col">{t("Services")}</th></tr></thead>
               <tbody>
                 {data.hbac_rules.length === 0 ? (
-                  <tr><td colSpan={5} className="empty">{t("No HBAC rule reaches this host: nobody from the directory can sign in.")}</td></tr>
+                  <tr><td colSpan={5} className="ui-empty">{t("No HBAC rule reaches this host: nobody from the directory can sign in.")}</td></tr>
                 ) : data.hbac_rules.map((rule) => (
                   <tr key={rule.name}>
                     <td>
                       {rule.name}
-                      {rule.allows_everything && <> <span className="badge error">{t("covers the whole fleet")}</span></>}
+                      {rule.allows_everything && <> <span className="ui-pill ui-error">{t("covers the whole fleet")}</span></>}
                     </td>
-                    <td>{rule.enabled ? t("yes") : <span className="badge">{t("no")}</span>}</td>
+                    <td>{rule.enabled ? t("yes") : <span className="ui-pill">{t("no")}</span>}</td>
                     <td>{rule.via.join(", ")}</td>
                     <td>
                       {rule.all_users
@@ -650,22 +651,22 @@ function EffectiveAccess({ host }: { host: Host }) {
               <thead><tr><th scope="col">{t("Rule")}</th><th scope="col">{t("Enabled")}</th><th scope="col">{t("Via")}</th><th scope="col">{t("Who")}</th><th scope="col">{t("Commands")}</th><th scope="col">{t("Run as")}</th><th scope="col">{t("Risk")}</th></tr></thead>
               <tbody>
                 {data.sudo_rules.length === 0 ? (
-                  <tr><td colSpan={7} className="empty">{t("No sudo rule from the directory reaches this host.")}</td></tr>
+                  <tr><td colSpan={7} className="ui-empty">{t("No sudo rule from the directory reaches this host.")}</td></tr>
                 ) : data.sudo_rules.map((rule) => (
                   <tr key={rule.name}>
                     <td>{rule.name}</td>
-                    <td>{rule.enabled ? t("yes") : <span className="badge">{t("no")}</span>}</td>
+                    <td>{rule.enabled ? t("yes") : <span className="ui-pill">{t("no")}</span>}</td>
                     <td>{rule.via.join(", ")}</td>
                     <td>
                       {rule.all_users
                         ? t("every user")
                         : (rule.reached_users ?? []).join(", ") || [...(rule.users ?? []), ...(rule.user_groups ?? [])].join(", ") || "—"}
                     </td>
-                    <td className="hm-mono">{rule.all_commands ? t("every command") : [...(rule.commands ?? []), ...(rule.command_groups ?? [])].join(", ") || "—"}</td>
+                    <td className="ui-mono">{rule.all_commands ? t("every command") : [...(rule.commands ?? []), ...(rule.command_groups ?? [])].join(", ") || "—"}</td>
                     <td>{rule.run_as_any_user ? t("any user") : [...(rule.run_as ?? []), ...(rule.run_as_groups ?? [])].join(", ") || "—"}</td>
                     <td>
                       {rule.critical
-                        ? <span className="badge error" title={(rule.critical_reasons ?? []).join("; ")}>{t("critical")}</span>
+                        ? <span className="ui-pill ui-error" title={(rule.critical_reasons ?? []).join("; ")}>{t("critical")}</span>
                         : "—"}
                     </td>
                   </tr>
@@ -703,11 +704,11 @@ function LocalSudoRules({ access }: { access: HostAccess }) {
       flush
     >
       {!state.read ? (
-        <p className="hm-message"><Unknown /> {state.reason}</p>
+        <p className="ui-message"><Unknown /> {state.reason}</p>
       ) : (
         <>
           {state.passwordless_globally && (
-            <p className="warning">
+            <p className="ui-banner">
               <span>{t("A global Defaults line turns authentication off: every local rule is passwordless whatever its tags say.")}</span>
             </p>
           )}
@@ -715,31 +716,31 @@ function LocalSudoRules({ access }: { access: HostAccess }) {
             <thead><tr><th scope="col">{t("Who")}</th><th scope="col">{t("Hosts")}</th><th scope="col">{t("Commands")}</th><th scope="col">{t("Run as")}</th><th scope="col">{t("Password")}</th><th scope="col">{t("Risk")}</th><th scope="col">{t("Source")}</th></tr></thead>
             <tbody>
               {rules.length === 0 ? (
-                <tr><td colSpan={7} className="empty">{t("The local sudoers files grant nothing.")}</td></tr>
+                <tr><td colSpan={7} className="ui-empty">{t("The local sudoers files grant nothing.")}</td></tr>
               ) : rules.map((rule) => (
                 <tr key={`${rule.source}:${rule.line}:${rule.commands.join(",")}:${rule.nopasswd}`} style={rule.reaches_host ? undefined : { opacity: 0.55 }}>
                   <td>
                     {rule.all_users ? t("every user") : rule.users.join(", ")}
                     {(rule.reached_users ?? []).length > 0 && !rule.all_users && rule.users.some((user) => user.startsWith("%") || user.startsWith("#")) && (
-                      <div className="source">{t("members: {users}", { users: (rule.reached_users ?? []).join(", ") })}</div>
+                      <div className="ui-note">{t("members: {users}", { users: (rule.reached_users ?? []).join(", ") })}</div>
                     )}
                   </td>
                   <td>
                     {rule.reaches_host
                       ? rule.via.join(", ")
-                      : <span className="badge unknown" title={rule.hosts.join(", ")}>{t("not this host")}</span>}
+                      : <span className="ui-pill ui-unknown" title={rule.hosts.join(", ")}>{t("not this host")}</span>}
                   </td>
-                  <td className="hm-mono">{rule.all_commands ? t("every command") : rule.commands.join(", ")}</td>
+                  <td className="ui-mono">{rule.all_commands ? t("every command") : rule.commands.join(", ")}</td>
                   <td>{runAs(rule)}</td>
-                  <td>{rule.nopasswd || state.passwordless_globally ? <span className="badge warn">{t("none")}</span> : t("required")}</td>
+                  <td>{rule.nopasswd || state.passwordless_globally ? <span className="ui-pill ui-warn">{t("none")}</span> : t("required")}</td>
                   <td>
                     {rule.root_equivalent
-                      ? <span className="badge error" title={(rule.critical_reasons ?? []).join("; ")}>{t("root")}</span>
+                      ? <span className="ui-pill ui-error" title={(rule.critical_reasons ?? []).join("; ")}>{t("root")}</span>
                       : rule.critical
-                        ? <span className="badge warn" title={(rule.critical_reasons ?? []).join("; ")}>{t("critical")}</span>
+                        ? <span className="ui-pill ui-warn" title={(rule.critical_reasons ?? []).join("; ")}>{t("critical")}</span>
                         : "—"}
                   </td>
-                  <td className="hm-mono">{rule.source}:{rule.line}</td>
+                  <td className="ui-mono">{rule.source}:{rule.line}</td>
                 </tr>
               ))}
             </tbody>

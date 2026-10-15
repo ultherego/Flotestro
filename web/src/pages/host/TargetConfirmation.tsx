@@ -39,11 +39,11 @@ export function TargetConfirmation({
   const ready = reason.trim().length >= 8 && (reasonOnly || confirmation === expected);
 
   return (
-    <div className={danger ? "form danger" : "form"} data-testid="target-confirmation">
+    <div className={danger ? "ui-form ui-error" : "ui-form"} data-testid="target-confirmation">
       <h2>{label}</h2>
-      <p className="subtitle">{description}</p>
+      <p className="ui-note">{description}</p>
       {/* The target repeated in the dialog: the operator approves a specific machine. */}
-      <p className="source">
+      <p className="ui-note">
         {t("Target: {host}", { host: host.hostname })}
         {host.management_address ? ` · ${host.management_address}` : ` · ${t("address unknown")}`}
         {` · ${host.site} / ${host.environment}`}
@@ -58,11 +58,11 @@ export function TargetConfirmation({
           <input value={confirmation} onChange={(e) => setConfirmation(e.target.value)} />
         </label>
       )}
-      <div className="operations">
-        <button className={danger ? "danger" : undefined} disabled={!ready || busy} onClick={() => onConfirm(reason, confirmation)}>
+      <div className="ui-actions">
+        <button className={danger ? "ui-btn-danger" : undefined} disabled={!ready || busy} onClick={() => onConfirm(reason, confirmation)}>
           {busy ? t("Requesting…") : label}
         </button>
-        <button className="secondary" onClick={onCancel} disabled={busy}>{t("Cancel")}</button>
+        <button className="ui-btn-secondary" onClick={onCancel} disabled={busy}>{t("Cancel")}</button>
       </div>
     </div>
   );

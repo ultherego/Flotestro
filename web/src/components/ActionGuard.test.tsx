@@ -75,7 +75,7 @@ describe("ActionGuard", () => {
     draw(<ActionGuard action="docker.image.pull" host="h1" explain><button>Pull</button></ActionGuard>);
     const button = await screen.findByRole("button", { name: "Pull" });
     expect(button).toBeDisabled();
-    const guard = button.closest(".action-guard");
+    const guard = button.closest(".ui-guard");
     expect(guard).toHaveAttribute("title", "the host lacks capability docker");
     expect(guard).toHaveAttribute("data-reason-code", "capability_missing");
     expect(screen.getByText("the host lacks capability docker")).toBeInTheDocument();

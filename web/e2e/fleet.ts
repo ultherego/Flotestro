@@ -67,7 +67,7 @@ export function watchErrors(page: Page): { errors: string[] } {
 
 /** The page shows no error box and threw nothing. */
 export async function expectHealthy(page: Page, errors: string[]) {
-  await expect(page.locator(".page-error")).toHaveCount(0);
+  await expect(page.locator(".ui-errorbox")).toHaveCount(0);
   await expect(page.getByText(/^Error:/)).toHaveCount(0);
   expect(errors, "uncaught exceptions on the page").toEqual([]);
 }
@@ -88,7 +88,7 @@ export async function openAccountMenu(page: Page) {
 /** Opens the host list and waits for its rows. */
 export async function openHostList(page: Page) {
   await page.goto("/hosts");
-  await expect(page.locator(".page-header").getByRole("heading", { name: "Hosts" })).toBeVisible();
+  await expect(page.locator(".ui-pagehead").getByRole("heading", { name: "Hosts" })).toBeVisible();
   const table = page.locator("table").first();
   await expect(table).toBeVisible();
   return table;
@@ -122,7 +122,7 @@ export function onlineHostWith(hosts: Host[], capability: string): Host | undefi
  */
 export async function openModule(page: Page, host: Host, segment: string, name: string): Promise<string | null> {
   await page.goto(`/hosts/${host.id}/${segment}`);
-  const header = page.locator(".hm-header").getByRole("heading", { name, exact: true });
+  const header = page.locator(".ui-sectionhead").getByRole("heading", { name, exact: true });
   const notice = page.getByText(`${name} is not available on this host:`);
   await expect(header.or(notice).first()).toBeVisible();
   return (await notice.isVisible()) ? await notice.textContent() : null;

@@ -5,8 +5,8 @@ import { api, ApiError, type Collection } from "../lib/api";
 import type { Policy, PolicyRule, PolicyVerdict, PolicyRemediationMode, Whoami } from "../lib/types";
 import { POLICY_MODES } from "../lib/types";
 import { Board } from "../components/board";
-import { ErrorBox, Empty, Time } from "../components/ui";
-import { Actions, Card, EmptyState, Field, FieldGrid, SectionHead } from "../components/layout";
+import { ErrorBox, Time } from "../components/ui";
+import { Actions, Empty, Field, Fields, Panel, SectionHead, toneClass } from "../ui/kit";
 import { StatusBar, type WidgetTone } from "../components/widgets";
 import { useT } from "../i18n";
 
@@ -103,21 +103,21 @@ export function modeLabel(mode: PolicyRemediationMode | string, t: Translate): s
 export function ComplianceBar({ counts }: { counts: Policy["counts"] | undefined }) {
   const t = useT();
   const segments = complianceShares(counts);
-  if (segments.length === 0) return <span className="badge unknown">{t("not evaluated")}</span>;
+  if (segments.length === 0) return <span className="ui-pill ui-unknown">{t("not evaluated")}</span>;
   return (
-    <span className="meter" title={segments.map((segment) => `${verdictLabel(segment.verdict, t)}: ${segment.count}`).join(", ")}>
-      <span className="meter-track" style={{ display: "inline-flex", overflow: "hidden" }}>
+    <span className="ui-meter" title={segments.map((segment) => `${verdictLabel(segment.verdict, t)}: ${segment.count}`).join(", ")}>
+      <span className="ui-bar" style={{ display: "inline-flex", overflow: "hidden" }}>
         {segments.map((segment) => (
           <span
             key={segment.verdict}
-            className={`meter-fill ${verdictTone(segment.verdict)}`}
+            className={`ui-bar-fill ${toneClass(verdictTone(segment.verdict))}`}
             style={{ width: `${Math.round(segment.share * 100)}%`, display: "inline-block" }}
           />
         ))}
       </span>
-      <span className="meter-value">
+      <span className="ui-meter-value">
         {segments.map((segment) => (
-          <span key={segment.verdict} className={`badge ${verdictTone(segment.verdict)}`}>{segment.count}</span>
+          <span key={segment.verdict} className={`ui-pill ${toneClass(verdictTone(segment.verdict))}`}>{segment.count}</span>
         ))}
       </span>
     </span>
@@ -127,7 +127,7 @@ export function ComplianceBar({ counts }: { counts: Policy["counts"] | undefined
 /** A verdict as a chip. */
 export function VerdictChip({ verdict }: { verdict: PolicyVerdict | string }) {
   const t = useT();
-  return <span className={`badge ${verdictTone(verdict)}`}>{verdictLabel(verdict, t)}</span>;
+  return <span className={`ui-pill ${toneClass(verdictTone(verdict))}`}>{verdictLabel(verdict, t)}</span>;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -186,8 +186,8 @@ export function Policies() {
       />
 
       {creating && (
-        <Card title={t("New policy")} description={t("A draft: the rules and the hosts are written on its page, and nothing is judged until it is published.")}>
-          <FieldGrid>
+        <Panel title={t("New policy")} description={t("A draft: the rules and the hosts are written on its page, and nothing is judged until it is published.")}>
+          <Fields>
             <Field label={t("Name")}>
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("e.g. baseline-cron")} autoFocus />
             </Field>
@@ -196,13 +196,13 @@ export function Policies() {
                 {POLICY_MODES.map((value) => <option key={value} value={value}>{modeLabel(value, t)}</option>)}
               </select>
             </Field>
-          </FieldGrid>
-          {create.error instanceof ApiError && <p className="hm-message error">{create.error.message}</p>}
+          </Fields>
+          {create.error instanceof ApiError && <p className="ui-message ui-error">{create.error.message}</p>}
           <Actions>
             <button onClick={() => create.mutate()} disabled={name.trim() === "" || create.isPending}>{t("Create the draft")}</button>
-            <button className="secondary" onClick={() => setCreating(false)}>{t("Cancel")}</button>
+            <button className="ui-btn-secondary" onClick={() => setCreating(false)}>{t("Cancel")}</button>
           </Actions>
-        </Card>
+        </Panel>
       )}
 
       <Board
@@ -214,25 +214,25 @@ export function Policies() {
         drawn={{
           standing: (
             <>
-              <Card className="span-12" title={t("Standing")} description={loaded ? t("{n} policies", { n: policies.length }) : undefined}>
+              <Panel className="ui-col-12" title={t("Standing")} description={loaded ? t("{n} policies", { n: policies.length }) : undefined}>
           <StatusBar segments={[
             { label: t("Published"), value: loaded ? published.length : undefined, tone: "info" },
             { label: t("Drafts"), value: loaded ? drafts.length : undefined, tone: "neutral" },
             { label: t("With drift"), value: loaded ? drifting.length : undefined, tone: "warn" },
             { label: t("With errors"), value: loaded ? erring.length : undefined, tone: "error" },
           ]} />
-        </Card>
+        </Panel>
             </>
           ),
           list: (
             <>
-              <Card className="span-12" flush>
+              <Panel className="ui-col-12" flush>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : policies.length === 0 ? (
-            <EmptyState action={canWrite && !creating && <button onClick={() => setCreating(true)}>{t("New policy")}</button>}>
+            <Empty action={canWrite && !creating && <button onClick={() => setCreating(true)}>{t("New policy")}</button>}>
               {t("No policy is declared. Without one the panel reports what the hosts are, not what they should be.")}
-            </EmptyState>
+            </Empty>
           ) : (
             <table>
               <thead>
@@ -251,15 +251,15 @@ export function Policies() {
                     <td><Link to={`/policies/${policy.id}`}>{policy.name}</Link></td>
                     <td><Standing policy={policy} /></td>
                     <td>{modeLabel(policy.remediation_mode, t)}</td>
-                    <td className="num">{policy.rules.length}</td>
+                    <td className="ui-numeric">{policy.rules.length}</td>
                     <td><ComplianceBar counts={policy.counts} /></td>
-                    <td>{policy.last_evaluated_at ? <Time value={policy.last_evaluated_at} /> : <span className="badge unknown">{t("never")}</span>}</td>
+                    <td>{policy.last_evaluated_at ? <Time value={policy.last_evaluated_at} /> : <span className="ui-pill ui-unknown">{t("never")}</span>}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
             </>
           )
         }}
@@ -273,11 +273,11 @@ export function Standing({ policy }: { policy: Pick<Policy, "version" | "draft" 
   const t = useT();
   switch (policyStanding(policy)) {
     case "unpublished":
-      return <span className="badge unknown">{t("not published")}</span>;
+      return <span className="ui-pill ui-unknown">{t("not published")}</span>;
     case "disabled":
-      return <>v{policy.version} <span className="badge unknown">{t("disabled")}</span></>;
+      return <>v{policy.version} <span className="ui-pill ui-unknown">{t("disabled")}</span></>;
     case "draft":
-      return <>v{policy.version} <span className="badge warn">{t("draft on top")}</span></>;
+      return <>v{policy.version} <span className="ui-pill ui-warn">{t("draft on top")}</span></>;
     default:
       return <>v{policy.version}</>;
   }

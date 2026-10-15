@@ -143,9 +143,9 @@ describe("the account menu", () => {
     expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
     const menu = openMenu();
     expect(trigger).toHaveAttribute("aria-expanded", "true");
-    expect(menu.querySelector(".user-menu-name")).toHaveTextContent("Alice");
-    expect(menu.querySelector(".user-menu-subject")).toHaveTextContent("alice@example.org");
-    expect(menu.querySelector(".user-menu-roles")).toHaveTextContent("operator");
+    expect(menu.querySelector(".ui-name")).toHaveTextContent("Alice");
+    expect(menu.querySelector(".ui-usermenu-subject")).toHaveTextContent("alice@example.org");
+    expect(menu.querySelector(".ui-tags")).toHaveTextContent("operator");
     expect(within(menu).getByRole("group", { name: "Theme" })).toBeInTheDocument();
     expect(within(menu).getByRole("group", { name: "Language" })).toBeInTheDocument();
   });
@@ -153,12 +153,12 @@ describe("the account menu", () => {
   it("says so when the person has no roles and shows a question mark for nobody", () => {
     draw({ who: { ...user, display_name: undefined, roles: [] } });
     const menu = openMenu();
-    expect(menu.querySelector(".user-menu-name")).toHaveTextContent("alice@example.org");
-    expect(menu.querySelector(".user-menu-subject")).toBeNull();
-    expect(menu.querySelector(".user-menu-roles")).toHaveTextContent("no roles");
+    expect(menu.querySelector(".ui-name")).toHaveTextContent("alice@example.org");
+    expect(menu.querySelector(".ui-usermenu-subject")).toBeNull();
+    expect(menu.querySelector(".ui-tags")).toHaveTextContent("no roles");
     cleanup();
     draw({ who: undefined });
-    expect(screen.getByRole("button", { name: "Account menu" }).querySelector(".topbar-avatar")).toHaveTextContent("?");
+    expect(screen.getByRole("button", { name: "Account menu" }).querySelector(".ui-avatar")).toHaveTextContent("?");
   });
 
   it("closes on Escape and on a click outside, and stays open on a click inside", () => {
@@ -181,30 +181,30 @@ describe("the trail", () => {
     const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(within(trail).getByRole("heading", { level: 1 })).toHaveTextContent("Dashboard");
     expect(within(trail).queryByRole("link")).toBeNull();
-    expect(trail).not.toHaveClass("on-host");
+    expect(trail).not.toHaveClass("ui-on-host");
     expect(screen.getByTestId("host-picker")).toBeInTheDocument();
   });
 
   it("puts the host between the section and the module on a host page", () => {
     draw({ trail: { section: "Hosts", to: "/hosts", host, module: "Services" } });
     const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
-    expect(trail).toHaveClass("on-host");
+    expect(trail).toHaveClass("ui-on-host");
     expect(within(trail).getByRole("link", { name: "Hosts" })).toHaveAttribute("href", "/hosts");
     const link = within(trail).getByRole("link", { name: /web-01/ });
     expect(link).toHaveAttribute("href", "/hosts/h1");
     expect(link).toHaveTextContent("10.0.0.5");
-    expect(link.querySelector(".dot")).toHaveClass("ok");
-    expect(link).not.toHaveClass("current");
-    expect(trail.querySelector(".topbar-crumb.current")).toHaveTextContent("Services");
+    expect(link.querySelector(".ui-dot")).toHaveClass("ui-ok");
+    expect(link).not.toHaveClass("ui-active");
+    expect(trail.querySelector(".ui-topbar-crumb.ui-active")).toHaveTextContent("Services");
   });
 
   it("makes the host the current place when no module is open, and says when its address is unknown", () => {
     draw({ trail: { section: "Hosts", to: "/hosts", host: { ...host, management_address: undefined, connection_state: "offline" } } });
     const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
     const link = within(trail).getByRole("link", { name: /web-01/ });
-    expect(link).toHaveClass("current");
+    expect(link).toHaveClass("ui-active");
     expect(link).toHaveTextContent("address unknown");
-    expect(link.querySelector(".dot")).toHaveClass("error");
-    expect(trail.querySelector(".topbar-crumb.current")).toBeNull();
+    expect(link.querySelector(".ui-dot")).toHaveClass("ui-error");
+    expect(trail.querySelector(".ui-topbar-crumb.ui-active")).toBeNull();
   });
 });

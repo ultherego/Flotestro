@@ -205,11 +205,11 @@ describe("arranging a board with the mouse", () => {
   it("widens and narrows a tile a column at a time", async () => {
     await arrange();
     const wider = () => screen.getAllByLabelText("Wider")[0];
-    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-4");
+    expect(screen.getAllByTestId("board-tile")[0].className).toContain("ui-col-4");
     fireEvent.click(wider());
-    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-5");
+    expect(screen.getAllByTestId("board-tile")[0].className).toContain("ui-col-5");
     fireEvent.click(screen.getAllByLabelText("Narrower")[0]);
-    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-4");
+    expect(screen.getAllByTestId("board-tile")[0].className).toContain("ui-col-4");
   });
 
   /* Two short tiles one under another is the thing heights are for: a tile
@@ -234,7 +234,7 @@ describe("arranging a board with the mouse", () => {
       if (!narrower.disabled) fireEvent.click(narrower);
     }
     // One column is the narrowest the grid has a class for.
-    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-1");
+    expect(screen.getAllByTestId("board-tile")[0].className).toContain("ui-col-1");
     expect(screen.getAllByTestId("board-tile")[0].style.gridRow).toBe("span 1");
   });
 });
@@ -269,12 +269,12 @@ describe("the arrange mode looks like the screen it is arranging", () => {
   const css = readFileSync(join(src, "styles.css"), "utf8");
 
   it("gives the bar its own height and the widget the rest of the box", () => {
-    expect(css).toContain(".widgets.arranged > div > .widget-handle { flex: 0 0 auto; }");
-    expect(/\.widgets\.arranged > div > \* \{[^}]*flex: 1 1 auto/.test(css)).toBe(true);
+    expect(css).toContain(".ui-grid.ui-arranged > div > .ui-handle { flex: 0 0 auto; }");
+    expect(/\.ui-grid\.ui-arranged > div > \* \{[^}]*flex: 1 1 auto/.test(css)).toBe(true);
   });
 });
 
-/* A panel whose condition is false renders nothing, and `{open && <Card/>}`
+/* A panel whose condition is false renders nothing, and `{open && <Panel/>}`
    hands the board `false` rather than undefined. Taken for a node it left a
    cell with nothing in it - a hole in the row where a closed form was. */
 describe("a panel with nothing to draw", () => {

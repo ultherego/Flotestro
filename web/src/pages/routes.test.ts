@@ -80,7 +80,7 @@ function openingTag(source: string, name: string, from = 0): string | undefined 
 
 /** The icons the page header can resolve, read out of the component itself. */
 function sectionIcons(): Set<string> {
-  const layout = readFileSync(join(SRC, "components/layout.tsx"), "utf8");
+  const layout = readFileSync(join(SRC, "ui/kit.tsx"), "utf8");
   const table = layout.slice(layout.indexOf("const SECTION_ICONS"), layout.indexOf("function iconForPath"));
   return new Set([...table.matchAll(/(\w[\w-]*)\s*:\s*"[\w-]+"/g)].map((m) => m[1]));
 }
@@ -109,11 +109,11 @@ describe("the pages the router can reach", () => {
       // ask for: the screens that moved into the settings area keep their old
       // addresses answering, and those answers are a <Navigate>.
       if (/Redirect$/.test(where.exported)) continue;
-      // PageHeader for an ordinary page; the host section's header is its
+      // PageHead for an ordinary page; the host section's header is its
       // context bar, which carries the connection state and the freshness of
       // the data as well as the name - the one section whose header is not the
       // same component, and deliberately.
-      if (!/PageHeader|ContextBar/.test(source)) without.push(`${name} (${where.from})`);
+      if (!/PageHead|ContextBar/.test(source)) without.push(`${name} (${where.from})`);
     }
     expect(without).toEqual([]);
   });
@@ -131,7 +131,7 @@ describe("the pages the router can reach", () => {
       if (!where) continue;
       const file = join(SRC, `${where.from.replace(/^\.\//, "")}.tsx`);
       const source = readFileSync(file, "utf8");
-      const tag = openingTag(source, "PageHeader");
+      const tag = openingTag(source, "PageHead");
       // A page under a layout carries no header of its own; the header test
       // above is what says which pages those are.
       if (!tag) continue;

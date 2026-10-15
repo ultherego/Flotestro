@@ -78,7 +78,7 @@ describe("PlanSummary", () => {
 
   it("puts a refusal in a red badge and nothing else", () => {
     const { container } = render(<PlanSummary plan={{ action: "update", changes: ["x"], refusal: "the path is a symlink" }} />);
-    const badge = container.querySelector(".badge.error");
+    const badge = container.querySelector(".ui-pill.ui-error");
     expect(badge).toHaveTextContent("refused: the path is a symlink");
     expect(container).not.toHaveTextContent("will change");
   });
@@ -86,11 +86,11 @@ describe("PlanSummary", () => {
   it("reports a failed validator with the start of its output", () => {
     const output = "x".repeat(300);
     const { container } = render(<PlanSummary plan={{ action: "update", validator_failed: true, validator_output: output }} />);
-    const badge = container.querySelector(".badge.error") as HTMLElement;
+    const badge = container.querySelector(".ui-pill.ui-error") as HTMLElement;
     expect(badge).toHaveTextContent(/^validator failed: x+$/);
     expect(badge.textContent?.length).toBe("validator failed: ".length + 200);
     const { container: quiet } = render(<PlanSummary plan={{ validator_failed: true }} />);
-    expect(quiet.querySelector(".badge.error")).toHaveTextContent(/^validator failed$/);
+    expect(quiet.querySelector(".ui-pill.ui-error")).toHaveTextContent(/^validator failed$/);
   });
 
   it("shows the source resolved to a UUID next to the path of the order", () => {
@@ -105,18 +105,18 @@ describe("PlanSummary", () => {
   it("prints the document verbatim, because that is what lands on the host", () => {
     const document = "network:\n  version: 2\n";
     const { container } = render(<PlanSummary plan={{ action: "update", document }} />);
-    expect(container.querySelector(".source")).toHaveTextContent("Document");
-    expect(container.querySelector("pre.hm-log")?.textContent).toBe(document);
+    expect(container.querySelector(".ui-note")).toHaveTextContent("Document");
+    expect(container.querySelector("pre.ui-log")?.textContent).toBe(document);
   });
 
   it("prints the commands one per line, and prefers the document when both exist", () => {
     const commands = ["ufw allow 22/tcp", "ufw reload"];
     const { container } = render(<PlanSummary plan={{ action: "update", commands }} />);
-    expect(container.querySelector(".source")).toHaveTextContent("Commands");
-    expect(container.querySelector("pre.hm-log")?.textContent).toBe("ufw allow 22/tcp\nufw reload");
+    expect(container.querySelector(".ui-note")).toHaveTextContent("Commands");
+    expect(container.querySelector("pre.ui-log")?.textContent).toBe("ufw allow 22/tcp\nufw reload");
     const { container: both } = render(<PlanSummary plan={{ action: "update", commands, document: "doc" }} />);
-    expect(both.querySelector(".source")).toHaveTextContent("Document");
-    expect(both.querySelector("pre.hm-log")?.textContent).toBe("doc");
+    expect(both.querySelector(".ui-note")).toHaveTextContent("Document");
+    expect(both.querySelector("pre.ui-log")?.textContent).toBe("doc");
     // An empty command list is no verbatim block at all.
     const { container: none } = render(<PlanSummary plan={{ action: "update", commands: [] }} />);
     expect(none.querySelector("pre")).toBeNull();
@@ -142,18 +142,18 @@ describe("JobPlan", () => {
     get.mockResolvedValue({ items: [{ detail: { kind: "unit_detail" } }] });
     const { container } = drawWithQueries(<JobPlan jobId="job-2" />);
     await waitFor(() => expect(get).toHaveBeenCalled());
-    await waitFor(() => expect(container.querySelector(".source")).toHaveTextContent("—"));
+    await waitFor(() => expect(container.querySelector(".ui-note")).toHaveTextContent("—"));
 
     get.mockResolvedValue({ items: [{ detail: { kind: "ssh_plan" } }] });
     const { container: bare } = drawWithQueries(<JobPlan jobId="job-3" />);
     await waitFor(() => expect(bare).toHaveTextContent("plan"));
-    expect(bare.querySelector(".badge")).toBeNull();
+    expect(bare.querySelector(".ui-pill")).toBeNull();
   });
 
   it("says that the plan is unavailable when the attempts cannot be read", async () => {
     get.mockRejectedValue(new Error("forbidden"));
     const { container } = drawWithQueries(<JobPlan jobId="job-4" />);
-    await waitFor(() => expect(container.querySelector(".source")).toHaveTextContent("plan unavailable"));
+    await waitFor(() => expect(container.querySelector(".ui-note")).toHaveTextContent("plan unavailable"));
   });
 });
 
@@ -189,8 +189,8 @@ describe("PlanChanges", () => {
     // A package new on the host has no version now; a dash says so, and
     // the direction follows from it.
     expect(cells(rows[3])).toEqual(["zsh", "install", "—", "5.9", ""]);
-    expect(container.querySelectorAll(".badge.warn")).toHaveLength(2);
-    expect(container.querySelector(".plan-changes-foot")).toHaveTextContent("4 packages · 2 security");
+    expect(container.querySelectorAll(".ui-pill.ui-warn")).toHaveLength(2);
+    expect(container.querySelector(".ui-foot")).toHaveTextContent("4 packages · 2 security");
     expect(container.querySelector("button")).toBeNull();
     expect(container.querySelector("ul")).toBeNull();
   });
@@ -206,7 +206,7 @@ describe("PlanChanges", () => {
     expect(button).toHaveTextContent("Show fewer");
     fireEvent.click(button);
     expect(container.querySelectorAll("tbody tr")).toHaveLength(8);
-    expect(container.querySelector(".plan-changes-foot .source")).toHaveTextContent(/^20 packages$/);
+    expect(container.querySelector(".ui-foot .ui-note")).toHaveTextContent(/^20 packages$/);
   });
 
   it("names the direction, the origin and the architecture of every element the host filled", () => {
@@ -221,8 +221,8 @@ describe("PlanChanges", () => {
     expect(cells(rows[1])).toEqual(["old-tool", "remove", "1.0", "—", "protecteddependency"]);
     expect(cells(rows[2])).toEqual(["openssl", "upgrade", "3.0.15-1", "3.0.16-1", "Debian-Security:12/stable-securityamd64+2.0 KiB"]);
     // A removal and a downgrade are what the operator must not miss.
-    expect(container.querySelectorAll("tr.plan-change-attention")).toHaveLength(2);
-    expect(container.querySelector(".plan-changes-foot")).toHaveTextContent("3 packages · 1 removed · 1 downgraded");
+    expect(container.querySelectorAll("tr.ui-warn")).toHaveLength(2);
+    expect(container.querySelector(".ui-foot")).toHaveTextContent("3 packages · 1 removed · 1 downgraded");
   });
 
   it("lists the changes of a file plan as sentences, and nothing for an empty plan", () => {
@@ -240,13 +240,13 @@ describe("PlanBlocked", () => {
       blocked: [{ name: "docker-ce", status: "no advisory covers it", kind: "advisory" }],
     }} />);
     expect(advisory.container).toHaveTextContent("stay out of this plan");
-    expect(advisory.container.querySelectorAll(".warning")).toHaveLength(0);
+    expect(advisory.container.querySelectorAll(".ui-banner")).toHaveLength(0);
 
     const broken = render(<PlanBlocked plan={{
       blocked: [{ name: "libc6", status: "half-configured", kind: "database" }],
     }} />);
     expect(broken.container).toHaveTextContent("a repair has to run");
-    expect(broken.container.querySelectorAll(".warning")).toHaveLength(1);
+    expect(broken.container.querySelectorAll(".ui-banner")).toHaveLength(1);
 
     // An agent from before the field names no kind, and that is the fault
     // every block used to be.
@@ -270,7 +270,7 @@ describe("PlanFacts", () => {
     expect(container).toHaveTextContent("download 3.0 MiB");
     expect(container).toHaveTextContent("/var (download cache): needs 100 B, 1.0 KiB free");
     // The short file system is a warning, the roomy one a plain fact.
-    expect(container.querySelectorAll(".badge.warn")).toHaveLength(2);
+    expect(container.querySelectorAll(".ui-pill.ui-warn")).toHaveLength(2);
     const { container: none } = render(<PlanFacts plan={{}} />);
     expect(none.innerHTML).toBe("");
   });
@@ -316,15 +316,15 @@ describe("PlanGroupView", () => {
       plan: { kind: "package_plan", mode: "upgrade", manager: "apt", planner_version: "packages/1", changes: [{ name: "libc6", candidate_version: "2.41-13", action: "install" }] },
     };
     const { container } = render(<PlanGroupView group={group} stale={["web-2", "db-9"]} />);
-    expect(container.querySelector(".plan-group-head")).toHaveTextContent("Planner packages/1");
-    expect(container.querySelector(".plan-group-head .badge.error")).toHaveTextContent("stale on 1 hosts");
+    expect(container.querySelector(".ui-group-head")).toHaveTextContent("Planner packages/1");
+    expect(container.querySelector(".ui-group-head .ui-pill.ui-error")).toHaveTextContent("stale on 1 hosts");
     expect(container.querySelector("[data-testid=plan-group]")?.getAttribute("data-status")).toBe("known");
 
     const { container: unknown } = render(<PlanGroupView group={{ plan_hash: "0000", count: 1, hosts: ["old-1"], expires_at: future, plan: {} }} />);
     expect(unknown.querySelector("[data-testid=plan-group]")?.getAttribute("data-status")).toBe("unknown");
-    expect(unknown.querySelector(".plan-group-head")).toHaveTextContent("unknown plan");
+    expect(unknown.querySelector(".ui-group-head")).toHaveTextContent("unknown plan");
     expect(unknown.querySelector("table")).toBeNull();
-    expect(unknown.querySelector(".warning")).toHaveTextContent("exclude the hosts with a reason");
+    expect(unknown.querySelector(".ui-banner")).toHaveTextContent("exclude the hosts with a reason");
   });
 
   it("keeps two plans of different fingerprints apart even over the same packages", () => {
@@ -353,11 +353,11 @@ describe("PlanGroupView", () => {
       },
     };
     const { container } = render(<PlanGroupView group={group} action="packages.upgrade" />);
-    const head = container.querySelector(".plan-group-head");
+    const head = container.querySelector(".ui-group-head");
     expect(head).toHaveTextContent("2 hosts web-1, web-2");
     expect(head).toHaveTextContent("abcdef0123456789");
     expect(head).toHaveTextContent("Valid until");
-    expect(container.querySelector(".plan-group-words")).toHaveTextContent("packages.upgrade · packages will be upgraded (apt)");
+    expect(container.querySelector(".ui-lede")).toHaveTextContent("packages.upgrade · packages will be upgraded (apt)");
     expect(container).toHaveTextContent("reboot predicted");
     expect(container.querySelector("tbody tr")).toHaveTextContent("libc6");
   });
@@ -365,11 +365,11 @@ describe("PlanGroupView", () => {
   it("shows a host plan with its words and a refusal as the badge alone", () => {
     const base = { plan_hash: "0123456789abcdef", count: 1, hosts: ["db-1"], expires_at: "2099-01-01T00:00:00Z" };
     const { container } = render(<PlanGroupView group={{ ...base, plan: { kind: "file_plan", plan: { action: "update", changes: ["content"], document: "x=1" } } }} />);
-    expect(container.querySelector(".plan-group-words")).toHaveTextContent("will change");
+    expect(container.querySelector(".ui-lede")).toHaveTextContent("will change");
     expect(container.querySelector("li")).toHaveTextContent("content");
-    expect(container.querySelector("pre.hm-log")?.textContent).toBe("x=1");
+    expect(container.querySelector("pre.ui-log")?.textContent).toBe("x=1");
     const { container: refused } = render(<PlanGroupView group={{ ...base, plan: { kind: "file_plan", plan: { action: "update", refusal: "symlink" } } }} />);
-    expect(refused.querySelector(".badge.error")).toHaveTextContent("refused: symlink");
-    expect(refused.querySelector(".plan-group-words")).toBeNull();
+    expect(refused.querySelector(".ui-pill.ui-error")).toHaveTextContent("refused: symlink");
+    expect(refused.querySelector(".ui-lede")).toBeNull();
   });
 });

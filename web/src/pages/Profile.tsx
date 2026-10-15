@@ -7,8 +7,8 @@ import { COMMON_TIME_ZONES, usePreferences, validTimeZone } from "../lib/prefere
 import { LOCALES, useLocale, useT } from "../i18n";
 import { THEMES, type Theme } from "../lib/theme";
 import { absoluteTime, absoluteTimeIn } from "../lib/format";
-import { Empty, ErrorBox, Pair, Pairs, Time } from "../components/ui";
-import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
+import { ErrorBox, Pair, Pairs, Time } from "../components/ui";
+import { Actions, Empty, Field, Fields, PageHead, Panel } from "../ui/kit";
 import { useToast } from "../components/Toast";
 
 /**
@@ -41,9 +41,9 @@ const WHOAMI_STALE = 5 * 60 * 1000;
  */
 function ScopeList({ values, every }: { values: string[] | undefined; every: string }) {
   const t = useT();
-  if (!values || values.includes("*")) return <span className="source">{every}</span>;
-  if (values.length === 0) return <span className="badge warn">{t("nothing")}</span>;
-  return <span className="mono">{values.join(", ")}</span>;
+  if (!values || values.includes("*")) return <span className="ui-note">{every}</span>;
+  if (values.length === 0) return <span className="ui-pill ui-warn">{t("nothing")}</span>;
+  return <span className="ui-mono">{values.join(", ")}</span>;
 }
 
 /** A scope part that names no site or environment: an asterisk, as the server keeps it, or nothing. */
@@ -139,37 +139,37 @@ export function Profile({ theme, setTheme }: {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         icon="user"
         title={t("Profile")}
         description={t("Who the panel takes you for, and how you like it.")}
         help={<p>{t("Who the panel takes you for, what you may do and where, where you are signed in, and how you like the panel.")}</p>}
       />
 
-      <div className="widgets">
-        <Card className="span-6" title={t("Identity")} description={t("As the trail names you.")}>
+      <div className="ui-grid">
+        <Panel className="ui-col-6" title={t("Identity")} description={t("As the trail names you.")}>
           {!me ? (
             <Empty>{t("Loading…")}</Empty>
           ) : (
             <Pairs>
               <Pair label={t("Name")}>{name}</Pair>
-              <Pair label={t("Subject")}><span className="mono">{me.subject}</span></Pair>
+              <Pair label={t("Subject")}><span className="ui-mono">{me.subject}</span></Pair>
               <Pair label={t("Kind")}>{me.kind === "service" ? t("service") : t("person")}</Pair>
-              {me.id && <Pair label={t("Identifier")}><span className="mono">{me.id}</span></Pair>}
+              {me.id && <Pair label={t("Identifier")}><span className="ui-mono">{me.id}</span></Pair>}
               <Pair label={t("Roles")}>
-                {me.roles.length === 0 ? <span className="badge unknown">{t("no roles")}</span> : me.roles.join(", ")}
+                {me.roles.length === 0 ? <span className="ui-pill ui-unknown">{t("no roles")}</span> : me.roles.join(", ")}
               </Pair>
             </Pairs>
           )}
           {managesAccess && me?.id && (
-            <p className="source">
+            <p className="ui-note">
               <Link to="/access">{t("Manage every identity on the access screen")}</Link>
             </p>
           )}
-        </Card>
+        </Panel>
 
-        <Card
-          className="span-6"
+        <Panel
+          className="ui-col-6"
           title={t("Bindings")}
           description={t("Each role with everything it is narrowed by. A category shown as any is one the binding does not narrow; a category naming values is one it does, and the role reaches nothing outside them.")}
           flush
@@ -193,24 +193,24 @@ export function Profile({ theme, setTheme }: {
                   return (
                     <tr key={`${binding.role}-${binding.scope.site}-${binding.scope.environment}-${index}`}>
                       <td>{binding.role}</td>
-                      <td>{anyScope(binding.scope.site) ? <span className="source">{t("any site")}</span> : <span className="mono">{binding.scope.site}</span>}</td>
-                      <td>{anyScope(binding.scope.environment) ? <span className="source">{t("any environment")}</span> : <span className="mono">{binding.scope.environment}</span>}</td>
+                      <td>{anyScope(binding.scope.site) ? <span className="ui-note">{t("any site")}</span> : <span className="ui-mono">{binding.scope.site}</span>}</td>
+                      <td>{anyScope(binding.scope.environment) ? <span className="ui-note">{t("any environment")}</span> : <span className="ui-mono">{binding.scope.environment}</span>}</td>
                       <td>{binding.scope.team_scope?.mode === "exact"
-                        ? <span className="mono">{binding.scope.team_scope.team_id}</span>
-                        : <span className="source">{t("any team")}</span>}</td>
+                        ? <span className="ui-mono">{binding.scope.team_scope.team_id}</span>
+                        : <span className="ui-note">{t("any team")}</span>}</td>
                       <td><ScopeList values={binding.scope.owners} every={t("any owner")} /></td>
                       <td><ScopeList values={binding.scope.tags} every={t("any tag")} /></td>
-                      <td>{until ? <Time value={until} /> : <span className="source">{t("until revoked")}</span>}</td>
+                      <td>{until ? <Time value={until} /> : <span className="ui-note">{t("until revoked")}</span>}</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
 
-        <Card
-          className="span-12"
+        <Panel
+          className="ui-col-12"
           title={t("Permissions")}
           description={t("Everything your roles allow, in any scope, by the part of the panel it concerns. The screens hide what is not here; the server refuses it either way.")}
           flush
@@ -227,16 +227,16 @@ export function Profile({ theme, setTheme }: {
               <tbody>
                 {groupPermissions(me.permissions).map((group) => (
                   <tr key={group.area}>
-                    <td className="fp-nowrap">
-                      <div className="fp-host-cell">
+                    <td className="ui-nowrap">
+                      <div className="ui-twoline">
                         <span>{t(AREA_NAMES[group.area] ?? group.area)}</span>
-                        <span className="source mono">{group.area}.*</span>
+                        <span className="ui-note ui-mono">{group.area}.*</span>
                       </div>
                     </td>
                     <td>
-                      <div className="fp-chips">
+                      <div className="ui-tags">
                         {group.actions.map((action) => (
-                          <span key={action} className="chip chip-mono" title={`${group.area}.${action}`}>{action}</span>
+                          <span key={action} className="ui-tag ui-tag ui-mono" title={`${group.area}.${action}`}>{action}</span>
                         ))}
                       </div>
                     </td>
@@ -245,28 +245,28 @@ export function Profile({ theme, setTheme }: {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
 
         <OwnPasswordCard />
         <PreferencesCard theme={theme} setTheme={setTheme} />
 
-        <Card
-          className="span-12"
+        <Panel
+          className="ui-col-12"
           title={t("Sessions")}
           description={t("Where you are signed in right now. A session you do not recognise is ended from the access screen by whoever manages the identities, or by signing out of every browser.")}
           flush
         >
           <OwnSessions query={sessions} />
-        </Card>
+        </Panel>
 
-        <Card
-          className="span-12"
+        <Panel
+          className="ui-col-12"
           title={t("Tokens")}
           description={t("The API tokens issued to your identity. A value is shown once, when the token is issued, and nowhere again.")}
           flush
         >
           <OwnTokens query={tokens} />
-        </Card>
+        </Panel>
       </div>
     </>
   );
@@ -307,8 +307,8 @@ function OwnPasswordCard() {
 
   const mismatch = again !== "" && next !== again;
   return (
-    <Card
-      className="span-6"
+    <Panel
+      className="ui-col-6"
       title={t("Password")}
       description={mustChange
         ? t("Somebody else chose the password you signed in with, so two people know it. Replace it here.")
@@ -322,11 +322,11 @@ function OwnPasswordCard() {
           >
             {change.isPending ? t("changing…") : t("Change the password")}
           </button>
-          {refusal !== "" && <span className="page-error" data-testid="password-refusal">{refusal}</span>}
+          {refusal !== "" && <span className="ui-errorbox" data-testid="password-refusal">{refusal}</span>}
         </Actions>
       }
     >
-      <FieldGrid>
+      <Fields>
         <Field label={t("The password in force")}>
           <input type="password" value={current} autoComplete="current-password"
                  onChange={(event) => setCurrent(event.target.value)} data-testid="current-password" />
@@ -339,9 +339,9 @@ function OwnPasswordCard() {
           <input type="password" value={again} autoComplete="new-password"
                  onChange={(event) => setAgain(event.target.value)} data-testid="new-password-again" />
         </Field>
-      </FieldGrid>
-      {mismatch && <p className="page-error">{t("The two new passwords are not the same.")}</p>}
-    </Card>
+      </Fields>
+      {mismatch && <p className="ui-errorbox">{t("The two new passwords are not the same.")}</p>}
+    </Panel>
   );
 }
 
@@ -395,21 +395,21 @@ function PreferencesCard({ theme, setTheme }: { theme: Theme; setTheme: (theme: 
   const now = new Date().toISOString();
 
   return (
-    <Card
-      className="span-12"
+    <Panel
+      className="ui-col-12"
       title={t("Preferences")}
       description={t("How you like the panel. The choices are kept under your identity and follow you to the next browser.")}
       footer={
         <Actions>
           <button onClick={submit} disabled={!ready || saving}>{saving ? t("saving…") : t("Save")}</button>
-          {message && <span className="page-error">{message}</span>}
+          {message && <span className="ui-errorbox">{message}</span>}
           {preferences.updated_at && (
-            <span className="source">{t("Last changed")} <Time value={preferences.updated_at} /></span>
+            <span className="ui-note">{t("Last changed")} <Time value={preferences.updated_at} /></span>
           )}
         </Actions>
       }
     >
-      <FieldGrid>
+      <Fields>
         <Field
           label={t("Time zone")}
           hint={zoneValid
@@ -445,19 +445,19 @@ function PreferencesCard({ theme, setTheme }: { theme: Theme; setTheme: (theme: 
           <input
             value={landing}
             placeholder="/dashboard"
-            className="mono"
+            className="ui-mono"
             onChange={(e) => setLanding(e.target.value)}
             aria-invalid={!landingValid}
             data-testid="preference-landing-page"
           />
         </Field>
         <Field label={t("Language")} hint={t("Applies at once, here and in the top bar.")}>
-          <div className="language-switch" role="group" aria-label={t("Language")}>
+          <div className="ui-switch" role="group" aria-label={t("Language")}>
             {LOCALES.map((entry) => (
               <button
                 key={entry.code}
                 type="button"
-                className={entry.code === locale ? "active" : ""}
+                className={entry.code === locale ? "ui-active" : ""}
                 aria-pressed={entry.code === locale}
                 onClick={() => applyLanguage(entry.code)}
               >
@@ -467,24 +467,24 @@ function PreferencesCard({ theme, setTheme }: { theme: Theme; setTheme: (theme: 
           </div>
         </Field>
         <Field label={t("Theme")} hint={t("Applies at once, here and in the top bar.")}>
-          <div className="theme-switch" role="group" aria-label={t("Theme")}>
+          <div className="ui-switch" role="group" aria-label={t("Theme")}>
             {THEMES.map((entry) => (
               <button
                 key={entry.code}
                 type="button"
-                className={entry.code === theme ? "active" : ""}
+                className={entry.code === theme ? "ui-active" : ""}
                 aria-pressed={entry.code === theme}
                 title={t(entry.description)}
                 onClick={() => applyTheme(entry.code)}
               >
-                <span className={`theme-swatch ${entry.code}`} aria-hidden="true" />
+                <span className={`ui-themeswatch ui-theme-${entry.code}`} aria-hidden="true" />
                 {t(entry.label)}
               </button>
             ))}
           </div>
         </Field>
-      </FieldGrid>
-    </Card>
+      </Fields>
+    </Panel>
   );
 }
 
@@ -501,17 +501,17 @@ function OwnSessions({ query }: { query: { data?: Collection<OwnSession>; error:
       <tbody>
         {query.data.items.map((session) => (
           <tr key={session.id}>
-            <td className="mono" title={session.id}>
+            <td className="ui-mono" title={session.id}>
               {session.id.slice(0, 12)}
-              {session.acr && <span className="source"> acr={session.acr}</span>}
+              {session.acr && <span className="ui-note"> acr={session.acr}</span>}
             </td>
             <td><Time value={session.created_at} /></td>
             <td><Time value={session.last_seen_at} /></td>
             <td>
               <Time value={session.expires_at} />
-              <div className="source">{t("or idle")} <Time value={session.idle_expires_at} /></div>
+              <div className="ui-note">{t("or idle")} <Time value={session.idle_expires_at} /></div>
             </td>
-            <td className="source">
+            <td className="ui-note">
               {session.remote_addr || "—"}
               {session.user_agent && <div title={session.user_agent}>{session.user_agent.slice(0, 60)}</div>}
             </td>
@@ -535,11 +535,11 @@ function OwnTokens({ query }: { query: { data?: Collection<ApiToken>; error: unk
       <tbody>
         {query.data.items.map((token) => (
           <tr key={token.id}>
-            <td className="mono" title={token.id}>{token.id.slice(0, 12)}</td>
+            <td className="ui-mono" title={token.id}>{token.id.slice(0, 12)}</td>
             <td>{token.description || "—"}</td>
             <td><Time value={token.created_at} /></td>
             <td><Time value={token.last_used_at} /></td>
-            <td>{token.expires_at ? <Time value={token.expires_at} /> : <span className="source">{t("never")}</span>}</td>
+            <td>{token.expires_at ? <Time value={token.expires_at} /> : <span className="ui-note">{t("never")}</span>}</td>
           </tr>
         ))}
       </tbody>

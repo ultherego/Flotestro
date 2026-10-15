@@ -68,7 +68,7 @@ describe("the jobs screen as a board", () => {
     // The two stored panels come first; a panel the record says nothing
     // about follows them rather than staying invisible for ever.
     expect(grid.children.length).toBeGreaterThanOrEqual(2);
-    expect((grid.children[1] as HTMLElement).className).toContain("span-6");
+    expect((grid.children[1] as HTMLElement).className).toContain("ui-col-6");
   });
 
   it("offers arranging to whoever opens it", async () => {

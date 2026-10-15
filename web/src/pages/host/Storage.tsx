@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { Time, Empty } from "../../components/ui";
+import { Time } from "../../components/ui";
 import { bytes } from "../../lib/format";
 import { Breakdown, Meter } from "../../components/widgets";
 import {
@@ -15,6 +15,7 @@ import { PlanSummary, type HostPlan } from "../../components/plan";
 import { OperationForm } from "../../components/OperationForm";
 import { emptyForm, operationForm, type FieldSuggestions, type FormValue } from "../../lib/operations";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 export type Device = {
   name: string;
@@ -352,7 +353,7 @@ export function Storage() {
   // and group operations need values typed in, and they are drawn from the
   // same registry the Bulk wizard draws from.
   const [layer, setLayer] = useState<{ action: string; seed: FormValue } | null>(null);
-  const unknown = <span className="badge unknown">{t("unknown")}</span>;
+  const unknown = <span className="ui-pill ui-unknown">{t("unknown")}</span>;
 
   const request = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
@@ -405,7 +406,7 @@ export function Storage() {
         actions={
           <>
             <ActionGuard action="mount.ensure" host={host.id}>
-              <button className="secondary" onClick={() => setWizard((open) => !open)}>
+              <button className="ui-btn-secondary" onClick={() => setWizard((open) => !open)}>
                 {wizard ? t("Cancel") : t("Mount a filesystem")}
               </button>
             </ActionGuard>
@@ -425,7 +426,7 @@ export function Storage() {
       <Message text={message} />
 
       {snapshot?.unavailable_reason && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>{t("Storage state could not be read: {reason}", { reason: snapshot.unavailable_reason })}</span>
         </p>
       )}
@@ -454,17 +455,17 @@ export function Storage() {
         {deviceTypes.length ? (
           <Breakdown items={deviceTypes.map(([type, count]) => ({ label: type, value: count }))} />
         ) : (
-          <p className="source">{t("This host reports no block device.")}</p>
+          <p className="ui-note">{t("This host reports no block device.")}</p>
         )}
-        <p className="widget-subhead">{t("Volume groups")}</p>
+        <p className="ui-subhead">{t("Volume groups")}</p>
         {snapshot?.lvm_unavailable_reason ? (
-          <p className="source">{t("No LVM here: {reason}", { reason: snapshot.lvm_unavailable_reason })}</p>
+          <p className="ui-note">{t("No LVM here: {reason}", { reason: snapshot.lvm_unavailable_reason })}</p>
         ) : !snapshot?.groups?.length ? (
-          <p className="source">{t("This host has LVM but no volume groups.")}</p>
+          <p className="ui-note">{t("This host has LVM but no volume groups.")}</p>
         ) : (
           <Breakdown
             items={(snapshot?.groups ?? []).map((group) => ({
-              label: <span className="hm-mono">{group.name}</span>,
+              label: <span className="ui-mono">{group.name}</span>,
               value: group.lv_count,
               tone: usageTone(group.size_bytes - group.free_bytes, group.size_bytes),
             }))}
@@ -472,20 +473,20 @@ export function Storage() {
         )}
         {/* The arrays have a section of their own below, with the members
             and the rebuild; this card says only how many there are. */}
-        <p className="widget-subhead">{t("Software RAID")}</p>
+        <p className="ui-subhead">{t("Software RAID")}</p>
         {snapshot?.raid_unavailable_reason ? (
-          <p className="source">{t("No software RAID here: {reason}", { reason: snapshot.raid_unavailable_reason })}</p>
+          <p className="ui-note">{t("No software RAID here: {reason}", { reason: snapshot.raid_unavailable_reason })}</p>
         ) : !snapshot?.arrays?.length ? (
-          <p className="source">{t("This kernel has software RAID and no array assembled.")}</p>
+          <p className="ui-note">{t("This kernel has software RAID and no array assembled.")}</p>
         ) : (
           <Breakdown
             items={snapshot.arrays.map((array) => ({
               // The bar is the slots the array has filled against the slots
               // it has: a shorter bar is an array that has lost a member.
               label: (
-                <span className="hm-mono">
+                <span className="ui-mono">
                   {array.name} {array.level || ""}
-                  {array.degraded && <span className="badge error"> {t("degraded")}</span>}
+                  {array.degraded && <span className="ui-pill ui-error"> {t("degraded")}</span>}
                 </span>
               ),
               value: array.active_devices,
@@ -506,23 +507,23 @@ export function Storage() {
           <tbody>
             {mountRows(mounts).map(({ mount, times }) => (
               <tr key={`${mount.target}|${mount.source}|${mount.fs_type}`}>
-                <td className="hm-mono hm-primary">
+                <td className="ui-mono ui-name">
                   {mount.target}
                   {times > 1 && (
-                    <span className="badge" title={t("The host has this filesystem mounted {n} times at this point, one over the other.", { n: times })}> ×{times}</span>
+                    <span className="ui-pill" title={t("The host has this filesystem mounted {n} times at this point, one over the other.", { n: times })}> ×{times}</span>
                   )}
                 </td>
-                <td className="hm-mono" title={mount.source}>{mount.source.slice(0, 40)}</td>
+                <td className="ui-mono" title={mount.source}>{mount.source.slice(0, 40)}</td>
                 <td>{mount.fs_type}</td>
                 {/* The four "mounted / in fstab" combinations mean four
                     different things, and all of them matter to the operator. */}
                 <td>
-                  {mount.mounted && mount.in_fstab && <span className="badge ok">{t("mounted, persistent")}</span>}
+                  {mount.mounted && mount.in_fstab && <span className="ui-pill ui-ok">{t("mounted, persistent")}</span>}
                   {mount.mounted && !mount.in_fstab && (
-                    <span className="badge warn">{t("mounted, gone after reboot")}</span>
+                    <span className="ui-pill ui-warn">{t("mounted, gone after reboot")}</span>
                   )}
                   {!mount.mounted && mount.in_fstab && (
-                    <span className="badge unknown">{t("in fstab, not mounted")}</span>
+                    <span className="ui-pill ui-unknown">{t("in fstab, not mounted")}</span>
                   )}
                 </td>
                 {/* Unknown usage stays unknown: a network filesystem may not
@@ -553,12 +554,12 @@ export function Storage() {
                     />
                   )}
                 </td>
-                <td>{mount.managed ? "Flotestro" : <span className="badge unknown">{t("host admin")}</span>}</td>
+                <td>{mount.managed ? "Flotestro" : <span className="ui-pill ui-unknown">{t("host admin")}</span>}</td>
                 <td>
                   {mount.managed && mount.mounted && (
                     <ActionGuard action="mount.remove" host={host.id}>
                       <button
-                        className="hm-danger"
+                        className="ui-btn-danger"
                         disabled={unmountPlan.busy}
                         onClick={() => {
                           unmountPlan.reset();
@@ -580,32 +581,32 @@ export function Storage() {
       <Section title={t("Devices")} count={devices.length} span={12} flush>
         <Table>
           <thead>
-            <tr><th scope="col">{t("Device")}</th><th scope="col">{t("Type")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col">{t("Filesystem")}</th><th scope="col">{t("Mounted at")}</th><th scope="col">{t("Identity")}</th><th scope="col">{t("Actions")}</th></tr>
+            <tr><th scope="col">{t("Device")}</th><th scope="col">{t("Type")}</th><th scope="col" className="ui-numeric">{t("Size")}</th><th scope="col">{t("Filesystem")}</th><th scope="col">{t("Mounted at")}</th><th scope="col">{t("Identity")}</th><th scope="col">{t("Actions")}</th></tr>
           </thead>
           <tbody>
             {devices.map((device) => (
               <tr key={device.path}>
                 {/* The indentation reflects the disk -> partition -> volume topology. */}
-                <td className={device.parent ? "hm-mono hm-indent" : "hm-mono hm-primary"}>
+                <td className={device.parent ? "ui-mono ui-indent" : "ui-mono ui-name"}>
                   {device.path}
-                  {device.read_only && <span className="badge"> {t("read-only")}</span>}
+                  {device.read_only && <span className="ui-pill"> {t("read-only")}</span>}
                 </td>
                 <td>{device.type}</td>
-                <td className="hm-num">{bytes(device.size_bytes)}</td>
+                <td className="ui-numeric">{bytes(device.size_bytes)}</td>
                 <td>
                   {device.fs_type || "—"}
                   {device.fs_size_bytes !== undefined && device.fs_size_bytes < device.size_bytes && (
-                    <span className="source"> · fs {bytes(device.fs_size_bytes)}</span>
+                    <span className="ui-note"> · fs {bytes(device.fs_size_bytes)}</span>
                   )}
                 </td>
-                <td className="hm-mono">{(device.mountpoints ?? []).map((point) => t(mountpointWords(point))).join(", ") || "—"}</td>
+                <td className="ui-mono">{(device.mountpoints ?? []).map((point) => t(mountpointWords(point))).join(", ") || "—"}</td>
                 {/* Identification goes by the by-id link, the WWN and the
                     serial: /dev/sdX depends on the detection order and points
                     at another disk after a reboot. A device without a link
                     has no identity to bind a destructive operation to, and
                     the row says so instead of showing an empty cell. */}
                 <td
-                  className="source hm-mono"
+                  className="ui-note ui-mono"
                   title={[
                     device.by_id ?? "",
                     device.wwn ? `WWN ${device.wwn}` : "",
@@ -622,11 +623,11 @@ export function Storage() {
                   {device.serial ? <div>{t("serial")} {device.serial}</div> : null}
                   {device.uuid ? <div>UUID={device.uuid.slice(0, 13)}…</div> : null}
                   {(device.holders ?? []).length > 0 && (
-                    <div><span className="badge warn">{t("held by {holders}", { holders: device.holders!.join(", ") })}</span></div>
+                    <div><span className="ui-pill ui-warn">{t("held by {holders}", { holders: device.holders!.join(", ") })}</span></div>
                   )}
                   {!device.by_id && (
                     <div>
-                      <span className="badge unknown" title={device.identity_unavailable_reason}>{t("no stable identity")}</span>
+                      <span className="ui-pill ui-unknown" title={device.identity_unavailable_reason}>{t("no stable identity")}</span>
                     </div>
                   )}
                 </td>
@@ -635,9 +636,9 @@ export function Storage() {
                       partition; reading it changes nothing, so a mounted
                       disk is asked as well. */}
                   {!device.parent && (
-                    <div className="operations">
+                    <div className="ui-actions">
                       <button
-                        className="secondary"
+                        className="ui-btn-secondary"
                         onClick={() => setSmartOf(smartOf?.path === device.path ? null : device)}
                       >
                         SMART
@@ -648,7 +649,7 @@ export function Storage() {
                       on it or under it - and the host checks that once more
                       anyway. */}
                   {!deviceInUse(device, devices) && (
-                    <div className="operations">
+                    <div className="ui-actions">
                       {device.fs_type && (
                         <ActionGuard action="filesystem.check" host={host.id}>
                           <button
@@ -689,7 +690,7 @@ export function Storage() {
                           offered: the host would refuse, and the row says why. */}
                       {destructiveRefusal(device, devices) ? (
                         <span
-                          className="badge error"
+                          className="ui-pill ui-error"
                           title={destructiveRefusal(device, devices)!.reason}
                         >
                           {t("format refused: {code}", { code: destructiveRefusal(device, devices)!.code })}
@@ -698,7 +699,7 @@ export function Storage() {
                         <>
                           <ActionGuard action="filesystem.create" host={host.id}>
                             <button
-                              className="hm-danger"
+                              className="ui-btn-danger"
                               onClick={() =>
                                 setIntent({
                                   action: "filesystem.create",
@@ -718,7 +719,7 @@ export function Storage() {
                           </ActionGuard>
                           <ActionGuard action="disk.wipe" host={host.id}>
                             <button
-                              className="hm-danger"
+                              className="ui-btn-danger"
                               onClick={() =>
                                 setIntent({
                                   action: "disk.wipe",
@@ -754,7 +755,7 @@ export function Storage() {
         description={t("The arrays of the host: the level, the members, and what each array is left with.")}
         flush
       >
-        <p className="source hm-section-body">{t(ARRAY_LIFECYCLE_REFUSAL)}</p>
+        <p className="ui-note ui-panel-body">{t(ARRAY_LIFECYCLE_REFUSAL)}</p>
         {snapshot?.raid_unavailable_reason ? (
           <Empty>{t("No software RAID here: {reason}", { reason: snapshot.raid_unavailable_reason })}</Empty>
         ) : !snapshot?.arrays?.length ? (
@@ -777,23 +778,23 @@ export function Storage() {
           above says so, and an empty section would say it twice. */}
       {!snapshot?.lvm_unavailable_reason && (
       <Section title={t("Volume groups")} count={snapshot?.groups?.length} span={snapshot?.volumes?.length ? 6 : 12} flush>
-        <p className="source hm-section-body">{t(GROUP_LIFECYCLE_REFUSAL)}</p>
+        <p className="ui-note ui-panel-body">{t(GROUP_LIFECYCLE_REFUSAL)}</p>
         {!snapshot?.groups?.length ? (
           <Empty>{t("This host has LVM but no volume groups.")}</Empty>
         ) : (
           <Table>
-            <thead><tr><th scope="col">{t("Group")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col">{t("Allocated")}</th><th scope="col" className="hm-num">{t("Free")}</th><th scope="col" className="hm-num">{t("Volumes")}</th><th scope="col">{t("Actions")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Group")}</th><th scope="col" className="ui-numeric">{t("Size")}</th><th scope="col">{t("Allocated")}</th><th scope="col" className="ui-numeric">{t("Free")}</th><th scope="col" className="ui-numeric">{t("Volumes")}</th><th scope="col">{t("Actions")}</th></tr></thead>
             <tbody>
               {snapshot.groups.map((group) => (
                 <tr key={group.name}>
-                  <td className="hm-mono hm-primary">
+                  <td className="ui-mono ui-name">
                     {group.name}
                     {/* A group without a UUID is a group no order binds to,
                         and the row says so rather than offering a button the
                         host would refuse. */}
-                    {!group.uuid && <div><span className="badge unknown">{t("no UUID")}</span></div>}
+                    {!group.uuid && <div><span className="ui-pill ui-unknown">{t("no UUID")}</span></div>}
                   </td>
-                  <td className="hm-num">{bytes(group.size_bytes)}</td>
+                  <td className="ui-numeric">{bytes(group.size_bytes)}</td>
                   <td>
                     <Meter
                       value={group.size_bytes - group.free_bytes}
@@ -804,14 +805,14 @@ export function Storage() {
                   </td>
                   {/* Zero free space decides whether anything can be extended
                       - and it is a number, not an absence. */}
-                  <td className="hm-num">{bytes(group.free_bytes)}</td>
-                  <td className="hm-num">{group.lv_count}</td>
+                  <td className="ui-numeric">{bytes(group.free_bytes)}</td>
+                  <td className="ui-numeric">{group.lv_count}</td>
                   <td>
                     {group.uuid && (
-                      <div className="operations">
+                      <div className="ui-actions">
                         <ActionGuard action="lvm.volume.create" host={host.id}>
                           <button
-                            className="secondary"
+                            className="ui-btn-secondary"
                             onClick={() => setLayer({
                               action: "lvm.volume.create",
                               seed: { group: group.name, expected_group_uuid: group.uuid ?? "" },
@@ -822,7 +823,7 @@ export function Storage() {
                         </ActionGuard>
                         <ActionGuard action="lvm.group.extend" host={host.id}>
                           <button
-                            className="hm-danger"
+                            className="ui-btn-danger"
                             onClick={() => setLayer({
                               action: "lvm.group.extend",
                               seed: { group: group.name, expected_group_uuid: group.uuid ?? "" },
@@ -848,16 +849,16 @@ export function Storage() {
       {snapshot?.physical_volumes?.length ? (
         <Section title={t("Physical volumes")} count={snapshot.physical_volumes.length} span={12} flush>
           <Table>
-            <thead><tr><th scope="col">{t("Device")}</th><th scope="col">{t("Group")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col" className="hm-num">{t("Free")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Device")}</th><th scope="col">{t("Group")}</th><th scope="col" className="ui-numeric">{t("Size")}</th><th scope="col" className="ui-numeric">{t("Free")}</th></tr></thead>
             <tbody>
               {snapshot.physical_volumes.map((physical) => (
                 <tr key={physical.path}>
-                  <td className="hm-mono hm-primary">{physical.path}</td>
-                  <td className="hm-mono">
-                    {physical.group || <span className="badge unknown">{t("in no group")}</span>}
+                  <td className="ui-mono ui-name">{physical.path}</td>
+                  <td className="ui-mono">
+                    {physical.group || <span className="ui-pill ui-unknown">{t("in no group")}</span>}
                   </td>
-                  <td className="hm-num">{bytes(physical.size_bytes)}</td>
-                  <td className="hm-num">{bytes(physical.free_bytes)}</td>
+                  <td className="ui-numeric">{bytes(physical.size_bytes)}</td>
+                  <td className="ui-numeric">{bytes(physical.free_bytes)}</td>
                 </tr>
               ))}
             </tbody>
@@ -868,16 +869,16 @@ export function Storage() {
       {snapshot?.volumes?.length ? (
         <Section title={t("Volumes")} count={snapshot.volumes.length} span={6} flush>
           <Table>
-            <thead><tr><th scope="col">{t("Logical volume")}</th><th scope="col">{t("Group")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("Actions")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Logical volume")}</th><th scope="col">{t("Group")}</th><th scope="col" className="ui-numeric">{t("Size")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("Actions")}</th></tr></thead>
             <tbody>
               {snapshot.volumes.map((volume) => (
                 <tr key={volume.path}>
-                  <td className="hm-mono hm-primary">
+                  <td className="ui-mono ui-name">
                     {volume.path}
-                    {!volume.uuid && <div><span className="badge unknown">{t("no UUID")}</span></div>}
+                    {!volume.uuid && <div><span className="ui-pill ui-unknown">{t("no UUID")}</span></div>}
                   </td>
-                  <td className="hm-mono">{volume.group}</td>
-                  <td className="hm-num">{bytes(volume.size_bytes)}</td>
+                  <td className="ui-mono">{volume.group}</td>
+                  <td className="ui-numeric">{bytes(volume.size_bytes)}</td>
                   {/* A snapshot that fills its copy-on-write space is dropped
                       by the kernel, so the fill is the number that decides
                       whether it is still usable. An ordinary volume has no
@@ -885,7 +886,7 @@ export function Storage() {
                   <td>
                     {isSnapshot(volume) ? (
                       <>
-                        <span className="badge">{t("snapshot of {origin}", { origin: volume.origin || "—" })}</span>
+                        <span className="ui-pill">{t("snapshot of {origin}", { origin: volume.origin || "—" })}</span>
                         {volume.data_percent !== undefined && (
                           <Meter
                             value={volume.data_percent}
@@ -900,13 +901,13 @@ export function Storage() {
                     )}
                   </td>
                   <td>
-                    <div className="operations">
+                    <div className="ui-actions">
                       {/* We extend upwards only and together with the
                           filesystem: a volume bigger than its filesystem gives
                           not a single byte. */}
                       <ActionGuard action="lvm.extend" host={host.id}>
                         <button
-                          className="secondary"
+                          className="ui-btn-secondary"
                           onClick={() =>
                             setIntent({
                               action: "lvm.extend",
@@ -922,7 +923,7 @@ export function Storage() {
                       {volume.uuid && !isSnapshot(volume) && (
                         <ActionGuard action="lvm.snapshot.create" host={host.id}>
                           <button
-                            className="secondary"
+                            className="ui-btn-secondary"
                             onClick={() => setLayer({
                               action: "lvm.snapshot.create",
                               seed: { device: volume.path, expected_volume_uuid: volume.uuid ?? "" },
@@ -935,7 +936,7 @@ export function Storage() {
                       {volume.uuid && isSnapshot(volume) && (
                         <ActionGuard action="lvm.snapshot.remove" host={host.id}>
                           <button
-                            className="hm-danger"
+                            className="ui-btn-danger"
                             onClick={() =>
                               setIntent({
                                 action: "lvm.snapshot.remove",
@@ -960,7 +961,7 @@ export function Storage() {
                           || candidate.path === `/dev/mapper/${volume.group.replace(/-/g, "--")}-${volume.name.replace(/-/g, "--")}`);
                         if (!device?.by_id) {
                           return (
-                            <span className="badge unknown" title={device?.identity_unavailable_reason}>
+                            <span className="ui-pill ui-unknown" title={device?.identity_unavailable_reason}>
                               {t("delete refused: {code}", { code: "stable_identity_required" })}
                             </span>
                           );
@@ -968,7 +969,7 @@ export function Storage() {
                         return (
                           <ActionGuard action="lvm.volume.remove" host={host.id}>
                             <button
-                              className="hm-danger"
+                              className="ui-btn-danger"
                               onClick={() =>
                                 setIntent({
                                   action: "lvm.volume.remove",
@@ -1014,7 +1015,7 @@ export function Storage() {
       )}
 
       {snapshot?.observed_at && (
-        <p className="hm-freshness">
+        <p className="ui-freshness">
           <span>{t("Storage read")} <Time value={snapshot.observed_at} /></span>
         </p>
       )}
@@ -1057,7 +1058,7 @@ function ArrayCard({ array, hostID, onIntent, onAdd }: {
   onAdd: (seed: FormValue) => void;
 }) {
   const t = useT();
-  const unknown = <span className="badge unknown">{t("unknown")}</span>;
+  const unknown = <span className="ui-pill ui-unknown">{t("unknown")}</span>;
   const members = array.members ?? [];
   // The order a member operation carries: the array by the UUID out of its
   // superblock, the member by the link that still means the same disk after
@@ -1072,19 +1073,19 @@ function ArrayCard({ array, hostID, onIntent, onAdd }: {
   });
 
   return (
-    <div className="hm-section-body">
+    <div className="ui-panel-body">
       <Facts>
-        <Fact label={t("Array")}><span className="hm-mono">{array.path}</span></Fact>
+        <Fact label={t("Array")}><span className="ui-mono">{array.path}</span></Fact>
         <Fact label={t("Level")}>
           {array.level || unknown}
           {array.level && !array.redundant && (
-            <span className="badge warn"> {t("keeps no copy")}</span>
+            <span className="ui-pill ui-warn"> {t("keeps no copy")}</span>
           )}
         </Fact>
         <Fact label={t("State")}>
           {array.degraded
-            ? <span className="badge error">{t("degraded")}</span>
-            : <span className="badge ok">{array.state || t("assembled")}</span>}
+            ? <span className="ui-pill ui-error">{t("degraded")}</span>
+            : <span className="ui-pill ui-ok">{array.state || t("assembled")}</span>}
         </Fact>
         <Fact label={t("Slots filled")}>
           {array.raid_devices > 0 ? `${array.active_devices} / ${array.raid_devices}` : unknown}
@@ -1092,8 +1093,8 @@ function ArrayCard({ array, hostID, onIntent, onAdd }: {
         <Fact label={t("Spares")}>{array.spare_devices}</Fact>
         <Fact label={t("Failed")}>
           {array.failed_devices > 0
-            ? <span className="badge error">{array.failed_devices}</span>
-            : <span className="badge ok">0</span>}
+            ? <span className="ui-pill ui-error">{array.failed_devices}</span>
+            : <span className="ui-pill ui-ok">0</span>}
         </Fact>
         <Fact label={t("Size")}>{array.size_bytes ? bytes(array.size_bytes) : unknown}</Fact>
         {/* No percentage means no rebuild is running - not a rebuild
@@ -1112,13 +1113,13 @@ function ArrayCard({ array, hostID, onIntent, onAdd }: {
         </Fact>
         <Fact label={t("Identity")}>
           {array.uuid
-            ? <span className="hm-mono">{array.uuid}</span>
-            : <span className="badge unknown" title={array.detail_unavailable_reason}>{t("no UUID")}</span>}
+            ? <span className="ui-mono">{array.uuid}</span>
+            : <span className="ui-pill ui-unknown" title={array.detail_unavailable_reason}>{t("no UUID")}</span>}
         </Fact>
       </Facts>
 
       {array.detail_unavailable_reason && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>{t("This array carries no superblock detail: {reason}. No member operation binds to it.", { reason: array.detail_unavailable_reason })}</span>
         </p>
       )}
@@ -1126,7 +1127,7 @@ function ArrayCard({ array, hostID, onIntent, onAdd }: {
       <Table>
         <thead>
           <tr>
-            <th scope="col">{t("Member")}</th><th scope="col" className="hm-num">{t("Slot")}</th><th scope="col">{t("Role")}</th>
+            <th scope="col">{t("Member")}</th><th scope="col" className="ui-numeric">{t("Slot")}</th><th scope="col">{t("Role")}</th>
             <th scope="col">{t("Identity")}</th><th scope="col">{t("Actions")}</th>
           </tr>
         </thead>
@@ -1135,35 +1136,35 @@ function ArrayCard({ array, hostID, onIntent, onAdd }: {
             const refusal = memberRefusal(array, member, carriesData(member));
             return (
               <tr key={member.path || `slot-${member.slot ?? index}`}>
-                <td className="hm-mono hm-primary">{member.path || t("empty slot")}</td>
-                <td className="hm-num">{member.slot === undefined ? "—" : member.slot}</td>
+                <td className="ui-mono ui-name">{member.path || t("empty slot")}</td>
+                <td className="ui-numeric">{member.slot === undefined ? "—" : member.slot}</td>
                 <td>
-                  {member.role === "faulty" && <span className="badge error">{t("failed")}</span>}
-                  {member.role === "removed" && <span className="badge unknown">{t("empty slot")}</span>}
-                  {member.role === "spare" && <span className="badge">{t("spare")}</span>}
-                  {member.role === "rebuilding" && <span className="badge warn">{t("rebuilding")}</span>}
-                  {member.role === "active" && <span className="badge ok">{t("active")}</span>}
-                  {member.role === "write_mostly" && <span className="badge ok">{t("write-mostly")}</span>}
-                  {member.role === "journal" && <span className="badge">{t("journal")}</span>}
+                  {member.role === "faulty" && <span className="ui-pill ui-error">{t("failed")}</span>}
+                  {member.role === "removed" && <span className="ui-pill ui-unknown">{t("empty slot")}</span>}
+                  {member.role === "spare" && <span className="ui-pill">{t("spare")}</span>}
+                  {member.role === "rebuilding" && <span className="ui-pill ui-warn">{t("rebuilding")}</span>}
+                  {member.role === "active" && <span className="ui-pill ui-ok">{t("active")}</span>}
+                  {member.role === "write_mostly" && <span className="ui-pill ui-ok">{t("write-mostly")}</span>}
+                  {member.role === "journal" && <span className="ui-pill">{t("journal")}</span>}
                   {member.role === "" && unknown}
-                  {member.state ? <div className="source">{member.state}</div> : null}
+                  {member.state ? <div className="ui-note">{member.state}</div> : null}
                 </td>
-                <td className="source hm-mono" title={member.identity_unavailable_reason}>
+                <td className="ui-note ui-mono" title={member.identity_unavailable_reason}>
                   {member.by_id
                     ? member.by_id.replace(/^\/dev\/disk\/by-id\//, "")
-                    : <span className="badge unknown">{t("no stable identity")}</span>}
+                    : <span className="ui-pill ui-unknown">{t("no stable identity")}</span>}
                 </td>
                 <td>
                   {!member.path ? null : refusal ? (
-                    <span className="badge error" title={refusal.reason}>
+                    <span className="ui-pill ui-error" title={refusal.reason}>
                       {t("refused: {code}", { code: refusal.code })}
                     </span>
                   ) : (
-                    <div className="operations">
+                    <div className="ui-actions">
                       {member.role !== "faulty" && (
                         <ActionGuard action="raid.member.fail" host={hostID}>
                           <button
-                            className="hm-danger"
+                            className="ui-btn-danger"
                             onClick={() => onIntent({
                               action: "raid.member.fail",
                               label: t("Fail member"),
@@ -1180,7 +1181,7 @@ function ArrayCard({ array, hostID, onIntent, onAdd }: {
                       {!carriesData(member) && (
                         <ActionGuard action="raid.member.remove" host={hostID}>
                           <button
-                            className="hm-danger"
+                            className="ui-btn-danger"
                             onClick={() => onIntent({
                               action: "raid.member.remove",
                               label: t("Remove member"),
@@ -1207,7 +1208,7 @@ function ArrayCard({ array, hostID, onIntent, onAdd }: {
         <FormActions>
           <ActionGuard action="raid.member.add" host={hostID}>
             <button
-              className="secondary"
+              className="ui-btn-secondary"
               onClick={() => onAdd({ array: array.path, expected_array_uuid: array.uuid ?? "" })}
             >
               {t("Add a member")}
@@ -1261,7 +1262,7 @@ function LayerWizard({ action, seed, suggestions, onIntent, onClose }: {
     <Section
       title={t(entry.title)}
       description={entry.note ? t(entry.note) : undefined}
-      tools={<button className="secondary" onClick={onClose}>{t("Cancel")}</button>}
+      tools={<button className="ui-btn-secondary" onClick={onClose}>{t("Cancel")}</button>}
     >
       <Form>
         <OperationForm entry={entry} value={value} onChange={setValue}
@@ -1294,7 +1295,7 @@ function SmartReport({ device, onClose }: { device: Device; onClose: () => void 
   const read = useReadOperation<SmartResult>(host);
   const report = read.attempt?.detail;
   const refused = read.attempt && read.attempt.status !== "succeeded";
-  const unknown = <span className="badge unknown">{t("unknown")}</span>;
+  const unknown = <span className="ui-pill ui-unknown">{t("unknown")}</span>;
   const attributes = report?.attributes ?? [];
 
   return (
@@ -1309,7 +1310,7 @@ function SmartReport({ device, onClose }: { device: Device; onClose: () => void 
               {read.busy ? t("Reading…") : read.ordered ? t("Read again") : t("Read SMART")}
             </button>
           </ActionGuard>
-          <button className="secondary" onClick={onClose}>{t("Close")}</button>
+          <button className="ui-btn-secondary" onClick={onClose}>{t("Close")}</button>
         </>
       }
       flush
@@ -1328,7 +1329,7 @@ function SmartReport({ device, onClose }: { device: Device; onClose: () => void 
           <Facts>
             <Fact label={t("Health")}><SmartHealth report={report} /></Fact>
             <Fact label={t("Model")}>{report.model || "—"}</Fact>
-            <Fact label={t("Serial")}><span className="hm-mono">{report.serial || "—"}</span></Fact>
+            <Fact label={t("Serial")}><span className="ui-mono">{report.serial || "—"}</span></Fact>
             <Fact label={t("Temperature")}>{report.temperature_c !== undefined ? `${report.temperature_c} °C` : unknown}</Fact>
             <Fact label={t("Power-on hours")}>{report.power_on_hours !== undefined ? report.power_on_hours.toLocaleString() : unknown}</Fact>
             {/* A reallocated or a pending sector is the number that matters
@@ -1346,30 +1347,30 @@ function SmartReport({ device, onClose }: { device: Device; onClose: () => void 
             <Table>
               <thead>
                 <tr>
-                  <th scope="col" className="hm-num">ID</th><th scope="col">{t("Attribute")}</th><th scope="col" className="hm-num">{t("Value")}</th>
-                  <th scope="col" className="hm-num">{t("Worst")}</th><th scope="col" className="hm-num">{t("Threshold")}</th><th scope="col" className="hm-num">{t("Raw")}</th>
+                  <th scope="col" className="ui-numeric">ID</th><th scope="col">{t("Attribute")}</th><th scope="col" className="ui-numeric">{t("Value")}</th>
+                  <th scope="col" className="ui-numeric">{t("Worst")}</th><th scope="col" className="ui-numeric">{t("Threshold")}</th><th scope="col" className="ui-numeric">{t("Raw")}</th>
                 </tr>
               </thead>
               <tbody>
                 {attributes.map((attribute) => (
                   <tr key={attribute.id}>
-                    <td className="hm-num">{attribute.id}</td>
-                    <td className="hm-mono">
+                    <td className="ui-numeric">{attribute.id}</td>
+                    <td className="ui-mono">
                       {attribute.name}
-                      {attribute.failing && <span className="badge error"> {t("failing")}</span>}
+                      {attribute.failing && <span className="ui-pill ui-error"> {t("failing")}</span>}
                     </td>
-                    <td className="hm-num">{attribute.value}</td>
-                    <td className="hm-num">{attribute.worst}</td>
-                    <td className="hm-num">{attribute.threshold}</td>
-                    <td className="hm-num hm-mono">{attribute.raw_string || attribute.raw}</td>
+                    <td className="ui-numeric">{attribute.value}</td>
+                    <td className="ui-numeric">{attribute.worst}</td>
+                    <td className="ui-numeric">{attribute.threshold}</td>
+                    <td className="ui-numeric ui-mono">{attribute.raw_string || attribute.raw}</td>
                   </tr>
                 ))}
               </tbody>
             </Table>
           )}
           {report.output && (
-            <div className="hm-section-body">
-              <pre className="hm-log">{report.output}</pre>
+            <div className="ui-panel-body">
+              <pre className="ui-log">{report.output}</pre>
             </div>
           )}
         </>
@@ -1383,17 +1384,17 @@ function SmartHealth({ report }: { report: SmartResult }) {
   const t = useT();
   switch (report.health) {
     case "passed":
-      return <span className="badge ok">{t("passed")}</span>;
+      return <span className="ui-pill ui-ok">{t("passed")}</span>;
     case "failed":
-      return <span className="badge error">{t("failed")}{report.health_reason ? ` · ${report.health_reason}` : ""}</span>;
+      return <span className="ui-pill ui-error">{t("failed")}{report.health_reason ? ` · ${report.health_reason}` : ""}</span>;
     default:
-      return <span className="badge unknown">{t("unknown")}{report.health_reason ? ` · ${report.health_reason}` : ""}</span>;
+      return <span className="ui-pill ui-unknown">{t("unknown")}{report.health_reason ? ` · ${report.health_reason}` : ""}</span>;
   }
 }
 
 /** A sector count: zero is the good answer here, and anything else is a warning. */
 function SectorCount({ count }: { count: number }) {
-  return count === 0 ? <span className="badge ok">0</span> : <span className="badge error">{count}</span>;
+  return count === 0 ? <span className="ui-pill ui-ok">0</span> : <span className="ui-pill ui-error">{count}</span>;
 }
 
 /**
@@ -1504,7 +1505,7 @@ function MountWizard({ devices, onIntent }: { devices: Device[]; onIntent: (inte
         {refused && <Message text={plan.attempt?.message || plan.attempt?.error_code || t("The host refused the planning.")} error />}
         {/* What the host says it would do, and the digest the change is bound
             to; without it the order is refused on the host. */}
-        <div className="source">
+        <div className="ui-note">
           {binding
             ? <PlanSummary plan={binding.plan} />
             : plan.busy
@@ -1514,7 +1515,7 @@ function MountWizard({ devices, onIntent }: { devices: Device[]; onIntent: (inte
         <FormActions>
           <ActionGuard action="storage.plan" host={host.id} explain>
             <button
-              className="secondary"
+              className="ui-btn-secondary"
               onClick={() => {
                 setPlanned(order);
                 plan.order({ action: "storage.plan", payload: { storage: { source, target, fs_type: type, options, persist } } });

@@ -18,7 +18,7 @@ test.beforeAll(async ({ request }) => {
 
 /** The page header of a fleet page, with its title. */
 function header(page: Page, title: string) {
-  return page.locator(".page-header").getByRole("heading", { name: title });
+  return page.locator(".ui-pagehead").getByRole("heading", { name: title });
 }
 
 /** A whole-text match: "Jobs" must not find "Jobs of the host". */
@@ -28,12 +28,12 @@ function exact(text: string): RegExp {
 
 /** The card of a fleet page by its title. */
 function card(page: Page, title: string) {
-  return page.locator(".card").filter({ has: page.locator(".card-title", { hasText: exact(title) }) });
+  return page.locator(".ui-panel").filter({ has: page.locator(".ui-panel-title", { hasText: exact(title) }) });
 }
 
 /** A section of the host workspace by its heading. */
 function section(page: Page, title: string) {
-  return page.locator(".hm-section").filter({ has: page.locator("h3", { hasText: exact(title) }) }).first();
+  return page.locator(".ui-panel").filter({ has: page.locator("h3", { hasText: exact(title) }) }).first();
 }
 
 /** The items of a collection endpoint, or an empty list when the token may not read it. */
@@ -64,12 +64,12 @@ test.describe("jobs", () => {
 
     // A state chosen in the toolbar goes to the address, and the clear
     // button appears with it.
-    const toolbar = page.locator(".toolbar").first();
+    const toolbar = page.locator(".ui-toolbar").first();
     await expect(toolbar.getByRole("button", { name: "Clear filters" })).toHaveCount(0);
     await toolbar.locator("select").first().selectOption("succeeded");
     await expect(page).toHaveURL(/[?&]state=succeeded/);
     await expect(toolbar.getByRole("button", { name: "Clear filters" })).toBeVisible();
-    await expect(table.locator("tbody tr").first().or(page.locator(".card-body .empty", { hasText: exact("No jobs.") })).first()).toBeVisible();
+    await expect(table.locator("tbody tr").first().or(page.locator(".ui-panel-body .ui-empty", { hasText: exact("No jobs.") })).first()).toBeVisible();
     await toolbar.getByRole("button", { name: "Clear filters" }).click();
     await expect(page).not.toHaveURL(/[?&]state=/);
     await expect(toolbar.getByRole("button", { name: "Clear filters" })).toHaveCount(0);
@@ -80,9 +80,9 @@ test.describe("jobs", () => {
     const host = hosts[0];
     await page.goto(`/jobs?host_id=${encodeURIComponent(host.id)}`);
     await expect(header(page, "Jobs")).toBeVisible();
-    const chip = page.locator(".toolbar .chip", { hasText: `host ${host.id.slice(0, 8)}` });
+    const chip = page.locator(".ui-toolbar .ui-tag", { hasText: `host ${host.id.slice(0, 8)}` });
     await expect(chip).toBeVisible();
-    await expect(page.locator(".toolbar").first().getByRole("button", { name: "Clear filters" })).toBeVisible();
+    await expect(page.locator(".ui-toolbar").first().getByRole("button", { name: "Clear filters" })).toBeVisible();
     await chip.getByRole("button", { name: "Remove the host filter" }).click();
     await expect(chip).toHaveCount(0);
     await expect(page).not.toHaveURL(/[?&]host_id=/);
@@ -97,8 +97,8 @@ test.describe("jobs", () => {
     const { errors } = watchErrors(page);
 
     await page.goto(`/jobs/${job.id}`);
-    await expect(page.locator(".page-header").getByRole("heading", { name: job.action_type })).toBeVisible();
-    await expect(page.locator(".page-header .breadcrumb").getByRole("link", { name: "Jobs" })).toBeVisible();
+    await expect(page.locator(".ui-pagehead").getByRole("heading", { name: job.action_type })).toBeVisible();
+    await expect(page.locator(".ui-pagehead .ui-crumbs").getByRole("link", { name: "Jobs" })).toBeVisible();
     await expect(card(page, "Job")).toBeVisible();
     await expect(card(page, "Decision and result")).toBeVisible();
     // The payload is the order as the host receives it; the hash of the
@@ -124,14 +124,14 @@ test.describe("campaigns", () => {
 
     const list = card(page, "List");
     await expect(list).toBeVisible();
-    const toolbar = list.locator(".toolbar").first();
+    const toolbar = list.locator(".ui-toolbar").first();
     const state = toolbar.locator("select").first();
     const operation = toolbar.locator("select").nth(1);
     await expect(state.locator("option").first()).toHaveText("state: any");
     await expect(operation.locator("option").first()).toHaveText("operation: any");
     await expect(toolbar.getByPlaceholder("Requested by")).toBeVisible();
     if (campaigns.length === 0) {
-      await expect(list.locator(".empty-state")).toBeVisible();
+      await expect(list.locator(".ui-empty")).toBeVisible();
     } else {
       await expect(list.locator("tbody tr").first()).toBeVisible();
     }
@@ -146,7 +146,7 @@ test.describe("campaigns", () => {
     await state.selectOption("");
 
     // The schedules are one link away in the header.
-    const schedules = page.locator(".page-header").getByRole("link", { name: "Schedules" });
+    const schedules = page.locator(".ui-pagehead").getByRole("link", { name: "Schedules" });
     await expect(schedules).toHaveAttribute("href", "/campaigns/schedules");
     await schedules.click();
     await expect(page).toHaveURL(/\/campaigns\/schedules$/);
@@ -162,19 +162,19 @@ test.describe("campaigns", () => {
 
     const schedules = card(page, "Schedules");
     await expect(schedules).toBeVisible();
-    await expect(schedules.locator("tbody tr").first().or(schedules.locator(".empty, .empty-state").first()).first()).toBeVisible();
+    await expect(schedules.locator("tbody tr").first().or(schedules.locator(".ui-empty, .ui-empty").first()).first()).toBeVisible();
 
     const calendar = card(page, "Maintenance calendar");
     await expect(calendar).toBeVisible();
     for (const day of ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]) {
-      await expect(calendar.locator(".source", { hasText: exact(day) })).toHaveCount(1);
+      await expect(calendar.locator(".ui-note", { hasText: exact(day) })).toHaveCount(1);
     }
     // A month grid has at least four weeks of seven days behind the
     // labels, and the month it draws is named between its two arrows.
-    const cells = calendar.locator(".card-body > div > div");
+    const cells = calendar.locator(".ui-panel-body > div > div");
     await expect(cells.nth(7 + 27)).toBeVisible();
-    await expect(calendar.locator(".card-actions .mono")).toHaveText(/^\d{4}-\d{2}$/);
-    await expect(calendar.locator(".card-actions").getByRole("button", { name: "Next month" })).toBeVisible();
+    await expect(calendar.locator(".ui-panel-actions .ui-mono")).toHaveText(/^\d{4}-\d{2}$/);
+    await expect(calendar.locator(".ui-panel-actions").getByRole("button", { name: "Next month" })).toBeVisible();
     await expectHealthy(page, errors);
   });
 });
@@ -213,7 +213,7 @@ test.describe("secrets", () => {
     await table.getByRole("link", { name: first.name, exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/secrets/${encodeURIComponent(first.name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
     await expect(header(page, first.name)).toBeVisible();
-    await expect(page.locator(".page-header .breadcrumb").getByRole("link", { name: "Secrets" })).toBeVisible();
+    await expect(page.locator(".ui-pagehead .ui-crumbs").getByRole("link", { name: "Secrets" })).toBeVisible();
     await expect(card(page, "Secret")).toContainText("the value is not here and cannot be read back");
     await expect(card(page, "Reference")).toBeVisible();
     await expect(card(page, "Versions")).toBeVisible();
@@ -250,7 +250,7 @@ test.describe("access", () => {
     // one permission ticked "yes".
     expect(await matrix.locator("thead th").count()).toBeGreaterThanOrEqual(3);
     await expect(matrix.locator("tbody tr").first()).toBeVisible();
-    await expect(matrix.locator("tbody .badge.ok", { hasText: exact("yes") }).first()).toBeVisible();
+    await expect(matrix.locator("tbody .ui-pill.ui-ok", { hasText: exact("yes") }).first()).toBeVisible();
     await expect(roles).toContainText(/\d+ permissions/);
 
     // The search narrows the rows in the browser.
@@ -273,8 +273,8 @@ test.describe("audit", () => {
     await expect(header(page, "Audit")).toBeVisible();
     const events = card(page, "Events");
     await expect(events).toBeVisible();
-    await expect(events.locator(".card-actions").getByRole("button", { name: "Export", exact: true })).toBeVisible();
-    await expect(events.locator(".card-actions").getByRole("button", { name: "Export", exact: true })).toBeEnabled();
+    await expect(events.locator(".ui-panel-actions").getByRole("button", { name: "Export", exact: true })).toBeVisible();
+    await expect(events.locator(".ui-panel-actions").getByRole("button", { name: "Export", exact: true })).toBeEnabled();
     await expect(events).toContainText("hash chain");
     await expectHealthy(page, errors);
   });
@@ -293,7 +293,7 @@ test.describe("vulnerabilities", () => {
     const table = card(page, "By CVE");
     await expect(table).toBeVisible();
     await expect(table.getByPlaceholder("CVE number or package name")).toBeVisible();
-    await expect(table.locator("tbody tr").first().or(table.locator(".empty").first()).first()).toBeVisible();
+    await expect(table.locator("tbody tr").first().or(table.locator(".ui-empty").first()).first()).toBeVisible();
 
     // The other way round: the toggle writes the address.
     await toggle.getByRole("button", { name: "By host" }).click();
@@ -338,24 +338,24 @@ test.describe("reports", () => {
     await page.goto("/reports");
     await expect(header(page, "Reports")).toBeVisible();
     await expect(page.getByRole("group", { name: "Period" })).toBeVisible();
-    await expect(page.getByRole("group", { name: "Period" }).locator("button.active")).toHaveCount(1);
+    await expect(page.getByRole("group", { name: "Period" }).locator("button.ui-active")).toHaveCount(1);
 
     // The campaigns report needs the right to read campaigns; the other
     // two come with the hosts.
     const titles = granted.has("campaign.read") ? ["Patch status", "Campaigns", "Compliance"] : ["Patch status", "Compliance"];
-    await expect(page.locator(".widgets > .card")).toHaveCount(titles.length);
+    await expect(page.locator(".ui-grid > .ui-panel")).toHaveCount(titles.length);
     for (const title of titles) {
       const report = card(page, title);
       await expect(report).toBeVisible();
       // The compliance report carries one export per section; the first
       // stands for the card.
-      await expect(report.locator(".card-actions").getByTestId("export-csv").first()).toBeVisible();
-      await expect(report.locator(".card-actions").getByTestId("export-csv").first()).toHaveText(/Export .*CSV/);
+      await expect(report.locator(".ui-panel-actions").getByTestId("export-csv").first()).toBeVisible();
+      await expect(report.locator(".ui-panel-actions").getByTestId("export-csv").first()).toHaveText(/Export .*CSV/);
     }
     // The patch report has settled: a table of hosts, or the reason it
     // could not be drawn.
     const patch = card(page, "Patch status");
-    await expect(patch.locator("table").first().or(patch.locator(".empty, .page-error, .fp-note").first()).first()).toBeVisible();
+    await expect(patch.locator("table").first().or(patch.locator(".ui-empty, .ui-errorbox, .ui-note").first()).first()).toBeVisible();
     await expectHealthy(page, errors);
   });
 });
@@ -385,32 +385,32 @@ test.describe("status", () => {
     await expect(header(page, "Status")).toBeVisible();
     // The verdict of the whole panel, in one line and without a box.
     const verdict = page.getByTestId("verdict");
-    await expect(verdict.locator(".verdict-headline")).toHaveText(
+    await expect(verdict.locator(".ui-verdict-headline")).toHaveText(
       status.ok ? "Every judged part of this panel is fine" : "A part of this panel is not fine",
     );
-    await expect(verdict.locator(".verdict-facts")).toContainText(
+    await expect(verdict.locator(".ui-verdict-facts")).toContainText(
       status.unknown > 0 ? "could not be judged" : "parts judged",
     );
 
     // Every part is on the screen at once; a part that is not fine - and
     // unknown counts as not fine - carries the mark that says so.
-    const parts = page.locator(".part");
+    const parts = page.locator(".ui-tile");
     await expect(parts.first()).toBeVisible();
     for (const [name, block] of Object.entries(status.blocks)) {
       if (name === "build") continue;
       const judged = (block as { ok: boolean | null; attention?: string });
       const tone = judged.ok === null ? "unknown" : !judged.ok ? "error" : judged.attention ? "warn" : "ok";
-      const tile = parts.filter({ has: page.locator(".part-name", { hasText: blockTitle(name) }) }).first();
+      const tile = parts.filter({ has: page.locator(".ui-tile-name", { hasText: blockTitle(name) }) }).first();
       if (await tile.count() === 0) continue;
       await expect(tile).toHaveClass(new RegExp(`\\b${tone}\\b`));
     }
 
     if (status.blocks.build) {
-      const about = parts.filter({ has: page.locator(".part-name", { hasText: exact("About") }) }).first();
+      const about = parts.filter({ has: page.locator(".ui-tile-name", { hasText: exact("About") }) }).first();
       await expect(about.locator("dt").first()).toBeVisible();
     }
 
-    await expect(page.locator(".page-header").getByRole("link", { name: "OpenAPI" })).toHaveAttribute("href", "/api/v1/openapi.json");
+    await expect(page.locator(".ui-pagehead").getByRole("link", { name: "OpenAPI" })).toHaveAttribute("href", "/api/v1/openapi.json");
     await expectHealthy(page, errors);
   });
 });
@@ -438,7 +438,7 @@ test.describe("unresolved operations", () => {
     await expect(header(page, "Needs confirmation")).toBeVisible();
     // The failure this test exists for showed as the page's error box, not as
     // a console error, so it is named here on its own.
-    await expect(page.locator(".page-error")).toHaveCount(0);
+    await expect(page.locator(".ui-errorbox")).toHaveCount(0);
 
     // The two uncertainties are counted apart on purpose: one total reads the
     // same for one host with forty of these and forty hosts with one each.
@@ -470,7 +470,7 @@ test.describe("unresolved operations", () => {
     await expect(form).toHaveClass(/detail-row/);
     await expect(form.getByRole("button", { name: "Record the ruling" })).toBeDisabled();
     await first.getByRole("button", { name: "Close" }).click();
-    await expect(page.locator("tr.detail-row")).toHaveCount(0);
+    await expect(page.locator("tr.ui-detailrow")).toHaveCount(0);
 
     await expectHealthy(page, errors);
   });
@@ -489,7 +489,7 @@ test.describe("unresolved operations", () => {
     // Beside the title, not in two cards over the table: as cards the first
     // row of the list began a quarter of a screen down, and the two were not
     // even level with each other.
-    const filter = page.locator(".page-header .segmented");
+    const filter = page.locator(".ui-pagehead .ui-segmented");
     await expect(filter.getByTestId("count-outcome_unknown")).toBeVisible();
     await expect(filter.getByTestId("count-applied_unverified")).toBeVisible();
     await expect(filter.getByTestId("filter-both")).toHaveAttribute("aria-pressed", "true");
@@ -528,18 +528,18 @@ test.describe("setup", () => {
 
     await page.goto("/setup");
     await expect(header(page, "First run")).toBeVisible();
-    const cards = page.locator(".stack > .card");
+    const cards = page.locator(".ui-stack > .ui-panel");
     // The summary card and one card per step, numbered in order.
     await expect(cards).toHaveCount(1 + checklist.steps.length);
     await expect(cards.first()).toContainText(checklist.complete ? "Every required step is done" : `${checklist.done} of ${checklist.total} required steps done`);
     for (let index = 0; index < checklist.steps.length; index += 1) {
       const step = cards.nth(index + 1);
-      await expect(step.locator(".card-title")).toContainText(`${index + 1}.`);
-      await expect(step.locator(".card-title .badge")).toHaveText(/^(Done|To do|Warning|Optional)$/);
+      await expect(step.locator(".ui-panel-title")).toContainText(`${index + 1}.`);
+      await expect(step.locator(".ui-panel-title .ui-pill")).toHaveText(/^(Done|To do|Warning|Optional)$/);
       // Which card is which step is read off the page, not off a table kept
       // here: the card carries a link to the page the server named for that
       // step, and a step dealt with on this screen carries none.
-      const away = step.locator(".card-actions a");
+      const away = step.locator(".ui-panel-actions a");
       if (checklist.steps[index].path === "/setup") {
         await expect(away).toHaveCount(0);
       } else {
@@ -548,7 +548,7 @@ test.describe("setup", () => {
     }
     // The first step left is the one highlighted; none when all is done.
     const undone = checklist.steps.findIndex((step) => step.state === "undone");
-    await expect(page.locator(".stack > .card.warn")).toHaveCount(undone === -1 ? 0 : 1);
+    await expect(page.locator(".ui-stack > .ui-panel.ui-warn")).toHaveCount(undone === -1 ? 0 : 1);
     await expectHealthy(page, errors);
   });
 });
@@ -560,11 +560,11 @@ test.describe("notifications", () => {
     const channels = await items<{ id: string; name: string }>(request, "/api/v1/notifications/channels");
 
     await page.goto("/settings?tab=channels");
-    await expect(page.locator(".parts-head").getByRole("heading", { name: "Notification channels" })).toBeVisible();
+    await expect(page.locator(".ui-sectionhead").getByRole("heading", { name: "Notification channels" })).toBeVisible();
     const list = card(page, "Channels");
     await expect(list).toBeVisible();
     if (channels.length === 0) {
-      await expect(list.locator(".empty-state")).toContainText("No channels");
+      await expect(list.locator(".ui-empty")).toContainText("No channels");
     } else {
       await expect(list.locator("tbody tr")).toHaveCount(channels.length);
       for (const channel of channels) {
@@ -600,7 +600,7 @@ test.describe("profile", () => {
     await expect(preferences.getByTestId("preference-page-size")).toBeVisible();
     await expect(preferences.getByTestId("preference-landing-page")).toBeVisible();
     await expect(preferences.getByRole("group", { name: "Language" })).toBeVisible();
-    await expect(preferences.locator(".card-foot").getByRole("button", { name: "Save" })).toBeVisible();
+    await expect(preferences.locator(".ui-panel-foot").getByRole("button", { name: "Save" })).toBeVisible();
     // Nothing is typed, nothing is saved: the form is looked at only.
     await expectHealthy(page, errors);
   });
@@ -613,7 +613,7 @@ test.describe("command palette", () => {
     await page.goto("/hosts");
     await expect(header(page, "Hosts")).toBeVisible();
 
-    const popover = page.locator(".host-picker-popover");
+    const popover = page.locator(".ui-menu");
     await expect(popover).toHaveCount(0);
     await page.keyboard.press("Control+k");
     await expect(popover).toBeVisible();
@@ -622,7 +622,7 @@ test.describe("command palette", () => {
 
     // A prefix of at least two characters is a query of the fleet.
     await input.fill(host.hostname.slice(0, Math.max(2, Math.min(4, host.hostname.length))));
-    const row = popover.getByRole("option").filter({ has: page.locator(".host-picker-name", { hasText: exact(host.hostname) }) });
+    const row = popover.getByRole("option").filter({ has: page.locator(".ui-name", { hasText: exact(host.hostname) }) });
     await expect(row.first()).toBeVisible();
 
     await page.keyboard.press("Escape");
@@ -641,22 +641,22 @@ test.describe("host workspace", () => {
     const detail = (await response.json()) as { failure_domain?: string | null; lifecycle_state?: string };
 
     await page.goto(`/hosts/${host.id}/overview`);
-    await expect(page.locator(".hm-header").getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+    await expect(page.locator(".ui-sectionhead").getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 
     // The failure domain is a fact of the system card: the domain, or
     // the badge that says the host is not placed.
     const system = section(page, "System");
-    const domain = system.locator(".hm-fact").filter({ has: page.locator("dt", { hasText: exact("Failure domain") }) });
+    const domain = system.locator(".ui-fact").filter({ has: page.locator("dt", { hasText: exact("Failure domain") }) });
     await expect(domain).toBeVisible();
     if (detail.failure_domain) {
       await expect(domain.locator("dd")).toContainText(detail.failure_domain);
     } else {
-      await expect(domain.locator("dd .badge", { hasText: "not placed" })).toBeVisible();
+      await expect(domain.locator("dd .ui-pill", { hasText: "not placed" })).toBeVisible();
     }
 
     const notes = section(page, "Notes");
     await expect(notes).toBeVisible();
-    await expect(notes.locator(".hm-section-desc")).toContainText("audit trail");
+    await expect(notes.locator(".ui-panel-note")).toContainText("audit trail");
 
     // The quarantine button is looked at, never pressed: the door stands
     // for whoever may quarantine a live host, and is absent otherwise.
@@ -692,11 +692,11 @@ test.describe("host workspace", () => {
     // The tools stand in the heading: the search, the filter, the order.
     const search = installed.getByPlaceholder("Search packages");
     await expect(search).toBeVisible();
-    await expect(installed.locator(".hm-count")).toHaveText(String(packages.items.length));
+    await expect(installed.locator(".ui-count")).toHaveText(String(packages.items.length));
     const table = installed.locator("table").first();
     await expect(table.locator("th", { hasText: "Package" }).first()).toBeVisible();
     await expect(table.locator("th", { hasText: "Held" }).first()).toBeVisible();
-    await expect(table.locator("tbody tr:not(.spacer)").first()).toBeVisible();
+    await expect(table.locator("tbody tr:not(.ui-spacer)").first()).toBeVisible();
 
     // The search narrows in the browser; the count follows it.
     const first = packages.items[0].name;
@@ -705,7 +705,7 @@ test.describe("host workspace", () => {
     await search.fill("no-such-package-" + Date.now());
     await expect(installed.getByText("No package matches.")).toBeVisible();
     await search.fill("");
-    await expect(installed.locator(".hm-count")).toHaveText(String(packages.items.length));
+    await expect(installed.locator(".ui-count")).toHaveText(String(packages.items.length));
     await expectHealthy(page, errors);
   });
 });

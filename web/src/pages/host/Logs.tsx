@@ -4,7 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api";
 import { awaitJob } from "../../lib/jobs";
 import type { Attempt, Capabilities, Job } from "../../lib/types";
-import { Empty } from "../../components/ui";
+
 import {
   Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Summary, Widgets,
   countWhere, useHost,
@@ -13,6 +13,7 @@ import { useJournalPreview } from "../../lib/stream";
 import { readsPrefill } from "../Reads";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 /** The reads this page offers; when every one is refused, the page says so once. */
 const LOG_READS = ["journal.read", "logfile.read", "journal.follow"];
@@ -509,25 +510,25 @@ export function Logs() {
         <Facts>
           <Fact label={t("Source")}>{source === "journal" ? t("journal") : t("file")}</Fact>
           <Fact label={source === "journal" ? t("Unit") : t("Path")}>
-            <span className="hm-mono">{source === "journal" ? unit || t("all units") : path}</span>
+            <span className="ui-mono">{source === "journal" ? unit || t("all units") : path}</span>
           </Fact>
           <Fact label={t("Limit")}>{preview ? t("5 minutes, 32 KiB/s") : t("{n} lines", { n: lineCount })}</Fact>
           {source === "journal" && boot && (
             <Fact label={t("Boot")}>
-              <span className="hm-mono" title={boot}>{boot.slice(0, 8)}…</span>
+              <span className="ui-mono" title={boot}>{boot.slice(0, 8)}…</span>
             </Fact>
           )}
           {bounds && (
             <Fact label={t("Window")}>
-              <span className="hm-mono">{bounds.since} – {bounds.until}</span>
+              <span className="ui-mono">{bounds.since} – {bounds.until}</span>
             </Fact>
           )}
           <Fact label={t("State")}>
             {preview
-              ? <span className={paused ? "badge warn" : "badge ok"}>{paused ? t("paused") : t("live")}</span>
+              ? <span className={paused ? "ui-pill ui-warn" : "ui-pill ui-ok"}>{paused ? t("paused") : t("live")}</span>
               : lines !== null
-                ? <span className="badge">{t("read")}</span>
-                : <span className="badge unknown">{t("nothing read yet")}</span>}
+                ? <span className="ui-pill">{t("read")}</span>
+                : <span className="ui-pill ui-unknown">{t("nothing read yet")}</span>}
           </Fact>
         </Facts>
       </Section>
@@ -537,7 +538,7 @@ export function Logs() {
         span={12}
         tools={
           <>
-            <label className="toggle">
+            <label className="ui-check">
               <input
                 type="radio"
                 checked={source === "journal"}
@@ -545,7 +546,7 @@ export function Logs() {
               />
               journald
             </label>
-            <label className="toggle">
+            <label className="ui-check">
               <input
                 type="radio"
                 checked={source === "file"}
@@ -597,13 +598,13 @@ export function Logs() {
                         : t("Reading the job…")
                   : t("Paste a job identifier to read what the host wrote while that operation ran.")}
               >
-                <div className="operations">
+                <div className="ui-actions">
                   <input
                     placeholder={t("job identifier (optional)")}
                     value={jobId}
                     onChange={(e) => setJobId(e.target.value)}
                   />
-                  {jobId && <button className="secondary" onClick={() => setJobId("")}>{t("Clear")}</button>}
+                  {jobId && <button className="ui-btn-secondary" onClick={() => setJobId("")}>{t("Clear")}</button>}
                   {boundJob && jobRecord.data && (
                     <Link to={`/hosts/${host.id}/jobs`}>{t("open the operations")}</Link>
                   )}
@@ -621,10 +622,10 @@ export function Logs() {
                     ? t("Only the lines of this boot of the host; clear the filter to read across boots.")
                     : bootFilter.reason}
                 >
-                  <div className="operations">
-                    <span className="hm-mono" title={boot} data-testid="boot-filter">{boot}</span>
-                    {!bootFilter.supported && <span className="badge warn">{t("not applied")}</span>}
-                    <button className="secondary" onClick={clearBoot}>{t("Clear")}</button>
+                  <div className="ui-actions">
+                    <span className="ui-mono" title={boot} data-testid="boot-filter">{boot}</span>
+                    {!bootFilter.supported && <span className="ui-pill ui-warn">{t("not applied")}</span>}
+                    <button className="ui-btn-secondary" onClick={clearBoot}>{t("Clear")}</button>
                     <Link to={`/hosts/${host.id}/power`}>{t("boots on the Power tab")}</Link>
                   </div>
                 </Field>
@@ -633,9 +634,9 @@ export function Logs() {
                   read continues from there until the operator clears it. */}
               {cursor && (
                 <Field label={t("After cursor")} wide help={t("Continues right after the last line shown in the unit detail.")}>
-                  <div className="operations">
-                    <span className="hm-mono" title={cursor}>{cursor.slice(0, 40)}…</span>
-                    <button className="secondary" onClick={() => setCursor("")}>{t("Clear")}</button>
+                  <div className="ui-actions">
+                    <span className="ui-mono" title={cursor}>{cursor.slice(0, 40)}…</span>
+                    <button className="ui-btn-secondary" onClick={() => setCursor("")}>{t("Clear")}</button>
                   </div>
                 </Field>
               )}
@@ -689,7 +690,7 @@ export function Logs() {
             {source === "journal" && !preview && (
               <ActionGuard action="journal.follow" host={host.id}>
                 <button
-                  className="secondary"
+                  className="ui-btn-secondary"
                   title={t("A live stream of the journal with these filters, for a bounded time; lines the host cannot send in time are dropped and counted.")}
                   onClick={() => follow.mutate()}
                   disabled={follow.isPending || host.connection_state !== "online"}
@@ -700,10 +701,10 @@ export function Logs() {
             )}
             {preview && (
               <>
-                <button className="secondary" onClick={() => setPaused((state) => !state)}>
+                <button className="ui-btn-secondary" onClick={() => setPaused((state) => !state)}>
                   {paused ? t("Resume") : t("Pause")}
                 </button>
-                <button className="secondary" onClick={() => stop.mutate()} disabled={stop.isPending}>
+                <button className="ui-btn-secondary" onClick={() => stop.mutate()} disabled={stop.isPending}>
                   {t("Stop")}
                 </button>
               </>
@@ -713,7 +714,7 @@ export function Logs() {
                 lines of every host come back merged into one timeline. */}
             {!preview && (
               <Link
-                className="button"
+                className="ui-btn"
                 title={t("Opens the reads page with this query filled in; the lines of every chosen host come back in one timeline.")}
                 to={readsPrefill(
                   source === "journal" ? "journal.read" : "logfile.read",
@@ -765,7 +766,7 @@ export function Logs() {
           {lines.length === 0 ? (
             <Empty>{t("Nothing matched.")}</Empty>
           ) : (
-            <div className="hm-section-body">
+            <div className="ui-panel-body">
               <LogView lines={lines} search={search} matches={matches} current={current} wrap={wrap} />
             </div>
           )}
@@ -811,21 +812,21 @@ function LogTools({
       {/* The count says whether the search found anything: no match is
           "0 matches", not a quiet empty screen. */}
       {search.trim() !== "" && (
-        <span className="source">
+        <span className="ui-note">
           {matches > 0 ? t("{n} of {total} matches", { n: current + 1, total: matches }) : t("0 matches")}
         </span>
       )}
-      <span className="segmented">
+      <span className="ui-segmented">
         <button type="button" disabled={matches === 0} onClick={() => onStep(-1)} title={t("Previous match")}>↑</button>
         <button type="button" disabled={matches === 0} onClick={() => onStep(1)} title={t("Next match")}>↓</button>
       </span>
-      <label className="toggle">
+      <label className="ui-check">
         <input type="checkbox" checked={wrap} onChange={(e) => onWrap(e.target.checked)} />
         {t("wrap lines")}
       </label>
-      <button type="button" className="secondary" disabled={disabled} onClick={onCopy}>{t("Copy")}</button>
-      <button type="button" className="secondary" disabled={disabled} onClick={onDownload}>{t("Download")}</button>
-      {copied && <span className="source">{copied}</span>}
+      <button type="button" className="ui-btn-secondary" disabled={disabled} onClick={onCopy}>{t("Copy")}</button>
+      <button type="button" className="ui-btn-secondary" disabled={disabled} onClick={onDownload}>{t("Download")}</button>
+      {copied && <span className="ui-note">{copied}</span>}
     </>
   );
 }
@@ -852,9 +853,9 @@ function LogView({
     pre.current?.querySelector("[data-current]")?.scrollIntoView({ block: "nearest" });
   }, [currentLine]);
   const style = { whiteSpace: wrap ? "pre-wrap" as const : "pre" as const };
-  if (!searching) return <pre ref={pre} className="hm-log" style={style}>{lines.join("\n")}</pre>;
+  if (!searching) return <pre ref={pre} className="ui-log" style={style}>{lines.join("\n")}</pre>;
   return (
-    <pre ref={pre} className="hm-log" style={style}>
+    <pre ref={pre} className="ui-log" style={style}>
       {lines.map((line, index) => (
         <span key={index} data-current={index === currentLine ? "" : undefined}>
           {splitMatches(line, search).map((piece, at) => (

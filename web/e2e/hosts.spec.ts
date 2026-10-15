@@ -102,8 +102,8 @@ test.describe("host list", () => {
     await expect(row.getByTestId("host-owner")).toHaveText(/\S/);
     const address = row.getByTestId("host-address");
     // An address comes with its origin as a chip; a missing one says so.
-    await expect(address.locator(".badge").first()).toBeVisible();
-    const chip = (await address.locator(".badge").first().textContent())?.trim() ?? "";
+    await expect(address.locator(".ui-pill").first()).toBeVisible();
+    const chip = (await address.locator(".ui-pill").first().textContent())?.trim() ?? "";
     expect(["session", "agent", "manual", "unknown"]).toContain(chip);
     // The reset puts the column away again.
     await page.getByTestId("column-chooser").click();
@@ -133,7 +133,7 @@ test.describe("host list", () => {
     await expect(page).toHaveURL(/\/bulk\?/);
     const url = new URL(page.url());
     expect(url.searchParams.getAll("host_id")).toEqual(chosen.map((host) => host.id));
-    await expect(page.locator(".page-header").getByRole("heading", { name: "Bulk Workspace" })).toBeVisible();
+    await expect(page.locator(".ui-pagehead").getByRole("heading", { name: "Bulk Workspace" })).toBeVisible();
     await expectHealthy(page, errors);
   });
 });
@@ -146,7 +146,7 @@ test.describe("host workspace", () => {
     await table.getByRole("link", { name: host.hostname, exact: true }).click();
 
     await expect(page).toHaveURL(new RegExp(`/hosts/${host.id}/overview$`));
-    await expect(page.locator(".hm-header").getByRole("heading", { name: "Overview" })).toBeVisible();
+    await expect(page.locator(".ui-sectionhead").getByRole("heading", { name: "Overview" })).toBeVisible();
 
     // The top bar names the host between the section and the module.
     const trail = page.getByRole("navigation", { name: "Breadcrumb" });
@@ -170,10 +170,10 @@ test.describe("host workspace", () => {
     const { errors } = watchErrors(page);
     const host = hosts.find((entry) => entry.connection_state === "online") ?? hosts[0];
     await page.goto(`/hosts/${host.id}/overview`);
-    await expect(page.locator(".hm-header").getByRole("heading", { name: "Overview" })).toBeVisible();
+    await expect(page.locator(".ui-sectionhead").getByRole("heading", { name: "Overview" })).toBeVisible();
 
     const nav = navigation(page);
-    const links = nav.locator("a.sidebar-item:not(.sidebar-back)");
+    const links = nav.locator("a.ui-sidebar-item:not(.ui-sidebar-back)");
     await expect(links.first()).toBeVisible();
 
     const modules: { name: string; href: string; unavailable: string | null }[] = [];
@@ -203,13 +203,13 @@ test.describe("host workspace", () => {
           await expect(notice).toBeVisible();
           // The unavailable module is still a page with its header and a
           // way back, not a bare sentence.
-          await expect(page.locator(".hm-header").getByRole("heading", { name: module.name, exact: true })).toBeVisible();
+          await expect(page.locator(".ui-sectionhead").getByRole("heading", { name: module.name, exact: true })).toBeVisible();
           await expect(page.getByRole("link", { name: "Back to the overview" })).toBeVisible();
         } else {
           // A module with backing shows its header, or an honest empty
           // state while the host has not reported it yet.
-          const header = page.locator(".hm-header").getByRole("heading", { name: module.name, exact: true });
-          await expect(header.or(page.locator(".empty")).first()).toBeVisible();
+          const header = page.locator(".ui-sectionhead").getByRole("heading", { name: module.name, exact: true });
+          await expect(header.or(page.locator(".ui-empty")).first()).toBeVisible();
         }
         await expectHealthy(page, errors);
       });

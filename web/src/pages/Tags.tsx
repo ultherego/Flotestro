@@ -4,8 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../lib/api";
 import type { Whoami } from "../lib/types";
 import { Board } from "../components/board";
-import { Empty, ErrorBox } from "../components/ui";
-import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
+import { ErrorBox } from "../components/ui";
+import { Actions, Empty, Field, Fields, PageHead, Panel, Toolbar } from "../ui/kit";
 import { Breakdown, StatusBar } from "../components/widgets";
 import { useConfirm } from "../components/Modal";
 import { useToast } from "../components/Toast";
@@ -71,7 +71,7 @@ export function Tags() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         icon="hosts"
         title={t("Tags")}
         description={t("Every tag your hosts carry, and how many carry it.")}
@@ -88,7 +88,7 @@ export function Tags() {
         drawn={{
           catalogue: (
             <>
-              <Card className="span-8" title={t("Catalogue")} description={t("{n} tags on the hosts you may read", { n: items.length })}>
+              <Panel className="ui-col-8" title={t("Catalogue")} description={t("{n} tags on the hosts you may read", { n: items.length })}>
           <StatusBar segments={[
             { label: t("Tags"), value: loaded ? items.length : undefined, tone: "info" },
             { label: t("Plain"), value: loaded ? plain : undefined, tone: "neutral" },
@@ -97,20 +97,20 @@ export function Tags() {
             // number of assignments, not of tagged hosts.
             { label: t("Assignments"), value: loaded ? tagged : undefined, tone: "info" },
           ]} />
-        </Card>
+        </Panel>
             </>
           ),
           by_key: (
             <>
-              <Card className="span-4" title={t("By key")} description={t("The keys with the most values.")}>
+              <Panel className="ui-col-4" title={t("By key")} description={t("The keys with the most values.")}>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : byKey.length === 0 ? (
-            <p className="fp-blank">{t("No key=value tag.")}</p>
+            <p className="ui-empty">{t("No key=value tag.")}</p>
           ) : (
-            <Breakdown tone="info" items={byKey.map(([key, n]) => ({ label: <span className="mono">{key}</span>, value: n }))} />
+            <Breakdown tone="info" items={byKey.map(([key, n]) => ({ label: <span className="ui-mono">{key}</span>, value: n }))} />
           )}
-        </Card>
+        </Panel>
 
         {renaming && (
           <RenameTag
@@ -122,7 +122,7 @@ export function Tags() {
           ),
           list: (
             <>
-              <Card className="span-12" flush>
+              <Panel className="ui-col-12" flush>
           <Toolbar>
             <input
               type="search"
@@ -135,9 +135,9 @@ export function Tags() {
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : items.length === 0 ? (
-            <EmptyState action={<Link className="button secondary" to="/hosts">{t("Open the host list")}</Link>}>
+            <Empty action={<Link className="ui-btn ui-btn-secondary" to="/hosts">{t("Open the host list")}</Link>}>
               {t("No host you may read carries a tag. Tags are set on the host page, under Overview.")}
-            </EmptyState>
+            </Empty>
           ) : shown.length === 0 ? (
             <Empty>{t("No tag matches the filter.")}</Empty>
           ) : (
@@ -147,7 +147,7 @@ export function Tags() {
                   <th scope="col">{t("Tag")}</th>
                   <th scope="col">{t("Key")}</th>
                   <th scope="col">{t("Value")}</th>
-                  <th scope="col" className="num">{t("Hosts")}</th>
+                  <th scope="col" className="ui-numeric">{t("Hosts")}</th>
                   <th scope="col" />
                 </tr>
               </thead>
@@ -156,16 +156,16 @@ export function Tags() {
                   const { key, value } = splitTag(item.tag);
                   return (
                     <tr key={item.tag} data-testid="tag-row" data-tag={item.tag}>
-                      <td><span className="chip chip-tag">{item.tag}</span></td>
-                      <td className="mono">{key}</td>
-                      <td className="mono">{value ?? <span className="source">—</span>}</td>
-                      <td className="num">{item.hosts}</td>
-                      <td className="actions-cell">
+                      <td><span className="ui-tag ui-tag">{item.tag}</span></td>
+                      <td className="ui-mono">{key}</td>
+                      <td className="ui-mono">{value ?? <span className="ui-note">—</span>}</td>
+                      <td className="ui-numeric">{item.hosts}</td>
+                      <td className="ui-actioncell">
                         <Actions>
-                          <Link className="button secondary" to={hostsWithTag(item.tag)}>{t("Hosts with this tag")}</Link>
+                          <Link className="ui-btn ui-btn-secondary" to={hostsWithTag(item.tag)}>{t("Hosts with this tag")}</Link>
                           {canRename && (
                             <button
-                              className="secondary"
+                              className="ui-btn-secondary"
                               onClick={() => setRenaming(renaming?.tag === item.tag ? null : item)}
                               aria-expanded={renaming?.tag === item.tag}
                             >
@@ -180,7 +180,7 @@ export function Tags() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
             </>
           )
         }}
@@ -243,22 +243,22 @@ function RenameTag({ tag, onDone }: { tag: TagCount; onDone: () => void }) {
   };
 
   return (
-    <Card
-      className="span-12"
+    <Panel
+      className="ui-col-12"
       title={t("Rename {tag}", { tag: tag.tag })}
       description={t("The tag changes its name on every host carrying it that you may change; the rest keep the old one and stay in the catalogue.")}
       footer={
         <Actions>
           <button onClick={ask} disabled={!ready || rename.isPending}>{rename.isPending ? t("Renaming…") : t("Rename")}</button>
-          <button className="secondary" onClick={onDone} disabled={rename.isPending}>{t("Cancel")}</button>
-          {message && <span className="page-error">{message}</span>}
+          <button className="ui-btn-secondary" onClick={onDone} disabled={rename.isPending}>{t("Cancel")}</button>
+          {message && <span className="ui-errorbox">{message}</span>}
         </Actions>
       }
     >
-      <FieldGrid>
+      <Fields>
         <Field label={t("New name")} hint={validTarget || !target ? t("key or key=value, lower-case key; a host already carrying the new name ends up with it once.") : t("Not a tag: key or key=value, lower-case key.")}>
           <input
-            className="mono"
+            className="ui-mono"
             value={to}
             onChange={(e) => setTo(e.target.value)}
             autoFocus
@@ -269,7 +269,7 @@ function RenameTag({ tag, onDone }: { tag: TagCount; onDone: () => void }) {
         <Field label={t("Reason")} hint={t("Required, at least 8 characters; kept in the audit trail with every host.")}>
           <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("unifying the spelling, ticket number")} data-testid="rename-reason" />
         </Field>
-      </FieldGrid>
-    </Card>
+      </Fields>
+    </Panel>
   );
 }

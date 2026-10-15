@@ -42,7 +42,7 @@ test.describe("HOST-UI: unknown is not zero", () => {
     await expect(row).toHaveCount(1);
     const cell = row.locator(`td[data-column="${column}"]`);
     await expect(cell).toBeVisible();
-    await expect(cell.locator(".badge.unknown")).toHaveText("unknown");
+    await expect(cell.locator(".ui-pill.ui-unknown")).toHaveText("unknown");
     await expect(cell).not.toHaveText(/^\s*0\s*$/);
 
     // A determined count in the same column is the number, never the badge
@@ -51,7 +51,7 @@ test.describe("HOST-UI: unknown is not zero", () => {
       typeof (column === "updates" ? entry.pending_updates : entry.pending_security_updates) === "number");
     expect(known, `no host reports a ${column} count, so the two cannot be told apart`).toBeTruthy();
     const knownCell = rowOf((known as Host).hostname).locator(`td[data-column="${column}"]`);
-    await expect(knownCell.locator(".badge.unknown")).toHaveCount(0);
+    await expect(knownCell.locator(".ui-pill.ui-unknown")).toHaveCount(0);
     await expect(knownCell).toContainText(
       String(column === "updates" ? (known as Host).pending_updates : (known as Host).pending_security_updates));
   });
@@ -59,7 +59,7 @@ test.describe("HOST-UI: unknown is not zero", () => {
   test("the overview shows undetermined counts as dashes and badges, not zeros", async ({ page }) => {
     const host = hosts[0];
     await page.goto(`/hosts/${host.id}/overview`);
-    await expect(page.locator(".hm-header").getByRole("heading", { name: "Overview" })).toBeVisible();
+    await expect(page.locator(".ui-sectionhead").getByRole("heading", { name: "Overview" })).toBeVisible();
 
     // The attention bar of the host: a null count from the API is a dash
     // on the segment, a number is that number.
@@ -82,7 +82,7 @@ test.describe("HOST-UI: a change asks before it runs", () => {
     });
 
     await page.goto(`/hosts/${host.id}/power`);
-    const header = page.locator(".hm-header").getByRole("heading", { name: "Power", exact: true });
+    const header = page.locator(".ui-sectionhead").getByRole("heading", { name: "Power", exact: true });
     const unreported = page.getByText("This host has not reported its boot state yet.");
     await expect(header.or(unreported).first()).toBeVisible();
     test.skip(await unreported.isVisible(), absent(
@@ -110,7 +110,7 @@ test.describe("HOST-UI: a change asks before it runs", () => {
   test("a shutdown needs a reason before its button is even enabled", async ({ page }) => {
     const host = hostWith(hosts, "systemd") ?? hosts[0];
     await page.goto(`/hosts/${host.id}/power`);
-    const header = page.locator(".hm-header").getByRole("heading", { name: "Power", exact: true });
+    const header = page.locator(".ui-sectionhead").getByRole("heading", { name: "Power", exact: true });
     const unreported = page.getByText("This host has not reported its boot state yet.");
     await expect(header.or(unreported).first()).toBeVisible();
     test.skip(await unreported.isVisible(), absent(
@@ -125,7 +125,7 @@ test.describe("HOST-UI: source and freshness", () => {
   test("a module page says where its data came from and when it was observed", async ({ page }) => {
     const host = hosts.find((entry) => entry.connection_state === "online") ?? hosts[0];
     await page.goto(`/hosts/${host.id}/overview`);
-    await expect(page.locator(".hm-header").getByRole("heading", { name: "Overview" })).toBeVisible();
+    await expect(page.locator(".ui-sectionhead").getByRole("heading", { name: "Overview" })).toBeVisible();
 
     const freshness = page.getByTestId("module-freshness");
     await expect(freshness).toBeVisible();
@@ -141,14 +141,14 @@ test.describe("HOST-UI: source and freshness", () => {
   test("the host header carries the state, the address with its origin and the last report", async ({ page }) => {
     const host = hosts[0];
     await page.goto(`/hosts/${host.id}/overview`);
-    const header = page.locator(".host-header");
+    const header = page.locator(".ui-hosthead");
     await expect(header).toBeVisible();
-    await expect(header.locator(".badge").first()).toHaveText(host.connection_state);
+    await expect(header.locator(".ui-pill").first()).toHaveText(host.connection_state);
     await expect(header.getByTitle("site / environment")).toHaveText(`${host.site} / ${host.environment}`);
     await expect(header.getByTitle("last seen")).toContainText("seen");
     // The address chip names its origin (session, agent, manual) or says
     // the address is unknown; a bare address would hide how it was learnt.
-    const address = header.locator(".chip-tag").first().or(header.getByText("address unknown"));
+    const address = header.locator(".ui-tag").first().or(header.getByText("address unknown"));
     await expect(address.first()).toBeVisible();
   });
 });

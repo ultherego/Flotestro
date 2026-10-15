@@ -4,7 +4,7 @@ import { api, ApiError } from "../lib/api";
 import type { InstallationProfile } from "../lib/types";
 import { ErrorBox } from "../components/ui";
 import { absoluteTime } from "../lib/format";
-import { Actions, Field, FieldGrid } from "../components/layout";
+import { Actions, Field, Fields, toneClass } from "../ui/kit";
 import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
 
@@ -120,7 +120,7 @@ export function AdvertisedAddressSection({ mayConfirm }: { mayConfirm: boolean }
 
   if (address.error) return <ErrorBox error={address.error} />;
   const state = address.data;
-  if (!state) return <p className="source">{t("Loading…")}</p>;
+  if (!state) return <p className="ui-note">{t("Loading…")}</p>;
   // An answer without the address in force is not an address of none: it is
   // an answer this section cannot read, and it says so rather than taking
   // the screen down with it. It read `state.in_force.join` straight out, so
@@ -129,7 +129,7 @@ export function AdvertisedAddressSection({ mayConfirm }: { mayConfirm: boolean }
   // this section beside others, which is where that would have been paid for.
   if (!Array.isArray(state.in_force)) {
     return (
-      <p className="source" data-testid="advertised-address">
+      <p className="ui-note" data-testid="advertised-address">
         {t("This panel did not say which address is in force.")}
       </p>
     );
@@ -142,15 +142,15 @@ export function AdvertisedAddressSection({ mayConfirm }: { mayConfirm: boolean }
     <div data-testid="advertised-address">
       <p>
         <strong>{t("In force:")}</strong>{" "}
-        <code className="mono">{state.in_force.join(", ")}</code>{" "}
-        <span className={`badge ${sourceTone(state.source, state.loopback_only)}`}>
+        <code className="ui-mono">{state.in_force.join(", ")}</code>{" "}
+        <span className={`ui-pill ${toneClass(sourceTone(state.source, state.loopback_only))}`}>
           {state.source === "environment" && t("declared in the deployment")}
           {state.source === "confirmed" && t("confirmed")}
           {state.source === "default" && t("not confirmed")}
         </span>
       </p>
       {state.source === "confirmed" && state.confirmed_by && (
-        <p className="source">
+        <p className="ui-note">
           {t("Confirmed by {who} on {when}.", {
             who: state.confirmed_by,
             when: absoluteTime(state.confirmed_at ?? "") || (state.confirmed_at ?? ""),
@@ -158,17 +158,17 @@ export function AdvertisedAddressSection({ mayConfirm }: { mayConfirm: boolean }
         </p>
       )}
       {state.loopback_only && (
-        <p className="source">
+        <p className="ui-note">
           {t("This reaches only the machine the panel runs on, so a host elsewhere is turned away at enrolment rather than left to fail a handshake later.")}
         </p>
       )}
       {state.mismatch && (
-        <div className="warning">
+        <div className="ui-banner">
           <p>{state.mismatch}</p>
         </div>
       )}
       {state.superseded && state.superseded.length > 0 && (
-        <p className="source">
+        <p className="ui-note">
           {t("Held back from any relay as well, because an agent not yet reconfigured still dials it: {names}.", {
             names: state.superseded.join(", "),
           })}
@@ -176,28 +176,28 @@ export function AdvertisedAddressSection({ mayConfirm }: { mayConfirm: boolean }
       )}
 
       {state.environment_in_force ? (
-        <p className="source">
+        <p className="ui-note">
           {t("This installation declares the address in the environment of the control plane ({names}), and that declaration decides. Change it there; a confirmation made here would be refused rather than kept where it does not take effect.", {
             names: (state.environment ?? []).join(", "),
           })}
         </p>
       ) : !mayConfirm ? (
-        <p className="source">
+        <p className="ui-note">
           {t("Only a platform administrator names the address the fleet connects to; ask one.")}
         </p>
       ) : (
         <div>
           <p>
             <strong>{t("Found on this machine")}</strong>{" "}
-            <span className="badge unknown">{t("proposal")}</span>
+            <span className="ui-pill ui-unknown">{t("proposal")}</span>
           </p>
-          <p className="source">
+          <p className="ui-note">
             {t("The panel read these off its own interfaces. It cannot tell which of them the hosts route to, so none of them is in use until you pick one and confirm it.")}
           </p>
-          <FieldGrid>
+          <Fields>
             {state.candidates.map((candidate) => (
-              <div className="field" key={`${candidate.kind}:${candidate.name}`}>
-                <label className="toggle">
+              <div className="ui-field" key={`${candidate.kind}:${candidate.name}`}>
+                <label className="ui-check">
                   <input
                     type="radio"
                     name="advertised-candidate"
@@ -205,13 +205,13 @@ export function AdvertisedAddressSection({ mayConfirm }: { mayConfirm: boolean }
                     checked={picked === candidate.name}
                     onChange={() => setPicked(candidate.name)}
                   />{" "}
-                  <code className="mono">{candidate.name}</code>
+                  <code className="ui-mono">{candidate.name}</code>
                 </label>
-                <span className="field-hint">{candidateNote(candidate, t)}</span>
+                <span className="ui-field-hint">{candidateNote(candidate, t)}</span>
               </div>
             ))}
-            <div className="field">
-              <label className="toggle">
+            <div className="ui-field">
+              <label className="ui-check">
                 <input
                   type="radio"
                   name="advertised-candidate"
@@ -221,25 +221,25 @@ export function AdvertisedAddressSection({ mayConfirm }: { mayConfirm: boolean }
                 />{" "}
                 {t("a name of your own")}
               </label>
-              <span className="field-hint">
+              <span className="ui-field-hint">
                 {t("The DNS name the hosts resolve, which is usually not an address of an interface. Several, separated by commas, are tried in order.")}
               </span>
               <input
-                className="mono"
+                className="ui-mono"
                 value={typed}
                 placeholder="panel.example.org"
                 disabled={picked !== OWN_ADDRESS}
                 onChange={(e) => setTyped(e.target.value)}
               />
             </div>
-          </FieldGrid>
-          <FieldGrid>
+          </Fields>
+          <Fields>
             <Field label={t("Reason")} hint={t("Kept on the audit trail beside the names. Optional.")} wide>
               <input value={reason} onChange={(e) => setReason(e.target.value)} />
             </Field>
-          </FieldGrid>
+          </Fields>
           {refusal && (
-            <p className="page-error">
+            <p className="ui-errorbox">
               {refusal.code === "advertised_address_from_environment"
                 ? t("The deployment declares the address, so it is not confirmed here.")
                 : refusal.message}
@@ -254,7 +254,7 @@ export function AdvertisedAddressSection({ mayConfirm }: { mayConfirm: boolean }
                   : t("Confirm the address")}
             </button>
           </Actions>
-          <p className="source">{state.note}</p>
+          <p className="ui-note">{state.note}</p>
         </div>
       )}
 
@@ -281,18 +281,18 @@ function AgentConfiguration() {
   });
   if (profile.error) return <ErrorBox error={profile.error} />;
   const data = profile.data;
-  if (!data) return <p className="source">{t("Loading…")}</p>;
+  if (!data) return <p className="ui-note">{t("Loading…")}</p>;
   return (
     <div>
       <p>
         <strong>{t("The agent configuration that now applies")}</strong>
       </p>
-      <p className="source">
+      <p className="ui-note">
         {t("This is what the add-host screen hands out from now on; it is written to {path} on the host.", { path: data.config.path })}
       </p>
-      <pre className="mono" data-testid="advertised-agent-config">{data.config.content}</pre>
+      <pre className="ui-mono" data-testid="advertised-agent-config">{data.config.content}</pre>
       {(data.warnings ?? []).map((warning) => (
-        <p className="source" key={warning}>{warning}</p>
+        <p className="ui-note" key={warning}>{warning}</p>
       ))}
     </div>
   );

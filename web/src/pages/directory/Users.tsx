@@ -2,8 +2,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../../lib/api";
 import type { DirectoryChange, DirectoryUser, RevealedSecret } from "../../lib/types";
-import { ErrorBox, Empty, JobState, Time } from "../../components/ui";
-import { Actions, Card, Field, FieldGrid, Toolbar } from "../../components/layout";
+import { ErrorBox, JobState, Time } from "../../components/ui";
+import { Actions, Empty, Field, Fields, Panel, Toolbar } from "../../ui/kit";
 import { useT } from "../../i18n";
 import { absoluteTime } from "../../lib/format";
 import {
@@ -36,10 +36,10 @@ function Expiry({ value, label }: { value?: string; label: string }) {
   // The date in the ISO shape every screen uses, not the browser locale's:
   // two operators reading the same account must read the same day.
   const text = `${label} ${absoluteTime(value).slice(0, 10)}`;
-  if (Number.isNaN(at)) return <span className="badge unknown" title={value}>{label}</span>;
-  if (left < 0) return <span className="badge error" title={absoluteTime(value)}>{t("{what} expired", { what: text })}</span>;
-  if (left < 14 * DAY) return <span className="badge warn" title={absoluteTime(value)}>{text}</span>;
-  return <span className="badge" title={absoluteTime(value)}>{text}</span>;
+  if (Number.isNaN(at)) return <span className="ui-pill ui-unknown" title={value}>{label}</span>;
+  if (left < 0) return <span className="ui-pill ui-error" title={absoluteTime(value)}>{t("{what} expired", { what: text })}</span>;
+  if (left < 14 * DAY) return <span className="ui-pill ui-warn" title={absoluteTime(value)}>{text}</span>;
+  return <span className="ui-pill" title={absoluteTime(value)}>{text}</span>;
 }
 
 /** A datetime-local value for an RFC3339 stamp, in the browser's zone. */
@@ -88,7 +88,7 @@ export function Users() {
 
   return (
     <>
-      <p className="subtitle">
+      <p className="ui-note">
         {t("An account is created, locked, expired, preserved or given a new password as a change: the plan shows the groups, the hosts reachable through HBAC and the sudo rules, a second person approves it, and every phase keeps its own result. The initial password never reaches the logs.")}
       </p>
 
@@ -97,7 +97,7 @@ export function Users() {
       </Toolbar>
 
       {form && (
-        <Card
+        <Panel
           title={t("New account")}
           footer={
             <Actions>
@@ -111,12 +111,12 @@ export function Users() {
                       }, reason)}>
                 {t("Plan account")}
               </button>
-              <button className="secondary" onClick={() => setForm(null)}>{t("Close")}</button>
-              {message && <p className="page-error">{message}</p>}
+              <button className="ui-btn-secondary" onClick={() => setForm(null)}>{t("Close")}</button>
+              {message && <p className="ui-errorbox">{message}</p>}
             </Actions>
           }
         >
-          <FieldGrid>
+          <Fields>
             <Field label={t("Account")}>
               <input value={form.uid} onChange={(e) => set("uid", e.target.value)} placeholder="jsmith" />
             </Field>
@@ -137,12 +137,12 @@ export function Users() {
               <textarea rows={3} value={form.ssh_keys} onChange={(e) => set("ssh_keys", e.target.value)} placeholder="ssh-ed25519 AAAA… user@host" />
             </Field>
             <ReasonField value={reason} onChange={setReason} />
-          </FieldGrid>
-        </Card>
+          </Fields>
+        </Panel>
       )}
 
       {intent && (intent.kind === "disable" || intent.kind === "enable") && (
-        <Card
+        <Panel
           title={intent.kind === "disable" ? t("Lock the account {uid}", { uid: intent.user.uid }) : t("Unlock the account {uid}", { uid: intent.user.uid })}
           description={intent.kind === "disable"
             ? t("The local denial marker and the panel sessions go first, the directory second: the reverse order would leave a working session for the time the change takes to propagate.")
@@ -153,13 +153,13 @@ export function Users() {
                       onClick={() => order(`identity.user.${intent.kind}`, { reference: { uid: intent.user.uid, reason } }, reason)}>
                 {intent.kind === "disable" ? t("Plan lock") : t("Plan unlock")}
               </button>
-              <button className="secondary" onClick={() => setIntent(null)}>{t("Close")}</button>
-              {message && <p className="page-error">{message}</p>}
+              <button className="ui-btn-secondary" onClick={() => setIntent(null)}>{t("Close")}</button>
+              {message && <p className="ui-errorbox">{message}</p>}
             </Actions>
           }
         >
-          <FieldGrid><ReasonField value={reason} onChange={setReason} /></FieldGrid>
-        </Card>
+          <Fields><ReasonField value={reason} onChange={setReason} /></Fields>
+        </Panel>
       )}
 
       {intent && intent.kind === "expire" && (
@@ -196,34 +196,34 @@ export function Users() {
           onCancel={() => setIntent(null)}
         />
       )}
-      {message && !form && !intent && <p className="page-error">{message}</p>}
+      {message && !form && !intent && <p className="ui-errorbox">{message}</p>}
 
       {change && <PlanImpact change={change} />}
       {change && change.action_type === "identity.user.password.reset" && (
-        <p className="source">
+        <p className="ui-note">
           {t("The reset waits for a second person's approval. Once it is carried out, the one-time password appears under recent changes for the person who ordered it.")}
         </p>
       )}
 
-      <Card flush>
+      <Panel flush>
         {!data?.items.length ? (
           <Empty>{t("No accounts.")}</Empty>
         ) : (
           <table>
             <thead>
               <tr>
-                <th scope="col">{t("Account")}</th><th scope="col">{t("Full name")}</th><th scope="col" className="num">UID</th><th scope="col">{t("Groups")}</th>
-                <th scope="col" className="num">{t("SSH keys")}</th><th scope="col">{t("Expires")}</th><th scope="col">{t("State")}</th><th scope="col"></th>
+                <th scope="col">{t("Account")}</th><th scope="col">{t("Full name")}</th><th scope="col" className="ui-numeric">UID</th><th scope="col">{t("Groups")}</th>
+                <th scope="col" className="ui-numeric">{t("SSH keys")}</th><th scope="col">{t("Expires")}</th><th scope="col">{t("State")}</th><th scope="col"></th>
               </tr>
             </thead>
             <tbody>
               {data.items.map((user) => (
                 <tr key={user.uid}>
-                  <td className="mono">{user.uid}</td>
+                  <td className="ui-mono">{user.uid}</td>
                   <td>{[user.first_name, user.last_name].filter(Boolean).join(" ")}</td>
-                  <td className="num">{user.uid_number || "—"}</td>
+                  <td className="ui-numeric">{user.uid_number || "—"}</td>
                   <td>{(user.groups ?? []).join(", ") || "—"}</td>
-                  <td className="num">{user.ssh_key_fingerprints?.length ?? 0}</td>
+                  <td className="ui-numeric">{user.ssh_key_fingerprints?.length ?? 0}</td>
                   <td>
                     {!user.principal_expires_at && !user.password_expires_at ? "—" : (
                       <>
@@ -232,22 +232,22 @@ export function Users() {
                       </>
                     )}
                   </td>
-                  <td>{user.disabled ? <span className="badge error">{t("locked")}</span> : <span className="badge ok">{t("active")}</span>}</td>
-                  <td className="num">
+                  <td>{user.disabled ? <span className="ui-pill ui-error">{t("locked")}</span> : <span className="ui-pill ui-ok">{t("active")}</span>}</td>
+                  <td className="ui-numeric">
                     {/* The everyday action stands alone; the rarer ones sit
                         under one menu, so a row of fifty users is not a
                         wall of two hundred buttons. */}
-                    <div className="actions">
+                    <div className="ui-actions">
                       {user.disabled
-                        ? <button className="secondary" onClick={() => { setIntent({ kind: "enable", user }); setForm(null); }}>{t("Unlock")}</button>
-                        : <button className="secondary" onClick={() => { setIntent({ kind: "disable", user }); setForm(null); }}>{t("Lock")}</button>}
-                      <details className="chip has-menu">
+                        ? <button className="ui-btn-secondary" onClick={() => { setIntent({ kind: "enable", user }); setForm(null); }}>{t("Unlock")}</button>
+                        : <button className="ui-btn-secondary" onClick={() => { setIntent({ kind: "disable", user }); setForm(null); }}>{t("Lock")}</button>}
+                      <details className="ui-tag ui-menu-anchor">
                         <summary>{t("More")} ▾</summary>
-                        <div className="menu-popover to-the-left">
-                          <button className="link" style={{ textAlign: "left" }} title={t("Set or clear the expiry of the account and of the password")} onClick={() => { setIntent({ kind: "expire", user }); setForm(null); }}>{t("Expire")}</button>
-                          <button className="link" style={{ textAlign: "left" }} title={t("Change the UID, GID, home directory or login shell")} onClick={() => { setIntent({ kind: "posix", user }); setForm(null); }}>{t("POSIX")}</button>
-                          <button className="link" style={{ textAlign: "left" }} title={t("Issue a one-time password that expires at the first login")} onClick={() => { setIntent({ kind: "password", user }); setForm(null); }}>{t("Reset password")}</button>
-                          <button className="link" style={{ textAlign: "left" }} title={t("Soft-delete: the UID and the trail stay, nobody signs in")} onClick={() => { setIntent({ kind: "preserve", user }); setForm(null); }}>{t("Preserve")}</button>
+                        <div className="ui-menu ui-left">
+                          <button className="ui-btn-link" style={{ textAlign: "left" }} title={t("Set or clear the expiry of the account and of the password")} onClick={() => { setIntent({ kind: "expire", user }); setForm(null); }}>{t("Expire")}</button>
+                          <button className="ui-btn-link" style={{ textAlign: "left" }} title={t("Change the UID, GID, home directory or login shell")} onClick={() => { setIntent({ kind: "posix", user }); setForm(null); }}>{t("POSIX")}</button>
+                          <button className="ui-btn-link" style={{ textAlign: "left" }} title={t("Issue a one-time password that expires at the first login")} onClick={() => { setIntent({ kind: "password", user }); setForm(null); }}>{t("Reset password")}</button>
+                          <button className="ui-btn-link" style={{ textAlign: "left" }} title={t("Soft-delete: the UID and the trail stay, nobody signs in")} onClick={() => { setIntent({ kind: "preserve", user }); setForm(null); }}>{t("Preserve")}</button>
                         </div>
                       </details>
                     </div>
@@ -257,9 +257,9 @@ export function Users() {
             </tbody>
           </table>
         )}
-      </Card>
+      </Panel>
 
-      <Card
+      <Panel
         title={t("Preserved accounts")}
         description={t("Soft-deleted entries: the UID and the trail stay, nobody signs in. They are listed apart so they are not counted as users.")}
         flush
@@ -270,20 +270,20 @@ export function Users() {
           <Empty>{t("No preserved accounts.")}</Empty>
         ) : (
           <table>
-            <thead><tr><th scope="col">{t("Account")}</th><th scope="col">{t("Full name")}</th><th scope="col" className="num">UID</th><th scope="col">{t("Last password change")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Account")}</th><th scope="col">{t("Full name")}</th><th scope="col" className="ui-numeric">UID</th><th scope="col">{t("Last password change")}</th></tr></thead>
             <tbody>
               {(preserved.data?.items ?? []).map((user) => (
                 <tr key={user.uid}>
-                  <td className="mono">{user.uid}</td>
+                  <td className="ui-mono">{user.uid}</td>
                   <td>{[user.first_name, user.last_name].filter(Boolean).join(" ")}</td>
-                  <td className="num">{user.uid_number || "—"}</td>
+                  <td className="ui-numeric">{user.uid_number || "—"}</td>
                   <td><Time value={user.last_password_change} /></td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-      </Card>
+      </Panel>
 
       <RecentChanges />
     </>
@@ -313,7 +313,7 @@ function ExpireForm({ user, busy, message, onSubmit, onClose }: {
   const touched = "principal_expires_at" in expiry || "password_expires_at" in expiry;
 
   return (
-    <Card
+    <Panel
       title={t("Expiry of the account {uid}", { uid: user.uid })}
       description={t("The account expiry ends every Kerberos login after the date; the password expiry forces a change at the next login. A field left empty stays as it is.")}
       footer={
@@ -321,29 +321,29 @@ function ExpireForm({ user, busy, message, onSubmit, onClose }: {
           <button disabled={!touched || reason.trim().length < 8 || busy} onClick={() => onSubmit({ expiry }, reason)}>
             {t("Plan expiry")}
           </button>
-          <button className="secondary" onClick={onClose}>{t("Close")}</button>
-          {message && <p className="page-error">{message}</p>}
+          <button className="ui-btn-secondary" onClick={onClose}>{t("Close")}</button>
+          {message && <p className="ui-errorbox">{message}</p>}
         </Actions>
       }
     >
-      <FieldGrid>
+      <Fields>
         <Field label={t("Account expires at")}>
           <input type="datetime-local" value={principal} disabled={clearPrincipal} onChange={(e) => setPrincipal(e.target.value)} />
         </Field>
         <Field label={t("Password expires at")}>
           <input type="datetime-local" value={password} disabled={clearPassword} onChange={(e) => setPassword(e.target.value)} />
         </Field>
-      </FieldGrid>
-      <label className="toggle">
+      </Fields>
+      <label className="ui-check">
         <input type="checkbox" checked={clearPrincipal} onChange={(e) => setClearPrincipal(e.target.checked)} />
         {t("Clear the account expiry")}
       </label>
-      <label className="toggle">
+      <label className="ui-check">
         <input type="checkbox" checked={clearPassword} onChange={(e) => setClearPassword(e.target.checked)} />
         {t("Clear the password expiry")}
       </label>
-      <FieldGrid><ReasonField value={reason} onChange={setReason} /></FieldGrid>
-    </Card>
+      <Fields><ReasonField value={reason} onChange={setReason} /></Fields>
+    </Panel>
   );
 }
 
@@ -367,7 +367,7 @@ function PosixForm({ user, busy, message, onSubmit, onClose }: {
   const changed = Object.keys(posix).length > 1;
 
   return (
-    <Card
+    <Panel
       title={t("POSIX data of the account {uid}", { uid: user.uid })}
       description={t("A changed UID or GID leaves the files on every host owned by the old number; the plan says so before anybody approves.")}
       footer={
@@ -375,19 +375,19 @@ function PosixForm({ user, busy, message, onSubmit, onClose }: {
           <button disabled={!changed || reason.trim().length < 8 || busy} onClick={() => onSubmit({ posix }, reason)}>
             {t("Plan POSIX change")}
           </button>
-          <button className="secondary" onClick={onClose}>{t("Close")}</button>
-          {message && <p className="page-error">{message}</p>}
+          <button className="ui-btn-secondary" onClick={onClose}>{t("Close")}</button>
+          {message && <p className="ui-errorbox">{message}</p>}
         </Actions>
       }
     >
-      <FieldGrid>
+      <Fields>
         <Field label="UID"><input value={uidNumber} onChange={(e) => setUidNumber(e.target.value)} /></Field>
         <Field label="GID"><input value={gidNumber} onChange={(e) => setGidNumber(e.target.value)} /></Field>
         <Field label={t("Shell")}><input value={shell} onChange={(e) => setShell(e.target.value)} placeholder="/bin/bash" /></Field>
         <Field label={t("Home directory")}><input value={home} onChange={(e) => setHome(e.target.value)} placeholder={`/home/${user.uid}`} /></Field>
         <ReasonField value={reason} onChange={setReason} />
-      </FieldGrid>
-    </Card>
+      </Fields>
+    </Panel>
   );
 }
 
@@ -430,22 +430,22 @@ function RecentChanges() {
   if (changes.error instanceof ApiError && changes.error.forbidden) return null;
 
   return (
-    <Card title={t("Recent changes")} description={t("The last directory changes, newest first; a change is approved by a second person before it runs.")} flush>
+    <Panel title={t("Recent changes")} description={t("The last directory changes, newest first; a change is approved by a second person before it runs.")} flush>
       {secret && (
-        <div className="card-body">
-          <p className="warning">
+        <div className="ui-panel-body">
+          <p className="ui-banner">
             <span>{t("The one-time password of {uid}. It expires on first login and will not be shown again.", { uid: secret.uid })}</span>
           </p>
-          <p className="mono" data-testid="one-time-password">{secret.one_time_password}</p>
+          <p className="ui-mono" data-testid="one-time-password">{secret.one_time_password}</p>
           <Actions>
-            <button className="secondary" onClick={() => {
+            <button className="ui-btn-secondary" onClick={() => {
               // The clipboard may be refused outside a secure context; the
               // password stays on the screen either way.
               navigator.clipboard?.writeText(secret.one_time_password).then(() => setCopied(true)).catch(() => setCopied(false));
             }}>
               {copied ? t("Copied") : t("Copy")}
             </button>
-            <button className="secondary" onClick={() => { setSecret(null); setCopied(false); }}>{t("Hide")}</button>
+            <button className="ui-btn-secondary" onClick={() => { setSecret(null); setCopied(false); }}>{t("Hide")}</button>
           </Actions>
         </div>
       )}
@@ -459,13 +459,13 @@ function RecentChanges() {
           <tbody>
             {(changes.data?.items ?? []).map((item) => (
               <tr key={item.id}>
-                <td className="mono" title={item.id}>{item.id.slice(0, 8)}</td>
+                <td className="ui-mono" title={item.id}>{item.id.slice(0, 8)}</td>
                 <td>
                   {/* The plan names what the change touches; without one
                       the type says at least what kind of change it is. */}
-                  <div className="fp-host-cell">
+                  <div className="ui-twoline">
                     <span>{t(actionName(item.action_type))}</span>
-                    <span className="source">{item.plan?.summary || <span className="mono">{item.action_type}</span>}</span>
+                    <span className="ui-note">{item.plan?.summary || <span className="ui-mono">{item.action_type}</span>}</span>
                   </div>
                 </td>
                 <td><JobState state={item.state} /></td>
@@ -473,17 +473,17 @@ function RecentChanges() {
                 {/* A change is read by when it ended; one still running
                     is read by when it was ordered. */}
                 <td><Time value={item.finished_at || item.created_at} /></td>
-                <td className="source">{item.result_message || "—"}</td>
-                <td className="num">
+                <td className="ui-note">{item.result_message || "—"}</td>
+                <td className="ui-numeric">
                   {item.action_type === "identity.user.password.reset" && item.secret_available && (
                     revealing === item.id ? (
-                      <div className="actions">
+                      <div className="ui-actions">
                         <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("why the password is read (min. 8 characters)")} />
                         <button disabled={reason.trim().length < 8 || reveal.isPending} onClick={() => reveal.mutate(item.id)}>{t("Reveal")}</button>
-                        <button className="secondary" onClick={() => { setRevealing(null); setReason(""); }}>{t("Cancel")}</button>
+                        <button className="ui-btn-secondary" onClick={() => { setRevealing(null); setReason(""); }}>{t("Cancel")}</button>
                       </div>
                     ) : (
-                      <button className="secondary" onClick={() => { setRevealing(item.id); setSecret(null); }}>{t("Reveal one-time password")}</button>
+                      <button className="ui-btn-secondary" onClick={() => { setRevealing(item.id); setSecret(null); }}>{t("Reveal one-time password")}</button>
                     )
                   )}
                 </td>
@@ -492,7 +492,7 @@ function RecentChanges() {
           </tbody>
         </table>
       )}
-      {revealError && <div className="card-body"><p className="page-error">{revealError}</p></div>}
-    </Card>
+      {revealError && <div className="ui-panel-body"><p className="ui-errorbox">{revealError}</p></div>}
+    </Panel>
   );
 }

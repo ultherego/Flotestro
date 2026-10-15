@@ -4,8 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import { goDuration } from "../lib/format";
 import type { Settings as SettingsView, SettingsArea, SettingsFact, Whoami } from "../lib/types";
-import { Empty, ErrorBox, Pair, Pairs, Time } from "../components/ui";
-import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
+import { ErrorBox, Pair, Pairs, Time } from "../components/ui";
+import { Actions, Empty, Field, Fields, PageHead, Panel } from "../ui/kit";
 import { useToast } from "../components/Toast";
 import { Board } from "../components/board";
 import { AdvertisedAddressSection } from "./AdvertisedAddress";
@@ -120,7 +120,7 @@ export function Settings() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         icon="settings"
         title={t("Settings")}
         description={t("Everything this installation is configured with.")}
@@ -134,11 +134,11 @@ export function Settings() {
         }
       />
 
-      <div className="tabs" data-testid="settings-tabs">
+      <div className="ui-tabs" data-testid="settings-tabs">
         {TABS.filter((one) => one.permission === "" || permissions.has(one.permission)).map((one) => (
           <button
             key={one.key}
-            className={tab === one.key ? "active" : ""}
+            className={tab === one.key ? "ui-active" : ""}
             onClick={() => setTab(one.key)}
             data-testid={`settings-tab-${one.key}`}
           >
@@ -215,21 +215,21 @@ function GeneralSettings({ permissions }: { permissions: Set<string> }) {
   return (
     <>
       {error && <ErrorBox error={error} />}
-      {!error && !data && <Card><Empty>{t("Loading…")}</Empty></Card>}
+      {!error && !data && <Panel><Empty>{t("Loading…")}</Empty></Panel>}
 
       {/* What this tab itself stores. Side by side where there is room and
           stacked where there is not: the grid decides that, not a width
           written into either card. */}
-      <div className="widgets">
+      <div className="ui-grid">
         <MonitoringSettingsCard />
         {(permissions.has("settings.read") || permissions.has("principal.manage")) && (
-          <Card
-            className="span-5"
+          <Panel
+            className="ui-col-5"
             title={t("Advertised address")}
             description={t("The address the agents dial to reach this panel.")}
           >
             <AdvertisedAddressSection mayConfirm={permissions.has("settings.advertise.write")} />
-          </Card>
+          </Panel>
         )}
       </div>
 
@@ -238,12 +238,12 @@ function GeneralSettings({ permissions }: { permissions: Set<string> }) {
           {/* The tiles stand on the page, not inside a card: a tile is a
               raised surface, and a raised surface on another one of the same
               colour is a tile nobody can see the edge of. */}
-          <div className="parts-head">
+          <div className="ui-sectionhead">
             <h2>{t("What the process was started with")}</h2>
-            <span className="source">{t("Read at start, changed where the deployment is defined.")}</span>
+            <span className="ui-note">{t("Read at start, changed where the deployment is defined.")}</span>
             <input
               type="search"
-              className="settings-search"
+              className="ui-search"
               placeholder={t("Find a setting")}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -407,21 +407,21 @@ function MonitoringSettingsCard() {
   const ready = preview !== null && !invalid && (!destructive || acknowledged);
 
   return (
-    <Card
-      className="span-7"
+    <Panel
+      className="ui-col-7"
       title={t("Monitoring retention")}
       description={t("How long the panel keeps what the hosts send.")}
       footer={
         <Actions>
-          <button className="secondary" onClick={() => check.mutate()} disabled={check.isPending || save.isPending}>
+          <button className="ui-btn-secondary" onClick={() => check.mutate()} disabled={check.isPending || save.isPending}>
             {check.isPending ? t("checking…") : t("Check what this would change")}
           </button>
           <button onClick={() => save.mutate()} disabled={!ready || save.isPending}>
             {save.isPending ? t("storing…") : t("Store these settings")}
           </button>
-          {message && <span className="page-error">{message}</span>}
+          {message && <span className="ui-errorbox">{message}</span>}
           {settings.data.stored.present && settings.data.stored.updated_at && (
-            <span className="source">
+            <span className="ui-note">
               {t("Stored by {who}", { who: settings.data.stored.updated_by || "—" })}{" "}
               <Time value={settings.data.stored.updated_at} />
             </span>
@@ -429,7 +429,7 @@ function MonitoringSettingsCard() {
         </Actions>
       }
     >
-      <FieldGrid>
+      <Fields>
         {DURATION_FIELDS.map((field) => (
           <Field
             key={field.key}
@@ -440,7 +440,7 @@ function MonitoringSettingsCard() {
             })}`}
           >
             <input
-              className="mono"
+              className="ui-mono"
               value={valueOf(field.key)}
               placeholder={String(environment[field.key])}
               onChange={(e) => { setDraft({ ...draft, [field.key]: e.target.value }); setPreview(null); }}
@@ -465,15 +465,15 @@ function MonitoringSettingsCard() {
             data-testid="monitoring-partitions-ahead"
           />
         </Field>
-      </FieldGrid>
+      </Fields>
 
       {invalid && (
-        <p className="page-error">
+        <p className="ui-errorbox">
           {t("These settings would delete readings that are still arriving, so they cannot be stored. Raise the raw retention to at least the raw query window plus the maximum lateness.")}
         </p>
       )}
       {preview && !invalid && <ImpactNote impact={preview.impact} acknowledged={acknowledged} onAcknowledge={setAcknowledged} />}
-    </Card>
+    </Panel>
   );
 }
 
@@ -490,34 +490,34 @@ function ImpactNote({
 }) {
   const t = useT();
   if (!impact.destructive) {
-    return <p className="source">{t("Nothing stored is removed by this change.")}</p>;
+    return <p className="ui-note">{t("Nothing stored is removed by this change.")}</p>;
   }
   return (
     <>
       <Pairs>
         {impact.dropped_raw_partitions.length > 0 && (
           <Pair label={t("Days of raw samples dropped")}>
-            <span className="mono wrap">{impact.dropped_raw_partitions.join(", ")}</span>
+            <span className="ui-mono ui-wrap">{impact.dropped_raw_partitions.join(", ")}</span>
           </Pair>
         )}
         {impact.raw_samples_estimate > 0 && (
           <Pair label={t("Raw readings in them (estimate)")}>
-            <span className="num">{impact.raw_samples_estimate.toLocaleString()}</span>
+            <span className="ui-numeric">{impact.raw_samples_estimate.toLocaleString()}</span>
           </Pair>
         )}
         {impact.rollup_rows > 0 && (
           <Pair label={t("Quarter-hour rollups removed")}>
-            <span className="num">{impact.rollup_rows.toLocaleString()}</span>
+            <span className="ui-numeric">{impact.rollup_rows.toLocaleString()}</span>
           </Pair>
         )}
         {impact.gap_rows > 0 && (
-          <Pair label={t("Recorded gaps removed")}><span className="num">{impact.gap_rows.toLocaleString()}</span></Pair>
+          <Pair label={t("Recorded gaps removed")}><span className="ui-numeric">{impact.gap_rows.toLocaleString()}</span></Pair>
         )}
         {impact.clock_skew_rows > 0 && (
-          <Pair label={t("Clock corrections removed")}><span className="num">{impact.clock_skew_rows.toLocaleString()}</span></Pair>
+          <Pair label={t("Clock corrections removed")}><span className="ui-numeric">{impact.clock_skew_rows.toLocaleString()}</span></Pair>
         )}
         {impact.expired_silence_rows > 0 && (
-          <Pair label={t("Expired silences removed")}><span className="num">{impact.expired_silence_rows.toLocaleString()}</span></Pair>
+          <Pair label={t("Expired silences removed")}><span className="ui-numeric">{impact.expired_silence_rows.toLocaleString()}</span></Pair>
         )}
       </Pairs>
       <label>
@@ -552,14 +552,14 @@ function AreaTile({
 }) {
   const t = useT();
   return (
-    <section className="part">
-      <h3 className="part-head">
-        <span className="part-name">{t(area.title)}</span>
-        <span className="part-summary">
+    <section className="ui-tile">
+      <h3 className="ui-tile-head">
+        <span className="ui-tile-name">{t(area.title)}</span>
+        <span className="ui-tile-note">
           {facts.length === 1 ? t("{n} value", { n: facts.length }) : t("{n} values", { n: facts.length })}
         </span>
       </h3>
-      <div className="part-body">
+      <div className="ui-tile-body">
       <Pairs>
         {facts.map((fact) => (
           <Pair key={fact.key} label={t(FACT_LABELS[fact.key] ?? fact.key)}>
@@ -581,22 +581,22 @@ function FactValue({ fact, area }: { fact: SettingsFact; area: string }) {
   // A secret says only whether it is set.
   if (fact.secret) {
     return fact.configured
-      ? <span className="badge ok" title={t("The value is set; it is never shown here.")}>{t("set")}</span>
-      : <span className="badge unknown">{t("not set")}</span>;
+      ? <span className="ui-pill ui-ok" title={t("The value is set; it is never shown here.")}>{t("set")}</span>
+      : <span className="ui-pill ui-unknown">{t("not set")}</span>;
   }
   const value = fact.value;
-  if (value === null) return <span className="badge unknown">{t("no snapshot yet")}</span>;
+  if (value === null) return <span className="ui-pill ui-unknown">{t("no snapshot yet")}</span>;
   // A retention left unset keeps the record for good; a dash would read
   // as "nothing kept", which is the opposite of what happens.
   if (value === "" && area === "retention") return <span title={t("No limit is set; the records are never swept.")}>{t("forever")}</span>;
-  if (value === "" || (Array.isArray(value) && value.length === 0)) return <span className="source">—</span>;
-  if (typeof value === "boolean") return <span className={value ? "badge ok" : "badge unknown"}>{value ? t("yes") : t("no")}</span>;
-  if (Array.isArray(value)) return <span className="mono wrap">{value.join(", ")}</span>;
+  if (value === "" || (Array.isArray(value) && value.length === 0)) return <span className="ui-note">—</span>;
+  if (typeof value === "boolean") return <span className={value ? "ui-pill ui-ok" : "ui-pill ui-unknown"}>{value ? t("yes") : t("no")}</span>;
+  if (Array.isArray(value)) return <span className="ui-mono ui-wrap">{value.join(", ")}</span>;
   // A duration is read in days and hours, with the exact value on hover.
   if (typeof value === "string" && value !== "" && GO_DURATION.test(value)) {
-    return <span className="mono" title={value}>{goDuration(value)}</span>;
+    return <span className="ui-mono" title={value}>{goDuration(value)}</span>;
   }
-  return <span className="mono wrap">{String(value)}</span>;
+  return <span className="ui-mono ui-wrap">{String(value)}</span>;
 }
 
 /* The English label of each fact, so the catalogue has a sentence to

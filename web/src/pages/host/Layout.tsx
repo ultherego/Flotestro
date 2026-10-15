@@ -2,8 +2,8 @@ import { Link, Outlet, useLocation, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Host } from "../../lib/types";
-import { ErrorBox, Empty } from "../../components/ui";
-import { EmptyState } from "../../components/layout";
+import { ErrorBox } from "../../components/ui";
+import { Empty } from "../../ui/kit";
 import { ModuleHeader } from "./shared";
 import { useCapabilities } from "../../lib/capabilities";
 import { ContextBar } from "./ContextBar";
@@ -50,12 +50,12 @@ export function HostLayout() {
 
       {/* The modules of the host are in the sidebar, which App feeds from
           the same registry; the page holds the header and the content. */}
-      <div className="host-content">
+      <div className="ui-page">
         {/* A host switch that changed the module says why. Without that the
             operator sees a different screen than they opened and does not
             know what happened. */}
         {rejected?.rejected && (
-          <p className="warning">
+          <p className="ui-banner">
             <span>
               {t("{module} is not available on {host}: {reason}", { module: t(rejected.rejected), host: data.hostname, reason: rejected.reason ?? "" })}
             </span>
@@ -74,15 +74,15 @@ export function HostLayout() {
         !active.available ? (
           // A module the host cannot serve is still a page with a header:
           // a bare sentence in a blank area reads as a broken screen.
-          <div className="hm-page">
+          <div className="ui-stack-l">
             <ModuleHeader
               title={t(active.name)}
               icon={active.icon}
               description={t("{module} is not available on this host: {reason}.", { module: t(active.name), reason: active.missingReason })}
             />
-            <EmptyState action={<Link className="button" to={`/hosts/${data.id}/overview`}>{t("Back to the overview")}</Link>}>
+            <Empty action={<Link className="ui-btn" to={`/hosts/${data.id}/overview`}>{t("Back to the overview")}</Link>}>
               {t("The module appears once the host reports the adapter it needs; the agent checks for it at every report, so nothing has to be re-enrolled.")}
-            </EmptyState>
+            </Empty>
           </div>
         ) : (
           <Outlet context={{ host: data }} />

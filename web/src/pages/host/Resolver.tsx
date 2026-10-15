@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { Time, Empty } from "../../components/ui";
+import { Time } from "../../components/ui";
 import {
   Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
   Summary, Table, Widgets, countWhere, orderReady, refusalOf, registryOrder, useHost, useModule,
@@ -16,6 +16,7 @@ import {
   type FieldSuggestions, type FormValue,
 } from "../../lib/operations";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 /**
  * The resolver change as an order. It goes through the operation registry,
@@ -108,7 +109,7 @@ export function Resolver() {
   // The test result belongs to the job, so we wait for that specific job
   // instead of refreshing the whole list.
   const [testJob, setTestJob] = useState("");
-  const unknown = <span className="badge unknown">{t("unknown")}</span>;
+  const unknown = <span className="ui-pill ui-unknown">{t("unknown")}</span>;
 
   // The job result lives on the attempt, not on the job: it is the attempt
   // that knows what the host answered and when.
@@ -164,7 +165,7 @@ export function Resolver() {
         actions={
           <ActionGuard action="dns.host.apply" host={host.id}>
             <button
-              className="secondary"
+              className="ui-btn-secondary"
               onClick={() => setForm((open) => !open)}
               disabled={!snapshot?.writable}
               title={snapshot?.writable ? "" : snapshot?.read_only_reason}
@@ -179,12 +180,12 @@ export function Resolver() {
       <Message text={message} />
 
       {snapshot?.unavailable_reason && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>{t("Resolver state could not be read: {reason}", { reason: snapshot.unavailable_reason })}</span>
         </p>
       )}
       {snapshot?.read_only_reason && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>{t("Read-only on this host: {reason}", { reason: snapshot.read_only_reason })}</span>
         </p>
       )}
@@ -209,12 +210,12 @@ export function Resolver() {
               says what each means for a change written here. */}
           <Fact label={t("Owner")}>
             {snapshot?.owner ? <span title={t(ownerMeaning(snapshot.owner)) || undefined}>{snapshot.owner}</span> : unknown}
-            {snapshot?.mode && <span className="source" title={t(modeMeaning(snapshot.mode)) || undefined}> · {snapshot.mode}</span>}
+            {snapshot?.mode && <span className="ui-note" title={t(modeMeaning(snapshot.mode)) || undefined}> · {snapshot.mode}</span>}
           </Fact>
           <Fact label={t("Write adapter")}>
             {snapshot?.writable
-              ? <span className="badge ok">{snapshot.write_adapter || t("yes")}</span>
-              : <span className="badge unknown">{t("read only")}</span>}
+              ? <span className="ui-pill ui-ok">{snapshot.write_adapter || t("yes")}</span>
+              : <span className="ui-pill ui-unknown">{t("read only")}</span>}
           </Fact>
           {/* "unsupported" and "disabled" are two different answers, so we
               show what the host said, not yes/no. */}
@@ -238,16 +239,16 @@ export function Resolver() {
         <Facts>
           <Fact label={t("Mode")}>
             {snapshot?.mode ? <span title={t(modeMeaning(snapshot.mode)) || undefined}>{snapshot.mode}</span> : "—"}
-            {snapshot?.mode && modeMeaning(snapshot.mode) && <span className="source"> · {t(modeMeaning(snapshot.mode))}</span>}
+            {snapshot?.mode && modeMeaning(snapshot.mode) && <span className="ui-note"> · {t(modeMeaning(snapshot.mode))}</span>}
           </Fact>
           <Fact label="resolv.conf">
-            <span className="hm-mono">
+            <span className="ui-mono">
               {snapshot?.resolv_conf}
               {snapshot?.resolv_conf_target && ` → ${snapshot.resolv_conf_target}`}
             </span>
           </Fact>
-          <Fact label={t("Servers")}><span className="hm-mono">{(snapshot?.servers ?? []).join(", ") || "—"}</span></Fact>
-          <Fact label={t("Search domains")}><span className="hm-mono">{(snapshot?.search_domains ?? []).join(", ") || "—"}</span></Fact>
+          <Fact label={t("Servers")}><span className="ui-mono">{(snapshot?.servers ?? []).join(", ") || "—"}</span></Fact>
+          <Fact label={t("Search domains")}><span className="ui-mono">{(snapshot?.search_domains ?? []).join(", ") || "—"}</span></Fact>
         </Facts>
       </Section>
 
@@ -257,7 +258,7 @@ export function Resolver() {
         span={6}
         flush
       >
-        <div className="hm-section-body">
+        <div className="ui-panel-body">
           <Form>
             <Fields>
               <Field label={t("Names, comma separated")} wide>
@@ -285,18 +286,18 @@ export function Resolver() {
             specific moment, not a state that could be refreshed. */}
         {testJob && (
           <Table>
-            <thead><tr><th scope="col">{t("Name")}</th><th scope="col">{t("Addresses")}</th><th scope="col">{t("Answered by")}</th><th scope="col" className="hm-num">{t("Took")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Name")}</th><th scope="col">{t("Addresses")}</th><th scope="col">{t("Answered by")}</th><th scope="col" className="ui-numeric">{t("Took")}</th></tr></thead>
             <tbody>
               {answers.map((query) => (
                 <tr key={query.name}>
-                  <td className="hm-mono hm-primary">{query.name}</td>
-                  <td className="hm-mono">
+                  <td className="ui-mono ui-name">{query.name}</td>
+                  <td className="ui-mono">
                     {query.addresses?.length
                       ? query.addresses.join(", ")
-                      : <span className="badge unknown">{query.error || t("no answer")}</span>}
+                      : <span className="ui-pill ui-unknown">{query.error || t("no answer")}</span>}
                   </td>
-                  <td className="hm-mono">{query.server || "—"}</td>
-                  <td className="hm-num">{query.took_millis} ms</td>
+                  <td className="ui-mono">{query.server || "—"}</td>
+                  <td className="ui-numeric">{query.took_millis} ms</td>
                 </tr>
               ))}
               {!answers.length && (
@@ -336,9 +337,9 @@ export function Resolver() {
             <tbody>
               {snapshot.links.map((link) => (
                 <tr key={link.name}>
-                  <td className="hm-mono hm-primary">{link.name}</td>
-                  <td className="hm-mono">{(link.servers ?? []).join(", ") || "—"}</td>
-                  <td className="hm-mono">{(link.domains ?? []).join(", ") || "—"}</td>
+                  <td className="ui-mono ui-name">{link.name}</td>
+                  <td className="ui-mono">{(link.servers ?? []).join(", ") || "—"}</td>
+                  <td className="ui-mono">{(link.domains ?? []).join(", ") || "—"}</td>
                   {/* The default route decides which link answers a name
                       outside its domains - and that is the operator's
                       question. */}
@@ -362,7 +363,7 @@ export function Resolver() {
       </Widgets>
 
       {snapshot?.observed_at && (
-        <p className="hm-freshness">
+        <p className="ui-freshness">
           <span>{t("Resolver read")} <Time value={snapshot.observed_at} /></span>
         </p>
       )}

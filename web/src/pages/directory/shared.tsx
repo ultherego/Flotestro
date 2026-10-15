@@ -2,15 +2,15 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../lib/api";
 import type { DirectoryChange } from "../../lib/types";
-import { Empty } from "../../components/ui";
-import { Card, Field } from "../../components/layout";
+
+import { Empty, Field, Panel } from "../../ui/kit";
 import { useT } from "../../i18n";
 
 /** The pieces the directory tabs share: a refusal, a list field, the impact card and the change order. */
 
 export function Forbidden() {
   const t = useT();
-  return <Card><Empty>{t("You do not have permission to read this resource.")}</Empty></Card>;
+  return <Panel><Empty>{t("You do not have permission to read this resource.")}</Empty></Panel>;
 }
 
 /**
@@ -76,7 +76,7 @@ export function PlanImpact({ change }: { change: DirectoryChange }) {
   const conflicts = plan.conflicts ?? [];
   const warnings = plan.warnings ?? [];
   return (
-    <Card
+    <Panel
       title={plan.summary}
       tone={conflicts.length ? "error" : warnings.length ? "warn" : undefined}
       description={
@@ -86,23 +86,23 @@ export function PlanImpact({ change }: { change: DirectoryChange }) {
       }
     >
       {conflicts.map((conflict, index) => (
-        <p key={index} className="warning"><span>{conflict}</span></p>
+        <p key={index} className="ui-banner"><span>{conflict}</span></p>
       ))}
       {warnings.map((warning, index) => (
-        <p key={index} className="warning"><span>{warning}</span></p>
+        <p key={index} className="ui-banner"><span>{warning}</span></p>
       ))}
-      <ul className="source">
+      <ul className="ui-note">
         {(plan.steps ?? []).map((step, index) => <li key={index}>{step}</li>)}
       </ul>
-      <p className="source">
+      <p className="ui-note">
         <strong>{t("Hosts reached ({n})", { n: (plan.reachable_hosts ?? []).length })}:</strong>{" "}
-        <span className="mono">{(plan.reachable_hosts ?? []).join(", ") || "—"}</span>
+        <span className="ui-mono">{(plan.reachable_hosts ?? []).join(", ") || "—"}</span>
       </p>
-      <p className="source">
+      <p className="ui-note">
         <strong>{t("Users reached ({n})", { n: (plan.affected_users ?? []).length })}:</strong>{" "}
-        <span className="mono">{(plan.affected_users ?? []).join(", ") || "—"}</span>
+        <span className="ui-mono">{(plan.affected_users ?? []).join(", ") || "—"}</span>
       </p>
-    </Card>
+    </Panel>
   );
 }
 
@@ -165,10 +165,10 @@ export function DirectoryConfirmation({
   const ready = reason.trim().length >= 8 && confirmation === target;
 
   return (
-    <div className={danger ? "form danger" : "form"} data-testid="target-confirmation">
+    <div className={danger ? "ui-form ui-error" : "ui-form"} data-testid="target-confirmation">
       <h2>{label}</h2>
-      <p className="subtitle">{description}</p>
-      <p className="source">{t("Target: {name}", { name: target })}</p>
+      <p className="ui-note">{description}</p>
+      <p className="ui-note">{t("Target: {name}", { name: target })}</p>
       <label>
         {t("Reason (at least 8 characters, kept in the audit trail)")}
         <input value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -177,11 +177,11 @@ export function DirectoryConfirmation({
         {t("Type the name to confirm:")} <code>{target}</code>
         <input value={confirmation} onChange={(e) => setConfirmation(e.target.value)} />
       </label>
-      <div className="operations">
-        <button className={danger ? "danger" : undefined} disabled={!ready || busy} onClick={() => onConfirm(reason, confirmation)}>
+      <div className="ui-actions">
+        <button className={danger ? "ui-btn-danger" : undefined} disabled={!ready || busy} onClick={() => onConfirm(reason, confirmation)}>
           {busy ? t("Requesting…") : label}
         </button>
-        <button className="secondary" onClick={onCancel} disabled={busy}>{t("Cancel")}</button>
+        <button className="ui-btn-secondary" onClick={onCancel} disabled={busy}>{t("Cancel")}</button>
       </div>
     </div>
   );
@@ -190,7 +190,7 @@ export function DirectoryConfirmation({
 /** A yes / no / unknown badge: the directory not saying is not the same as "no". */
 export function TriState({ value, yes, no }: { value: boolean | null | undefined; yes: string; no: string }) {
   const t = useT();
-  if (value === true) return <span className="badge ok">{yes}</span>;
-  if (value === false) return <span className="badge">{no}</span>;
-  return <span className="badge unknown">{t("unknown")}</span>;
+  if (value === true) return <span className="ui-pill ui-ok">{yes}</span>;
+  if (value === false) return <span className="ui-pill">{no}</span>;
+  return <span className="ui-pill ui-unknown">{t("unknown")}</span>;
 }

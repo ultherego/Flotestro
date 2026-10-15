@@ -5,12 +5,13 @@ import { api, ApiError, loadedItems, type Page } from "../../lib/api";
 import { useDebounced } from "../../lib/debounce";
 import { toInstant } from "../../lib/format";
 import type { AuditEvent } from "../../lib/types";
-import { ErrorBox, Time, Empty, JobState } from "../../components/ui";
+import { ErrorBox, Time, JobState } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import { Foot, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere, useHost } from "./shared";
 import { hoursAgo } from "../Jobs";
 import { actorKey, actorOf, actorView } from "../Audit";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 /** How many events one page of the trail carries. */
 const AUDIT_PAGE = 50;
@@ -137,9 +138,9 @@ export function HostAudit() {
       />
       <Section title={t("By actor")} span={4} description={t("Who caused the most of them.")}>
         {!events ? (
-          <p className="source">{t("Loading…")}</p>
+          <p className="ui-note">{t("Loading…")}</p>
         ) : !actors.length ? (
-          <p className="source">{t("No events.")}</p>
+          <p className="ui-note">{t("No events.")}</p>
         ) : (
           <Breakdown items={actors.map(({ event, count }) => {
             const who = actorLabel(event, host, t);
@@ -161,17 +162,17 @@ export function HostAudit() {
             </select>
             <input placeholder={t("action prefix, e.g. job.")} value={action} onChange={(e) => setAction(e.target.value)} />
             <input placeholder={t("actor")} value={actor} onChange={(e) => setActor(e.target.value)} />
-            <label className="toggle">
+            <label className="ui-check">
               {t("Since")}{" "}
               <input type="datetime-local" value={since} onChange={(e) => setSince(e.target.value)} />
             </label>
-            <span className="segmented">
+            <span className="ui-segmented">
               <button type="button" onClick={() => setSince(hoursAgo(1))}>{t("last hour")}</button>
               <button type="button" onClick={() => setSince(hoursAgo(24))}>{t("last 24 h")}</button>
               <button type="button" onClick={() => setSince(hoursAgo(24 * 7))}>{t("last 7 days")}</button>
             </span>
             {filtered && (
-              <button type="button" className="secondary" onClick={() => { setOutcome(""); setAction(""); setActor(""); setSince(""); }}>
+              <button type="button" className="ui-btn-secondary" onClick={() => { setOutcome(""); setAction(""); setActor(""); setSince(""); }}>
                 {t("Clear filters")}
               </button>
             )}
@@ -197,7 +198,7 @@ export function HostAudit() {
                             row opens on its attempts: one mark at the left
                             edge instead of a link repeated on every row. */}
                         <button
-                          className="expander"
+                          className="ui-expander"
                           aria-expanded={open}
                           aria-label={open ? t("Hide the record") : t("Show the record")}
                           title={open ? t("Hide the record") : t("Show the record")}
@@ -220,7 +221,7 @@ export function HostAudit() {
                                   it had, so a rename later still reads as
                                   one actor. */}
                               {who.title && who.title !== who.text && (
-                                <> <span className="source hm-mono" title={who.title}>{who.title.slice(0, 8)}</span></>
+                                <> <span className="ui-note ui-mono" title={who.title}>{who.title.slice(0, 8)}</span></>
                               )}
                             </>
                           );
@@ -229,26 +230,26 @@ export function HostAudit() {
                             under the actor: they say which sign-in acted,
                             which the name alone does not. */}
                         {(event.session_id || event.acr) && (
-                          <div className="source">
+                          <div className="ui-note">
                             {event.session_id && <span title={event.session_id}>{t("session")} {event.session_id.slice(0, 12)}</span>}
                             {event.session_id && event.acr && " · "}
                             {event.acr && <span title={t("Authentication context class")}>acr={event.acr}</span>}
                           </div>
                         )}
                       </td>
-                      <td className="hm-mono">{event.action}</td>
+                      <td className="ui-mono">{event.action}</td>
                       <td><JobState state={event.outcome} /></td>
                       <td>
                         {/* A line of the detail, then the whole event as
                             the trail keeps it: the row shows four columns,
                             and an incident wants every key of the record. */}
                         {digest(event.detail)
-                          ? <span className="source">{digest(event.detail)}</span>
-                          : <span className="source">—</span>}
+                          ? <span className="ui-note">{digest(event.detail)}</span>
+                          : <span className="ui-note">—</span>}
                       </td>
                     </tr>
                     {open && (
-                      <tr className="detail-row">
+                      <tr className="ui-detailrow">
                         <td colSpan={5}>
                           <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(event, null, 2)}</pre>
                         </td>
@@ -265,7 +266,7 @@ export function HostAudit() {
         {trail.hasNextPage && (
           <Foot>
             <span>{t("{n} listed", { n: events?.length ?? 0 })}</span>
-            <button className="secondary" onClick={() => trail.fetchNextPage()} disabled={trail.isFetchingNextPage}>
+            <button className="ui-btn-secondary" onClick={() => trail.fetchNextPage()} disabled={trail.isFetchingNextPage}>
               {trail.isFetchingNextPage ? t("Loading…") : t("Load more")}
             </button>
           </Foot>

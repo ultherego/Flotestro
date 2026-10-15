@@ -6,8 +6,8 @@ import { useDebounced } from "../lib/debounce";
 import { toInstant } from "../lib/format";
 import type { AuditEvent } from "../lib/types";
 import { Board } from "../components/board";
-import { ErrorBox, Time, Empty } from "../components/ui";
-import { Card, PageHeader, Toolbar } from "../components/layout";
+import { ErrorBox, Time } from "../components/ui";
+import { Empty, PageHead, Panel, toneClass, Toolbar } from "../ui/kit";
 import { BarChart, Breakdown, StatusBar } from "../components/widgets";
 import { useT } from "../i18n";
 
@@ -172,14 +172,14 @@ export function Audit() {
   if (trail.error instanceof ApiError && trail.error.forbidden) {
     return (
       <>
-        <PageHeader title={t("Audit")}
+        <PageHead title={t("Audit")}
         help={<p>{t("Every action the panel took or refused, with who asked and when. A refusal is recorded as fully as a success - what was not allowed is as much a fact about the fleet as what was.")}</p>}
       />
-        <Card>
+        <Panel>
           <Empty>
             {t("You do not have permission to read the fleet-wide audit trail. A single host's audit trail is available in its own view.")}
           </Empty>
-        </Card>
+        </Panel>
       </>
     );
   }
@@ -219,7 +219,7 @@ export function Audit() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         title={t("Audit")}
         description={t("Every success and failure creates an event; so does every denial.")}
       />
@@ -234,11 +234,11 @@ export function Audit() {
         drawn={{
           per_hour: (
             <>
-              <Card className="span-8" title={t("Events per hour")} description={`${t("By outcome")} · ${listed}`}>
+              <Panel className="ui-col-8" title={t("Events per hour")} description={`${t("By outcome")} · ${listed}`}>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : hourly.labels.length === 0 ? (
-            <p className="fp-blank">{t("No events.")}</p>
+            <p className="ui-empty">{t("No events.")}</p>
           ) : (
             <BarChart
               labels={hourly.labels.map(hourLabel)}
@@ -250,28 +250,28 @@ export function Audit() {
               ]}
             />
           )}
-        </Card>
+        </Panel>
             </>
           ),
           outcome: (
             <>
-              <Card className="span-4" title={t("Outcome")} description={listed}>
-          <div className="fp-stack">
+              <Panel className="ui-col-4" title={t("Outcome")} description={listed}>
+          <div className="ui-stack">
             <StatusBar compact segments={[
               { label: t("success"), value: outcomeCount("success"), tone: "ok" },
               { label: t("failure"), value: outcomeCount("failure"), tone: "error" },
               { label: t("denied"), value: outcomeCount("denied"), tone: "warn" },
             ]} />
             <div>
-              <h4 className="widget-subhead">{t("By actor")}</h4>
+              <h4 className="ui-subhead">{t("By actor")}</h4>
               {!loaded ? (
                 <Empty>{t("Loading…")}</Empty>
               ) : byActor.length === 0 ? (
-                <p className="fp-blank">{t("No events.")}</p>
+                <p className="ui-empty">{t("No events.")}</p>
               ) : (
                 <Breakdown tone="neutral" items={byActor.map((entry) => ({
                   label: (
-                    <button type="button" className="link" onClick={() => pickActor(entry.event)} title={t("Only this actor")}>
+                    <button type="button" className="ui-btn-link" onClick={() => pickActor(entry.event)} title={t("Only this actor")}>
                       <ActorCell event={entry.event} plain />
                     </button>
                   ),
@@ -280,26 +280,26 @@ export function Audit() {
               )}
             </div>
           </div>
-        </Card>
+        </Panel>
             </>
           ),
           events: (
             <>
-              <Card
-          className="span-12"
+              <Panel
+          className="ui-col-12"
           title={t("Events")}
           description={t("The export is the trail between the bounds as JSON lines linked by a hash chain; flotestro-auditverify checks a saved file without the panel.")}
           actions={
-            <button className="secondary" onClick={exportTrail} disabled={exporting}>
+            <button className="ui-btn-secondary" onClick={exportTrail} disabled={exporting}>
               {exporting ? t("Exporting…") : t("Export")}
             </button>
           }
           flush
         >
           {exportError && (
-            <div className="warning">
+            <div className="ui-banner">
               <div>{t("The export failed: {message}", { message: exportError })}</div>
-              <div className="operations"><button onClick={() => setExportError(null)}>{t("Close")}</button></div>
+              <div className="ui-actions"><button onClick={() => setExportError(null)}>{t("Close")}</button></div>
             </div>
           )}
           <Toolbar end={<span>{t("{n} events", { n: events.length })}</span>}>
@@ -311,25 +311,25 @@ export function Audit() {
             </select>
             <input placeholder={t("actor")} aria-label={t("Actor")} value={actor} onChange={(e) => setActor(e.target.value)} />
             {(actorPrincipalID || actorResourceID) && (
-              <span className="badge" title={actorPrincipalID || actorResourceID}>
+              <span className="ui-pill" title={actorPrincipalID || actorResourceID}>
                 {actorKind || t("actor")} {(actorPrincipalID || actorResourceID).slice(0, 8)}{" "}
-                <button type="button" className="link" onClick={clearActor} aria-label={t("Clear the actor filter")}>×</button>
+                <button type="button" className="ui-btn-link" onClick={clearActor} aria-label={t("Clear the actor filter")}>×</button>
               </span>
             )}
             <input placeholder={t("operation, e.g. job.create")} aria-label={t("Operation")} value={action} onChange={(e) => setAction(e.target.value)} />
             <input placeholder={t("target type, e.g. host")} aria-label={t("Target type")} value={targetType} onChange={(e) => setTargetType(e.target.value)} />
             <input placeholder={t("target identifier")} aria-label={t("Target identifier")} value={targetID} onChange={(e) => setTargetID(e.target.value)} />
-            <label className="toggle">
+            <label className="ui-check">
               {t("Since")}{" "}
               <input type="datetime-local" value={since} onChange={(e) => setSince(e.target.value)} />
             </label>
-            <label className="toggle">
+            <label className="ui-check">
               {t("Until")}{" "}
               <input type="datetime-local" value={until} onChange={(e) => setUntil(e.target.value)} />
             </label>
             {/* The usual windows, one click each: the bound is the moment of
                 the click, so the address keeps what was asked. */}
-            <div className="segmented">
+            <div className="ui-segmented">
               <button onClick={() => applyPreset(1)}>{t("Last hour")}</button>
               <button onClick={() => applyPreset(24)}>{t("Last 24 h")}</button>
               <button onClick={() => applyPreset(24 * 7)}>{t("Last 7 days")}</button>
@@ -358,18 +358,18 @@ export function Audit() {
                               digest above shows a few keys, and an incident
                               wants every one of them. */}
                           <div>
-                            <button className="secondary tiny" onClick={() => setExpanded(open ? null : event.id)}>
+                            <button className="ui-btn-secondary ui-btn-tiny" onClick={() => setExpanded(open ? null : event.id)}>
                               {open ? t("Hide JSON") : t("Show JSON")}
                             </button>
                           </div>
                         </td>
-                        <td className="mono">
+                        <td className="ui-mono">
                           <ActorCell event={event} />
                           {/* The session and how it was authenticated stand
                               under the actor: they say which sign-in acted,
                               which the name alone does not. */}
                           {(event.session_id || event.acr) && (
-                            <div className="source fp-audit-session">
+                            <div className="ui-note ui-row-s">
                               {event.session_id && (
                                 <span title={`${t("Session")} ${event.session_id}`}>{t("session")} {event.session_id.slice(0, 12)}</span>
                               )}
@@ -378,26 +378,26 @@ export function Audit() {
                           )}
                         </td>
                         <td>{t(ACTOR_KINDS[actorOf(event)?.kind ?? event.actor_type] ?? actorOf(event)?.kind ?? event.actor_type)}</td>
-                        <td className="mono">{event.action}</td>
-                        <td className="mono"><TargetCell event={event} /></td>
+                        <td className="ui-mono">{event.action}</td>
+                        <td className="ui-mono"><TargetCell event={event} /></td>
                         <td><OutcomeBadge outcome={event.outcome} /></td>
-                        <td className="source">{digest(event.detail, t)}</td>
+                        <td className="ui-note">{digest(event.detail, t)}</td>
                       </tr>
                       {/* What an approval rests on and what a change did,
                           under the row rather than in columns of their
                           own: the table keeps its width on a phone. */}
                       {open && (
-                        <tr className="detail-row">
+                        <tr className="ui-detailrow">
                           <td colSpan={7}>
                             <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(event, null, 2)}</pre>
                           </td>
                         </tr>
                       )}
                       {(chain || changes.length > 0) && (
-                        <tr className="detail-row">
+                        <tr className="ui-detailrow">
                           <td colSpan={7}>
                             {chain && (
-                              <p className="source fp-audit-chain">
+                              <p className="ui-note ui-note-mono">
                                 {t("Approval chain")}: {t("ordered by {creator}, approved by {approvers}", {
                                   creator: chain.created_by,
                                   approvers: chain.approvers.length > 0 ? chain.approvers.join(", ") : "—",
@@ -405,10 +405,10 @@ export function Audit() {
                               </p>
                             )}
                             {changes.length > 0 && (
-                              <ul className="fp-audit-diff">
+                              <ul className="ui-stack-xs">
                                 {changes.map((change) => (
                                   <li key={change.key}>
-                                    <span className="mono">{change.key}</span>: <span className="fp-audit-before">{change.before}</span> → <span className="fp-audit-after">{change.after}</span>
+                                    <span className="ui-mono">{change.key}</span>: <span className="ui-was">{change.before}</span> → <span className="ui-now">{change.after}</span>
                                   </li>
                                 ))}
                               </ul>
@@ -424,12 +424,12 @@ export function Audit() {
           )}
           {trail.hasNextPage && (
             <p>
-              <button className="secondary" onClick={() => trail.fetchNextPage()} disabled={trail.isFetchingNextPage}>
+              <button className="ui-btn-secondary" onClick={() => trail.fetchNextPage()} disabled={trail.isFetchingNextPage}>
                 {t("Load more")}
               </button>
             </p>
           )}
-        </Card>
+        </Panel>
             </>
           )
         }}
@@ -555,9 +555,9 @@ function TargetCell({ event }: { event: AuditEvent }) {
   }
   const name = event.target_hostname || short;
   return (
-    <span className="fp-host-cell" title={ref}>
+    <span className="ui-twoline" title={ref}>
       <span>{to ? <Link to={to}>{name}</Link> : name}</span>
-      {event.target_address && <span className="fp-host-address">{event.target_address}</span>}
+      {event.target_address && <span className="ui-twoline-sub">{event.target_address}</span>}
     </span>
   );
 }
@@ -571,7 +571,7 @@ function OutcomeBadge({ outcome }: { outcome: AuditEvent["outcome"] }) {
   const t = useT();
   const tone = outcome === "success" ? "ok" : outcome === "failure" ? "error" : outcome === "denied" ? "warn" : "unknown";
   const name = outcome === "success" ? t("success") : outcome === "failure" ? t("failure") : outcome === "denied" ? t("denied") : outcome;
-  return <span className={`badge ${tone}`}>{name}</span>;
+  return <span className={`ui-pill ${toneClass(tone)}`}>{name}</span>;
 }
 
 /**
@@ -587,7 +587,7 @@ function ActorCell({ event, plain }: { event: AuditEvent; plain?: boolean }) {
   return (
     <>
       {name}{" "}
-      <span className="source mono" title={who.id}>{who.id.slice(0, 8)}</span>
+      <span className="ui-note ui-mono" title={who.id}>{who.id.slice(0, 8)}</span>
     </>
   );
 }

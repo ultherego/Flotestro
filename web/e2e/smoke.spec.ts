@@ -10,21 +10,21 @@ test.describe("dashboard", () => {
   test("answers in one line, then counts what needs a person", async ({ page }) => {
     const { errors } = watchErrors(page);
     await page.goto("/dashboard");
-    await expect(page.locator(".page-header").getByRole("heading", { name: "Fleet dashboard" })).toBeVisible();
+    await expect(page.locator(".ui-pagehead").getByRole("heading", { name: "Fleet dashboard" })).toBeVisible();
 
     // The verdict is the first thing on the screen and it is a sentence,
     // not a box: either nothing needs a decision, or it says how much does.
     const verdict = page.getByTestId("verdict");
     await expect(verdict).toBeVisible();
-    await expect(verdict.locator(".verdict-headline")).toHaveText(
+    await expect(verdict.locator(".ui-verdict-headline")).toHaveText(
       /Nothing needs a decision|decisions waiting|things need a look/,
     );
-    await expect(verdict.locator(".verdict-facts")).toContainText("hosts you can see");
+    await expect(verdict.locator(".ui-verdict-facts")).toContainText("hosts you can see");
 
     // The availability bar counts hosts; every segment settles on a number
     // once the summary and the activity have arrived.
     const availability = page
-      .locator(".card")
+      .locator(".ui-panel")
       .filter({ has: page.getByRole("heading", { name: "Host availability" }) })
       .getByTestId("status-bar");
     const values = availability.getByTestId("status-bar-value");
@@ -51,7 +51,7 @@ test.describe("dashboard", () => {
     // The three lists the dashboard keeps. Each says what is in it, in its
     // own words, whether or not it holds anything.
     const failures = page
-      .locator(".card")
+      .locator(".ui-panel")
       .filter({ has: page.getByRole("heading", { name: "Recent failures" }) });
     await expect(
       failures.locator("tbody tr").first().or(failures.getByText("No failed operations.")),
@@ -73,7 +73,7 @@ test.describe("navigation", () => {
     const items: { name: string; href: string }[] = [];
     for (const link of await links.all()) {
       const href = await link.getAttribute("href");
-      const name = (await link.locator(".sidebar-item-label").textContent())?.trim() ?? "";
+      const name = (await link.locator(".ui-sidebar-item-label").textContent())?.trim() ?? "";
       if (href) items.push({ name, href });
     }
     expect(items.length).toBeGreaterThanOrEqual(4);
@@ -83,7 +83,7 @@ test.describe("navigation", () => {
       await test.step(`${item.name} (${item.href})`, async () => {
         await navigation(page).locator(`a[href="${item.href}"]`).click();
         await expect(page).toHaveURL(new RegExp(`${item.href.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\?|$)`));
-        const header = page.locator(".page-header, .hm-header").first();
+        const header = page.locator(".ui-pagehead, .ui-sectionhead").first();
         await expect(header).toBeVisible();
         await expect(header.getByRole("heading").first()).not.toBeEmpty();
         // The trail in the top bar names the section as the sidebar does.

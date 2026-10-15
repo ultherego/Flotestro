@@ -33,9 +33,9 @@ describe("a metric tile", () => {
 
     const tile = screen.getByTestId("metric-Disk");
     expect(tile).toHaveAttribute("data-state", "error");
-    expect(tile.className).toContain("metric-tile-error");
+    expect(tile.className).toContain("ui-error");
     // The filled tile is the hero's, and a hero carries no state.
-    expect(container.querySelector(".metric-tile-hero")).toBeNull();
+    expect(container.querySelector(".ui-stat-hero")).toBeNull();
   });
 });
 
@@ -46,7 +46,7 @@ describe("the severity bar", () => {
     // "Nothing critical" is an answer, and a row that changes shape cannot
     // be read by position.
     expect(screen.getByTestId("severity-critical")).toBeInTheDocument();
-    expect(screen.getByTestId("severity-critical").className).toContain("severity-empty");
+    expect(screen.getByTestId("severity-critical").className).toContain("ui-severity-empty");
     expect(screen.getByTestId("severity-warning").className).not.toContain("severity-empty");
   });
 
@@ -62,7 +62,7 @@ describe("the severity bar", () => {
 describe("a tile in a widget grid", () => {
   it("takes the columns it was given, because a grid child with none takes one", () => {
     render(<MetricTile label="Disk used" value={41} unit="%" span={4} />);
-    expect(screen.getByTestId("metric-Disk used").className).toContain("span-4");
+    expect(screen.getByTestId("metric-Disk used").className).toContain("ui-col-4");
   });
 
   it("stands alone without a span, for a tile that is not in a grid", () => {
@@ -78,14 +78,14 @@ describe("a severity nobody has answered for", () => {
     // "Nothing is on fire" and "nobody has asked" look the same to an
     // operator if both draw a nought, and only one of them is true.
     expect(screen.getByTestId("severity-critical")).toHaveTextContent("—");
-    expect(screen.getByTestId("severity-critical").className).toContain("severity-unanswered");
-    expect(screen.getByTestId("severity-critical").className).not.toContain("severity-empty");
+    expect(screen.getByTestId("severity-critical").className).toContain("ui-severity-unanswered");
+    expect(screen.getByTestId("severity-critical").className).not.toContain("ui-severity-empty");
   });
 
   it("keeps a real zero a zero, and calls it empty rather than unanswered", () => {
     render(<SeverityBar counts={{ critical: 0, warning: 2, info: 0 }} />);
     expect(screen.getByTestId("severity-critical")).toHaveTextContent("0");
-    expect(screen.getByTestId("severity-critical").className).toContain("severity-empty");
+    expect(screen.getByTestId("severity-critical").className).toContain("ui-severity-empty");
     expect(screen.getByTestId("severity-critical").className).not.toContain("severity-unanswered");
   });
 

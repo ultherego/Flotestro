@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, fetchWithCredentials } from "../lib/api";
-import { ErrorBox, Empty, Time } from "../components/ui";
-import { Actions, Card, FieldGrid, PageHeader, Toolbar } from "../components/layout";
+import { ErrorBox, Time } from "../components/ui";
+import { Actions, Empty, Fields, PageHead, Panel, Toolbar } from "../ui/kit";
 import { ReasonField, errorText, reasonGiven, usePermissions } from "./Secrets";
 import { useT } from "../i18n";
 
@@ -122,17 +122,17 @@ export function Support() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         icon="logs"
         title={t("Support bundle")}
         description={t("Readings of this panel for whoever is helping you.")}
         help={<p>{t("A set of readings of this panel - its build, its status, its settings and the counts of the fleet - for whoever is helping you. No credential, key or token is read, and an assembled bundle that carries one is refused rather than written. The archive is encrypted where it rests and removed when its retention runs out.")}</p>}
       />
 
-      <div className="widgets">
+      <div className="ui-grid">
         {canCreate && (
-          <Card
-            className="span-12"
+          <Panel
+            className="ui-col-12"
             title={t("Ask for a bundle")}
             description={t("The request needs fresh authentication and a reason, and both the request and every download are on the audit trail. What is in the bundle is not.")}
             footer={
@@ -140,18 +140,18 @@ export function Support() {
                 <button onClick={() => ask.mutate()} disabled={!askReady}>
                   {ask.isPending ? t("Asking…") : t("Ask for a bundle")}
                 </button>
-                {watching(bundles) && <span className="source">{t("A bundle is being assembled; wait for it before asking for another.")}</span>}
-                {ask.error ? <span className="page-error">{errorText(ask.error)}</span> : null}
+                {watching(bundles) && <span className="ui-note">{t("A bundle is being assembled; wait for it before asking for another.")}</span>}
+                {ask.error ? <span className="ui-errorbox">{errorText(ask.error)}</span> : null}
               </Actions>
             }
           >
-            <FieldGrid>
+            <Fields>
               <ReasonField value={reason} onChange={setReason} />
-            </FieldGrid>
-          </Card>
+            </Fields>
+          </Panel>
         )}
 
-        <Card className="span-12" flush>
+        <Panel className="ui-col-12" flush>
           <Toolbar
             end={
               list.data && (
@@ -165,8 +165,8 @@ export function Support() {
               )
             }
           >
-            {notice && <span className="source">{notice}</span>}
-            {fetchBundle.error ? <span className="page-error">{errorText(fetchBundle.error)}</span> : null}
+            {notice && <span className="ui-note">{notice}</span>}
+            {fetchBundle.error ? <span className="ui-errorbox">{errorText(fetchBundle.error)}</span> : null}
           </Toolbar>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
@@ -180,8 +180,8 @@ export function Support() {
                   <th scope="col">{t("By")}</th>
                   <th scope="col">{t("Reason")}</th>
                   <th scope="col">{t("State")}</th>
-                  <th scope="col" className="num">{t("Files")}</th>
-                  <th scope="col" className="num">{t("Size")}</th>
+                  <th scope="col" className="ui-numeric">{t("Files")}</th>
+                  <th scope="col" className="ui-numeric">{t("Size")}</th>
                   <th scope="col">{t("Digest")}</th>
                   <th scope="col">{t("Fetched")}</th>
                   <th scope="col"></th>
@@ -191,19 +191,19 @@ export function Support() {
                 {bundles.map((bundle) => (
                   <tr key={bundle.id}>
                     <td><Time value={bundle.requested_at} /></td>
-                    <td className="mono">{bundle.requested_by}</td>
+                    <td className="ui-mono">{bundle.requested_by}</td>
                     <td>{bundle.reason}</td>
                     <td>
                       <BundleState bundle={bundle} />
                     </td>
-                    <td className="num">{bundle.state === "ready" ? bundle.files : "—"}</td>
-                    <td className="num">{bundle.state === "ready" ? bundleSize(bundle.size_bytes) : "—"}</td>
-                    <td className="mono" title={bundle.archive_sha256}>{shortDigest(bundle.archive_sha256)}</td>
+                    <td className="ui-numeric">{bundle.state === "ready" ? bundle.files : "—"}</td>
+                    <td className="ui-numeric">{bundle.state === "ready" ? bundleSize(bundle.size_bytes) : "—"}</td>
+                    <td className="ui-mono" title={bundle.archive_sha256}>{shortDigest(bundle.archive_sha256)}</td>
                     <td>{bundle.downloaded_at ? <Time value={bundle.downloaded_at} /> : t("never")}</td>
                     <td>
                       {canRead && bundle.downloadable && (
                         <button
-                          className="secondary"
+                          className="ui-btn-secondary"
                           onClick={() => fetchBundle.mutate(bundle)}
                           disabled={!reasonGiven(reason) || fetchBundle.isPending}
                           title={reasonGiven(reason) ? undefined : t("A reason is needed; the download is on the audit trail too.")}
@@ -217,7 +217,7 @@ export function Support() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   );
@@ -226,9 +226,9 @@ export function Support() {
 /** What became of one bundle, in the words the trail uses. */
 function BundleState({ bundle }: { bundle: SupportBundle }) {
   const t = useT();
-  if (bundle.state === "pending") return <span className="badge warn">{t("being assembled")}</span>;
+  if (bundle.state === "pending") return <span className="ui-pill ui-warn">{t("being assembled")}</span>;
   if (bundle.state === "failed") {
-    return <span className="badge error" title={bundle.error_code}>{bundle.error_code || t("refused")}</span>;
+    return <span className="ui-pill ui-error" title={bundle.error_code}>{bundle.error_code || t("refused")}</span>;
   }
-  return <span className="badge ok">{t("ready")}</span>;
+  return <span className="ui-pill ui-ok">{t("ready")}</span>;
 }
