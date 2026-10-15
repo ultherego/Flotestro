@@ -228,12 +228,18 @@ const DEFAULT_TOKEN_TTL_HOURS = 720;
 /** The longest life the server gives a token: a year. */
 const MAX_TOKEN_TTL_HOURS = 8760;
 
-const TABS = ["mappings", "identities", "roles", "review", "ca"] as const;
+/*
+ * The tabs this screen keeps. The group mappings and the roles moved into
+ * the settings area on 15.10, where the rest of an installation's
+ * configuration is; what is left here is who exists, what they hold, and the
+ * authority their certificates come from.
+ */
+const TABS = ["identities", "review", "ca"] as const;
 type Tab = (typeof TABS)[number];
 
 /** The tab named in the address, or the first one for a name that is not a tab. */
 export function tabFromParam(value: string | null): Tab {
-  return (TABS as readonly string[]).includes(value ?? "") ? (value as Tab) : "mappings";
+  return (TABS as readonly string[]).includes(value ?? "") ? (value as Tab) : "identities";
 }
 
 /**
@@ -253,19 +259,13 @@ export function Access() {
         title={t("Access")}
         description={t("Who may do what in this panel.")}
         help={
-          <p>{t("A group in an identity provider's token grants nothing by itself: the role comes from a mapping made here. Beside the mappings are the local identities, the roles themselves and what each one may do, the review of every enabled identity, and the authority the panel issues its own certificates from.")}</p>
+          <p>{t("The identities this panel knows, the review of every one of them, and the authority it issues its own certificates from. What grants access - the roles and the mappings of the provider's groups onto them - is configured under Settings.")}</p>
         }
       />
 
       <div className="tabs">
-        <button className={tab === "mappings" ? "active" : ""} onClick={() => setTab("mappings")}>
-          {t("Group mappings")}
-        </button>
         <button className={tab === "identities" ? "active" : ""} onClick={() => setTab("identities")}>
           {t("Identities")}
-        </button>
-        <button className={tab === "roles" ? "active" : ""} onClick={() => setTab("roles")}>
-          {t("Roles")}
         </button>
         <button className={tab === "review" ? "active" : ""} onClick={() => setTab("review")}>
           {t("Access review")}
@@ -276,9 +276,7 @@ export function Access() {
       </div>
 
       {tab === "ca" && <Warning error={warning} close={() => setWarning(null)} />}
-      {tab === "mappings" && <Mappings />}
       {tab === "identities" && <Identities initialSearch={searchParams.get("q") ?? ""} />}
-      {tab === "roles" && <Roles />}
       {tab === "review" && <Review />}
       {tab === "ca" && <CertificateAuthority reportError={setWarning} />}
     </>
@@ -331,7 +329,7 @@ function ConfirmCard({ title, text, action, danger = false, busy = false, disabl
   );
 }
 
-function Mappings() {
+export function Mappings() {
   const t = useT();
   const queryClient = useQueryClient();
   // The roles on offer, and the roles the breakdown counts by: read, not

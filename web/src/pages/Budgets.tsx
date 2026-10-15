@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import type { Budget, BudgetLimit, Whoami } from "../lib/types";
 import { ErrorBox, Empty, Time } from "../components/ui";
-import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
+import { Actions, Card, Field, FieldGrid, SectionHead } from "../components/layout";
 import { Breakdown, Meter, StatusBar, type WidgetTone } from "../components/widgets";
 import { useConfirm } from "../components/Modal";
 import { useToast } from "../components/Toast";
@@ -210,9 +210,10 @@ export function Budgets() {
   if (error instanceof ApiError && error.status === 501) {
     return (
       <>
-        <PageHeader icon="overview" title={t("Budgets")}
-        help={<p>{t("A budget is a capacity under a key the store reads before an operation runs. It bounds how much of the fleet one change may touch at once, which is what keeps a mistake from reaching every host.")}</p>}
-      />
+        <SectionHead
+          title={t("Budgets")}
+          help={<p>{t("A budget is a capacity under a key the store reads before an operation runs. It bounds how much of the fleet one change may touch at once, which is what keeps a mistake from reaching every host.")}</p>}
+        />
         <Empty>{t("Budgets are disabled in this installation.")}</Empty>
       </>
     );
@@ -232,8 +233,7 @@ export function Budgets() {
 
   return (
     <>
-      <PageHeader
-        icon="overview"
+      <SectionHead
         title={t("Budgets")}
         description={t("How many operations the fleet carries at once.")}
         help={<p>{t("The capacity of the fleet, in tokens: how many operations the fleet, a site or a backup backend carries at once. A campaign or a job that finds no free token waits here, and the free tokens are divided fairly between everyone asking.")}</p>}

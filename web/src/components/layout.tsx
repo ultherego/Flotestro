@@ -77,6 +77,52 @@ export function PageHeader({
   );
 }
 
+/**
+ * The head of a section inside a page: a title, one line about it, the rest
+ * behind the mark, and the actions on the right.
+ *
+ * The same object as PageHeader and deliberately a smaller one. A page has a
+ * header; a tab of a page has this. Written when the settings screen became
+ * an area with tabs and six screens moved into it: each of them had been a
+ * page with a header of its own, and the alternative to this was six
+ * different ways of putting a title over a tab.
+ */
+export function SectionHead({
+  title, description, help, actions,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  help?: ReactNode;
+  actions?: ReactNode;
+}) {
+  const t = useT();
+  const [helpOpen, setHelpOpen] = useState(false);
+  return (
+    <>
+      <div className="parts-head">
+        <h2>
+          {title}
+          {help && (
+            <button
+              type="button"
+              className="page-help-toggle"
+              aria-expanded={helpOpen}
+              title={t("What this screen is for")}
+              onClick={() => setHelpOpen(!helpOpen)}
+              data-testid="section-help-toggle"
+            >
+              <Icon name="help" />
+            </button>
+          )}
+        </h2>
+        {description && <span className="source">{description}</span>}
+        {actions && <div className="parts-head-actions">{actions}</div>}
+      </div>
+      {help && helpOpen && <div className="page-help" data-testid="section-help">{help}</div>}
+    </>
+  );
+}
+
 /* The mark of a section, by the first segment of its address: the same
    icon the navigation shows, so the header and the sidebar agree. */
 const SECTION_ICONS: Record<string, IconName> = {

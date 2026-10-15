@@ -238,9 +238,9 @@ test.describe("access", () => {
     await expect(identities.locator("tbody tr").first()).toBeVisible();
     await expect(identities.locator("th", { hasText: "Roles and scopes" }).first()).toBeVisible();
 
-    await page.goto("/access?tab=roles");
-    await expect(tabs.getByRole("button", { name: "Roles" })).toHaveClass(/active/);
-    const roles = card(page, "Roles");
+    await page.goto("/settings?tab=roles");
+    await expect(page.getByTestId("settings-tab-roles")).toHaveClass(/active/);
+    const roles = card(page, "What each role may do");
     await expect(roles).toBeVisible();
     const matrix = roles.locator("table");
     await expect(matrix.locator("th", { hasText: "Permission" }).first()).toBeVisible();
@@ -557,8 +557,8 @@ test.describe("notifications", () => {
     const { errors } = watchErrors(page);
     const channels = await items<{ id: string; name: string }>(request, "/api/v1/notifications/channels");
 
-    await page.goto("/notifications");
-    await expect(header(page, "Notifications")).toBeVisible();
+    await page.goto("/settings?tab=channels");
+    await expect(page.locator(".parts-head").getByRole("heading", { name: "Notification channels" })).toBeVisible();
     const list = card(page, "Channels");
     await expect(list).toBeVisible();
     if (channels.length === 0) {

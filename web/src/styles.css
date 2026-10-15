@@ -2183,6 +2183,11 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 /* The heading of a grid of tiles, with whatever narrows it. */
 .masonry + .masonry { margin-top: 14px; }
 .parts-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 20px 0 10px; }
+/* The actions of a section sit at the right end of its bar, as a page's do. */
+.parts-head-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.parts-head h2 { display: flex; align-items: center; gap: 6px; }
+/* The first bar on a screen needs no gap above it: the page header is there. */
+.page-header + .parts-head, .tabs + .parts-head { margin-top: 0; }
 .parts-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
 .parts-head .settings-search { margin-left: auto; }
 

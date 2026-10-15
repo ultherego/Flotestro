@@ -4,8 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
-import { ApiError } from "../lib/api";
-import { hubState, Settings } from "./Settings";
+import { settingsTab, Settings } from "./Settings";
 
 /**
  * A configuration screen is read with one name in mind. It used to answer
@@ -77,7 +76,10 @@ vi.mock("../lib/api", async (importOriginal) => {
 /** Everything the hub can count, so a test names only what it changes. */
 function grantEverything() {
   answers.permissions = [
-    "notification.read", "host.enroll.read", "principal.manage", "budget.read", "policy.read",
+    // host.read is what the server asks for the role catalogue, so it is
+    // what the tab holding it is gated on.
+    "host.read", "notification.read", "host.enroll.read", "principal.manage",
+    "budget.read", "policy.read",
   ];
   answers.collections = {
     "/api/v1/notifications/channels": { items: [{}, {}, {}], count: 3 },
@@ -154,99 +156,64 @@ describe("the settings screen", () => {
  * has to see that, because "0 roles" reads as an installation with nobody in
  * it - and somebody would go and grant themselves one.
  */
-describe("hubState", () => {
-  it("counts what the collection says it holds", () => {
-    expect(hubState({ items: [{}, {}], count: 2 }, null, false)).toEqual({ kind: "count", n: 2 });
-    // A collection that answers with the items alone is still counted.
-    expect(hubState({ items: [{}] }, null, false)).toEqual({ kind: "count", n: 1 });
-    // An empty collection is a count, and the only honest zero here.
-    expect(hubState({ items: [], count: 0 }, null, false)).toEqual({ kind: "count", n: 0 });
+/*
+ * The settings area, which is where an installation is configured.
+ *
+ * It was a screen of values to read with a list of places to go, twice over,
+ * and the owner said so twice: *"setting przypomina przejdz do zakladki X-Y a
+ * nie ustawienia"*. The six screens that configure an installation are tabs
+ * of this one now, each holding the screen that does the work.
+ */
+describe("settingsTab", () => {
+  const everything = new Set([
+    "notification.read", "host.read", "principal.manage", "budget.read", "policy.read",
+  ]);
+
+  it("opens the tab the address names", () => {
+    expect(settingsTab("policies", everything)).toBe("policies");
+    expect(settingsTab("channels", everything)).toBe("channels");
+    expect(settingsTab(null, everything)).toBe("general");
+    expect(settingsTab("nonsense", everything)).toBe("general");
   });
 
-  it("tells a refusal apart from an empty collection", () => {
-    expect(hubState(undefined, new ApiError(403, "forbidden", "no"), false)).toEqual({ kind: "forbidden" });
-  });
-
-  it("says it does not know rather than naming a number it has not got", () => {
-    // Still asking.
-    expect(hubState(undefined, null, true)).toEqual({ kind: "unknown" });
-    // Asked and failed: a timeout, a replica that is down, a proxy in the way.
-    expect(hubState(undefined, new Error("network"), false)).toEqual({ kind: "unknown" });
-    expect(hubState(undefined, new ApiError(500, "internal", "boom"), false)).toEqual({ kind: "unknown" });
-    // An answer of a shape nothing can be counted from is not zero either.
-    expect(hubState({ nothing: true }, null, false)).toEqual({ kind: "unknown" });
-    expect(hubState(null, null, false)).toEqual({ kind: "unknown" });
+  // A tab nobody may open is not a tab. An address kept in a bookmark from a
+  // wider role has to land on something that exists.
+  it("sends an address this sign-in may not open to the first tab it may", () => {
+    const reader = new Set(["host.read"]);
+    expect(settingsTab("budgets", reader)).toBe("general");
+    expect(settingsTab("roles", reader)).toBe("roles");
+    expect(settingsTab("mappings", reader)).toBe("general");
   });
 });
 
-/*
- * The resources kept on screens of their own, listed at the end of the
- * settings screen.
- *
- * They were six tiles across the top of the screen for half a day, until the
- * owner read what they were: "setting przypomina przejdz do zakladki X-Y a
- * nie ustawienia". A box whose whole content is a sentence and a button to go
- * somewhere else is a menu. What survived the change is the part worth
- * having - the state each resource is in, and the rule that a number nobody
- * could take is never drawn as a zero.
- */
-describe("the resources kept elsewhere", () => {
-  it("lists every one with what is set now and the way in", async () => {
+describe("the settings area", () => {
+  it("offers a tab for each part of the configuration this sign-in may read", async () => {
     grantEverything();
     draw(<Settings />);
-    await waitFor(() => expect(screen.getByTestId("elsewhere-channels")).toBeInTheDocument());
-    await waitFor(() =>
-      expect(screen.getByTestId("elsewhere-channels-state").textContent).toContain("set: 3"));
-    expect(screen.getByTestId("elsewhere-budgets-state").textContent).toContain("set: 4");
-    // A collection that holds nothing says so in words, not as a count tile.
-    await waitFor(() =>
-      expect(screen.getByTestId("elsewhere-mappings-state").textContent).toContain("none set"));
-    // Every tile offers the screen that owns the resource.
-    const channels = screen.getByTestId("elsewhere-channels");
-    expect(channels.querySelector("a")).toHaveAttribute("href", "/notifications");
-    // One table at the end of the screen, not a board of cards at the top.
-    expect(document.querySelectorAll('[data-testid="settings-elsewhere"] tr')).toHaveLength(6);
-    expect(screen.getByTestId("elsewhere-roles").querySelector("a"))
-      .toHaveAttribute("href", "/access?tab=roles");
-    // And the facts of the process are still their own section, named as such.
-    expect(screen.getByText("What the process was started with")).toBeInTheDocument();
+    // The tabs appear as the sign-in's permissions arrive, so the wait is on
+    // the last of them rather than on the bar that holds them.
+    await waitFor(() => expect(screen.getByTestId("settings-tab-policies")).toBeInTheDocument());
+    for (const key of ["general", "channels", "roles", "mappings", "budgets"]) {
+      expect(screen.getByTestId(`settings-tab-${key}`)).toBeInTheDocument();
+    }
   });
 
-  it("says a resource is not the viewer's to read rather than drawing it as none", async () => {
-    grantEverything();
-    answers.permissions = answers.permissions.filter((one) => one !== "principal.manage");
-    draw(<Settings />);
-    await waitFor(() =>
-      expect(screen.getByTestId("elsewhere-roles-state").textContent).toContain("not yours to read"));
-    expect(screen.getByTestId("elsewhere-roles-state").textContent).not.toContain("0");
-    // No way in is offered to a screen that would refuse on arrival.
-    expect(screen.getByTestId("elsewhere-roles").querySelector("a")).toBeNull();
-    // The resource is still named: the installation has roles, they are not
-    // this viewer's to see.
-    expect(screen.getByTestId("elsewhere-roles").textContent).toContain("Roles");
-    // And the tile beside it, which this sign-in may read, still counts.
-    await waitFor(() =>
-      expect(screen.getByTestId("elsewhere-channels-state").textContent).toContain("set: 3"));
-  });
-
-  it("says a collection that refused is unread, with the resource still open", async () => {
-    grantEverything();
-    // The permission is held, and the collection refuses anyway: a role scoped
-    // to an owner or a tag, which the server decides and the panel cannot know.
-    answers.collections["/api/v1/budgets"] = new ApiError(403, "forbidden", "not yours");
-    draw(<Settings />);
-    await waitFor(() =>
-      expect(screen.getByTestId("elsewhere-budgets-state").textContent).toContain("not yours to read"));
-    expect(screen.getByTestId("elsewhere-budgets-state").textContent).not.toContain("set: 0");
-  });
-
-  it("does not claim a refusal while the sign-in is still unknown", async () => {
-    // Nothing answers: the permissions have not arrived. A tile that read the
-    // empty set as "nothing granted" would accuse every viewer of that.
-    answers.permissions = [];
+  it("leaves out the tabs whose contents this sign-in may not read", async () => {
+    answers.permissions = ["host.read"];
     answers.collections = {};
     draw(<Settings />);
-    await waitFor(() => expect(screen.getByTestId("elsewhere-roles-state")).toBeInTheDocument());
-    expect(screen.getByTestId("elsewhere-roles-state").textContent).toContain("not known");
+    await waitFor(() => expect(screen.getByTestId("settings-tab-roles")).toBeInTheDocument());
+    expect(screen.queryByTestId("settings-tab-budgets")).toBeNull();
+    expect(screen.queryByTestId("settings-tab-mappings")).toBeNull();
+    expect(screen.queryByTestId("settings-tab-channels")).toBeNull();
+  });
+
+  it("opens on what the process was started with, and keeps the search there", async () => {
+    grantEverything();
+    draw(<Settings />);
+    await waitFor(() => expect(screen.getByTestId("settings-search")).toBeInTheDocument());
+    expect(screen.getByText("What the process was started with")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("settings-search"), { target: { value: "lifetime" } });
+    await waitFor(() => expect(areaTiles().length).toBe(1));
   });
 });

@@ -65,7 +65,6 @@ import { Setup } from "./pages/Setup";
 import { Status } from "./pages/Status";
 import { Reports } from "./pages/Reports";
 import { Support } from "./pages/Support";
-import { Notifications } from "./pages/Notifications";
 import { Profile } from "./pages/Profile";
 import { Tags } from "./pages/Tags";
 import { Teams } from "./pages/Teams";
@@ -74,8 +73,6 @@ import { Bulk } from "./pages/Bulk";
 import { Campaigns } from "./pages/Campaigns";
 import { Campaign } from "./pages/Campaign";
 import { Reads } from "./pages/Reads";
-import { Budgets } from "./pages/Budgets";
-import { Policies } from "./pages/Policies";
 import { PolicyPage } from "./pages/Policy";
 import { HostPolicies } from "./pages/host/Policies";
 import { Directory } from "./pages/Directory";
@@ -138,7 +135,7 @@ export function App() {
           })}
         </p>
         <p className="prose">
-          {t("Whoever administers this installation grants it: a group of the identity provider is mapped to a role under Access, or a role is bound to this principal directly. Until then every page refuses, which is the panel working as intended.")}
+          {t("Whoever administers this installation grants it: under Settings, a group of the identity provider is mapped to a role, or a role is bound to this principal directly. Until then every page refuses, which is the panel working as intended.")}
         </p>
       </div>
     );
@@ -221,10 +218,8 @@ export function App() {
         ] : []),
         // A policy declares what is to be true and orders campaigns for
         // the rest, so it stands after the campaigns it orders.
-        ...(seesPolicies ? [{ to: "/policies", label: "Policies", icon: "security" as const }] : []),
         // The capacity the jobs and the campaigns draw on: the gauge stands
         // last in the group, after the work it meters.
-        ...(seesBudgets ? [{ to: "/budgets", label: "Budgets", icon: "overview" as const }] : []),
       ],
     },
     {
@@ -243,7 +238,6 @@ export function App() {
       items: [
         ...(seesBackups ? [{ to: "/backups", label: "Backups", icon: "backups" as const }] : []),
         ...(seesMonitoring ? [{ to: "/monitoring", label: "Monitoring", icon: "monitoring" as const }] : []),
-        ...(seesNotifications ? [{ to: "/notifications", label: "Notifications", icon: "notifications" as const }] : []),
       ],
     },
     {
@@ -330,12 +324,16 @@ export function App() {
               {seesRelays && <Route path="/relays/:id" element={<RelayPage />} />}
               <Route path="/readiness" element={<Readiness />} />
               <Route path="/security" element={<FleetSecurity />} />
-              {seesPolicies && <Route path="/policies" element={<Policies />} />}
+              {/* The six screens of an installation's configuration live in
+                  the settings area since 15.10. Their old addresses are kept
+                  and send the reader there: they are in bookmarks, in the
+                  manual and in the panel's own links. */}
+              {seesPolicies && <Route path="/policies" element={<Navigate to="/settings?tab=policies" replace />} />}
               {seesPolicies && <Route path="/policies/:id" element={<PolicyPage />} />}
               <Route path="/certificates" element={<FleetCertificates />} />
               <Route path="/backups" element={<FleetBackups />} />
               <Route path="/monitoring" element={<FleetMonitoring />} />
-              {seesNotifications && <Route path="/notifications" element={<Notifications />} />}
+              {seesNotifications && <Route path="/notifications" element={<Navigate to="/settings?tab=channels" replace />} />}
               <Route path="/vulnerabilities" element={<FleetVulnerabilities />} />
               <Route path="/vulnerabilities/:cve" element={<Vulnerability />} />
               <Route path="/secrets" element={<Secrets />} />
@@ -383,7 +381,7 @@ export function App() {
               {seesCampaigns && <Route path="/campaigns" element={<Campaigns />} />}
               {seesCampaigns && <Route path="/campaigns/schedules" element={<CampaignSchedules />} />}
               {seesCampaigns && <Route path="/campaigns/:id" element={<Campaign />} />}
-              {seesBudgets && <Route path="/budgets" element={<Budgets />} />}
+              {seesBudgets && <Route path="/budgets" element={<Navigate to="/settings?tab=budgets" replace />} />}
               {capabilities.directory && <Route path="/directory" element={<Directory />} />}
               {managesAccess && <Route path="/access" element={<Access />} />}
               {seesAudit && <Route path="/audit" element={<Audit />} />}
