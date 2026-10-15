@@ -1191,6 +1191,7 @@ function ScopeStep({
   const payloadValid = orderPayload(order) !== null;
   return (
     <Card
+      className="measure"
       title={`1. ${t("Scope")}`}
       description={t("Name the campaign and pick what it does on every host; the next step chooses the hosts. Only operations the registry opens to the fleet are listed - an operation missing here is a deliberate refusal, not a missing screen.")}
     flush
@@ -1513,6 +1514,7 @@ function TargetsStep({
   const matched = matchedState(Boolean(names), count, checking);
   return (
     <Card
+      className="measure"
       title={`2. ${t("Targets")}`}
       description={t("Choose the hosts one of three ways: by site, environment and OS; by groups and tags; or by picking them from a list. The count below is the server's answer; the next step says which of those hosts can run the operation.")}
       footer={
@@ -1725,6 +1727,7 @@ function EligibilityStep({ order, preview, checking, nav }: { order: Order; prev
     : preview?.sample ?? [];
   return (
     <Card
+      className="measure"
       title={`3. ${t("Eligibility")}`}
       description={t("Nothing to fill in here: read which of the matched hosts can run the operation and why the rest cannot, then go on to the rollout. A host that cannot run it stays in the snapshot with its reason; dropping it quietly would hide a decision nobody made.")}
       footer={
@@ -1816,6 +1819,7 @@ function RolloutStep({
     index >= declaredIndex && (policy !== "replan_on_reconnect" || declaredPolicy === "replan_on_reconnect"));
   return (
     <Card
+      className="measure"
       title={`4. ${t("Rollout")}`}
       description={
         <>
@@ -1940,6 +1944,7 @@ function WindowStep({
   const changeSchedule = (delta: Partial<ScheduleChoice>) => change({ schedule: { ...schedule, ...delta } });
   return (
     <Card
+      className="measure"
       title={`5. ${t("Window and verification")}`}
       description={t("Say when the change may run and what is checked afterwards; everything here is optional, and left empty the campaign runs as soon as it is approved and verifies nothing. Both go into the fingerprint the approver signs; the next step creates the campaign.")}
       footer={nav}
@@ -2071,6 +2076,7 @@ function CreateStep({
 
   return (
     <Card
+      className="measure"
       title={`6. ${t("Create")}`}
       description={scheduling
         ? t("Give the reason and record the schedule: the order is placed at its moments, and each campaign it places waits for its approval. Nothing changes on any host now.")
@@ -2152,6 +2158,7 @@ function PlansStep({ campaignID, campaign, nav }: { campaignID: string; campaign
   const groups = plans.data?.items ?? [];
   return (
     <Card
+      className="measure"
       title={`7. ${t("Plans")}`}
       description={planning
         ? t("Wait: each host is computing what it would change, and the page refreshes by itself. Nothing is applied while this runs; the approval opens once every plan is in.")
@@ -2205,6 +2212,7 @@ function ApprovalStep({ campaignID, campaign, nav }: { campaignID: string; campa
   if (!campaign) return <Empty>{t("No campaign yet.")}</Empty>;
   return (
     <Card
+      className="measure"
       title={`8. ${t("Approval and run")}`}
       description={t("Give the reason and approve: the campaign starts at once, canary first, and its progress is followed on the campaign page. You are approving this operation, this payload, this list of hosts, this rollout policy and this set of plans - together, as one fingerprint.")}
       footer={nav}

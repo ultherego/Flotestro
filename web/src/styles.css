@@ -2730,3 +2730,9 @@ tr.row-open > td { background: var(--bg-raised); }
 .chart-peak circle { fill: var(--accent); }
 .chart-peak rect { fill: var(--accent); }
 .chart-peak-label { fill: var(--accent-contrast); font-size: 10px; font-weight: 600; }
+
+/* A card holding a form gets a measure. A form stretched across a 2000px
+   screen puts its fields at one edge and nothing at the other, which is
+   what the Bulk workspace looked like: a page of empty card. Tables and
+   charts keep the whole width - they have something to do with it. */
+.card.measure { max-width: 1180px; }
