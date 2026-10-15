@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { api, ApiError, LIST_PAGE, loadedItems, type Page } from "../lib/api";
 import type { ReadFanOut, ReadFanOutHost, ReadFanOutView, Whoami } from "../lib/types";
 import { bytes } from "../lib/format";
+import { Board } from "../components/board";
 import { ErrorBox, ErrorCode, Time, Empty, JobState } from "../components/ui";
 import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
 import { Breakdown, StatusBar } from "../components/widgets";
@@ -76,10 +77,17 @@ function ReadsList() {
 
       {building && <NewRead onDone={() => setBuilding(false)} />}
 
-      <div className="widgets">
-        {/* The bar counts host answers, not reads: four reads of four
-            hosts are sixteen answers, and the caption says which. */}
-        <Card className="span-12" title={t("Hosts by state")} description={t("every host of the {n} reads listed, counted once per read", { n: reads.length })}>
+      <Board
+        screen="reads"
+        catalogue={[
+          { key: "hosts_by_state", title: "Hosts by state", width: 12 },
+          { key: "your_reads", title: "Your reads", width: 9 },
+          { key: "by_operation", title: "By operation", width: 3 },
+        ]}
+        drawn={{
+          hosts_by_state: (
+            <>
+              <Card className="span-12" title={t("Hosts by state")} description={t("every host of the {n} reads listed, counted once per read", { n: reads.length })}>
           <StatusBar segments={[
             { label: t("Queued"), value: sum("queued"), tone: "warn" },
             { label: t("Running"), value: sum("running"), tone: "info" },
@@ -87,8 +95,11 @@ function ReadsList() {
             { label: t("Failed"), value: sum("failed"), tone: "error" },
           ]} />
         </Card>
-
-        <Card className="span-9" title={t("Your reads")} flush>
+            </>
+          ),
+          your_reads: (
+            <>
+              <Card className="span-9" title={t("Your reads")} flush>
           {reads.length === 0 ? (
             <EmptyState action={!building && <button onClick={() => setBuilding(true)}>{t("New read")}</button>}>
               {t("No reads yet.")}
@@ -121,8 +132,11 @@ function ReadsList() {
             </>
           )}
         </Card>
-
-        <Card className="span-3" title={t("By operation")} description={listed}>
+            </>
+          ),
+          by_operation: (
+            <>
+              <Card className="span-3" title={t("By operation")} description={listed}>
           {!data ? (
             <Empty>{t("Loading…")}</Empty>
           ) : operations.length === 0 ? (
@@ -131,7 +145,10 @@ function ReadsList() {
             <Breakdown tone="neutral" items={operations.map(([action, n]) => ({ label: <span className="mono">{action}</span>, value: n }))} />
           )}
         </Card>
-      </div>
+            </>
+          )
+        }}
+      />
     </>
   );
 }

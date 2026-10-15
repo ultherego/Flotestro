@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { copyToClipboard } from "../lib/clipboard";
 import type { Whoami } from "../lib/types";
+import { Board } from "../components/board";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { absoluteTime } from "../lib/format";
 import { Actions, Card, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
@@ -231,16 +232,29 @@ export function Secrets() {
         help={<p>{t("Values go in and do not come out. Nothing here can read a secret back: the only way out is a short lease issued to one host for one job, and the value never appears in a job payload, in the audit trail or in inventory. The store is encrypted with a key kept outside the database.")}</p>}
       />
 
-      <div className="widgets">
-        <Card className="span-8" title={t("Store")} description={t("{n} secrets; the never-rotated ones are counted among the issuable, still on their first version.", { n: secrets.length })}>
+      <Board
+        screen="secrets"
+        catalogue={[
+          { key: "store", title: "Store", width: 8 },
+          { key: "by_creator", title: "By creator", width: 4 },
+          { key: "new_secret", title: "New secret", width: 12 },
+          { key: "list", title: "Secrets", width: 12 },
+        ]}
+        drawn={{
+          store: (
+            <>
+              <Card className="span-8" title={t("Store")} description={t("{n} secrets; the never-rotated ones are counted among the issuable, still on their first version.", { n: secrets.length })}>
           <StatusBar segments={[
             { label: t("Issuable"), value: counts?.issuable, tone: "ok" },
             { label: t("Never rotated"), value: counts?.neverRotated, tone: "warn" },
             { label: t("Retired"), value: counts?.retired, tone: "unknown" },
           ]} />
         </Card>
-
-        <Card className="span-4" title={t("By creator")} description={t("Who put the secrets in.")}>
+            </>
+          ),
+          by_creator: (
+            <>
+              <Card className="span-4" title={t("By creator")} description={t("Who put the secrets in.")}>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : byCreator.length === 0 ? (
@@ -251,7 +265,11 @@ export function Secrets() {
         </Card>
 
         {/* The outcome of the last request stands by the button that made it. */}
-        {canWrite && (
+            </>
+          ),
+          new_secret: (
+            <>
+              {canWrite && (
           <Card
             className="span-12"
             title={t("New secret")}
@@ -276,8 +294,11 @@ export function Secrets() {
             </FieldGrid>
           </Card>
         )}
-
-        <Card className="span-12" flush>
+            </>
+          ),
+          list: (
+            <>
+              <Card className="span-12" flush>
           <Toolbar end={loaded && <span>{t("{shown} of {n} secrets", { shown: shown.length, n: secrets.length })}</span>}>
             <input placeholder={t("Search by name or description")} value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 260 }} />
             {notice && <span className="source">{notice}</span>}
@@ -318,7 +339,10 @@ export function Secrets() {
             </table>
           )}
         </Card>
-      </div>
+            </>
+          )
+        }}
+      />
     </>
   );
 }
