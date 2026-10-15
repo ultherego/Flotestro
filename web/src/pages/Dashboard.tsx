@@ -6,6 +6,7 @@ import type { AuditEvent, Campaign, FleetActivity, FleetSummary, Job } from "../
 import { relativeTime } from "../lib/format";
 import { ErrorBox, ErrorCode, Time, Empty, JobState } from "../components/ui";
 import { Card, NeedsAttention, PageHeader, Verdict } from "../components/layout";
+import { MetricTile } from "../components/MetricTile";
 import { BarChart, Breakdown, CountRow, StatusBar, type Segment } from "../components/widgets";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import { FirstRunCard } from "../components/FirstRunCard";
@@ -223,6 +224,36 @@ export function Dashboard() {
 
       {/* Where the fleet is, read across the room. */}
       <Board screen="dashboard" catalogue={DASHBOARD_CATALOGUE} drawn={{
+            // A count nobody has yet is a dash, not a nought: a fleet that
+            // has not answered is not a fleet with nothing wrong with it.
+            hosts_total: <MetricTile label={t("Hosts")} value={s?.hosts ?? null} size="xl" />,
+            hosts_offline: (
+              <MetricTile
+                label={t("Offline")}
+                value={s?.offline ?? null}
+                size="xl"
+                state={s === undefined ? undefined : s.offline > 0 ? "error" : "ok"}
+                footnote={s === undefined ? undefined : t("{n} online", { n: s.online })}
+              />
+            ),
+            security_updates: (
+              <MetricTile
+                label={t("Security updates")}
+                value={s?.hosts_with_security_updates ?? null}
+                size="xl"
+                state={s === undefined ? undefined : s.hosts_with_security_updates > 0 ? "warn" : "ok"}
+                footnote={t("hosts waiting")}
+              />
+            ),
+            failed_units: (
+              <MetricTile
+                label={t("Failed units")}
+                value={s?.with_failed_units ?? null}
+                size="xl"
+                state={s === undefined ? undefined : s.with_failed_units > 0 ? "error" : "ok"}
+                footnote={t("hosts affected")}
+              />
+            ),
             host_availability: (
               <Card title={t("Host availability")}>
                 <StatusBar segments={[
@@ -409,6 +440,13 @@ function Refreshed({ at, fetching, onRefresh }: { at: number; fetching: boolean;
  * arrange mode, and the width it takes until somebody says otherwise.
  */
 export const DASHBOARD_CATALOGUE: BoardEntry[] = [
+  // The four numbers somebody reads from the doorway. They stand first and
+  // narrow, as measurements rather than as rows of a bar: the fleet's size,
+  // how much of it is out of reach, and the two counts that mean work.
+  { key: "hosts_total", title: "Hosts", width: 3 },
+  { key: "hosts_offline", title: "Offline", width: 3 },
+  { key: "security_updates", title: "Security updates", width: 3 },
+  { key: "failed_units", title: "Failed units", width: 3 },
   { key: "host_availability", title: "Host availability", width: 12 },
   { key: "operations_24h", title: "Operations, last 24 h", width: 6 },
   { key: "fleet_composition", title: "Fleet composition", width: 6 },

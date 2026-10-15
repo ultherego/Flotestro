@@ -1363,7 +1363,22 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
 }
 .card-head + .card-body { border-top: 1px solid var(--border); }
 .card-head-text { flex: 1 1 240px; min-width: 0; }
-.card-title { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.4; }
+/* The title of a card is a label, not a headline.
+ *
+ * Upper case, small and letter-spaced, the way the dark operations panels
+ * the owner pointed at name their cards: it reads at a glance, it stops
+ * competing with the numbers inside the card, and it leaves the loud end of
+ * the type scale to the thing worth being loud - the measurement. A card
+ * whose title shouted as loudly as its content is a card nobody scans. */
+.card-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
 .card-description { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; max-width: 80ch; }
 .card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 /* The body owns the rhythm of what is inside it.

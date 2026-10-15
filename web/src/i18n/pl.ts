@@ -6106,4 +6106,7 @@ export const pl: Record<string, string> = {
   // Kafle-bohaterowie przeglądu hosta.
   "Disk used": "Zajętość dysku",
   "of": "z",
+  // Podpisy pod liczbami na Dashboardzie: mówią, czego liczba dotyczy.
+  "hosts affected": "hostów dotkniętych",
+  "hosts waiting": "hostów czeka",
 };
