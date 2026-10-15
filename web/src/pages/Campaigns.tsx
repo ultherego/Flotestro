@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import type { Campaign } from "../lib/types";
+import { Board } from "../components/board";
 import { ErrorBox, Time, Empty, JobState, stateName } from "../components/ui";
 import { Card, EmptyState, PageHeader, Toolbar } from "../components/layout";
 import {
@@ -170,8 +171,17 @@ export function Campaigns() {
         help={<p>{t("Campaigns are how the fleet is changed at scale: a canary first, then waves, with a gate between them. A campaign carries the operation, the payload and the rollout it was approved with.")}</p>}
       />
 
-      <div className="widgets">
-        <Card className="span-12" title={t("State")} description={listed}>
+      <Board
+        screen="campaigns"
+        catalogue={[
+          { key: "state", title: "State", width: 12 },
+          { key: "list", title: "List", width: 9 },
+          { key: "outcomes", title: "Outcomes", width: 3 },
+        ]}
+        drawn={{
+          state: (
+            <>
+              <Card className="span-12" title={t("State")} description={listed}>
           <StatusBar segments={[
             { label: t("Awaiting approval"), value: awaiting, tone: "warn" },
             { label: t("In progress"), value: inProgress, tone: "info" },
@@ -182,8 +192,11 @@ export function Campaigns() {
             { label: t("Canceled"), value: canceled, tone: "unknown" },
           ]} />
         </Card>
-
-        <Card className="span-9" title={t("List")} flush>
+            </>
+          ),
+          list: (
+            <>
+              <Card className="span-9" title={t("List")} flush>
           {/* The filter runs on the server and the rows arrive page by
               page: the screen shows what the operator asked about, not
               the newest fifty of everything. */}
@@ -256,7 +269,11 @@ export function Campaigns() {
 
         {/* The side widget reads the outcomes and operations of the page,
             not the fleet's history: it is the shape of what is listed. */}
-        <Card className="span-3" title={t("Outcomes")} description={listed}>
+            </>
+          ),
+          outcomes: (
+            <>
+              <Card className="span-3" title={t("Outcomes")} description={listed}>
           {!data ? (
             <Empty>{t("Loading…")}</Empty>
           ) : campaigns.length === 0 ? (
@@ -269,7 +286,10 @@ export function Campaigns() {
             </>
           )}
         </Card>
-      </div>
+            </>
+          )
+        }}
+      />
     </>
   );
 }

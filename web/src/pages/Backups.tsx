@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { api, loadedItems, LIST_PAGE } from "../lib/api";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
+import { Board } from "../components/board";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { Card, PageHeader, Toolbar } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
@@ -139,12 +140,20 @@ export function FleetBackups() {
       />
       <FleetCoverage coverage={data} />
 
-      <div className="widgets">
-        {/* The age of the newest copy, one segment per verdict, and beside
-            it what nobody has checked: a copy nobody has ever restored is a
-            hope, not a copy. The panel does not force a trial - it is to
-            say there was none. */}
-        <Card className="span-8" title={t("Age")} description={t("{n} definitions on {hosts} of {total} hosts", { n: data.total, hosts: data.evaluated_hosts, total: data.total_hosts })}>
+      <Board
+        screen="backups"
+        catalogue={[
+          { key: "age", title: "Age", width: 8 },
+          { key: "verified", title: "Verified", width: 4 },
+          { key: "calendar", title: "Calendar", width: 12 },
+          { key: "repositories", title: "Repositories", width: 6 },
+          { key: "definitions", title: "Definitions", width: 9 },
+          { key: "by_tool", title: "By tool", width: 3 },
+        ]}
+        drawn={{
+          age: (
+            <>
+              <Card className="span-8" title={t("Age")} description={t("{n} definitions on {hosts} of {total} hosts", { n: data.total, hosts: data.evaluated_hosts, total: data.total_hosts })}>
           <StatusBar segments={[
             { label: t("Never ran"), value: never, tone: "error" },
             { label: t("Stale"), value: stale, tone: "error" },
@@ -153,7 +162,11 @@ export function FleetBackups() {
             { label: t("Unknown"), value: counts.unknown ?? 0, tone: "unknown" },
           ]} />
         </Card>
-        <Card className="span-4" title={t("Verified")} description={t("A copy is a safeguard once somebody has read it back.")}>
+            </>
+          ),
+          verified: (
+            <>
+              <Card className="span-4" title={t("Verified")} description={t("A copy is a safeguard once somebody has read it back.")}>
           <StatusBar segments={[
             { label: t("Unverified"), value: data.unverified, tone: "warn" },
             { label: t("Never restored"), value: neverRestored, tone: "unknown" },
@@ -167,10 +180,21 @@ export function FleetBackups() {
 
         {/* The calendar and the backends are two short blocks: side by side
             they make one row above the list instead of two thin strips. */}
-        <Calendar items={items} wide={!(data.repositories ?? []).length} />
-        <Repositories repositories={data.repositories ?? []} />
-
-        <Card
+            </>
+          ),
+          calendar: (
+            <>
+              <Calendar items={items} wide={!(data.repositories ?? []).length} />
+            </>
+          ),
+          repositories: (
+            <>
+              <Repositories repositories={data.repositories ?? []} />
+            </>
+          ),
+          definitions: (
+            <>
+              <Card
           className="span-9"
           flush
           footer={list.hasNextPage && (
@@ -234,8 +258,11 @@ export function FleetBackups() {
             </table>
           )}
         </Card>
-
-        <Card className="span-3" title={t("By tool")} description={items.length ? listed : undefined}>
+            </>
+          ),
+          by_tool: (
+            <>
+              <Card className="span-3" title={t("By tool")} description={items.length ? listed : undefined}>
           {!items.length ? (
             <p className="fp-blank">{t("No backup definition yet.")}</p>
           ) : (
@@ -251,7 +278,10 @@ export function FleetBackups() {
             </>
           )}
         </Card>
-      </div>
+            </>
+          )
+        }}
+      />
     </>
   );
 }
