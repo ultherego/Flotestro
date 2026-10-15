@@ -159,7 +159,7 @@ export function Dashboard() {
         }
       />
 
-      <Board screen="next-dashboard" catalogue={DASHBOARD} drawn={{
+      <Board screen={DASHBOARD_SCREEN} catalogue={DASHBOARD} drawn={{
         hosts: (
           <Kpi
             icon="hosts"
@@ -337,6 +337,14 @@ export function Dashboard() {
     </>
   );
 }
+
+/**
+ * The name this screen's arrangement is stored under. The server takes
+ * lower-case letters, digits and underscores and refuses the rest; a
+ * refused name reads as "no arrangement" and the screen then offers no
+ * way to arrange it at all.
+ */
+export const DASHBOARD_SCREEN = "next_dashboard";
 
 /**
  * The containers this screen can draw: the name each is picked by when the

@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
-import { Dashboard } from "./Dashboard";
+import { Dashboard, DASHBOARD, DASHBOARD_SCREEN } from "./Dashboard";
 
 /**
  * The screen answers one question - is there anything for me to do - and
@@ -62,6 +62,25 @@ function draw() {
 }
 
 afterEach(cleanup);
+
+describe("the arrangement of the fleet dashboard", () => {
+  it("is stored under a name the server takes", () => {
+    // Lower-case letters, digits and underscores; the server refuses the
+    // rest, the read fails, and the screen then offers no way to arrange
+    // itself at all - which is how it shipped for an hour with a hyphen.
+    expect(DASHBOARD_SCREEN).toMatch(/^[a-z0-9_]+$/);
+  });
+
+  it("names every container the screen draws, and no other", () => {
+    expect(DASHBOARD.map((one) => one.key)).toEqual([
+      "hosts", "online", "waiting", "found", "needs", "answering",
+      "availability", "operations", "composition", "campaigns", "failures", "denials",
+    ]);
+    // Every one of them has a shape to ship with, or the first arrangement
+    // of a screen nobody has touched is a guess.
+    expect(DASHBOARD.every((one) => one.width >= 1 && one.width <= 12 && (one.height ?? 0) >= 1)).toBe(true);
+  });
+});
 
 describe("the fleet dashboard", () => {
   it("opens with the four numbers somebody reads from the doorway", async () => {

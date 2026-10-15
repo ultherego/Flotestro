@@ -27,7 +27,11 @@ import { Problem } from "./kit";
  */
 
 export function Board({ screen, catalogue, drawn }: {
-  /** The name the arrangement is stored under. */
+  /**
+   * The name the arrangement is stored under. The server takes lower-case
+   * letters, digits and underscores and refuses anything else, and a
+   * refused name leaves the screen with no arrange bar at all.
+   */
   screen: string;
   catalogue: BoardEntry[];
   /** What each container draws, by key. A key with nothing to draw -
