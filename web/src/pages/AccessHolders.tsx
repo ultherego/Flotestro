@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { Card, Toolbar } from "../components/layout";
+import { Card, Pager, Toolbar } from "../components/layout";
 import { Empty, ErrorBox } from "../components/ui";
 import { useT } from "../i18n";
 
@@ -48,9 +48,49 @@ export function shortScope(scope: string): string {
   return kept === "" ? "" : kept;
 }
 
+/** Whether any of somebody's roles comes from a group of the directory. */
+export function fromTheDirectory(holder: Pick<Holder, "roles">): boolean {
+  return holder.roles.some((role) => role.from === "group");
+}
+
+/** Which of the holders a screen is asking about. */
+export type Which = "directory" | "bound" | "everyone";
+
+/**
+ * The holders this view shows, in the order it shows them.
+ *
+ * The people of an installation come from its directory; the identities the
+ * panel made for itself are tokens, runners and whatever a test suite left
+ * behind - 1785 of them in the laboratory. So the directory's people are
+ * first whichever filter is on, and the filter opens on them: an
+ * administrator asking "who has access" means the people.
+ */
+export function holdersToShow(items: Holder[], which: Which, search: string): Holder[] {
+  const needle = search.trim().toLowerCase();
+  const matches = (holder: Holder) =>
+    needle === ""
+    || holder.subject.toLowerCase().includes(needle)
+    || (holder.display_name ?? "").toLowerCase().includes(needle)
+    || holder.roles.some((role) => role.role.includes(needle))
+    || (holder.groups ?? []).some((group) => group.toLowerCase().includes(needle));
+  const wanted = (holder: Holder) =>
+    which === "everyone" ? true
+      : which === "directory" ? fromTheDirectory(holder)
+        : !fromTheDirectory(holder);
+  return items
+    .filter((holder) => wanted(holder) && matches(holder))
+    .sort((a, b) => {
+      const bySource = Number(fromTheDirectory(b)) - Number(fromTheDirectory(a));
+      return bySource !== 0 ? bySource : a.subject.localeCompare(b.subject);
+    });
+}
+
 export function AccessHolders() {
   const t = useT();
   const [search, setSearch] = useState("");
+  const [which, setWhich] = useState<Which>("directory");
+  const [page, setPage] = useState(1);
+  const [size, setSize] = useState(25);
   const { data, error } = useQuery({
     queryKey: ["access-holders"],
     queryFn: () => api.get<Holders>("/api/v1/access/holders"),
@@ -59,13 +99,11 @@ export function AccessHolders() {
 
   if (error) return <ErrorBox error={error} />;
 
-  const needle = search.trim().toLowerCase();
-  const shown = (data?.items ?? []).filter((holder) =>
-    needle === ""
-    || holder.subject.toLowerCase().includes(needle)
-    || (holder.display_name ?? "").toLowerCase().includes(needle)
-    || holder.roles.some((role) => role.role.includes(needle))
-    || (holder.groups ?? []).some((group) => group.toLowerCase().includes(needle)));
+  const items = data?.items ?? [];
+  const everyone = holdersToShow(items, "everyone", search);
+  const matching = holdersToShow(items, which, search);
+  const shown = matching.slice((page - 1) * size, page * size);
+  const fromDirectory = items.filter(fromTheDirectory).length;
 
   return (
     <Card
@@ -74,13 +112,43 @@ export function AccessHolders() {
       description={t("Everyone with a role here: bound by hand, or granted by a group of the identity provider. Somebody who has never signed in is here too - the panel makes their record at the first sign-in.")}
       flush
     >
-      <Toolbar end={<span>{t("{n} of {total}", { n: shown.length, total: data?.count ?? 0 })}</span>}>
+      <Toolbar
+        end={<Pager page={page} size={size} total={matching.length}
+                    onPage={setPage} onSize={setSize} />}
+      >
         <input
           placeholder={t("name, role or group")}
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={(event) => { setSearch(event.target.value); setPage(1); }}
           data-testid="holder-search"
         />
+        {/* The people come from the directory; the rest are the panel's own
+            records - a token, a runner, whatever a suite left behind. The
+            filter opens on the people, because that is what the question
+            "who has access" means. */}
+        <div className="segmented" role="group" aria-label={t("Whose access to show")}>
+          <button
+            className={which === "directory" ? "active" : ""}
+            onClick={() => { setWhich("directory"); setPage(1); }}
+            data-testid="holders-directory"
+          >
+            {t("From the directory ({n})", { n: fromDirectory })}
+          </button>
+          <button
+            className={which === "bound" ? "active" : ""}
+            onClick={() => { setWhich("bound"); setPage(1); }}
+            data-testid="holders-bound"
+          >
+            {t("Bound by hand ({n})", { n: everyone.length - fromDirectory })}
+          </button>
+          <button
+            className={which === "everyone" ? "active" : ""}
+            onClick={() => { setWhich("everyone"); setPage(1); }}
+            data-testid="holders-everyone"
+          >
+            {t("Everyone ({n})", { n: everyone.length })}
+          </button>
+        </div>
       </Toolbar>
 
       {/* What the directory side of this answer is worth. An unreadable
@@ -101,8 +169,12 @@ export function AccessHolders() {
 
       {!data ? (
         <Empty>{t("Loading…")}</Empty>
-      ) : shown.length === 0 ? (
-        <Empty>{t("Nobody holds a role here yet.")}</Empty>
+      ) : matching.length === 0 ? (
+        <Empty>
+          {which === "directory"
+            ? t("No group of the directory grants a role here yet. A mapping is what gives one.")
+            : t("Nobody holds a role here yet.")}
+        </Empty>
       ) : (
         <table>
           <thead>

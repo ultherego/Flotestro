@@ -3035,6 +3035,11 @@ export const pl: Record<string, string> = {
   "Username": "Użytkownik",
   "Username (private source)": "Użytkownik (źródło prywatne)",
   /* Kto ma dostep do panelu: wiazania wlasne i role z grup katalogu. */
+  "Whose access to show": "Czyj dostęp pokazać",
+  "From the directory ({n})": "Z katalogu ({n})",
+  "Bound by hand ({n})": "Przypisane ręcznie ({n})",
+  "Everyone ({n})": "Wszyscy ({n})",
+  "No group of the directory grants a role here yet. A mapping is what gives one.": "Żadna grupa z katalogu nie nadaje jeszcze tutaj roli. Nadaje ją mapowanie.",
   "Who may sign in": "Kto może się zalogować",
   "Everyone with a role here: bound by hand, or granted by a group of the identity provider. Somebody who has never signed in is here too - the panel makes their record at the first sign-in.": "Każdy, kto ma tu rolę: przypisaną ręcznie albo nadaną przez grupę z dostawcy tożsamości. Kto nigdy się nie zalogował, też tu jest — panel zakłada jego zapis przy pierwszym logowaniu.",
   "name, role or group": "nazwa, rola albo grupa",

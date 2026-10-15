@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
-import { AccessHolders, shortScope } from "./AccessHolders";
+import { AccessHolders, holdersToShow, shortScope } from "./AccessHolders";
 
 /**
  * Who may sign in, which is not the same question as who has signed in.
@@ -69,6 +69,30 @@ describe("shortScope", () => {
   });
 });
 
+describe("holdersToShow", () => {
+  const people = [
+    { subject: "zzz-from-group", roles: [{ role: "viewer", scope: "", from: "group", group: "g" }], signed_in: false, kind: "user" },
+    { subject: "aaa-bound", roles: [{ role: "operator", scope: "", from: "binding" }], signed_in: true, kind: "user" },
+  ];
+
+  it("puts the directory's people first whatever the filter", () => {
+    // The laboratory's panel holds 1785 identities a suite left behind and
+    // five people. Sorted by name, the people are nowhere.
+    expect(holdersToShow(people, "everyone", "").map((one) => one.subject))
+      .toEqual(["zzz-from-group", "aaa-bound"]);
+  });
+
+  it("separates where the access comes from", () => {
+    expect(holdersToShow(people, "directory", "").map((one) => one.subject)).toEqual(["zzz-from-group"]);
+    expect(holdersToShow(people, "bound", "").map((one) => one.subject)).toEqual(["aaa-bound"]);
+  });
+
+  it("searches the name, the role and the group", () => {
+    expect(holdersToShow(people, "everyone", "operator").map((one) => one.subject)).toEqual(["aaa-bound"]);
+    expect(holdersToShow(people, "everyone", "g").map((one) => one.subject)).toEqual(["zzz-from-group"]);
+  });
+});
+
 describe("who may sign in", () => {
   it("lists somebody the directory lets in before they have ever signed in", async () => {
     draw(<AccessHolders />);
@@ -86,6 +110,10 @@ describe("who may sign in", () => {
 
   it("tells a role bound by hand from one a group grants", async () => {
     draw(<AccessHolders />);
+    // The screen opens on the directory's people; the bound identities are
+    // behind their own button.
+    await waitFor(() => expect(screen.getByTestId("holders-bound")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("holders-bound"));
     await waitFor(() => expect(screen.getByTestId("holder-bootstrap-admin")).toBeInTheDocument());
     const row = within(screen.getByTestId("holder-bootstrap-admin"));
     expect(row.getByText("bound to this identity")).toBeInTheDocument();
