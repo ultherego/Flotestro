@@ -11,6 +11,7 @@ import { Board } from "../components/board";
 import { AdvertisedAddressSection } from "./AdvertisedAddress";
 import { Identities, Mappings, Review, Roles, Warning } from "./Access";
 import { CertificateAuthority } from "./CertificateAuthority";
+import { AccessHolders } from "./AccessHolders";
 import { Budgets } from "./Budgets";
 import { Notifications } from "./Notifications";
 import { Policies } from "./Policies";
@@ -147,7 +148,16 @@ export function Settings() {
       </div>
 
       {tab === "general" && <GeneralSettings permissions={permissions} />}
-      {tab === "users" && <Identities initialSearch={searchParams.get("q") ?? ""} />}
+      {tab === "users" && (
+        <>
+          {/* Who may sign in comes first: it is the question an administrator
+              opens this tab with. The identities below are the panel's own
+              records - where a token is issued, a session ended, a role
+              bound by hand. */}
+          <div className="widgets"><AccessHolders /></div>
+          <Identities initialSearch={searchParams.get("q") ?? ""} />
+        </>
+      )}
       {tab === "roles" && <Roles />}
       {tab === "mappings" && <Mappings />}
       {tab === "review" && <Review />}

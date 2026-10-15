@@ -120,7 +120,7 @@
 
   <main class="content">
 <h1>8. API</h1>
-<p class="lede">Wszystko, co robi panel, może zrobić program. API to ta sama powierzchnia, na której działa panel webowy: 239 tras pod <code>/api/v1</code>, odpowiedzi w JSON, autoryzacja tymi samymi uprawnieniami i zapis do tego samego śladu audytowego. Ta strona to tabela tras w postaci, w jakiej rejestruje je <code>internal/adminapi/adminapi.go</code>, oraz konwencje opisane w <code>internal/adminapi/openapi.go</code>; panel udostępnia własny dokument OpenAPI pod <code>GET /api/v1/openapi.json</code>. Po wywołania do wklejenia w terminal, z odpowiedziami, jakie dały, zob. <a href="examples.html">11. Przykłady użycia</a>.</p>
+<p class="lede">Wszystko, co robi panel, może zrobić program. API to ta sama powierzchnia, na której działa panel webowy: 240 tras pod <code>/api/v1</code>, odpowiedzi w JSON, autoryzacja tymi samymi uprawnieniami i zapis do tego samego śladu audytowego. Ta strona to tabela tras w postaci, w jakiej rejestruje je <code>internal/adminapi/adminapi.go</code>, oraz konwencje opisane w <code>internal/adminapi/openapi.go</code>; panel udostępnia własny dokument OpenAPI pod <code>GET /api/v1/openapi.json</code>. Po wywołania do wklejenia w terminal, z odpowiedziami, jakie dały, zob. <a href="examples.html">11. Przykłady użycia</a>.</p>
 <h2 id="basics">Kształt interfejsu</h2>
 <ul><li>Odczyty idą przez <code>GET</code>. Plany, operacje i kampanie tworzy się przez <code>POST</code>; mają też własne jawne endpointy <code>approve</code>, <code>cancel</code>, <code>pause</code> i <code>resume</code>.</li><li>Każda lista jest stronicowana po stronie serwera.</li><li>Błędy to obiekty problem ze stabilnym kodem.</li><li>Dokument opisuje sam siebie: <code>GET /api/v1/openapi.json</code> powstaje z zarejestrowanych tras, więc nie może się od nich rozjechać.</li><li>Panel nasłuchuje na <code>FLOTESTRO_ADMIN_ADDR</code>, domyślnie <code>127.0.0.1:8080</code>, po zwykłym HTTP; ma stać za reverse proxy, które terminuje TLS.</li></ul>
 <h2 id="authentication">Uwierzytelnianie</h2>
@@ -183,7 +183,7 @@
 <tbody>
 <tr><td><a href="#routes-service">Endpointy serwisowe</a></td><td>19</td></tr>
 <tr><td><a href="#routes-caller">Logowanie i własne rekordy wywołującego</a></td><td>8</td></tr>
-<tr><td><a href="#routes-fleet">Flota w skrócie</a></td><td>8</td></tr>
+<tr><td><a href="#routes-fleet">Flota w skrócie</a></td><td>9</td></tr>
 <tr><td><a href="#routes-hosts">Hosty</a></td><td>59</td></tr>
 <tr><td><a href="#routes-enrollment">Enrollment, relaye i CA floty</a></td><td>14</td></tr>
 <tr><td><a href="#routes-work">Operacje, odczyty i kampanie</a></td><td>40</td></tr>
@@ -238,6 +238,7 @@
 <table>
 <thead><tr><th>Metoda</th><th>Ścieżka</th><th>Uprawnienie</th></tr></thead>
 <tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/access/holders</code><br><span class="caption">Kto może się zalogować i skąd bierze się jego dostęp: wiązania zrobione ręcznie oraz użytkownicy katalogu, których grupom mapowanie nadaje rolę — niezależnie od tego, czy kiedykolwiek się logowali. Odpowiedź mówi, ile warta jest jej katalogowa część.</span></td><td><code>principal.manage</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/access/review</code><br><span class="caption">Przegląd dostępów: każda tożsamość wraz z tym, co może zrobić, kiedy była ostatnio użyta i na co powinien spojrzeć przeglądający.</span></td><td><code>principal.manage</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/events</code><br><span class="caption">Strumień zdarzeń całej widocznej floty. Jedno połączenie na kartę wystarcza dla wszystkich trwających operacji.</span></td><td><code>job.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/fleet/activity</code></td><td><code>host.read</code></td></tr>

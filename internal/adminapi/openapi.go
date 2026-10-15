@@ -87,6 +87,7 @@ func (s *Server) openAPI() map[string]any {
 	register("CVE", cveReport{})
 	register("Binding", authz.Binding{})
 	register("Role", authz.RoleDefinition{})
+	register("AccessHolder", accessHolder{})
 	register("BulkHostMetadataResult", hostsBulkMetadataResponse{})
 	register("BackupDefinition", backup.Definition{})
 	register("CertificateTarget", certificates.Target{})
@@ -951,6 +952,21 @@ var responseSchemas = map[string]map[string]any{
 	"GET /api/v1/installation-profiles":           ref("InstallationProfile"),
 	"GET /api/v1/monitoring/alerts":               pagedCollection("Alert"),
 	"GET /api/v1/policies/{id}/campaigns":         collection("PolicyCampaignLink"),
+	"GET /api/v1/access/holders": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"items": map[string]any{"type": "array", "items": ref("AccessHolder")},
+			"count": count(),
+			"directory": map[string]any{
+				"type":        "object",
+				"description": "What the directory side of this answer is worth: whether one is configured, whether it answered, and why not when it did not. A directory that will not answer is not a directory with nobody in it.",
+				"properties": map[string]any{
+					"configured": flag(), "read": flag(),
+					"reason": str(), "users": count(),
+				},
+			},
+		},
+	},
 	"GET /api/v1/principals": map[string]any{
 		"type": "object",
 		"properties": map[string]any{

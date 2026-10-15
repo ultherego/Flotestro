@@ -726,7 +726,7 @@ func (s *Store) ListPrincipals(ctx context.Context, filter PrincipalFilter) (Pri
 		return PrincipalPage{}, err
 	}
 
-	bindings, err := s.bindingsOfMany(ctx, identifiersOf(principals))
+	bindings, err := s.BindingsOfMany(ctx, identifiersOf(principals))
 	if err != nil {
 		return PrincipalPage{}, err
 	}
@@ -811,9 +811,9 @@ func identifiersOf(principals []Principal) []string {
 	return ids
 }
 
-// bindingsOfMany reads the bindings of a page of identities in one query,
+// BindingsOfMany reads the bindings of a page of identities in one query,
 // expired ones included: the screen says when a binding ended.
-func (s *Store) bindingsOfMany(ctx context.Context, principalIDs []string) (map[string][]Binding, error) {
+func (s *Store) BindingsOfMany(ctx context.Context, principalIDs []string) (map[string][]Binding, error) {
 	out := map[string][]Binding{}
 	if len(principalIDs) == 0 {
 		return out, nil
