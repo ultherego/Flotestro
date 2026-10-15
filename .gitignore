@@ -12,7 +12,10 @@
 /relay
 
 # Node / Web UI
-node_modules/
+# No trailing slash: a pattern that ends in one matches a directory alone, and
+# a worktree's web/node_modules is a symbolic link to another checkout's copy.
+# The rule read right and ignored it; the link reached a commit.
+node_modules
 /web/dist/
 
 # local configuration
@@ -21,7 +24,7 @@ node_modules/
 *.local
 
 # Dependencies and the build output of the panel
-web/node_modules/
+web/node_modules
 web/dist/
 # The incremental build record of tsc: a local cache, not a source.
 web/tsconfig.tsbuildinfo
