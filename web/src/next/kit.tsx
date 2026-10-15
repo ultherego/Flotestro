@@ -257,6 +257,12 @@ export type Column<Row> = {
   actions?: boolean;
   /** What a narrow screen may do without. */
   minor?: boolean;
+  /**
+   * A value read as one word - an identifier, an error code, a path. The
+   * cell keeps it on one line and cuts it with the whole of it on hover:
+   * broken across two lines, `unit.reset_failed` reads as two things.
+   */
+  tight?: boolean;
 };
 
 /**
@@ -274,7 +280,12 @@ export function Table<Row>({ columns, rows, keyOf, empty, rowTestId, testId }: {
 }) {
   if (rows.length === 0 && empty !== undefined) return <Empty>{empty}</Empty>;
   const classOf = (column: Column<Row>) =>
-    join(column.num && "fl-num", column.actions && "fl-cell-actions", column.minor && "fl-minor") || undefined;
+    join(
+      column.num && "fl-num",
+      column.actions && "fl-cell-actions",
+      column.minor && "fl-minor",
+      column.tight && "fl-tight",
+    ) || undefined;
   return (
     <div className="fl-tablewrap">
       <table className="fl-table" data-testid={testId}>

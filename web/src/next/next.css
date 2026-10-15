@@ -609,6 +609,16 @@
 .fl-app .fl-table tbody tr:hover td { background: color-mix(in srgb, var(--ink) 3%, transparent); }
 .fl-app .fl-table th.fl-num { text-align: right; }
 .fl-app .fl-cell-actions { text-align: right; white-space: nowrap; }
+/* A value read as one word is cut, not broken: `unit.reset_failed` over
+   two lines reads as two things. The whole of it is on hover. */
+.fl-app .fl-table td.fl-tight { max-width: 220px; }
+.fl-app .fl-table td.fl-tight > * {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .fl-app .fl-cell-actions > * + * { margin-left: var(--x2); }
 
 /* =====================================================================

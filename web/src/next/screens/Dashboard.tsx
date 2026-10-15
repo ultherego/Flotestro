@@ -271,7 +271,7 @@ export function Dashboard() {
               columns={[
                 { key: "name", head: t("Name"), cell: (one) => <Link to={`/campaigns/${one.id}`}>{one.name}</Link> },
                 { key: "state", head: t("State"), cell: (one) => <Pill tone={campaignTone(one.state)}>{t(stateName(one.state))}</Pill> },
-                { key: "action", head: t("Operation"), minor: true, cell: (one) => <code>{one.action_type}</code> },
+                { key: "action", head: t("Operation"), minor: true, tight: true, cell: (one) => <code title={one.action_type}>{one.action_type}</code> },
               ]}
             />
           </Card>
@@ -295,8 +295,8 @@ export function Dashboard() {
                 { key: "host", head: t("Host"), cell: (one) => (
                   <Link to={`/next/hosts/${one.host_id}`}>{one.hostname || one.host_id.slice(0, 8)}</Link>
                 ) },
-                { key: "what", head: t("Operation"), minor: true, cell: (one) => <code>{one.action_type}</code> },
-                { key: "error", head: t("Error"), cell: (one) => <code>{one.result_error_code || "failed"}</code> },
+                { key: "what", head: t("Operation"), minor: true, tight: true, cell: (one) => <code title={one.action_type}>{one.action_type}</code> },
+                { key: "error", head: t("Error"), tight: true, cell: (one) => <code title={one.result_error_code || "failed"}>{one.result_error_code || "failed"}</code> },
               ]}
             />
           </Card>
@@ -320,12 +320,14 @@ export function Dashboard() {
                 { key: "when", head: t("Time"), cell: (one) => (
                   <span title={absoluteTime(one.occurred_at)}>{relativeTime(one.occurred_at)}</span>
                 ) },
-                { key: "actor", head: t("Actor"), cell: (one) => (
-                  <Link to={`/next/audit?actor=${encodeURIComponent(one.actor_id)}`} className="fl-mono">{one.actor_id}</Link>
+                { key: "actor", head: t("Actor"), tight: true, cell: (one) => (
+                  <Link to={`/next/audit?actor=${encodeURIComponent(one.actor_id)}`} className="fl-mono" title={one.actor_id}>
+                    {one.actor_id}
+                  </Link>
                 ) },
-                { key: "action", head: t("Operation"), cell: (one) => <code>{one.action}</code> },
-                { key: "reason", head: t("Reason"), minor: true, cell: (one) => (
-                  one.detail?.reason ? <code>{String(one.detail.reason)}</code> : <>—</>
+                { key: "action", head: t("Operation"), tight: true, cell: (one) => <code title={one.action}>{one.action}</code> },
+                { key: "reason", head: t("Reason"), minor: true, tight: true, cell: (one) => (
+                  one.detail?.reason ? <code title={String(one.detail.reason)}>{String(one.detail.reason)}</code> : <>—</>
                 ) },
               ]}
             />
