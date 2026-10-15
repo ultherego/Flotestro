@@ -316,6 +316,20 @@ export function AreaChart({
         </g>
       ))}
       <line className="axis" x1={pad.left} x2={width - pad.right} y1={y(0)} y2={y(0)} />
+      {/* The band under a line fades out downwards instead of sitting at one
+          flat wash. A constant fill competes with the gridlines at the
+          bottom of the chart and makes two overlapping series unreadable
+          where they cross; a fade keeps the weight at the line, which is
+          the part being read. One gradient per tone, named after it, so
+          two series of the same tone share one definition. */}
+      <defs>
+        {Array.from(new Set(series.map((s) => s.tone))).map((tone) => (
+          <linearGradient key={tone} id={`area-${tone}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={`var(${TONE_VAR[tone]})`} stopOpacity={0.28} />
+            <stop offset="100%" stopColor={`var(${TONE_VAR[tone]})`} stopOpacity={0.02} />
+          </linearGradient>
+        ))}
+      </defs>
       {series.map((s) => {
         const colour = `var(${TONE_VAR[s.tone]})`;
         return (
@@ -324,8 +338,7 @@ export function AreaChart({
               <path
                 key={k}
                 className="area"
-                style={{ fill: colour }}
-                fillOpacity={0.18}
+                style={{ fill: `url(#area-${s.tone})` }}
                 d={`${runPath(run, x, y)} L${x(run[run.length - 1].i).toFixed(1)},${y(0).toFixed(1)} L${x(run[0].i).toFixed(1)},${y(0).toFixed(1)} Z`}
               />
             ))}

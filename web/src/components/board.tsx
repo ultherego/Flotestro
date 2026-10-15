@@ -78,13 +78,23 @@ export function Board({
   /** The name the arrangement is stored under. */
   screen: string;
   catalogue: BoardEntry[];
-  /** What each widget draws, by key. A key with nothing to draw is not shown. */
+  /** What each widget draws, by key. A key with nothing to draw - undefined,
+      null or the false of a `{condition && ...}` - is not shown. */
   drawn: Record<string, ReactNode>;
 }) {
   const t = useT();
   const toast = useToast();
   const queryClient = useQueryClient();
-  const known = new Set(Object.keys(drawn).filter((key) => drawn[key] !== undefined && drawn[key] !== null));
+  // What this screen has to draw right now. A panel that renders nothing -
+  // because the condition behind it is false, as a form that is not open -
+  // is not placed at all, rather than placed as an empty cell. `false` is
+  // among those: `{open && <Card/>}` yields false, not undefined, and a
+  // board that took it for a node left a hole in the row where a closed
+  // form used to be.
+  const known = new Set(Object.keys(drawn).filter((key) => {
+    const node = drawn[key];
+    return node !== undefined && node !== null && node !== false;
+  }));
   const [editing, setEditing] = useState<BoardWidget[] | null>(null);
   // Which tile is under the hand, and which one it is over: dragging is how
   // a board is arranged, and the arrows it replaced were a click per place.

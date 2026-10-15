@@ -490,7 +490,17 @@ describe("AreaChart", () => {
     const lines = container.querySelectorAll("path.line");
     expect(lines[0].getAttribute("style")).toContain("var(--blue)");
     expect(lines[1].getAttribute("style")).toContain("var(--warn)");
-    expect(container.querySelector("path.area")?.getAttribute("style")).toContain("var(--blue)");
+    // The band under the line is painted with the gradient of its tone,
+    // and the gradient itself is built from that tone's token - so the
+    // theme still decides the colour, through one more hop.
+    expect(container.querySelector("path.area")?.getAttribute("style")).toContain("url(#area-info)");
+    const fade = container.querySelector("#area-info");
+    expect(fade).not.toBeNull();
+    expect(fade?.querySelector("stop")?.getAttribute("stop-color")).toBe("var(--blue)");
+    // It fades: the far end is all but transparent, so the band does not
+    // compete with the gridlines at the foot of the chart.
+    const stops = fade?.querySelectorAll("stop") ?? [];
+    expect(Number(stops[0].getAttribute("stop-opacity"))).toBeGreaterThan(Number(stops[1].getAttribute("stop-opacity")));
   });
 });
 

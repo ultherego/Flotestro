@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { api, loadedItems, LIST_PAGE } from "../lib/api";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
+import { Board } from "../components/board";
 import { ErrorBox, Empty } from "../components/ui";
 import { absoluteTime, relativeTime } from "../lib/format";
 import { Card, PageHeader, Toolbar } from "../components/layout";
@@ -136,10 +137,19 @@ export function FleetCertificates() {
       />
       <FleetCoverage coverage={data} />
 
-      <div className="widgets">
-        {/* The counts cover every certificate the fleet reports, not only
-            the listed ones; the nearest deadline is the leftmost segment. */}
-        <Card className="span-9" title={t("Expiry")} description={t("Every certificate the fleet reports, by how close its deadline is.")}>
+      <Board
+        screen="certificates"
+        catalogue={[
+          { key: "expiry", title: "Expiry", width: 9 },
+          { key: "hosts", title: "Hosts", width: 3 },
+          { key: "trust", title: "Trust", width: 12 },
+          { key: "list", title: "Certificates", width: 9 },
+          { key: "expires", title: "Expires", width: 3 },
+        ]}
+        drawn={{
+          expiry: (
+            <>
+              <Card className="span-9" title={t("Expiry")} description={t("Every certificate the fleet reports, by how close its deadline is.")}>
           <StatusBar segments={[
             { label: t("Expired"), value: expired, tone: "error" },
             { label: t("Urgent"), value: critical, tone: "error" },
@@ -151,7 +161,11 @@ export function FleetCertificates() {
 
         {/* A host that reports none is not a host without certificates: it
             is a host nobody has pointed at a path yet. */}
-        <Card className="span-3" title={t("Hosts")} description={t("{n} of {total} hosts report none", { n: data.hosts_without_certificates, total: data.total_hosts })}>
+            </>
+          ),
+          hosts: (
+            <>
+              <Card className="span-3" title={t("Hosts")} description={t("{n} of {total} hosts report none", { n: data.hosts_without_certificates, total: data.total_hosts })}>
           <Breakdown items={[
             { label: t("Reporting certificates"), value: reporting, tone: "ok" },
             { label: t("Reporting none"), value: data.hosts_without_certificates, tone: "warn" },
@@ -160,10 +174,16 @@ export function FleetCertificates() {
             { label: t("Nothing known"), value: data.unknown_hosts, tone: "unknown" },
           ]} />
         </Card>
-
-        <Trust leaves={items} />
-
-        <Card
+            </>
+          ),
+          trust: (
+            <>
+              <Trust leaves={items} />
+            </>
+          ),
+          list: (
+            <>
+              <Card
           className="span-9"
           flush
           footer={list.hasNextPage && (
@@ -231,8 +251,11 @@ export function FleetCertificates() {
             </table>
           )}
         </Card>
-
-        <Card className="span-3" title={t("Expires")} description={t("When the next waves of deadlines come.")}>
+            </>
+          ),
+          expires: (
+            <>
+              <Card className="span-3" title={t("Expires")} description={t("When the next waves of deadlines come.")}>
           <ExpiryTimeline timeline={data.timeline ?? []} />
           <h4 className="widget-subhead">{t("Renewal")}</h4>
           {/* "Manual" is a finding, "unknown" a missing answer - and the
@@ -246,7 +269,10 @@ export function FleetCertificates() {
           </div>
           <p className="fp-rest">{listed}</p>
         </Card>
-      </div>
+            </>
+          )
+        }}
+      />
     </>
   );
 }

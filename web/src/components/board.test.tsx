@@ -234,3 +234,22 @@ describe("the arrange mode looks like the screen it is arranging", () => {
     expect(/\.widgets\.arranged > div > \* \{[^}]*flex: 1 1 auto/.test(css)).toBe(true);
   });
 });
+
+/* A panel whose condition is false renders nothing, and `{open && <Card/>}`
+   hands the board `false` rather than undefined. Taken for a node it left a
+   cell with nothing in it - a hole in the row where a closed form was. */
+describe("a panel with nothing to draw", () => {
+  it("is left out whether it is undefined, null or false", () => {
+    const stored = {
+      widgets: [{ key: "first", width: 6 }, { key: "second", width: 6 }],
+      present: true,
+    };
+    for (const nothing of [undefined, null, false]) {
+      const known = new Set(Object.keys({ first: <div />, second: nothing }).filter((key) => {
+        const node = ({ first: <div />, second: nothing } as Record<string, unknown>)[key];
+        return node !== undefined && node !== null && node !== false;
+      }));
+      expect(boardToDraw(stored, catalogue, known)).toEqual([{ key: "first", width: 6 }]);
+    }
+  });
+});

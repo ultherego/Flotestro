@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../lib/api";
 import type { Whoami } from "../lib/types";
+import { Board } from "../components/board";
 import { Empty, ErrorBox } from "../components/ui";
 import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
 import { Breakdown, StatusBar } from "../components/widgets";
@@ -77,8 +78,17 @@ export function Tags() {
         help={<p>{t("Every tag the hosts you may read carry, with how many carry it. A tag is set on the host page; here it is found, followed to its hosts and, when it is spelled two ways, renamed on every host at once.")}</p>}
       />
 
-      <div className="widgets">
-        <Card className="span-8" title={t("Catalogue")} description={t("{n} tags on the hosts you may read", { n: items.length })}>
+      <Board
+        screen="tags"
+        catalogue={[
+          { key: "catalogue", title: "Catalogue", width: 8 },
+          { key: "by_key", title: "By key", width: 4 },
+          { key: "list", title: "Tags", width: 12 },
+        ]}
+        drawn={{
+          catalogue: (
+            <>
+              <Card className="span-8" title={t("Catalogue")} description={t("{n} tags on the hosts you may read", { n: items.length })}>
           <StatusBar segments={[
             { label: t("Tags"), value: loaded ? items.length : undefined, tone: "info" },
             { label: t("Plain"), value: loaded ? plain : undefined, tone: "neutral" },
@@ -88,7 +98,11 @@ export function Tags() {
             { label: t("Assignments"), value: loaded ? tagged : undefined, tone: "info" },
           ]} />
         </Card>
-        <Card className="span-4" title={t("By key")} description={t("The keys with the most values.")}>
+            </>
+          ),
+          by_key: (
+            <>
+              <Card className="span-4" title={t("By key")} description={t("The keys with the most values.")}>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : byKey.length === 0 ? (
@@ -104,8 +118,11 @@ export function Tags() {
             onDone={() => setRenaming(null)}
           />
         )}
-
-        <Card className="span-12" flush>
+            </>
+          ),
+          list: (
+            <>
+              <Card className="span-12" flush>
           <Toolbar>
             <input
               type="search"
@@ -164,7 +181,10 @@ export function Tags() {
             </table>
           )}
         </Card>
-      </div>
+            </>
+          )
+        }}
+      />
     </>
   );
 }
