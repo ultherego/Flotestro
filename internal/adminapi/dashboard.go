@@ -37,6 +37,11 @@ type DashboardWidget struct {
 	// and two widgets of one row each stand one under another in the space
 	// a taller neighbour leaves beside them.
 	Height int `json:"height,omitempty"`
+	// Hidden marks a widget somebody took off the screen on purpose. It
+	// stays in the record so that "removed" and "did not exist when this
+	// was arranged" remain two different answers: the panel places a
+	// widget the record says nothing about, and leaves a hidden one off.
+	Hidden bool `json:"hidden,omitempty"`
 }
 
 // DashboardLayout is the stored record, with who wrote it and when.

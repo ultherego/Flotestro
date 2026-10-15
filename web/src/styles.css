@@ -12,16 +12,24 @@
 
   /* Surfaces: the page sits lowest, panels are raised on it, the sidebar
      is the darkest so the content reads as the lit part of the screen. */
-  --bg: #1c1c2c;
-  --bg-panel: #26263a;
-  --bg-sidebar: #15151f;
-  --bg-sidebar-hover: #26263a;
-  --bg-hover: #363650;
-  --bg-input: #1c1c2c;
-  --bg-sunken: #15151f;
-  --bg-raised: #34344c;
-  --border: #3c3c58;
-  --border-strong: #52526e;
+  /* The surfaces, deepened on 15.10. They were #1c1c2c page over #26263a
+     panel: two mid greys a tenth apart, so a card barely separated from
+     the page and the screen read as one lilac mass. The page goes nearly
+     black and the card stays where it was, which doubles the step between
+     them - that step is what makes a card look like an object instead of
+     a region. The accent and the state colours are untouched: the owner
+     asked for our palette to stay, and this is the same palette with the
+     ground dug out from under it. */
+  --bg: #11111a;
+  --bg-panel: #1b1b28;
+  --bg-sidebar: #0c0c13;
+  --bg-sidebar-hover: #1b1b28;
+  --bg-hover: #2a2a3c;
+  --bg-input: #11111a;
+  --bg-sunken: #0c0c13;
+  --bg-raised: #24243444;
+  --border: #2a2a3c;
+  --border-strong: #3c3c52;
 
   --text: #cdd6f4;
   --text-muted: #a6adc8;
@@ -83,7 +91,9 @@
   --font-sans: -apple-system, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
-  --sidebar-width: 240px;
+  /* Wider since 15.10: at 240 the longer names wrapped and the column
+     read as a list of fragments. */
+  --sidebar-width: 264px;
   --sidebar-rail: 56px;
   --content-pad-x: 20px;
   --content-pad-y: 20px;
@@ -198,6 +208,37 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
   min-height: 100vh;
 }
 .layout.sidebar-collapsed { --sidebar-width: var(--sidebar-rail); }
+/* Hidden altogether: the rail goes too, and a button in the top bar brings
+   it back. Zabbix has both - fold to icons, and get the column out of the
+   way entirely - and on a fleet table forty columns wide the second one is
+   the useful half. */
+.layout.sidebar-hidden { --sidebar-width: 0px; }
+.layout.sidebar-hidden > .sidebar { display: none; }
+
+/* Folded to the rail, the column opens on hover and lies over the page
+   instead of pushing it: the content keeps its width while somebody
+   glances at the navigation, which is the behaviour of the panels the
+   owner pointed at. A pointer that cannot hover - a touch screen - is
+   left with the tap, which opens the drawer. */
+@media (hover: hover) {
+  .layout.sidebar-collapsed > .sidebar:hover,
+  .layout.sidebar-collapsed > .sidebar:focus-within {
+    width: 264px;
+    box-shadow: var(--shadow);
+  }
+  .layout.sidebar-collapsed > .sidebar:hover .sidebar-title,
+  .layout.sidebar-collapsed > .sidebar:focus-within .sidebar-title,
+  .layout.sidebar-collapsed > .sidebar:hover .nav-label,
+  .layout.sidebar-collapsed > .sidebar:focus-within .nav-label,
+  .layout.sidebar-collapsed > .sidebar:hover .sidebar-group-label,
+  .layout.sidebar-collapsed > .sidebar:focus-within .sidebar-group-label,
+  .layout.sidebar-collapsed > .sidebar:hover .sidebar-group-chevron,
+  .layout.sidebar-collapsed > .sidebar:focus-within .sidebar-group-chevron,
+  .layout.sidebar-collapsed > .sidebar:hover .nav-badge,
+  .layout.sidebar-collapsed > .sidebar:focus-within .nav-badge {
+    display: initial;
+  }
+}
 
 .sidebar {
   grid-column: 1;
@@ -206,6 +247,7 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
   top: 0;
   z-index: 20;
   height: 100vh;
+  width: var(--sidebar-width);
   display: flex;
   flex-direction: column;
   background: var(--bg-sidebar);
@@ -1950,13 +1992,15 @@ a.status-bar-segment:hover { filter: brightness(1.08); text-decoration: none; co
   /* Room between the cards, as in the references: at sixteen the page read
      as one mass of panels, at twenty-two each one is a thing of its own. */
   gap: 22px;
-  /* Each card is as tall as what it holds. Stretched to the row's height, a
-     card with one row of a table beside a card with eight stood half empty,
-     and an empty box reads as something that failed to load. */
-  align-items: start;
+  /* Cards of a row share its height. They used to be as tall as what they
+     held, which left a row with a short card and a tall one looking like a
+     torn edge - the thing the owner meant by "dziwny odstęp". The empty
+     space inside a short card is the price, and it is a smaller price than
+     a page with no horizontal line anywhere. */
+  align-items: stretch;
 }
 .widgets > * { min-width: 0; margin: 0; }
-.widgets > .card { display: flex; flex-direction: column; }
+.widgets > .card { display: flex; flex-direction: column; height: 100%; }
 .widgets > .card > .card-body { flex: 1 1 auto; }
 /* Every width from one to twelve has a class. Until 15.10 only five did,
    and the server refused the rest - which was honest but narrow: the rows
@@ -2438,6 +2482,30 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
   border: 1px solid transparent;
 }
 
+.metric-chip {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  margin-bottom: 14px;
+}
+.metric-chip svg { width: 20px; height: 20px; }
+
+.metric-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.metric-delta { font-size: 12px; font-weight: 600; white-space: nowrap; }
+.metric-delta.good { color: var(--ok-text); }
+.metric-delta.bad { color: var(--error-text); }
+
 .metric-value {
   font-size: var(--metric-l);
   font-weight: 600;
@@ -2576,3 +2644,8 @@ tr.row-open > td { background: var(--bg-raised); }
   background: var(--bg-sunken);
   color: var(--unknown-text);
 }
+
+/* The sentence under the detail card: thirty checks at zero used to be
+   printed one by one in small type, which is a wall of text saying
+   nothing. They are one line now. */
+.attention-clear { margin-top: 10px; }

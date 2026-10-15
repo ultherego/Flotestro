@@ -6114,4 +6114,7 @@ export const pl: Record<string, string> = {
   "{n} pending": "{n} oczekujących",
   "{n} silenced": "{n} wyciszonych",
   "{n} offline": "{n} offline",
+  // Kafle Dashboardu po przebudowie 15.10.
+  "Waiting on a person": "Czeka na człowieka",
+  "{n} other checks are clear.": "Pozostałe {n} kontroli bez zastrzeżeń.",
 };

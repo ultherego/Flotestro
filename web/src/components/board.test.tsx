@@ -53,7 +53,33 @@ describe("boardToDraw", () => {
       widgets: [{ key: "from_the_future", width: 6 }, { key: "first", width: 6 }],
       present: true,
     };
-    expect(boardToDraw(stored, catalogue, known)).toEqual([{ key: "first", width: 6 }]);
+    // The unknown key is skipped. "second" is in the catalogue and absent
+    // from the record, so it is treated as a panel that arrived after the
+    // arrangement was made and is placed at the end - see below.
+    expect(boardToDraw(stored, catalogue, known))
+      .toEqual([{ key: "first", width: 6 }, { key: "second", width: 6 }]);
+  });
+
+  /* A panel added by an upgrade has to appear. Until 15.10 it did not: the
+     screen drew the stored list and nothing else, so every widget this
+     product ever adds would have been invisible to every installation that
+     had arranged that screen once - and nobody would know to go looking.
+     A panel somebody took off carries `hidden` and stays off, which is how
+     "removed" and "did not exist yet" stay two different answers. */
+  describe("a panel the stored arrangement says nothing about", () => {
+    it("is placed at the end, at its own width", () => {
+      const stored = { widgets: [{ key: "second", width: 4 }], present: true };
+      expect(boardToDraw(stored, catalogue, known))
+        .toEqual([{ key: "second", width: 4 }, { key: "first", width: 12 }]);
+    });
+
+    it("stays away when it was taken off on purpose", () => {
+      const stored = {
+        widgets: [{ key: "second", width: 4 }, { key: "first", width: 12, hidden: true }],
+        present: true,
+      };
+      expect(boardToDraw(stored, catalogue, known)).toEqual([{ key: "second", width: 4 }]);
+    });
   });
 
   /* A widget whose screen has nothing to draw for it - a card that renders

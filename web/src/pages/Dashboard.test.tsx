@@ -156,7 +156,8 @@ describe("the first-run card", () => {
     summary = { ...EMPTY_FLEET, hosts: 3 };
     checklist = list([step("hosts", "done", "3 hosts enrolled", "/hosts")]);
     draw(<Dashboard />);
-    await waitFor(() => expect(screen.getByText("3 hosts you can see")).toBeInTheDocument());
+    // The fleet is named by its tile now, not by a sentence above it.
+    await waitFor(() => expect(screen.getByTestId("metric-Hosts")).toHaveTextContent("3"));
     expect(screen.queryByText("No host is enrolled yet")).not.toBeInTheDocument();
   });
 });
@@ -174,43 +175,48 @@ describe("the dashboard's three zones", () => {
     hosts_drifted: 0, operations_unconfirmed: 0, failed_jobs_24h: 0, reboot_required: 0,
   };
 
-  it("answers in one line when the fleet needs nothing", async () => {
+  it("says a quiet fleet is quiet in its tiles, and draws no list of detail", async () => {
     summary = quietFleet as typeof summary;
     draw(<Dashboard />);
-    // The zone is drawn before the counters arrive, so the wait is for the
-    // answer and not for the element.
-    await waitFor(() => expect(screen.getByTestId("verdict")).toHaveTextContent("Nothing needs a decision"));
-    expect(screen.getByTestId("verdict")).toHaveTextContent("12 hosts you can see");
-    // The zone for what needs a person is not an empty heading: it is absent.
-    expect(screen.queryByTestId("needs-attention")).toBeNull();
+    // The four tiles are the answer: the fleet, how much of it answers,
+    // what waits for a person, what the hosts found. A sentence used to
+    // say this above them and a wall of thirty counters below.
+    await waitFor(() => expect(screen.getByTestId("metric-Hosts")).toHaveTextContent("12"));
+    expect(screen.getByTestId("metric-Waiting on a person")).toHaveTextContent("0");
+    expect(screen.getByTestId("metric-Found on the hosts")).toHaveTextContent("0");
+    // Nothing is wrong, so the card naming what is wrong is not drawn.
+    expect(screen.queryByText("What needs you")).toBeNull();
   });
 
-  it("counts the decisions and the findings apart in its headline", async () => {
+  it("counts the decisions and the findings apart, in two tiles of their own", async () => {
     summary = {
       ...quietFleet,
       jobs_awaiting_approval: 2, operations_unconfirmed: 1,
       failed_jobs_24h: 3, reboot_required: 4,
     } as typeof summary;
     draw(<Dashboard />);
-    // Three waiting on a person, seven found on the hosts.
-    await waitFor(() => expect(screen.getByTestId("verdict")).toHaveTextContent("3 decisions waiting"));
-    expect(screen.getByTestId("verdict")).toHaveTextContent("7 things need a look");
-    const zone = screen.getByTestId("needs-attention");
-    expect(zone).toHaveTextContent("Decisions nobody has taken");
-    expect(zone).toHaveTextContent("Found on the hosts");
+    // Three waiting on a person, seven found on the hosts: an approval is
+    // somebody's decision, a finding is a state of a host, and the two are
+    // never added together.
+    await waitFor(() => expect(screen.getByTestId("metric-Waiting on a person")).toHaveTextContent("3"));
+    expect(screen.getByTestId("metric-Found on the hosts")).toHaveTextContent("7");
+    // The detail is named, and only where it is not zero.
+    expect(screen.getByText("What needs you")).toBeInTheDocument();
   });
 
   /* The rule the whole panel keeps: a count nobody could take is not a
      count of zero. A refused security sweep has to keep the zone on the
      screen, with a dash where the number would be. */
-  it("keeps the zone when a count could not be taken at all", async () => {
+  it("keeps the detail on screen when a count could not be taken at all", async () => {
     summary = quietFleet as typeof summary;
     security = Promise.reject(new Error("the sweep is refused for this reader"));
     draw(<Dashboard />);
-    await waitFor(() => expect(screen.getByTestId("needs-attention")).toBeInTheDocument());
-    const zone = screen.getByTestId("needs-attention");
-    expect(zone).toHaveTextContent("Security findings");
-    expect(zone.textContent).toContain("\u2014");
+    // Everything else is zero, so the only reason this card exists is the
+    // count nobody could take - which is the point: unknown is not zero,
+    // and it is never summed into "the other checks are clear".
+    await waitFor(() => expect(screen.getByText("What needs you")).toBeInTheDocument());
+    expect(screen.getByText("Security findings")).toBeInTheDocument();
+    expect(document.body.textContent).toContain("\u2014");
   });
 
   it("keeps its three lists as lists, each saying what is in it", async () => {

@@ -20,6 +20,13 @@ export type BoardWidget = {
   width: number;
   /** In rows of the board; absent means the one row every tile starts with. */
   height?: number;
+  /**
+   * Taken off the screen on purpose. It stays in the arrangement so that
+   * "somebody removed this" and "this did not exist when the arrangement
+   * was made" remain two different answers - which is what lets a panel
+   * added by an upgrade appear without undoing anybody's decision.
+   */
+  hidden?: boolean;
 };
 
 export type StoredBoard = {
@@ -69,7 +76,19 @@ export function boardToDraw(
   if (!stored || !stored.present || stored.widgets.length === 0) {
     return catalogue.filter((one) => known.has(one.key)).map((one) => ({ key: one.key, width: one.width }));
   }
-  return stored.widgets.filter((one) => known.has(one.key));
+  const placed = stored.widgets.filter((one) => known.has(one.key) && !one.hidden);
+  // A panel the stored arrangement says nothing about did not exist when
+  // somebody arranged this screen: it arrived with an upgrade. It goes at
+  // the end at its own width, because the alternative - leaving it out -
+  // means every panel this product ever adds is invisible to every
+  // installation that has ever arranged a screen, and nobody would know
+  // to go looking for it. A panel somebody removed carries hidden and
+  // stays away; the two are deliberately not the same record.
+  const decided = new Set(stored.widgets.map((one) => one.key));
+  const arrived = catalogue
+    .filter((one) => known.has(one.key) && !decided.has(one.key))
+    .map((one) => ({ key: one.key, width: one.width }));
+  return [...placed, ...arrived];
 }
 
 export function Board({
@@ -147,12 +166,18 @@ export function Board({
   });
 
   const current = editing ?? boardToDraw(layout.data, catalogue, known);
+  // The editor works on what is on the screen; the hidden ones ride along
+  // in the saved record so the decision to remove them is not lost.
+  const shown = current.filter((one) => !one.hidden);
   const titleOf = (key: string) => catalogue.find((one) => one.key === key)?.title ?? key;
   const move = (index: number, by: number) => reorder(index, index + by);
+  // The editor's indices are into what is on the screen; the record also
+  // holds the hidden ones, so a change is applied by key rather than by
+  // position - with hidden panels in the list, position lies.
   const resize = (index: number, change: Partial<BoardWidget>) => {
-    const next = [...current];
-    next[index] = { ...next[index], ...change };
-    setEditing(next);
+    const key = shown[index]?.key;
+    if (!key) return;
+    setEditing(current.map((one) => (one.key === key ? { ...one, ...change } : one)));
   };
   /**
    * The tile that was picked up lands where it was dropped, and everything
@@ -161,14 +186,18 @@ export function Board({
    * three places it leaves the ones in between where they were.
    */
   const reorder = (from: number, to: number) => {
-    if (to < 0 || to >= current.length || from === to) return;
-    const next = [...current];
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
-    setEditing(next);
+    if (to < 0 || to >= shown.length || from === to) return;
+    const order = [...shown];
+    const [moved] = order.splice(from, 1);
+    order.splice(to, 0, moved);
+    // The visible ones in their new order, then the hidden ones, so the
+    // record keeps every decision and the screen keeps the arrangement.
+    setEditing([...order, ...current.filter((one) => one.hidden)]);
   };
+  // What the editor may add back: a panel this screen can draw that is not
+  // on it - whether it was never placed or deliberately taken off.
   const absent = catalogue.filter(
-    (one) => known.has(one.key) && !current.some((placed) => placed.key === one.key),
+    (one) => known.has(one.key) && !shown.some((placed) => placed.key === one.key),
   );
 
   return (
@@ -212,7 +241,12 @@ export function Board({
                   value=""
                   onChange={(event) => {
                     const one = catalogue.find((item) => item.key === event.target.value);
-                    if (one) setEditing([...current, { key: one.key, width: one.width }]);
+                    if (!one) return;
+                    // It may be in the record already, hidden; putting it
+                    // back is unhiding it, not placing a second copy.
+                    setEditing(current.some((placed) => placed.key === one.key)
+                      ? current.map((placed) => placed.key === one.key ? { ...placed, hidden: false } : placed)
+                      : [...current, { key: one.key, width: one.width }]);
                   }}
                   data-testid="board-add"
                 >
@@ -243,7 +277,7 @@ export function Board({
         }}
         data-testid="board-grid"
       >
-        {current.map((placed, index) => (
+        {shown.map((placed, index) => (
           <div
             key={placed.key}
             style={{ gridRow: `span ${placed.height ?? 1}` }}
@@ -329,7 +363,11 @@ export function Board({
                 >
                   ← →
                 </span>
-                <button className="secondary" onClick={() => setEditing(current.filter((one) => one.key !== placed.key))}>
+                <button
+                  className="secondary"
+                  onClick={() => setEditing(current.map((one) =>
+                    one.key === placed.key ? { ...one, hidden: true } : one))}
+                >
                   {t("Remove")}
                 </button>
               </div>

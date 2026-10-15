@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Icon, type IconName } from "./icons";
 import { useT } from "../i18n";
 
 /**
@@ -20,7 +21,7 @@ import { useT } from "../i18n";
 export type MetricState = "ok" | "warn" | "error" | "unknown";
 
 export function MetricTile({
-  label, value, unit, state, hero = false, size = "l", footnote, span,
+  label, value, unit, state, hero = false, size = "l", footnote, span, icon, delta,
 }: {
   label: string;
   /** null or undefined is unknown. A number is shown as given. */
@@ -34,6 +35,14 @@ export function MetricTile({
       widget grid. Without it the tile is one column wide, which is what a
       grid child with no span class is - and which is never what was meant. */
   span?: number;
+  /** The mark above the number, in a quiet round chip. It names the subject
+      so the eye can find the right tile in a row of four without reading
+      four labels. */
+  icon?: IconName;
+  /** How it moved, beside the label: the direction decides the colour, and
+      the caller says whether up is good - more hosts online is, more hosts
+      offline is not. */
+  delta?: { text: string; direction: "up" | "down"; good?: boolean };
 }) {
   const t = useT();
   const unknown = value === null || value === undefined;
@@ -45,11 +54,24 @@ export function MetricTile({
 
   return (
     <div className={classes.join(" ")} data-testid={`metric-${label}`} data-state={shown ?? "none"}>
+      {icon && (
+        <span className="metric-chip" aria-hidden="true">
+          <Icon name={icon} />
+        </span>
+      )}
       <div className="metric-value">
         {unknown ? <span className="metric-unknown" title={t("unknown")}>—</span> : value}
         {!unknown && unit ? <span className="metric-unit">{unit}</span> : null}
       </div>
-      <div className="metric-label">{unknown ? t("{label}: unknown", { label }) : label}</div>
+      <div className="metric-foot">
+        <span className="metric-label">{unknown ? t("{label}: unknown", { label }) : label}</span>
+        {delta && !unknown && (
+          <span className={`metric-delta ${delta.good === false ? "bad" : "good"}`}>
+            {delta.text}
+            <span aria-hidden="true">{delta.direction === "up" ? " ↑" : " ↓"}</span>
+          </span>
+        )}
+      </div>
       {footnote ? <div className="metric-footnote">{footnote}</div> : null}
     </div>
   );

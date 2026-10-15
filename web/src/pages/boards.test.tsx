@@ -80,7 +80,11 @@ describe("a screen that was put on a board", () => {
 
       const grid = screen.getByTestId("board-grid");
       const expected = layouts[one.screen];
-      expect(grid.children).toHaveLength(expected.length);
+      // The stored panels come first, in their order and at their widths.
+      // Anything the record says nothing about follows them: a panel added
+      // by an upgrade has to appear, or every widget this product ever adds
+      // is invisible to an installation that arranged the screen once.
+      expect(grid.children.length).toBeGreaterThanOrEqual(expected.length);
       expected.forEach((widget, index) => {
         expect((grid.children[index] as HTMLElement).className).toContain(`span-${widget.width}`);
       });
