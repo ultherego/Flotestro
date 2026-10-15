@@ -6085,4 +6085,38 @@ export const pl: Record<string, string> = {
   "hosts offer it": "hostów to oferuje",
   "Show the operations {requirement} blocks": "Pokaż operacje blokowane przez {requirement}",
   "Hide the operations {requirement} blocks": "Ukryj operacje blokowane przez {requirement}",
+  // Układ ekranu: wspólny dla całej instalacji, więc nazwany żargonem
+  // administratora, nie marketingu.
+  "Alerts by severity": "Alerty wg ważności",
+  "Back to the panel's own": "Przywróć układ fabryczny",
+  "Earlier arrangements": "Wcześniejsze układy",
+  "Everybody goes back to the arrangement the panel ships with.": "Wszyscy wracają do układu, z którym panel jest wydawany.",
+  "Somebody else arranged this screen while you were editing it. What they stored is on screen now; make your change again on top of it.": "Ktoś inny ułożył ten ekran w trakcie Twojej edycji. Na ekranie jest teraz jego układ; nanieś swoją zmianę na to, co widzisz.",
+  "The screen is back to the arrangement the panel ships with.": "Ekran wrócił do układu fabrycznego.",
+  "why this arrangement (for the trail)": "po co ten układ (do dziennika)",
+  // Rekord tożsamości i jego zakładki.
+  "This identity has no tokens.": "Ta tożsamość nie ma tokenów.",
+  "Tokens and sessions": "Tokeny i sesje",
+  // Zakres, po którym policzono rozbicie — nie po stronie, tylko po całym
+  // dopasowaniu wyszukiwania.
+  "among the {n} disabled identities": "spośród {n} wyłączonych tożsamości",
+  "over all {n} that match, not only this page": "po wszystkich {n} pasujących, nie tylko po tej stronie",
+  // Kafel pomiaru: wartość nieznana nigdy nie jest zerem.
+  "{label}: unknown": "{label}: nieznane",
+  // Kafle-bohaterowie przeglądu hosta.
+  "Disk used": "Zajętość dysku",
+  "of": "z",
+  // Podpisy pod liczbami na Dashboardzie: mówią, czego liczba dotyczy.
+  "hosts affected": "hostów dotkniętych",
+  "hosts waiting": "hostów czeka",
+  // Co zrobiono z alertami — pod ważnościami, nie obok nich.
+  "{n} acknowledged": "{n} przyjętych",
+  "{n} pending": "{n} oczekujących",
+  "{n} silenced": "{n} wyciszonych",
+  "{n} offline": "{n} offline",
+  // Kafle Dashboardu po przebudowie 15.10.
+  "Waiting on a person": "Czeka na człowieka",
+  "{n} other checks are clear.": "Pozostałe {n} kontroli bez zastrzeżeń.",
+  "+{n} at zero": "+{n} na zerze",
+  "Drag to resize": "Przeciągnij, by zmienić rozmiar",
 };

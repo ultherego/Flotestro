@@ -86,10 +86,23 @@ func TestARoleThisInstallationDefinedGrantsWhatItSays(t *testing.T) {
 	holder := h.withToken(token)
 
 	var whoami struct {
+		ID          string   `json:"id"`
 		Roles       []string `json:"roles"`
 		Permissions []string `json:"permissions"`
 	}
 	holder.get("/api/v1/whoami", &whoami)
+	// The binding has to go before the role does: a role somebody holds
+	// cannot be deleted, and an identity cannot be deleted at all, so
+	// without this the role outlives every run and the removal above
+	// answers role_in_use. Cleanups run in reverse order, so this one -
+	// registered later - runs before the role's.
+	t.Cleanup(func() {
+		if whoami.ID != "" {
+			h.do(http.MethodDelete, "/api/v1/principals/"+whoami.ID+"/roles/"+name, map[string]any{
+				"reason": "the integration suite frees the role it defined",
+			}, nil, http.StatusNoContent)
+		}
+	})
 	if len(whoami.Roles) != 1 || whoami.Roles[0] != name {
 		t.Errorf("the identity holds %v rather than the role it was given", whoami.Roles)
 	}

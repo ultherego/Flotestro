@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import type { Authority } from "../lib/types";
+import { Board } from "../components/board";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { Actions, Card, Field, FieldGrid } from "../components/layout";
 import { Breakdown, StatusBar, type WidgetTone } from "../components/widgets";
@@ -95,8 +96,18 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
   // The trust set and the step that changes it stand side by side: the
   // operator reads the fingerprints on the left and acts on the right.
   return (
-    <div className="widgets">
-      <Card className="span-8" title={t("Trust set")} description={t("{n} authorities", { n: list.length })}>
+    <Board
+      screen="fleet_ca"
+      catalogue={[
+        { key: "trust_set", title: "Trust set", width: 8 },
+        { key: "by_authority", title: "Certificates by authority", width: 4 },
+        { key: "fleet_ca", title: "Fleet CA", width: 8 },
+        { key: "rotation", title: "Rotation", width: 4 },
+      ]}
+      drawn={{
+        trust_set: (
+          <>
+            <Card className="span-8" title={t("Trust set")} description={t("{n} authorities", { n: list.length })}>
         <StatusBar segments={[
           { label: t("signing"), value: count("active"), tone: "ok" },
           { label: t("prepared"), value: count("pending"), tone: "warn" },
@@ -107,7 +118,11 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
       {/* Which authority the agents' certificates hang on: a retired CA
           with hosts still holding its certificates cannot leave the trust
           set yet, and that is read here before the row says so. */}
-      <Card className="span-4" title={t("Certificates by authority")} description={t("Agent certificates each authority issued.")}>
+          </>
+        ),
+        by_authority: (
+          <>
+            <Card className="span-4" title={t("Certificates by authority")} description={t("Agent certificates each authority issued.")}>
         {!query.data ? (
           <Empty>{t("Loading…")}</Empty>
         ) : holding.length === 0 ? (
@@ -120,8 +135,11 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
           }))} />
         )}
       </Card>
-
-      <Card
+          </>
+        ),
+        fleet_ca: (
+          <>
+            <Card
         className="span-8"
         title={t("Fleet CA")}
         description={t("Agent certificates are issued by the fleet CA. Rotation happens in two phases: the new CA first reaches agents as their certificates are renewed, and only then takes over signing.")}
@@ -168,8 +186,11 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
           </tbody>
         </table>
       </Card>
-
-      <Card
+          </>
+        ),
+        rotation: (
+          <>
+            <Card
         className="span-4"
         title={pending ? t("Phase 2: hand over signing") : t("Phase 1: prepare a new CA")}
         description={pending
@@ -204,7 +225,10 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
           </Field>
         </FieldGrid>
       </Card>
-    </div>
+          </>
+        )
+      }}
+    />
   );
 }
 

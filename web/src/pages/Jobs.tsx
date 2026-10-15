@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, loadedItems, LIST_PAGE, type Collection, type Page } from "../lib/api";
 import { useDebounced } from "../lib/debounce";
 import { bytes, toInstant } from "../lib/format";
+import { Board } from "../components/board";
 import { PlanSummary } from "../components/plan";
 import type { Attempt, Campaign, FleetActivity, Job } from "../lib/types";
 import { ErrorBox, ErrorCode, Time, ProgressBar, Empty, JobState, stateName } from "../components/ui";
@@ -346,8 +347,18 @@ export function Jobs() {
         help={<p>{t("One row is one operation on one host. The plan hash covers the operation and its payload, so an approval granted for one plan cannot be spent on another.")}</p>}
       />
 
-      <div className="widgets">
-        <Card className="span-12" title={t("State")} description={listed}>
+      <Board
+        screen="jobs"
+        catalogue={[
+          { key: "state", title: "State", width: 12 },
+          { key: "per_hour", title: "Operations, last 24 h", width: 8 },
+          { key: "by_operation", title: "By operation", width: 4 },
+          { key: "jobs", title: "Jobs", width: 12 },
+        ]}
+        drawn={{
+          state: (
+            <>
+              <Card className="span-12" title={t("State")} description={listed}>
           <StatusBar segments={[
             { label: t("Awaiting approval"), value: awaiting, tone: "warn" },
             { label: t("Queued"), value: queued, tone: "neutral" },
@@ -357,8 +368,11 @@ export function Jobs() {
             { label: t("Canceled"), value: canceled, tone: "unknown" },
           ]} />
         </Card>
-
-        <Card className="span-8" title={t("Operations, last 24 h")} description={t("Finished per hour, by outcome.")}>
+            </>
+          ),
+          per_hour: (
+            <>
+              <Card className="span-8" title={t("Operations, last 24 h")} description={t("Finished per hour, by outcome.")}>
           {a ? (
             <BarChart
               labels={a.hours.map(hourLabel)}
@@ -373,8 +387,11 @@ export function Jobs() {
             <p className="fp-blank">{t("The last day could not be counted.")}</p>
           ) : <Empty>{t("Loading…")}</Empty>}
         </Card>
-
-        <Card className="span-4" title={t("By operation")} description={listed}>
+            </>
+          ),
+          by_operation: (
+            <>
+              <Card className="span-4" title={t("By operation")} description={listed}>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : shownOperations.length === 0 ? (
@@ -388,8 +405,11 @@ export function Jobs() {
             </>
           )}
         </Card>
-
-        <Card className="span-12" flush>
+            </>
+          ),
+          jobs: (
+            <>
+              <Card className="span-12" flush>
           <Toolbar end={<>
             <span>{t("{n} listed", { n: jobs.length })}</span>
             <PageSizeSelect value={pageSize} onChange={setPageSize} />
@@ -681,7 +701,11 @@ export function Jobs() {
             </p>
           )}
         </Card>
-      </div>
+            </>
+          )
+        }}
+      />
+
     </>
   );
 }

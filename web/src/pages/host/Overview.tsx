@@ -4,6 +4,8 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { Time, OptionalFlag, OptionalNumber, Empty, ErrorBox, ErrorCode, JobState } from "../../components/ui";
 import { Icon, type IconName } from "../../components/icons";
 import { Meter } from "../../components/widgets";
+import { MetricTile } from "../../components/MetricTile";
+import { Board } from "../../components/board";
 import { api, ApiError, loadedItems } from "../../lib/api";
 import { bytes, relativeTime } from "../../lib/format";
 import {
@@ -13,7 +15,7 @@ import {
 } from "../../lib/types";
 import {
   Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader, ModulePage,
-  Section, Summary, Table, Widgets, countWhere, orderReady, refusalOf, registryOrder, usageTone, useHost, useModule,
+  Section, Summary, Table, countWhere, orderReady, refusalOf, registryOrder, usageTone, useHost, useModule,
   type RegistryOrder,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
@@ -40,6 +42,27 @@ type SystemState = {
  */
 const OVERVIEW_CHANGES = ["system.hostname.set", "host.quarantine", "host.quarantine.release", "host.decommission"];
 
+/**
+ * How full the root filesystem is, and whether that is a condition.
+ *
+ * Three answers rather than two: a host that has not reported its disk is
+ * unknown, not empty - and the difference matters most exactly here, where
+ * a nought would read as "plenty of room" on a host nobody can see.
+ *
+ * The thresholds are the ones an operator acts on: past ninety per cent a
+ * full disk is a matter of hours, past eighty it is a matter of planning.
+ */
+export function diskPressure(total?: number, free?: number): {
+  used?: number;
+  share?: number;
+  state?: "ok" | "warn" | "error";
+} {
+  if (total === undefined || free === undefined || total <= 0) return {};
+  const used = total - free;
+  const share = used / total;
+  return { used, share, state: share > 0.9 ? "error" : share > 0.8 ? "warn" : "ok" };
+}
+
 export function Overview() {
   const t = useT();
   const host = useHost();
@@ -62,9 +85,9 @@ export function Overview() {
   // A host that has not reported its adapters has an unknown registry,
   // not an empty one: the bar shows dashes until the first report.
   const adapters = host.capabilities?.length ? host.capabilities : undefined;
-  const rootUsed = hardware?.root_fs_bytes !== undefined && hardware.root_fs_free_bytes !== undefined
-    ? hardware.root_fs_bytes - hardware.root_fs_free_bytes
-    : undefined;
+  const root = diskPressure(hardware?.root_fs_bytes, hardware?.root_fs_free_bytes);
+  const rootUsed = root.used;
+  const rootShare = root.share;
 
   return (
     <ModulePage>
@@ -74,10 +97,53 @@ export function Overview() {
       />
       <ModuleFreshness fragment={module.data} />
 
-      <Widgets>
+      <Board
+        screen="host_overview"
+        catalogue={[
+          { key: "disk", title: "Disk used", width: 4 },
+          { key: "memory", title: "Memory", width: 4 },
+          { key: "cores", title: "CPU cores", width: 4 },
+          { key: "adapters_bar", title: "Adapters at a glance", width: 7 },
+          { key: "attention", title: "Needs attention", width: 5 },
+          { key: "system", title: "System", width: 7 },
+          { key: "hardware", title: "Hardware", width: 5 },
+          { key: "notes", title: "Notes", width: 12 },
+          { key: "lifecycle", title: "Lifecycle", width: 12 },
+          { key: "adapters", title: "Adapters", width: 12 },
+          { key: "recent", title: "Recent activity", width: 12 },
+        ]}
+        drawn={{
+          disk: (
+            <>
+              <MetricTile
+          label={t("Disk used")}
+          value={rootShare === undefined ? null : Math.round(rootShare * 100)}
+          unit="%"
+          state={root.state}
+          footnote={rootUsed === undefined || hardware?.root_fs_bytes === undefined
+            ? undefined
+            : `${bytes(rootUsed)} ${t("of")} ${bytes(hardware.root_fs_bytes)}`}
+          size="l"
+          span={4}
+        />
+            </>
+          ),
+          memory: (
+            <>
+              <MetricTile label={t("Memory")} value={hardware?.memory_bytes === undefined ? null : bytes(hardware.memory_bytes)} size="l" span={4} />
+            </>
+          ),
+          cores: (
+            <>
+              <MetricTile label={t("CPU cores")} value={hardware?.cpu_cores ?? null} size="l" span={4} />
+
         {/* The two bars are the host read from across the room: what the
             panel can do here, and what wants a decision. */}
-        <Summary
+            </>
+          ),
+          adapters_bar: (
+            <>
+              <Summary
           title={t("Adapters")}
           description={t("What the panel can read and change on this host.")}
           span={7}
@@ -87,7 +153,11 @@ export function Overview() {
             { label: t("unavailable"), value: countWhere(adapters, (a) => !a.available), tone: "neutral" },
           ]}
         />
-        <Summary
+            </>
+          ),
+          attention: (
+            <>
+              <Summary
           title={t("Needs attention")}
           description={t("Counted by the agent on its last report.")}
           span={5}
@@ -106,8 +176,11 @@ export function Overview() {
             </p>
           )}
         </Summary>
-
-        <Section title={t("System")} span={7} flush>
+            </>
+          ),
+          system: (
+            <>
+              <Section title={t("System")} span={7} flush>
           <Facts>
             <Fact label={t("Hostname")}><span className="hm-mono">{host.hostname}</span></Fact>
             <Fact label={t("System")}>{host.os_distribution} {host.os_version} ({host.os_family})</Fact>
@@ -211,8 +284,11 @@ export function Overview() {
           </Facts>
           <RenameHost host={host} reported={module.data?.payload?.hostname} />
         </Section>
-
-        <Section title={t("Hardware")} span={5} flush>
+            </>
+          ),
+          hardware: (
+            <>
+              <Section title={t("Hardware")} span={5} flush>
           {hardware ? (
             <Facts>
               <Fact label={t("CPU cores")}>{hardware.cpu_cores ?? "—"}</Fact>
@@ -240,7 +316,11 @@ export function Overview() {
         {/* What fits no other field: the ticket, the quirk, whom to call.
             Recorded under the tag right like the owner, and kept whole in
             the trail on every change. */}
-        <Section
+            </>
+          ),
+          notes: (
+            <>
+              <Section
           title={t("Notes")}
           description={t("What an operator wrote about this host that fits no other field. Free text; every change goes to the audit trail with the previous text.")}
           span={12}
@@ -250,7 +330,11 @@ export function Overview() {
 
         {/* The trust in the host: its state, the decision behind it, and
             the one change that cannot be undone. */}
-        <Section
+            </>
+          ),
+          lifecycle: (
+            <>
+              <Section
           title={t("Lifecycle")}
           description={t("Whether the panel trusts this host, restoring its identity, and ending that trust.")}
           span={12}
@@ -258,15 +342,22 @@ export function Overview() {
         >
           <Lifecycle host={host} />
         </Section>
-
-        <Section title={t("Adapters")} count={(host.capabilities ?? []).length} span={12} flush>
+            </>
+          ),
+          adapters: (
+            <>
+              <Section title={t("Adapters")} count={(host.capabilities ?? []).length} span={12} flush>
           <Adapters host={host} />
         </Section>
 
         {/* The history of the host from every record the panel keeps,
             lined up by time: what ran, what failed, who did what and when
             the host was last seen. */}
-        <Section
+            </>
+          ),
+          recent: (
+            <>
+              <Section
           title={t("Recent activity")}
           description={t("Tasks, audit entries, sessions, campaigns and alerts of this host, newest first.")}
           span={12}
@@ -274,7 +365,10 @@ export function Overview() {
         >
           <RecentActivity host={host} />
         </Section>
-      </Widgets>
+            </>
+          )
+        }}
+      />
     </ModulePage>
   );
 }

@@ -40,7 +40,10 @@ type accessHolder struct {
 	// PrincipalID is empty for somebody the panel has never seen: the
 	// directory lets them in, and the record is made at their first sign-in.
 	PrincipalID string `json:"principal_id,omitempty"`
-	// SignedIn says whether the panel has a record of them at all.
+	// SignedIn says whether this person has actually been here. A record on
+	// its own is not an answer to that: a role granted in advance writes one
+	// before its owner ever arrives, and until their first sign-in adopts it
+	// the record is a reservation, not a visit.
 	SignedIn bool `json:"signed_in"`
 	// Groups are the directory groups of theirs that a mapping names. The
 	// groups that grant nothing are left out: this screen is about access.
@@ -99,8 +102,9 @@ func (s *Server) handleAccessHolders(w http.ResponseWriter, r *http.Request) {
 		bindings := bindingsOf[principal.ID]
 		holder := &accessHolder{
 			Subject: principal.Subject, DisplayName: principal.DisplayName,
-			Kind: principal.Kind, PrincipalID: principal.ID, SignedIn: true,
-			Roles: []holderRole{},
+			Kind: principal.Kind, PrincipalID: principal.ID,
+			SignedIn: principal.AwaitingIssuer == "",
+			Roles:    []holderRole{},
 		}
 		for _, binding := range bindings {
 			holder.Roles = append(holder.Roles, holderRole{

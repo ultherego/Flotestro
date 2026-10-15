@@ -8,6 +8,72 @@ day the tag was published.
 
 ### Added
 
+- **The appearance of the panel was rewritten.** One stylesheet, laid out as
+  a system rather than grown as a pile: a reset, the tokens, the shell, the
+  primitives, the readings and the screens. Every margin, padding and gap is
+  a step of one scale; every responsive decision is taken on one ladder of
+  five widths, from a phone to 4k; no element is given a height, every grid
+  and flex child may shrink, and a table that cannot fit scrolls inside its
+  card instead of widening the page. A bar in a breakdown has a track of its
+  own beside its label rather than under it, which is what made Fleet
+  composition unreadable.
+- **A panel is taken hold of and put where it is wanted.** In the arrange
+  mode each panel grows a bar along its top and a corner at its bottom
+  right: the bar moves it anywhere on the twelve-column grid, the corner
+  sets its width and height together, both snapping to the grid, and the
+  keyboard does the same work. A screen nobody has dragged is still arranged
+  by order alone, and the first drag writes down the places that order
+  already had, so nothing jumps under the hand.
+- **A panel added by an upgrade appears on a screen somebody arranged long
+  ago**, beside the panels it ships next to, instead of staying invisible
+  for ever. One somebody removed stays removed: the arrangement records the
+  removal, so "removed" and "did not exist yet" are two different answers.
+
+- **Any panel of any screen can be moved, resized and put back.** The
+  arrangement of a screen - which panels it shows, their order, their width
+  in the twelve columns and their height in rows - is a setting of the
+  installation: one person arranges it and everybody who opens that screen
+  sees it. Every width from one to twelve is allowed now rather than five,
+  and a panel given a height keeps it and scrolls inside itself, so a list
+  that grows does not push everything below it down the screen. Settings →
+  Users is the first screen on it.
+- **Arranging a screen is its own right.** `settings.layout.write`, held by
+  `platform_admin` and grantable to a role of the installation's own. It used
+  to be authorised by `settings.advertise.write`, which meant "may change the
+  address the agents dial" and "may rearrange everyone's screen" were one
+  grant.
+- **An arrangement is written like any change that reaches other people.**
+  With a reason the audit trail keeps, against the revision it was read at -
+  so a second administrator editing the same screen is refused with
+  `layout_changed` instead of silently losing the first one's work - and with
+  the ten previous arrangements kept, so one that made a screen worse can be
+  put back. `DELETE /api/v1/settings/layout/{screen}` returns a screen to the
+  arrangement the panel ships with.
+
+### Changed
+
+- **A row of Settings → Users shows facts and opens a record.** It carried
+  seven buttons - Remove, Revoke, Grant role, Issue token, Sessions, Set a
+  password, Disable - so a page of fifty rows held three hundred and fifty of
+  them, the loudest colour on the screen belonged to the rarest act, and two
+  of them sat inside cells of data and broke the column grid. The name now
+  opens a record with four tabs: the identity, its roles and scopes, its
+  tokens and sessions, and its password here. Whether an identity has a
+  password, and whether it is locked out, became columns, because that is
+  what they are.
+
+### Fixed
+
+- **"Who may sign in" no longer calls a reservation a visit.** An identity
+  created by granting a role in advance has never signed in, and the column
+  that says whether the panel has met somebody reported it as met: the marker
+  that tells the two apart was written at the grant, cleared at the first
+  sign-in, and read by nothing.
+- **"By kind" names the population it counts.** It said "among the 50 listed"
+  while the server counts those over everything the search matches - so on a
+  page of fifty out of 1805 identities it named the wrong population, and the
+  one it named was the only one the reader could see.
+
 - **A person can sign in without an identity provider.** The panel had roles,
   scopes and tokens and no door for a human without Keycloak:
   `/auth/login` answers `oidc_disabled` without one, and the bootstrap token

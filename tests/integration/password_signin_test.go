@@ -92,7 +92,13 @@ func TestAPersonSignsInWithAPassword(t *testing.T) {
 
 	// Ten wrong ones lock the account, and the lock says so plainly: its
 	// owner has to know that waiting is the answer, not retyping.
-	for i := 0; i < 9; i++ {
+	//
+	// The count is of this identity alone, so the refusal above for a name
+	// nobody has does not belong to it: one wrong password so far, eight
+	// here, and the tenth is the one that locks. The lock answers on the
+	// attempt that reaches the limit, not on the one after it - whoever is
+	// typing learns at once that waiting is now the only move.
+	for i := 0; i < 8; i++ {
 		h.do(http.MethodPost, "/auth/password", map[string]any{
 			"subject": subject, "password": fmt.Sprintf("wrong attempt %d", i),
 		}, nil, http.StatusUnauthorized)

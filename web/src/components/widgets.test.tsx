@@ -359,7 +359,7 @@ describe("AreaChart", () => {
     );
     expect(container.querySelectorAll("path.line")).toHaveLength(2);
     expect(container.querySelectorAll("path.area")).toHaveLength(1);
-    expect(container.querySelectorAll("circle")).toHaveLength(0);
+    expect(container.querySelectorAll(":not(.chart-peak) > circle")).toHaveLength(0);
     expect(getByRole("img")).toHaveClass("chart");
   });
 
@@ -370,7 +370,7 @@ describe("AreaChart", () => {
       <AreaChart times={minutes(4)} series={[{ name: "CPU", tone: "accent", values: [1, undefined, 3, 4] }]} />,
     );
     expect(container.querySelectorAll("path.area")).toHaveLength(2);
-    expect(container.querySelectorAll("circle")).toHaveLength(1);
+    expect(container.querySelectorAll(":not(.chart-peak) > circle")).toHaveLength(1);
     const lines = container.querySelectorAll("path.line");
     expect(lines).toHaveLength(1);
     // The line starts at the third instant, not at the first: a path that
@@ -385,7 +385,7 @@ describe("AreaChart", () => {
       <AreaChart times={minutes(3)} series={[{ name: "CPU", tone: "accent", values: [undefined, undefined, undefined] }]} />,
     );
     expect(container.querySelectorAll("path")).toHaveLength(0);
-    expect(container.querySelectorAll("circle")).toHaveLength(0);
+    expect(container.querySelectorAll(":not(.chart-peak) > circle")).toHaveLength(0);
     expect(container.querySelector("line.axis")).not.toBeNull();
   });
 
@@ -490,7 +490,17 @@ describe("AreaChart", () => {
     const lines = container.querySelectorAll("path.line");
     expect(lines[0].getAttribute("style")).toContain("var(--blue)");
     expect(lines[1].getAttribute("style")).toContain("var(--warn)");
-    expect(container.querySelector("path.area")?.getAttribute("style")).toContain("var(--blue)");
+    // The band under the line is painted with the gradient of its tone,
+    // and the gradient itself is built from that tone's token - so the
+    // theme still decides the colour, through one more hop.
+    expect(container.querySelector("path.area")?.getAttribute("style")).toContain("url(#area-info)");
+    const fade = container.querySelector("#area-info");
+    expect(fade).not.toBeNull();
+    expect(fade?.querySelector("stop")?.getAttribute("stop-color")).toBe("var(--blue)");
+    // It fades: the far end is all but transparent, so the band does not
+    // compete with the gridlines at the foot of the chart.
+    const stops = fade?.querySelectorAll("stop") ?? [];
+    expect(Number(stops[0].getAttribute("stop-opacity"))).toBeGreaterThan(Number(stops[1].getAttribute("stop-opacity")));
   });
 });
 
@@ -521,5 +531,64 @@ describe("ChartLegend", () => {
   it("draws nothing for an empty list, without a bare list element", () => {
     const { container } = draw(<ChartLegend items={[]} />);
     expect(container.querySelectorAll(".chart-legend li")).toHaveLength(0);
+  });
+});
+
+/* A dozen states at zero is a wall of small type saying nothing happened.
+   Four are named and the rest become one chip - which still names them to
+   anyone who hovers, because the counts are not hidden, only folded. */
+describe("a status bar with a long tail of zeros", () => {
+  const many = [
+    { label: "Online", value: 4, tone: "ok" as const },
+    { label: "Stale", value: 0, tone: "warn" as const },
+    { label: "Offline", value: 0, tone: "error" as const },
+    { label: "Unknown", value: 0, tone: "unknown" as const },
+    { label: "Quarantined", value: 0, tone: "neutral" as const },
+    { label: "In maintenance", value: 0, tone: "neutral" as const },
+    { label: "Drifted", value: 0, tone: "warn" as const },
+  ];
+
+  it("names four and folds the rest into one chip", () => {
+    const { getByText, getByTestId } = draw(<StatusBar segments={many} />);
+    expect(getByText("Stale")).toBeInTheDocument();
+    expect(getByText("Quarantined")).toBeInTheDocument();
+    const more = getByTestId("status-bar-more-at-zero");
+    expect(more).toHaveTextContent("+2 at zero");
+    // Folded, not hidden: the chip says which.
+    expect(more.getAttribute("title")).toBe("In maintenance, Drifted");
+  });
+
+  it("folds nothing when there are only a few", () => {
+    const { queryByTestId } = draw(<StatusBar segments={many.slice(0, 4)} />);
+    expect(queryByTestId("status-bar-more-at-zero")).toBeNull();
+  });
+});
+
+/* A chart answers "how high did it get" more often than anything else.
+   The peak of the first series is marked and named, so nobody measures it
+   against the axis by eye. */
+describe("the peak of an area chart", () => {
+  const minute = (n: number) => new Date(Date.UTC(2026, 9, 15, 12, n)).toISOString();
+
+  it("marks the highest point of the first series and prints its value", () => {
+    const { container, getByTestId } = draw(
+      <AreaChart
+        times={[minute(0), minute(1), minute(2)]}
+        series={[{ name: "memory", tone: "info", values: [10, 68, 20] }]}
+        format={(value) => `${value} MB`}
+      />,
+    );
+    const peak = getByTestId("chart-peak");
+    expect(peak).toBeInTheDocument();
+    expect(peak.textContent).toBe("68 MB");
+    // One label, not one per series: there is room for one.
+    expect(container.querySelectorAll(".chart-peak")).toHaveLength(1);
+  });
+
+  it("marks nothing on a chart with nothing in it", () => {
+    const { queryByTestId } = draw(
+      <AreaChart times={[minute(0), minute(1)]} series={[{ name: "memory", tone: "info", values: [0, 0] }]} />,
+    );
+    expect(queryByTestId("chart-peak")).toBeNull();
   });
 });

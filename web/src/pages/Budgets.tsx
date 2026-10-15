@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import type { Budget, BudgetLimit, Whoami } from "../lib/types";
+import { Board } from "../components/board";
 import { ErrorBox, Empty, Time } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, SectionHead } from "../components/layout";
 import { Breakdown, Meter, StatusBar, type WidgetTone } from "../components/widgets";
@@ -246,8 +247,18 @@ export function Budgets() {
 
       {creating && <NewBudget existing={budgets.map((budget) => budget.key)} onDone={() => setCreating(false)} />}
 
-      <div className="widgets">
-        <Card className="span-6" title={t("Capacity")} description={t("{n} budgets, {jobs} jobs and {hosts} campaign hosts waiting", { n: budgets.length, jobs: waitingJobs, hosts: waitingTargets })}>
+      <Board
+        screen="budgets"
+        catalogue={[
+          { key: "capacity", title: "Capacity", width: 6 },
+          { key: "by_family", title: "By family", width: 3 },
+          { key: "by_class", title: "By class", width: 3 },
+          { key: "list", title: "Budgets", width: 12 },
+        ]}
+        drawn={{
+          capacity: (
+            <>
+              <Card className="span-6" title={t("Capacity")} description={t("{n} budgets, {jobs} jobs and {hosts} campaign hosts waiting", { n: budgets.length, jobs: waitingJobs, hosts: waitingTargets })}>
           <StatusBar segments={[
             { label: t("Keys"), value: loaded ? budgets.length : undefined, tone: "info" },
             { label: t("Saturated"), value: loaded ? full.length : undefined, tone: "error" },
@@ -255,7 +266,11 @@ export function Budgets() {
             { label: t("With room"), value: loaded ? free.length : undefined, tone: "ok" },
           ]} />
         </Card>
-        <Card className="span-3" title={t("By family")} description={t("What the keys guard.")}>
+            </>
+          ),
+          by_family: (
+            <>
+              <Card className="span-3" title={t("By family")} description={t("What the keys guard.")}>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : byKind.length === 0 ? (
@@ -264,7 +279,11 @@ export function Budgets() {
             <Breakdown tone="info" items={byKind.map((entry) => ({ label: <KindLabel kind={entry.kind} />, value: entry.value }))} />
           )}
         </Card>
-        <Card className="span-3" title={t("By class")} description={t("Tokens in use per class of work, over every budget; the age is how long the class waits before its fair share stops binding.")}>
+            </>
+          ),
+          by_class: (
+            <>
+              <Card className="span-3" title={t("By class")} description={t("Tokens in use per class of work, over every budget; the age is how long the class waits before its fair share stops binding.")}>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : (
@@ -277,8 +296,11 @@ export function Budgets() {
             }))} />
           )}
         </Card>
-
-        <Card className="span-12" flush>
+            </>
+          ),
+          list: (
+            <>
+              <Card className="span-12" flush>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : budgets.length === 0 ? (
@@ -291,7 +313,10 @@ export function Budgets() {
             <BudgetTable budgets={budgets} canWrite={canWrite} />
           )}
         </Card>
-      </div>
+            </>
+          )
+        }}
+      />
     </>
   );
 }

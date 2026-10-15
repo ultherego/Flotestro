@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import type { Relay, RelayDetail, RelayHost, RelayState, Whoami } from "../lib/types";
 import { bytes } from "../lib/format";
+import { Board } from "../components/board";
 import { ErrorBox, Time, Empty, Pairs, Pair } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
 import { AreaChart, Breakdown, ChartLegend, StatusBar, type AreaSeries } from "../components/widgets";
@@ -90,8 +91,17 @@ export function Relays() {
         help={<p>{t("The relays of the sites: one connection upwards per site, a buffer for the results while the link is down, and the route a host in an isolated site installs through. A relay reports itself every minute; ten minutes of silence is a site cut off from the panel.")}</p>}
       />
 
-      <div className="widgets">
-        <Card className="span-8" title={t("State")} description={t("{n} relays, {hosts} hosts attested", { n: relays.length, hosts: attested })}>
+      <Board
+        screen="relays"
+        catalogue={[
+          { key: "state", title: "State", width: 8 },
+          { key: "by_site", title: "By site", width: 4 },
+          { key: "list", title: "Relays", width: 12 },
+        ]}
+        drawn={{
+          state: (
+            <>
+              <Card className="span-8" title={t("State")} description={t("{n} relays, {hosts} hosts attested", { n: relays.length, hosts: attested })}>
           <StatusBar segments={[
             { label: t("Active"), value: count("active"), tone: "ok" },
             { label: t("Silent"), value: count("silent"), tone: "error" },
@@ -99,7 +109,11 @@ export function Relays() {
             { label: t("Revoked"), value: count("revoked"), tone: "neutral" },
           ]} />
         </Card>
-        <Card className="span-4" title={t("By site")} description={t("Where the relays stand.")}>
+            </>
+          ),
+          by_site: (
+            <>
+              <Card className="span-4" title={t("By site")} description={t("Where the relays stand.")}>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : bySite.length === 0 ? (
@@ -108,8 +122,11 @@ export function Relays() {
             <Breakdown tone="info" items={bySite.map(([site, n]) => ({ label: <span className="mono">{site}</span>, value: n }))} />
           )}
         </Card>
-
-        <Card className="span-12" flush>
+            </>
+          ),
+          list: (
+            <>
+              <Card className="span-12" flush>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : relays.length === 0 ? (
@@ -148,7 +165,10 @@ export function Relays() {
             </table>
           )}
         </Card>
-      </div>
+            </>
+          )
+        }}
+      />
     </>
   );
 }

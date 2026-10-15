@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import type { Whoami } from "../lib/types";
 import { absoluteTime, toInstant } from "../lib/format";
 import { toLocalInput } from "./Audit";
+import { Board } from "../components/board";
 import { ErrorBox, Empty, OptionalFlag, OptionalNumber } from "../components/ui";
 import { Card, PageHeader, Toolbar } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
@@ -413,8 +414,17 @@ export function Reports() {
         </p>
       </Card>
 
-      <div className="widgets">
-        <PatchStatusCard
+      <Board
+        screen="reports"
+        catalogue={[
+          { key: "patch_status", title: "Patch status", width: 12 },
+          { key: "campaigns", title: "Campaigns", width: 12 },
+          { key: "compliance", title: "Compliance", width: 12 },
+        ]}
+        drawn={{
+          patch_status: (
+            <>
+              <PatchStatusCard
           report={patchReport}
           hosts={patchHosts}
           more={patch.hasNextPage ? () => patch.fetchNextPage() : undefined}
@@ -423,9 +433,20 @@ export function Reports() {
           ready={ready}
           params={query}
         />
-        {seesCampaigns && <CampaignsCard report={campaigns.data} error={campaigns.error} ready={ready} params={query} />}
-        <ComplianceCard report={compliance.data} error={compliance.error} ready={ready} params={query} />
-      </div>
+            </>
+          ),
+          campaigns: (
+            <>
+              {seesCampaigns && <CampaignsCard report={campaigns.data} error={campaigns.error} ready={ready} params={query} />}
+            </>
+          ),
+          compliance: (
+            <>
+              <ComplianceCard report={compliance.data} error={compliance.error} ready={ready} params={query} />
+            </>
+          )
+        }}
+      />
     </>
   );
 }

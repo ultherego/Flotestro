@@ -42,6 +42,9 @@ export type Segment = {
  * the zeros. It is said in words now, under the bar, in the one case it is
  * true - the state that was not counted is named there.
  */
+/** How many states at zero are named before the rest become one chip. */
+const QUIET_NAMED = 4;
+
 export function StatusBar({ segments, compact = false }: { segments: Segment[]; compact?: boolean }) {
   const t = useT();
   const counted = segments.filter((segment) => segment.value !== undefined && segment.value > 0);
@@ -86,7 +89,21 @@ export function StatusBar({ segments, compact = false }: { segments: Segment[]; 
       )}
       {quiet.length > 0 && (
         <div className="status-bar-quiet">
-          {quiet.map((segment) => draw(segment, `status-bar-quiet-item ${segment.tone} zero`))}
+          {/* A few states at zero are worth naming; a dozen are a wall of
+              small type saying nothing happened. Past the fourth they are
+              one chip, which still names them to anyone who hovers - and a
+              state nobody could count is never in here, because unknown is
+              not zero and is listed below under its own heading. */}
+          {quiet.slice(0, QUIET_NAMED).map((segment) => draw(segment, `status-bar-quiet-item ${segment.tone} zero`))}
+          {quiet.length > QUIET_NAMED && (
+            <span
+              className="status-bar-quiet-item zero"
+              data-testid="status-bar-more-at-zero"
+              title={quiet.slice(QUIET_NAMED).map((segment) => segment.label).join(", ")}
+            >
+              {t("+{n} at zero", { n: quiet.length - QUIET_NAMED })}
+            </span>
+          )}
         </div>
       )}
       {uncounted.length > 0 && (
@@ -295,6 +312,12 @@ export function AreaChart({
       : timed ? pad.left + ((stamps[i] - first) / span) * innerW
         : pad.left + (i / (count - 1)) * innerW;
   const y = (value: number) => pad.top + innerH - (Math.min(value, top) / top) * innerH;
+  // Where the first series reached its highest. One series is marked, not
+  // four: a chart with room for one label would otherwise carry four.
+  const topPoint = (series[0]?.values ?? []).reduce<{ i: number; value: number } | undefined>(
+    (best, value, i) => (value !== undefined && (best === undefined || value > best.value) ? { i, value } : best),
+    undefined,
+  );
   const ticks: number[] = [];
   for (let v = 0; v <= top + step / 1000; v += step) ticks.push(v);
   // Five labels evenly spaced along the axis. On a timed axis they are five
@@ -316,6 +339,20 @@ export function AreaChart({
         </g>
       ))}
       <line className="axis" x1={pad.left} x2={width - pad.right} y1={y(0)} y2={y(0)} />
+      {/* The band under a line fades out downwards instead of sitting at one
+          flat wash. A constant fill competes with the gridlines at the
+          bottom of the chart and makes two overlapping series unreadable
+          where they cross; a fade keeps the weight at the line, which is
+          the part being read. One gradient per tone, named after it, so
+          two series of the same tone share one definition. */}
+      <defs>
+        {Array.from(new Set(series.map((s) => s.tone))).map((tone) => (
+          <linearGradient key={tone} id={`area-${tone}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={`var(${TONE_VAR[tone]})`} stopOpacity={0.28} />
+            <stop offset="100%" stopColor={`var(${TONE_VAR[tone]})`} stopOpacity={0.02} />
+          </linearGradient>
+        ))}
+      </defs>
       {series.map((s) => {
         const colour = `var(${TONE_VAR[s.tone]})`;
         return (
@@ -324,8 +361,7 @@ export function AreaChart({
               <path
                 key={k}
                 className="area"
-                style={{ fill: colour }}
-                fillOpacity={0.18}
+                style={{ fill: `url(#area-${s.tone})` }}
                 d={`${runPath(run, x, y)} L${x(run[run.length - 1].i).toFixed(1)},${y(0).toFixed(1)} L${x(run[0].i).toFixed(1)},${y(0).toFixed(1)} Z`}
               />
             ))}
@@ -348,6 +384,30 @@ export function AreaChart({
           d={runPath(run, x, y)}
         />
       ))}
+      {/* The highest point of the first series, marked and named. A chart
+          answers "how high did it get" more often than anything else, and
+          the reader was left to measure it against the axis by eye. The
+          label is held inside the frame so it cannot be cut off. */}
+      {highest > 0 && topPoint && (
+        <g className="chart-peak" data-testid="chart-peak">
+          <circle cx={x(topPoint.i)} cy={y(topPoint.value)} r={3.5} />
+          <rect
+            x={Math.min(Math.max(x(topPoint.i) - 26, pad.left), width - pad.right - 52)}
+            y={Math.max(y(topPoint.value) - 24, 2)}
+            width={52}
+            height={16}
+            rx={4}
+          />
+          <text
+            className="chart-peak-label"
+            x={Math.min(Math.max(x(topPoint.i), pad.left + 26), width - pad.right - 26)}
+            y={Math.max(y(topPoint.value) - 12, 14)}
+            textAnchor="middle"
+          >
+            {format(topPoint.value)}
+          </text>
+        </g>
+      )}
       {labels.map((tick, k) => tick !== undefined && (
         <text key={k} x={tick.at} y={height - 6} textAnchor={k === 0 ? "start" : k === labels.length - 1 ? "end" : "middle"}>
           {label(tick.iso)}

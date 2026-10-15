@@ -358,6 +358,12 @@ const (
 	// same gravity but a different subject, and managing relays or inviting hosts
 	// are narrower - so borrowing one would have granted an unrelated power.
 	PermSettingsAdvertiseWrite Permission = "settings.advertise.write"
+	// PermSettingsLayoutWrite arranges a screen for everybody who sees it.
+	// It is a right of its own and not part of settings.read, because one
+	// identity holding it changes what every operator in the installation
+	// looks at - which is a different kind of act from reading a setting,
+	// and a different one again from editing one's own preferences.
+	PermSettingsLayoutWrite Permission = "settings.layout.write"
 	// The support bundle of the panel. Asking for one reads everything the panel
 	// knows about itself, so it is a right of its own.
 	PermSupportBundleCreate Permission = "support.bundle.create"
@@ -423,7 +429,8 @@ var allPermissions = []Permission{
 	PermSecretWrite, PermSecretDestroy, PermCertificatePlan, PermCertificateRead,
 	PermCertificateWatch, PermCertificateDeploy, PermCertificateTrustPlan, PermCertificateTrustWrite,
 	PermCertificateTrustRemove, PermCertificateRenew, PermPKIRead, PermPKIRotate,
-	PermSettingsRead, PermSettingsAdvertiseWrite, PermSupportBundleCreate, PermSupportBundleRead,
+	PermSettingsRead, PermSettingsAdvertiseWrite, PermSettingsLayoutWrite,
+	PermSupportBundleCreate, PermSupportBundleRead,
 }
 
 // AllPermissions returns every permission the product defines, sorted.
@@ -642,6 +649,11 @@ var rolePermissions = map[Role][]Permission{
 		PermNotificationRead, PermNotificationManage,
 		PermVulnerabilityRead,
 		PermSettingsRead, PermSettingsAdvertiseWrite,
+		// Arranging the screens of the whole installation belongs to whoever
+		// administers the platform. identity_admin administers identities,
+		// not the panel, so it is not here; a role of the installation's own
+		// can be given this permission without touching this list.
+		PermSettingsLayoutWrite,
 		// A bundle is a reading of the whole panel; it belongs to whoever
 		// administers the panel and to nobody else.
 		PermSupportBundleCreate, PermSupportBundleRead,
@@ -1011,8 +1023,14 @@ type Principal struct {
 	Kind        string `json:"kind"`
 	// DirectoryUID is the directory account somebody wrote this identity down
 	// as. Empty means no link, and an identity without one serialises as before.
-	DirectoryUID string    `json:"directory_uid,omitempty"`
-	Bindings     []Binding `json:"bindings"`
+	DirectoryUID string `json:"directory_uid,omitempty"`
+	// AwaitingIssuer is set on a record written before its owner ever arrived:
+	// a role granted in advance. It names the issuer whose first sign-in
+	// adopts the record, and it is cleared at that sign-in. A screen that
+	// reads it can tell "the panel has a record" from "this person has been
+	// here", which are not the same sentence.
+	AwaitingIssuer string    `json:"awaiting_issuer,omitempty"`
+	Bindings       []Binding `json:"bindings"`
 }
 
 // live returns the bindings that grant something now.

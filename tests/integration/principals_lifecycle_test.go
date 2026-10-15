@@ -80,7 +80,11 @@ func TestAnIdentityIsDisabledAndEnabledAgain(t *testing.T) {
 		}
 		return nil
 	}
-	listed := find("/api/v1/principals")
+	// Through the server's search, not through page one: the list is paged
+	// and ordered by subject, so in an installation with more identities than
+	// a page holds, "it is not on the first page" says nothing about whether
+	// it exists. 15.10, on a laboratory carrying 1805 of them.
+	listed := find("/api/v1/principals?q=" + subject)
 	if listed == nil {
 		t.Fatal("the new identity is not listed")
 	}
@@ -120,10 +124,13 @@ func TestAnIdentityIsDisabledAndEnabledAgain(t *testing.T) {
 	if conflict.Code != "principal_disabled" {
 		t.Errorf("the second disabling answered %q, expected principal_disabled", conflict.Code)
 	}
-	if find("/api/v1/principals") != nil {
+	// Asked by name, not by page: before 15.10 this looked on page one of a
+	// list ordered by subject, where the identity never was - so the
+	// assertion could not fail and was proving nothing.
+	if find("/api/v1/principals?q="+subject) != nil {
 		t.Error("the disabled identity is still among the enabled ones")
 	}
-	disabled := find("/api/v1/principals?disabled=true")
+	disabled := find("/api/v1/principals?disabled=true&q=" + subject)
 	if disabled == nil || disabled.DisabledAt == nil {
 		t.Fatalf("the disabled identity is not listed with the moment it was disabled: %+v", disabled)
 	}
@@ -150,10 +157,10 @@ func TestAnIdentityIsDisabledAndEnabledAgain(t *testing.T) {
 	if conflict.Code != "principal_enabled" {
 		t.Errorf("the second enabling answered %q, expected principal_enabled", conflict.Code)
 	}
-	if find("/api/v1/principals") == nil {
+	if find("/api/v1/principals?q="+subject) == nil {
 		t.Error("the enabled identity is not listed again")
 	}
-	if find("/api/v1/principals?disabled=true") != nil {
+	if find("/api/v1/principals?disabled=true&q="+subject) != nil {
 		t.Error("the enabled identity is still among the disabled ones")
 	}
 	probe.do(http.MethodGet, "/api/v1/whoami", nil, nil, http.StatusUnauthorized)

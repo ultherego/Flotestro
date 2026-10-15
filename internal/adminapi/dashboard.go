@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -36,6 +37,17 @@ type DashboardWidget struct {
 	// and two widgets of one row each stand one under another in the space
 	// a taller neighbour leaves beside them.
 	Height int `json:"height,omitempty"`
+	// Hidden marks a widget somebody took off the screen on purpose. It
+	// stays in the record so that "removed" and "did not exist when this
+	// was arranged" remain two different answers: the panel places a
+	// widget the record says nothing about, and leaves a hidden one off.
+	Hidden bool `json:"hidden,omitempty"`
+	// Where it stands, for an arrangement somebody placed on the grid
+	// rather than ordered: the column it starts at and the row. A widget
+	// without them flows, and a record may not mix the two - see the
+	// validation, which refuses half a placement.
+	X *int `json:"x,omitempty"`
+	Y *int `json:"y,omitempty"`
 }
 
 // DashboardLayout is the stored record, with who wrote it and when.
@@ -44,19 +56,36 @@ type DashboardLayout struct {
 	UpdatedAt *time.Time        `json:"updated_at,omitempty"`
 	UpdatedBy string            `json:"updated_by,omitempty"`
 	Revision  int64             `json:"revision,omitempty"`
+	// Reason is why this arrangement was written, in the words of whoever
+	// wrote it. Empty for the rows that predate the field.
+	Reason string `json:"reason,omitempty"`
 	// Present is false when the installation never stored a layout; the
 	// panel then draws the one it ships with, which is not the same thing as
 	// a layout somebody deliberately emptied.
 	Present bool `json:"present"`
 }
 
-// The widths a widget may take: a twelfth of the grid is unreadable and a
-// width the grid has no class for would silently fall back to the full row.
-var dashboardWidths = map[int]bool{3: true, 4: true, 6: true, 8: true, 12: true}
+// The grid a screen lays out on. Width is counted in columns rather than
+// pixels: an arrangement made on a wide monitor has to survive a laptop, and
+// a column is the same fraction of the width on both.
+//
+// Until 15.10 only 3, 4, 6, 8 and 12 were allowed, because the stylesheet
+// had a class for those five. The owner asked for panels that can be given
+// any width, and the references he gave are full of rows that add up out of
+// unequal parts - three narrow tiles beside two wider ones. So every width
+// from one to twelve is allowed and the grid has a class for each.
+const dashboardColumns = 12
 
 // How many rows a widget may take. Zero means the panel decides, which is
-// what a record written before heights existed carries.
-const dashboardMaxHeight = 8
+// what a record written before heights existed carries. Sixteen rather than
+// eight since 15.10: a widget holding a list scrolls inside its own box, and
+// a box worth scrolling is taller than half a screen.
+const dashboardMaxHeight = 16
+
+// How far down the grid a widget may be placed. Two hundred rows is a
+// screen nobody could scroll to the end of; the cap is here so one write
+// cannot make a page that never finishes laying out.
+const dashboardMaxRow = 200
 
 // A key is the panel's identifier for a widget, not free text: it reaches
 // the browser as a class and a React key.
@@ -69,18 +98,30 @@ const dashboardWidgetLimit = 40
 
 const (
 	dashboardRead = `
-		select widgets, updated_at, updated_by, revision
+		select widgets, updated_at, updated_by, revision, reason
 		  from screen_layout
 		 where screen = $1`
 	dashboardWrite = `
-		insert into screen_layout (screen, widgets, updated_at, updated_by, revision)
-		values ($1, $2, now(), $3, 1)
+		insert into screen_layout (screen, widgets, updated_at, updated_by, revision, reason)
+		values ($1, $2, now(), $3, 1, $4)
 		on conflict (screen) do update set
 		    widgets    = excluded.widgets,
 		    updated_at = now(),
 		    updated_by = excluded.updated_by,
-		    revision   = screen_layout.revision + 1
+		    revision   = screen_layout.revision + 1,
+		    reason     = excluded.reason
 		returning updated_at, revision`
+	// The arrangement being replaced is kept before it is gone, and only
+	// the last few are kept: this is an undo, not an archive.
+	dashboardKeep = `
+		insert into screen_layout_history (screen, revision, widgets, updated_at, updated_by, reason)
+		select screen, revision, widgets, updated_at, updated_by, reason
+		  from screen_layout where screen = $1
+		on conflict (screen, revision) do nothing`
+	dashboardTrim = `
+		delete from screen_layout_history
+		 where screen = $1
+		   and revision <= (select max(revision) - $2 from screen_layout_history where screen = $1)`
 )
 
 // readDashboardLayout answers what the installation stored. A schema from
@@ -92,7 +133,7 @@ func (s *Server) readDashboardLayout(ctx context.Context, screen string) (Dashbo
 		raw       []byte
 		updatedAt time.Time
 	)
-	err := s.pool.QueryRow(ctx, dashboardRead, screen).Scan(&raw, &updatedAt, &layout.UpdatedBy, &layout.Revision)
+	err := s.pool.QueryRow(ctx, dashboardRead, screen).Scan(&raw, &updatedAt, &layout.UpdatedBy, &layout.Revision, &layout.Reason)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DashboardLayout{Widgets: []DashboardWidget{}}, nil
 	}
@@ -129,11 +170,24 @@ func validateDashboardWidgets(widgets []DashboardWidget) (string, error) {
 			return "key", errors.New("the same widget twice: " + widget.Key)
 		}
 		seen[widget.Key] = true
-		if !dashboardWidths[widget.Width] {
-			return "width", errors.New("a width is 3, 4, 6, 8 or 12 of the twelve columns")
+		if widget.Width < 1 || widget.Width > dashboardColumns {
+			return "width", errors.New("a width is between 1 and 12 of the twelve columns")
 		}
 		if widget.Height < 0 || widget.Height > dashboardMaxHeight {
-			return "height", errors.New("a height is between 1 and 8 rows, or absent for the one the panel chooses")
+			return "height", errors.New("a height is between 1 and 16 rows, or absent for the one the panel chooses")
+		}
+		// A place is both coordinates or neither: half of one would leave
+		// the panel somewhere the screen has to guess at.
+		if (widget.X == nil) != (widget.Y == nil) {
+			return "place", errors.New("a widget is placed by both its column and its row, or by neither: " + widget.Key)
+		}
+		if widget.X != nil {
+			if *widget.X < 0 || *widget.X+widget.Width > dashboardColumns {
+				return "x", errors.New("a widget starts inside the twelve columns and ends inside them: " + widget.Key)
+			}
+			if *widget.Y < 0 || *widget.Y > dashboardMaxRow {
+				return "y", errors.New("a widget stands on a row of the grid: " + widget.Key)
+			}
 		}
 	}
 	return "", nil
@@ -165,15 +219,34 @@ func (s *Server) handleSetDashboardLayout(w http.ResponseWriter, r *http.Request
 		problem(w, http.StatusBadRequest, "invalid_request", "screen: a screen is named in lower-case letters, digits and underscores")
 		return
 	}
-	principal, ok := s.authorize(w, r, authz.PermSettingsAdvertiseWrite, authz.GlobalScope, "screen_layout", screen)
+	// Its own permission since 15.10. It used to borrow the one for naming
+	// the fleet's address, which meant "may change where agents dial" and
+	// "may rearrange everyone's screen" were the same right - two unrelated
+	// powers behind one grant.
+	principal, ok := s.authorize(w, r, authz.PermSettingsLayoutWrite, authz.GlobalScope, "screen_layout", screen)
 	if !ok {
 		return
 	}
 	var body struct {
 		Widgets []DashboardWidget `json:"widgets"`
+		// Revision the editor read. A write without it is refused: "I did
+		// not look" is not grounds for overwriting somebody who did.
+		Revision *int64 `json:"revision"`
+		Reason   string `json:"reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		problem(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	reason := strings.TrimSpace(body.Reason)
+	if len([]rune(reason)) < minimalStepUpReason {
+		problem(w, http.StatusBadRequest, "reason_required",
+			"this operation requires a reason (field reason, min. 8 characters): it changes the screen of everybody who opens it")
+		return
+	}
+	if body.Revision == nil {
+		problem(w, http.StatusBadRequest, "revision_required",
+			"send the revision this arrangement was read at, so a change made in the meantime is not overwritten unseen")
 		return
 	}
 	if field, err := validateDashboardWidgets(body.Widgets); err != nil {
@@ -185,11 +258,47 @@ func (s *Server) handleSetDashboardLayout(w http.ResponseWriter, r *http.Request
 		s.fail(w, err)
 		return
 	}
+
+	tx, err := s.pool.Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+
+	// The row is locked while its revision is read, so two administrators
+	// arranging the same screen cannot both pass this check.
+	var current int64
+	err = tx.QueryRow(r.Context(), `select revision from screen_layout where screen = $1 for update`, screen).Scan(&current)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		s.fail(w, err)
+		return
+	}
+	if current != *body.Revision {
+		problem(w, http.StatusConflict, "layout_changed",
+			"somebody else arranged this screen while this one was being edited; read it again and put the change on top of what is there now")
+		return
+	}
+	if current > 0 {
+		if _, err := tx.Exec(r.Context(), dashboardKeep, screen); err != nil {
+			s.fail(w, err)
+			return
+		}
+		if _, err := tx.Exec(r.Context(), dashboardTrim, screen, dashboardHistoryKept); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+
 	var (
 		updatedAt time.Time
 		revision  int64
 	)
-	if err := s.pool.QueryRow(r.Context(), dashboardWrite, screen, raw, principal.Subject).Scan(&updatedAt, &revision); err != nil {
+	if err := tx.QueryRow(r.Context(), dashboardWrite, screen, raw, principal.Subject, reason).Scan(&updatedAt, &revision); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -197,10 +306,121 @@ func (s *Server) handleSetDashboardLayout(w http.ResponseWriter, r *http.Request
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "screen.layout.write", TargetType: "screen_layout", TargetID: screen,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{"widgets": len(body.Widgets), "revision": revision},
+		Detail: map[string]any{
+			"widgets": len(body.Widgets), "revision": revision, "reason": reason,
+			// The blast radius, said rather than left to be inferred.
+			"applies_to": "every identity that can open this screen",
+		},
 	})
 	writeJSON(w, http.StatusOK, DashboardLayout{
 		Widgets: body.Widgets, UpdatedAt: &updatedAt, UpdatedBy: principal.Subject,
-		Revision: revision, Present: true,
+		Revision: revision, Reason: reason, Present: true,
 	})
+}
+
+// How many previous arrangements of a screen are kept. Enough to undo an
+// afternoon, not enough to be an archive.
+const dashboardHistoryKept = 10
+
+// handleResetScreenLayout takes the stored arrangement away, so the screen
+// goes back to the one the panel ships with. The history stays: a reset is a
+// change like any other and has to be undoable too.
+func (s *Server) handleResetScreenLayout(w http.ResponseWriter, r *http.Request) {
+	screen := r.PathValue("screen")
+	if !screenName.MatchString(screen) {
+		problem(w, http.StatusBadRequest, "invalid_request", "screen: a screen is named in lower-case letters, digits and underscores")
+		return
+	}
+	principal, ok := s.authorize(w, r, authz.PermSettingsLayoutWrite, authz.GlobalScope, "screen_layout", screen)
+	if !ok {
+		return
+	}
+	reason, ok := requestReason(w, r, nil)
+	if !ok {
+		return
+	}
+	if len([]rune(strings.TrimSpace(reason))) < minimalStepUpReason {
+		problem(w, http.StatusBadRequest, "reason_required",
+			"this operation requires a reason (field reason, min. 8 characters)")
+		return
+	}
+	tx, err := s.pool.Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	if _, err := tx.Exec(r.Context(), dashboardKeep, screen); err != nil {
+		s.fail(w, err)
+		return
+	}
+	tag, err := tx.Exec(r.Context(), `delete from screen_layout where screen = $1`, screen)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		problem(w, http.StatusNotFound, "no_layout", "this screen has no stored arrangement; it already draws the one the panel ships with")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "screen.layout.reset", TargetType: "screen_layout", TargetID: screen,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{"reason": strings.TrimSpace(reason),
+			"applies_to": "every identity that can open this screen"},
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleScreenLayoutHistory answers what this screen looked like before,
+// newest first, so an arrangement that made it worse can be put back.
+func (s *Server) handleScreenLayoutHistory(w http.ResponseWriter, r *http.Request) {
+	screen := r.PathValue("screen")
+	if !screenName.MatchString(screen) {
+		problem(w, http.StatusBadRequest, "invalid_request", "screen: a screen is named in lower-case letters, digits and underscores")
+		return
+	}
+	if _, ok := s.authorize(w, r, authz.PermSettingsLayoutWrite, authz.GlobalScope, "screen_layout", screen); !ok {
+		return
+	}
+	rows, err := s.pool.Query(r.Context(), `
+		select revision, widgets, updated_at, updated_by, reason
+		  from screen_layout_history
+		 where screen = $1
+		 order by revision desc
+		 limit $2`, screen, dashboardHistoryKept)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer rows.Close()
+	items := []DashboardLayout{}
+	for rows.Next() {
+		var (
+			one       DashboardLayout
+			raw       []byte
+			updatedAt time.Time
+		)
+		if err := rows.Scan(&one.Revision, &raw, &updatedAt, &one.UpdatedBy, &one.Reason); err != nil {
+			s.fail(w, err)
+			return
+		}
+		if err := json.Unmarshal(raw, &one.Widgets); err != nil {
+			s.fail(w, err)
+			return
+		}
+		one.UpdatedAt = &updatedAt
+		one.Present = true
+		items = append(items, one)
+	}
+	if err := rows.Err(); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }

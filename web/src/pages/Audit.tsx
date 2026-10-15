@@ -5,6 +5,7 @@ import { api, ApiError, fetchWithCredentials, loadedItems, LIST_PAGE, type Page 
 import { useDebounced } from "../lib/debounce";
 import { toInstant } from "../lib/format";
 import type { AuditEvent } from "../lib/types";
+import { Board } from "../components/board";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { Card, PageHeader, Toolbar } from "../components/layout";
 import { BarChart, Breakdown, StatusBar } from "../components/widgets";
@@ -223,11 +224,17 @@ export function Audit() {
         description={t("Every success and failure creates an event; so does every denial.")}
       />
 
-      <div className="widgets">
-        {/* The chart is drawn from the page in the browser, not from the
-            database: it is the shape of what is listed, and the caption
-            says so. A filter narrows the chart with the list. */}
-        <Card className="span-8" title={t("Events per hour")} description={`${t("By outcome")} · ${listed}`}>
+      <Board
+        screen="audit"
+        catalogue={[
+          { key: "per_hour", title: "Events per hour", width: 8 },
+          { key: "outcome", title: "Outcome", width: 4 },
+          { key: "events", title: "Events", width: 12 },
+        ]}
+        drawn={{
+          per_hour: (
+            <>
+              <Card className="span-8" title={t("Events per hour")} description={`${t("By outcome")} · ${listed}`}>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : hourly.labels.length === 0 ? (
@@ -244,8 +251,11 @@ export function Audit() {
             />
           )}
         </Card>
-
-        <Card className="span-4" title={t("Outcome")} description={listed}>
+            </>
+          ),
+          outcome: (
+            <>
+              <Card className="span-4" title={t("Outcome")} description={listed}>
           <div className="fp-stack">
             <StatusBar compact segments={[
               { label: t("success"), value: outcomeCount("success"), tone: "ok" },
@@ -271,8 +281,11 @@ export function Audit() {
             </div>
           </div>
         </Card>
-
-        <Card
+            </>
+          ),
+          events: (
+            <>
+              <Card
           className="span-12"
           title={t("Events")}
           description={t("The export is the trail between the bounds as JSON lines linked by a hash chain; flotestro-auditverify checks a saved file without the panel.")}
@@ -417,7 +430,11 @@ export function Audit() {
             </p>
           )}
         </Card>
-      </div>
+            </>
+          )
+        }}
+      />
+
     </>
   );
 }

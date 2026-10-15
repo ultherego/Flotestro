@@ -5,7 +5,8 @@ import { api, type Collection } from "../lib/api";
 import type { AuditEvent, Campaign, FleetActivity, FleetSummary, Job } from "../lib/types";
 import { relativeTime } from "../lib/format";
 import { ErrorBox, ErrorCode, Time, Empty, JobState } from "../components/ui";
-import { Card, NeedsAttention, PageHeader, Verdict } from "../components/layout";
+import { Card, PageHeader } from "../components/layout";
+import { MetricTile } from "../components/MetricTile";
 import { BarChart, Breakdown, CountRow, StatusBar, type Segment } from "../components/widgets";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import { FirstRunCard } from "../components/FirstRunCard";
@@ -160,19 +161,12 @@ export function Dashboard() {
   // could count. A fleet of zeros is answered by the verdict alone.
   const needsYou = [...decisions, ...findings]
     .some((count) => count.value === undefined || (count.value ?? 0) > 0);
+  // A check at zero is not news, and thirty of them printed in small type
+  // is what the owner meant by a wall of text. They are counted into one
+  // sentence instead; a check nobody could answer is NOT among them, since
+  // unknown is not zero and never gets summed away.
+  const clear = [...decisions, ...findings].filter((one) => one.value === 0).length;
 
-  // The headline. A fleet with nothing waiting and nothing wrong says so in
-  // one line, and that line is the whole answer somebody opened this for.
-  const quiet = waiting === 0 && attention === 0;
-  const headline = s === undefined
-    ? t("Reading the fleet…")
-    : quiet
-      ? t("Nothing needs a decision")
-      : waiting === 0
-        ? t("{attention} things need a look")
-        : attention === 0
-          ? t("{waiting} decisions waiting")
-          : t("{waiting} decisions waiting, {attention} things need a look");
 
   return (
     <>
@@ -191,38 +185,66 @@ export function Dashboard() {
           account of the flow of its own. */}
       {s?.hosts === 0 && <FirstRunCard />}
 
-      <Verdict
-        tone={s === undefined ? "unknown" : quiet ? "ok" : attention > 0 ? "warn" : undefined}
-        headline={t(headline, { waiting, attention })}
-      >
-        <span>{t("{n} hosts you can see", { n: s?.hosts ?? 0 })}</span>
-        <span>{t("{n} online", { n: s?.online ?? 0 })}</span>
-        {s?.quarantined_hosts ? <span>{t("{n} quarantined", { n: s.quarantined_hosts })}</span> : null}
-        {s?.in_maintenance ? <span>{t("{n} in maintenance", { n: s.in_maintenance })}</span> : null}
-      </Verdict>
-
-      <NeedsAttention title={t("What needs you")}>
-        {needsYou ? (
-          <Card>
-            {decisions.length > 0 && (
-              <>
-                <h4 className="widget-subhead first">{t("Decisions nobody has taken")}</h4>
-                <CountRow counts={decisions} />
-              </>
-            )}
-            {findings.length > 0 && (
-              <>
-                <h4 className="widget-subhead">{t("Found on the hosts")}</h4>
-                <CountRow counts={findings} />
-                <FleetCoverage coverage={securityCoverage} />
-              </>
-            )}
-          </Card>
-        ) : null}
-      </NeedsAttention>
 
       {/* Where the fleet is, read across the room. */}
       <Board screen="dashboard" catalogue={DASHBOARD_CATALOGUE} drawn={{
+            // A count nobody has yet is a dash, not a nought: a fleet that
+            // has not answered is not a fleet with nothing wrong with it.
+            // The two headline numbers wear the accent, filled: they say
+            // "start here", which is what the accent is for - it carries no
+            // state, so a glowing tile never claims a fleet is healthy. The
+            // two that follow carry state instead, and therefore do not
+            // glow. Two filled tiles on a screen and no more.
+            hosts_total: (
+              <MetricTile
+                icon="hosts"
+                label={t("Hosts")}
+                value={s?.hosts ?? null}
+                size="xl"
+              />
+            ),
+            hosts_online: (
+              <MetricTile
+                icon="server"
+                label={t("Online")}
+                value={s?.online ?? null}
+                size="xl"
+                delta={s === undefined ? undefined : {
+                  text: t("{n} offline", { n: s.offline }),
+                  direction: s.offline > 0 ? "down" : "up",
+                  good: s.offline === 0,
+                }}
+              />
+            ),
+            waiting_on_people: (
+              <MetricTile
+                icon="jobs"
+                label={t("Waiting on a person")}
+                value={s === undefined ? null : waiting}
+                size="xl"
+                state={s === undefined ? undefined : waiting > 0 ? "warn" : "ok"}
+              />
+            ),
+            found_wrong: (
+              <MetricTile
+                icon="security"
+                label={t("Found on the hosts")}
+                value={s === undefined ? null : attention}
+                size="xl"
+                state={s === undefined ? undefined : attention > 0 ? "error" : "ok"}
+              />
+            ),
+            attention: needsYou ? (
+              <Card title={t("What needs you")}>
+                <CountRow counts={[...decisions, ...findings].filter((one) => one.value === undefined || (one.value ?? 0) > 0)} />
+                {clear > 0 && (
+                  <p className="source attention-clear">
+                    {t("{n} other checks are clear.", { n: clear })}
+                  </p>
+                )}
+                <FleetCoverage coverage={securityCoverage} />
+              </Card>
+            ) : undefined,
             host_availability: (
               <Card title={t("Host availability")}>
                 <StatusBar segments={[
@@ -409,6 +431,19 @@ function Refreshed({ at, fetching, onRefresh }: { at: number; fetching: boolean;
  * arrange mode, and the width it takes until somebody says otherwise.
  */
 export const DASHBOARD_CATALOGUE: BoardEntry[] = [
+  // The four numbers somebody reads from the doorway. They stand first and
+  // narrow, as measurements rather than as rows of a bar: the fleet's size,
+  // how much of it is out of reach, and the two counts that mean work.
+  // Four equal tiles across the top, the way every modern console opens:
+  // the size of the fleet, how much of it answers, what waits for a person
+  // and what the hosts found wrong. Everything that used to be printed as
+  // a wall of thirty counters is summed into the last two, and the detail
+  // is one card below - named, and only where it is not zero.
+  { key: "hosts_total", title: "Hosts", width: 3 },
+  { key: "hosts_online", title: "Online", width: 3 },
+  { key: "waiting_on_people", title: "Waiting on a person", width: 3 },
+  { key: "found_wrong", title: "Found on the hosts", width: 3 },
+  { key: "attention", title: "What needs you", width: 12 },
   { key: "host_availability", title: "Host availability", width: 12 },
   { key: "operations_24h", title: "Operations, last 24 h", width: 6 },
   { key: "fleet_composition", title: "Fleet composition", width: 6 },

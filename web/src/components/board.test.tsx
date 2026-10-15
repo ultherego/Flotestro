@@ -8,7 +8,7 @@ import { Board } from "./board";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { boardToDraw, heightStep, widthStep, type BoardEntry } from "./board";
+import { boardToDraw, heightStep, isPlaced, placeAll, widthStep, type BoardEntry } from "./board";
 
 vi.mock("../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/api")>();
@@ -53,7 +53,46 @@ describe("boardToDraw", () => {
       widgets: [{ key: "from_the_future", width: 6 }, { key: "first", width: 6 }],
       present: true,
     };
-    expect(boardToDraw(stored, catalogue, known)).toEqual([{ key: "first", width: 6 }]);
+    // The unknown key is skipped. "second" is in the catalogue and absent
+    // from the record, so it is treated as a panel that arrived after the
+    // arrangement was made and is placed at the end - see below.
+    expect(boardToDraw(stored, catalogue, known))
+      .toEqual([{ key: "first", width: 6 }, { key: "second", width: 6 }]);
+  });
+
+  /* A panel added by an upgrade has to appear. Until 15.10 it did not: the
+     screen drew the stored list and nothing else, so every widget this
+     product ever adds would have been invisible to every installation that
+     had arranged that screen once - and nobody would know to go looking.
+     A panel somebody took off carries `hidden` and stays off, which is how
+     "removed" and "did not exist yet" stay two different answers. */
+  describe("a panel the stored arrangement says nothing about", () => {
+    it("lands where the product put it, not at the end", () => {
+      // "first" ships before "second" in the catalogue and nothing earlier
+      // than it is on the screen, so it goes to the front. At the end it
+      // would be buried: a row of headline tiles added above six existing
+      // panels would otherwise arrive under the tables at the bottom.
+      const stored = { widgets: [{ key: "second", width: 4 }], present: true };
+      expect(boardToDraw(stored, catalogue, known))
+        .toEqual([{ key: "first", width: 12 }, { key: "second", width: 4 }]);
+    });
+
+    it("keeps the order somebody chose around it", () => {
+      // The arrangement reversed the two it knows about; the newcomer
+      // follows its own catalogue neighbour and leaves that reversal alone.
+      const three = [...catalogue, { key: "third", title: "Third", width: 3 }];
+      const stored = { widgets: [{ key: "second", width: 4 }, { key: "first", width: 8 }], present: true };
+      expect(boardToDraw(stored, three, new Set(["first", "second", "third"])))
+        .toEqual([{ key: "second", width: 4 }, { key: "first", width: 8 }, { key: "third", width: 3 }]);
+    });
+
+    it("stays away when it was taken off on purpose", () => {
+      const stored = {
+        widgets: [{ key: "second", width: 4 }, { key: "first", width: 12, hidden: true }],
+        present: true,
+      };
+      expect(boardToDraw(stored, catalogue, known)).toEqual([{ key: "second", width: 4 }]);
+    });
   });
 
   /* A widget whose screen has nothing to draw for it - a card that renders
@@ -163,12 +202,12 @@ describe("arranging a board with the mouse", () => {
     expect(order()).toEqual(["First", "Second", "Third"]);
   });
 
-  it("widens and narrows a tile along the widths the grid has", async () => {
+  it("widens and narrows a tile a column at a time", async () => {
     await arrange();
     const wider = () => screen.getAllByLabelText("Wider")[0];
     expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-4");
     fireEvent.click(wider());
-    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-6");
+    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-5");
     fireEvent.click(screen.getAllByLabelText("Narrower")[0]);
     expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-4");
   });
@@ -188,31 +227,35 @@ describe("arranging a board with the mouse", () => {
 
   it("stops at the ends of both ladders instead of going past them", async () => {
     await arrange();
-    for (let i = 0; i < 10; i += 1) {
+    for (let i = 0; i < 20; i += 1) {
       const shorter = screen.getAllByLabelText("Shorter")[0] as HTMLButtonElement;
       if (!shorter.disabled) fireEvent.click(shorter);
       const narrower = screen.getAllByLabelText("Narrower")[0] as HTMLButtonElement;
       if (!narrower.disabled) fireEvent.click(narrower);
     }
-    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-3");
+    // One column is the narrowest the grid has a class for.
+    expect(screen.getAllByTestId("board-tile")[0].className).toContain("span-1");
     expect(screen.getAllByTestId("board-tile")[0].style.gridRow).toBe("span 1");
   });
 });
 
 describe("the ladders a tile is resized along", () => {
-  it("steps the width between the widths the grid has a class for", () => {
-    expect(widthStep(4, 1)).toBe(6);
+  it("steps the width by one column and stops at the edges of the grid", () => {
+    // Every column from one to twelve since 15.10: the rows worth building
+    // are the uneven ones, so the ladder is the grid itself.
+    expect(widthStep(4, 1)).toBe(5);
     expect(widthStep(4, -1)).toBe(3);
-    expect(widthStep(3, -1)).toBe(3);
+    expect(widthStep(1, -1)).toBe(1);
     expect(widthStep(12, 1)).toBe(12);
-    // A width from a record this panel has no class for lands on the ladder.
     expect(widthStep(5, 1)).toBe(6);
   });
 
-  it("steps the height between one row and eight", () => {
+  it("steps the height between one row and sixteen", () => {
     expect(heightStep(undefined, 1)).toBe(2);
     expect(heightStep(1, -1)).toBe(1);
-    expect(heightStep(8, 1)).toBe(8);
+    expect(heightStep(16, 1)).toBe(16);
+    // Eight used to be the ceiling; a tile holding a list is worth more.
+    expect(heightStep(8, 1)).toBe(9);
   });
 });
 
@@ -228,5 +271,58 @@ describe("the arrange mode looks like the screen it is arranging", () => {
   it("gives the bar its own height and the widget the rest of the box", () => {
     expect(css).toContain(".widgets.arranged > div > .widget-handle { flex: 0 0 auto; }");
     expect(/\.widgets\.arranged > div > \* \{[^}]*flex: 1 1 auto/.test(css)).toBe(true);
+  });
+});
+
+/* A panel whose condition is false renders nothing, and `{open && <Card/>}`
+   hands the board `false` rather than undefined. Taken for a node it left a
+   cell with nothing in it - a hole in the row where a closed form was. */
+describe("a panel with nothing to draw", () => {
+  it("is left out whether it is undefined, null or false", () => {
+    const stored = {
+      widgets: [{ key: "first", width: 6 }, { key: "second", width: 6 }],
+      present: true,
+    };
+    for (const nothing of [undefined, null, false]) {
+      const known = new Set(Object.keys({ first: <div />, second: nothing }).filter((key) => {
+        const node = ({ first: <div />, second: nothing } as Record<string, unknown>)[key];
+        return node !== undefined && node !== null && node !== false;
+      }));
+      expect(boardToDraw(stored, catalogue, known)).toEqual([{ key: "first", width: 6 }]);
+    }
+  });
+});
+
+/* Taking hold of a panel: the grid, the corner and what a first grab does
+   to an arrangement that was only ever ordered. */
+describe("placing a panel on the grid", () => {
+  it("turns an order into places that look the same", () => {
+    // Three panels of eight, four and twelve columns: the first two share
+    // a row, the third takes the next one.
+    const placed = placeAll([
+      { key: "a", width: 8, height: 3 },
+      { key: "b", width: 4, height: 2 },
+      { key: "c", width: 12, height: 2 },
+    ]);
+    expect(placed.map((one) => [one.x, one.y])).toEqual([[0, 0], [8, 0], [0, 3]]);
+  });
+
+  it("leaves an arrangement that already has places alone", () => {
+    const widgets = [{ key: "a", width: 6, height: 2, x: 6, y: 4 }];
+    expect(isPlaced(widgets)).toBe(true);
+    expect(placeAll(widgets)).toEqual(widgets);
+  });
+
+  it("knows an ordered arrangement has no places", () => {
+    expect(isPlaced([{ key: "a", width: 6 }])).toBe(false);
+  });
+
+  it("starts a new row when the one it is on is full", () => {
+    const placed = placeAll([
+      { key: "a", width: 6 },
+      { key: "b", width: 6 },
+      { key: "c", width: 6 },
+    ]);
+    expect(placed.map((one) => one.y)).toEqual([0, 0, 2]);
   });
 });

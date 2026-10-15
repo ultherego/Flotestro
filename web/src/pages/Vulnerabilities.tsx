@@ -4,6 +4,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { api, ApiError, LIST_PAGE, loadedItems } from "../lib/api";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import { useDebounced } from "../lib/debounce";
+import { Board } from "../components/board";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
@@ -417,8 +418,19 @@ export function FleetVulnerabilities() {
           stands how big the work is - the same CVE on twenty hosts is one
           vendor matter and twenty machines to move, and a single
           "findings" number says neither. */}
-      <div className="widgets">
-        <Card className="span-8" title={t("Findings")} description={t("By what the vendor offers for them.")}>
+      <Board
+        screen="vulnerabilities"
+        catalogue={[
+          { key: "findings", title: "Findings", width: 8 },
+          { key: "assessed", title: "Assessed", width: 4 },
+          { key: "security_data", title: "Security data", width: 8 },
+          { key: "by_host", title: "By host", width: 4 },
+          { key: "list", title: "The list", width: 12 },
+        ]}
+        drawn={{
+          findings: (
+            <>
+              <Card className="span-8" title={t("Findings")} description={t("By what the vendor offers for them.")}>
           <StatusBar segments={[
             { label: t("Vendor fix"), value: data.affected_with_vendor_fix, tone: "error" },
             { label: t("No fix"), value: data.affected_no_fix, tone: "warn" },
@@ -437,7 +449,11 @@ export function FleetVulnerabilities() {
             never assessed. The affected hosts are named under the findings;
             an affected host is also an assessed one, so it is not a fourth
             segment of the same bar. */}
-        <Card
+            </>
+          ),
+          assessed: (
+            <>
+              <Card
           className="span-4"
           title={t("Assessed")}
           description={t("{n} of {total} hosts fully assessed", { n: data.hosts_assessed, total: data.total_hosts })}
@@ -454,8 +470,11 @@ export function FleetVulnerabilities() {
             have stopped moving, and the operator reading them is the one
             who has to decide. */}
         {(data.candidates ?? []).length > 0 && <FeedCandidates candidates={data.candidates ?? []} />}
-
-        <Card className="span-8" title={t("Security data")} flush>
+            </>
+          ),
+          security_data: (
+            <>
+              <Card className="span-8" title={t("Security data")} flush>
           {!data.sources.length ? (
             <Empty>{t("No feed has been fetched yet.")}</Empty>
           ) : (
@@ -496,8 +515,11 @@ export function FleetVulnerabilities() {
             </table>
           )}
         </Card>
-
-        <Card className="span-4" title={t("By host")} description={t("Hosts with open findings, the ones with a vendor fix first.")}>
+            </>
+          ),
+          by_host: (
+            <>
+              <Card className="span-4" title={t("By host")} description={t("Hosts with open findings, the ones with a vendor fix first.")}>
           {affectedHosts.length === 0 ? (
             <p className="fp-blank">{data.hosts_assessed > 0 ? t("No assessed host has an open finding.") : t("No host has been assessed yet.")}</p>
           ) : (
@@ -510,8 +532,11 @@ export function FleetVulnerabilities() {
             </div>
           )}
         </Card>
-
-        <Card
+            </>
+          ),
+          list: (
+            <>
+              <Card
           className="span-12"
           title={filters.view === "cves" ? t("By CVE") : t("Hosts")}
           description={filters.view === "cves"
@@ -723,7 +748,10 @@ export function FleetVulnerabilities() {
             </p>
           )}
         </Card>
-      </div>
+            </>
+          )
+        }}
+      />
     </>
   );
 }

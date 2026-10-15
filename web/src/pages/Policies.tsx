@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../lib/api";
 import type { Policy, PolicyRule, PolicyVerdict, PolicyRemediationMode, Whoami } from "../lib/types";
 import { POLICY_MODES } from "../lib/types";
+import { Board } from "../components/board";
 import { ErrorBox, Empty, Time } from "../components/ui";
 import { Actions, Card, EmptyState, Field, FieldGrid, SectionHead } from "../components/layout";
 import { StatusBar, type WidgetTone } from "../components/widgets";
@@ -204,8 +205,16 @@ export function Policies() {
         </Card>
       )}
 
-      <div className="widgets">
-        <Card className="span-12" title={t("Standing")} description={loaded ? t("{n} policies", { n: policies.length }) : undefined}>
+      <Board
+        screen="policies"
+        catalogue={[
+          { key: "standing", title: "Standing", width: 12 },
+          { key: "list", title: "Policies", width: 12 },
+        ]}
+        drawn={{
+          standing: (
+            <>
+              <Card className="span-12" title={t("Standing")} description={loaded ? t("{n} policies", { n: policies.length }) : undefined}>
           <StatusBar segments={[
             { label: t("Published"), value: loaded ? published.length : undefined, tone: "info" },
             { label: t("Drafts"), value: loaded ? drafts.length : undefined, tone: "neutral" },
@@ -213,8 +222,11 @@ export function Policies() {
             { label: t("With errors"), value: loaded ? erring.length : undefined, tone: "error" },
           ]} />
         </Card>
-
-        <Card className="span-12" flush>
+            </>
+          ),
+          list: (
+            <>
+              <Card className="span-12" flush>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : policies.length === 0 ? (
@@ -248,7 +260,10 @@ export function Policies() {
             </table>
           )}
         </Card>
-      </div>
+            </>
+          )
+        }}
+      />
     </>
   );
 }

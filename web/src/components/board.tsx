@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import { useToast } from "./Toast";
 import { useT } from "../i18n";
 
@@ -20,7 +20,61 @@ export type BoardWidget = {
   width: number;
   /** In rows of the board; absent means the one row every tile starts with. */
   height?: number;
+  /**
+   * Taken off the screen on purpose. It stays in the arrangement so that
+   * "somebody removed this" and "this did not exist when the arrangement
+   * was made" remain two different answers - which is what lets a panel
+   * added by an upgrade appear without undoing anybody's decision.
+   */
+  hidden?: boolean;
+  /**
+   * Where it stands, when somebody has placed it: the column it starts at
+   * (0..11) and the row (0 upwards). Absent for an arrangement made by
+   * ordering alone, which flows left to right and wraps - the two ways
+   * coexist, so an installation that never touched the grid keeps the
+   * arrangement it has.
+   */
+  x?: number;
+  y?: number;
 };
+
+/** The columns of the grid, which is also the widest a widget may be. */
+export const BOARD_COLUMNS = 12;
+/** A row of the free grid, in pixels. The step a height moves by. */
+export const BOARD_ROW = 80;
+
+/** True when this arrangement was placed on the grid rather than ordered. */
+export function isPlaced(widgets: BoardWidget[]): boolean {
+  return widgets.some((one) => one.x !== undefined && one.y !== undefined);
+}
+
+/**
+ * Every widget given a place, so an arrangement made by ordering can be
+ * picked up and moved. The flow is what the browser would have drawn:
+ * left to right, wrapping when the row is full, each row as tall as the
+ * tallest widget that started in it.
+ */
+export function placeAll(widgets: BoardWidget[]): BoardWidget[] {
+  if (isPlaced(widgets)) {
+    return widgets.map((one) => ({ ...one, x: one.x ?? 0, y: one.y ?? 0 }));
+  }
+  let x = 0;
+  let y = 0;
+  let tallest = 1;
+  return widgets.map((one) => {
+    const width = Math.min(Math.max(one.width, 1), BOARD_COLUMNS);
+    const height = Math.max(one.height ?? 2, 1);
+    if (x + width > BOARD_COLUMNS) {
+      x = 0;
+      y += tallest;
+      tallest = 1;
+    }
+    const placed = { ...one, x, y, width, height };
+    x += width;
+    tallest = Math.max(tallest, height);
+    return placed;
+  });
+}
 
 export type StoredBoard = {
   widgets: BoardWidget[];
@@ -28,21 +82,27 @@ export type StoredBoard = {
   updated_at?: string;
   updated_by?: string;
   revision?: number;
+  reason?: string;
 };
 
 /** One widget the screen can draw: how it is named when picked, and its own width. */
 export type BoardEntry = { key: string; title: string; width: number };
 
-/** The widths the twelve-column grid has a class for. */
-export const BOARD_WIDTHS = [3, 4, 6, 8, 12];
-/** How many rows of the board a tile may take. */
-export const BOARD_HEIGHTS = { min: 1, max: 8 };
+/**
+ * The widths the twelve-column grid has a class for: every one of them.
+ *
+ * It was five - 3, 4, 6, 8, 12 - because the stylesheet had five classes,
+ * and the server refused the rest. The rows worth building are the uneven
+ * ones, so the ladder is now every column from one to twelve, and the server
+ * holds to the same twelve.
+ */
+export const BOARD_WIDTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+/** How many rows of the board a tile may take. Its content scrolls inside. */
+export const BOARD_HEIGHTS = { min: 1, max: 16 };
 
-/** The next width up or down the ladder, staying on it at the ends. */
+/** The next width up or down, staying on the grid at the ends. */
 export function widthStep(width: number, by: number): number {
-  const at = BOARD_WIDTHS.indexOf(width);
-  const next = (at === -1 ? 1 : at) + by;
-  return BOARD_WIDTHS[Math.max(0, Math.min(BOARD_WIDTHS.length - 1, next))];
+  return Math.max(BOARD_WIDTHS[0], Math.min(BOARD_WIDTHS[BOARD_WIDTHS.length - 1], width + by));
 }
 
 export function heightStep(height: number | undefined, by: number): number {
@@ -63,7 +123,37 @@ export function boardToDraw(
   if (!stored || !stored.present || stored.widgets.length === 0) {
     return catalogue.filter((one) => known.has(one.key)).map((one) => ({ key: one.key, width: one.width }));
   }
-  return stored.widgets.filter((one) => known.has(one.key));
+  const placed = stored.widgets.filter((one) => known.has(one.key) && !one.hidden);
+  const decided = new Set(stored.widgets.map((one) => one.key));
+
+  // A panel the stored arrangement says nothing about did not exist when
+  // somebody arranged this screen: it arrived with an upgrade. Leaving it
+  // out would make every panel this product ever adds invisible to every
+  // installation that has arranged that screen once, and nobody would know
+  // to go looking. A panel somebody removed carries hidden and stays away:
+  // the two are deliberately not the same record.
+  //
+  // Where it goes matters as much as that it appears. At the end it would
+  // be buried: a row of headline tiles added above six existing panels
+  // would arrive under the tables at the bottom. So it lands beside the
+  // catalogue neighbour it shipped next to - after the nearest earlier
+  // panel that is on the screen, or at the front when there is none - and
+  // an arrangement somebody made keeps its own order around it.
+  const result = [...placed];
+  for (let i = 0; i < catalogue.length; i += 1) {
+    const entry = catalogue[i];
+    if (!known.has(entry.key) || decided.has(entry.key)) continue;
+    // After everything that ships before it and is on the screen - not
+    // merely after the nearest one. With the nearest, a newcomer jumped
+    // over a panel somebody had deliberately moved earlier.
+    let at = 0;
+    for (let before = 0; before < i; before += 1) {
+      const neighbour = result.findIndex((one) => one.key === catalogue[before].key);
+      if (neighbour !== -1 && neighbour + 1 > at) at = neighbour + 1;
+    }
+    result.splice(at, 0, { key: entry.key, width: entry.width });
+  }
+  return result;
 }
 
 export function Board({
@@ -72,42 +162,158 @@ export function Board({
   /** The name the arrangement is stored under. */
   screen: string;
   catalogue: BoardEntry[];
-  /** What each widget draws, by key. A key with nothing to draw is not shown. */
+  /** What each widget draws, by key. A key with nothing to draw - undefined,
+      null or the false of a `{condition && ...}` - is not shown. */
   drawn: Record<string, ReactNode>;
 }) {
   const t = useT();
   const toast = useToast();
   const queryClient = useQueryClient();
-  const known = new Set(Object.keys(drawn).filter((key) => drawn[key] !== undefined && drawn[key] !== null));
+  // What this screen has to draw right now. A panel that renders nothing -
+  // because the condition behind it is false, as a form that is not open -
+  // is not placed at all, rather than placed as an empty cell. `false` is
+  // among those: `{open && <Card/>}` yields false, not undefined, and a
+  // board that took it for a node left a hole in the row where a closed
+  // form used to be.
+  const known = new Set(Object.keys(drawn).filter((key) => {
+    const node = drawn[key];
+    return node !== undefined && node !== null && node !== false;
+  }));
   const [editing, setEditing] = useState<BoardWidget[] | null>(null);
   // Which tile is under the hand, and which one it is over: dragging is how
   // a board is arranged, and the arrows it replaced were a click per place.
   const [dragging, setDragging] = useState<number | null>(null);
   const [over, setOver] = useState<number | null>(null);
+  const [reason, setReason] = useState("");
+  const [showEarlier, setShowEarlier] = useState(false);
 
   const layout = useQuery({
     queryKey: ["screen-layout", screen],
     queryFn: () => api.get<StoredBoard>(`/api/v1/settings/layout/${screen}`),
     retry: false,
   });
+  // The arrangement changes what everybody sees, so the write carries the
+  // reason the trail will keep and the revision it was read at. A second
+  // administrator who saved meanwhile wins, and this one is told rather than
+  // having their work vanish.
   const save = useMutation({
     mutationFn: (widgets: BoardWidget[]) =>
-      api.put<StoredBoard>(`/api/v1/settings/layout/${screen}`, { widgets }),
+      api.put<StoredBoard>(`/api/v1/settings/layout/${screen}`, {
+        widgets, reason: reason.trim(), revision: layout.data?.revision ?? 0,
+      }),
     onSuccess: () => {
       setEditing(null);
+      setReason("");
       void queryClient.invalidateQueries({ queryKey: ["screen-layout", screen] });
       toast.success(t("The screen is arranged this way for everybody who opens it."));
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        void queryClient.invalidateQueries({ queryKey: ["screen-layout", screen] });
+        toast.error(t("Somebody else arranged this screen while you were editing it. What they stored is on screen now; make your change again on top of it."));
+        setEditing(null);
+        return;
+      }
+      toast.error(error instanceof Error ? error.message : String(error));
+    },
+  });
+  // Back to the arrangement the panel ships with. It is a change like any
+  // other: a reason, the trail, and the previous one kept.
+  const reset = useMutation({
+    mutationFn: () => api.del(`/api/v1/settings/layout/${screen}?reason=${encodeURIComponent(reason.trim())}`),
+    onSuccess: () => {
+      setEditing(null);
+      setReason("");
+      void queryClient.invalidateQueries({ queryKey: ["screen-layout", screen] });
+      toast.success(t("The screen is back to the arrangement the panel ships with."));
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : String(error)),
   });
 
   const current = editing ?? boardToDraw(layout.data, catalogue, known);
+  // The editor works on what is on the screen; the hidden ones ride along
+  // in the saved record so the decision to remove them is not lost.
+  const shown = current.filter((one) => !one.hidden);
   const titleOf = (key: string) => catalogue.find((one) => one.key === key)?.title ?? key;
+
+  /* ------------------------------------------------------------------
+     Taking hold of a panel.
+
+     The owner asked to grab a corner, set the width and the height, and
+     put the panel anywhere on the grid. That is a placed arrangement
+     rather than an ordered one, so the first drag of a screen that was
+     only ever ordered writes the places its flow already had - nothing
+     jumps, and from then on every panel has coordinates.
+
+     The arithmetic is deliberately plain: the grid's own box gives the
+     width of a column, a row is a constant, and a pointer position is
+     divided by them. No library, and nothing to go stale when the
+     stylesheet changes, because the stylesheet is asked.
+     ------------------------------------------------------------------ */
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const [grab, setGrab] = useState<
+    { key: string; mode: "move" | "size"; fromX: number; fromY: number; start: BoardWidget } | null
+  >(null);
+
+  const columnWidth = () => {
+    const box = gridRef.current?.getBoundingClientRect();
+    if (!box) return 0;
+    // Eleven gaps between twelve columns; the gap is the one the sheet uses.
+    const gap = parseFloat(getComputedStyle(gridRef.current as Element).columnGap || "20") || 20;
+    return (box.width - gap * (BOARD_COLUMNS - 1)) / BOARD_COLUMNS;
+  };
+
+  const takeHold = (event: React.PointerEvent, key: string, mode: "move" | "size") => {
+    if (editing === null) return;
+    const placed = placeAll(current.filter((one) => !one.hidden)).find((one) => one.key === key);
+    if (!placed) return;
+    // The first hold on an ordered arrangement fixes everybody's place.
+    if (!isPlaced(current)) {
+      const places = placeAll(current.filter((one) => !one.hidden));
+      setEditing([
+        ...places,
+        ...current.filter((one) => one.hidden),
+      ]);
+    }
+    (event.target as Element).setPointerCapture?.(event.pointerId);
+    setGrab({ key, mode, fromX: event.clientX, fromY: event.clientY, start: placed });
+    event.preventDefault();
+  };
+
+  const dragTo = (event: React.PointerEvent) => {
+    if (!grab || editing === null) return;
+    const column = columnWidth();
+    if (column <= 0) return;
+    const dx = Math.round((event.clientX - grab.fromX) / column);
+    const dy = Math.round((event.clientY - grab.fromY) / BOARD_ROW);
+    const start = grab.start;
+    const next = { ...start };
+    if (grab.mode === "move") {
+      next.x = Math.min(Math.max((start.x ?? 0) + dx, 0), BOARD_COLUMNS - start.width);
+      next.y = Math.max((start.y ?? 0) + dy, 0);
+    } else {
+      // The corner: wider or narrower, taller or shorter, never off the
+      // grid and never smaller than something a person can grab again.
+      next.width = Math.min(Math.max(start.width + dx, 1), BOARD_COLUMNS - (start.x ?? 0));
+      next.height = Math.min(Math.max((start.height ?? 2) + dy, 1), BOARD_HEIGHTS.max);
+    }
+    setEditing(current.map((one) => (one.key === grab.key ? { ...one, ...next } : one)));
+  };
+
+  const letGo = () => setGrab(null);
+
+  // Drawn on the grid as placed, or flowing as ordered. The editor turns
+  // the first into the second the moment somebody takes hold of a panel.
+  const placedNow = isPlaced(current);
+  const positions = placedNow ? placeAll(shown) : shown;
   const move = (index: number, by: number) => reorder(index, index + by);
+  // The editor's indices are into what is on the screen; the record also
+  // holds the hidden ones, so a change is applied by key rather than by
+  // position - with hidden panels in the list, position lies.
   const resize = (index: number, change: Partial<BoardWidget>) => {
-    const next = [...current];
-    next[index] = { ...next[index], ...change };
-    setEditing(next);
+    const key = shown[index]?.key;
+    if (!key) return;
+    setEditing(current.map((one) => (one.key === key ? { ...one, ...change } : one)));
   };
   /**
    * The tile that was picked up lands where it was dropped, and everything
@@ -116,14 +322,18 @@ export function Board({
    * three places it leaves the ones in between where they were.
    */
   const reorder = (from: number, to: number) => {
-    if (to < 0 || to >= current.length || from === to) return;
-    const next = [...current];
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
-    setEditing(next);
+    if (to < 0 || to >= shown.length || from === to) return;
+    const order = [...shown];
+    const [moved] = order.splice(from, 1);
+    order.splice(to, 0, moved);
+    // The visible ones in their new order, then the hidden ones, so the
+    // record keeps every decision and the screen keeps the arrangement.
+    setEditing([...order, ...current.filter((one) => one.hidden)]);
   };
+  // What the editor may add back: a panel this screen can draw that is not
+  // on it - whether it was never placed or deliberately taken off.
   const absent = catalogue.filter(
-    (one) => known.has(one.key) && !current.some((placed) => placed.key === one.key),
+    (one) => known.has(one.key) && !shown.some((placed) => placed.key === one.key),
   );
 
   return (
@@ -131,19 +341,54 @@ export function Board({
       {layout.data !== undefined && (
         <div className="layout-bar">
           {editing === null ? (
-            <button className="secondary" onClick={() => setEditing(current)}>{t("Arrange this screen")}</button>
+            /* Quiet and at the right edge, level with the cards: arranging
+               is something somebody does once in a while, and a filled
+               button floating between two cards reads as the thing the
+               screen is for. */
+            <button className="ghost layout-arrange" onClick={() => setEditing(current)}>
+              {t("Arrange this screen")}
+            </button>
           ) : (
             <>
-              <button onClick={() => save.mutate(current)} disabled={save.isPending || current.length === 0}>
+              {/* A reason, because the trail keeps one for every change that
+                  reaches other people, and this one reaches all of them. */}
+              <input
+                className="layout-reason"
+                placeholder={t("why this arrangement (for the trail)")}
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                data-testid="board-reason"
+              />
+              <button
+                onClick={() => save.mutate(current)}
+                disabled={save.isPending || current.length === 0 || reason.trim().length < 8}
+                data-testid="board-save"
+              >
                 {save.isPending ? t("storing…") : t("Store this arrangement for everybody")}
               </button>
-              <button className="secondary" onClick={() => setEditing(null)}>{t("Back")}</button>
+              <button className="secondary" onClick={() => { setEditing(null); setReason(""); }}>{t("Back")}</button>
+              {layout.data?.present && (
+                <button
+                  className="danger"
+                  disabled={reset.isPending || reason.trim().length < 8}
+                  onClick={() => reset.mutate()}
+                  data-testid="board-reset"
+                  title={t("Everybody goes back to the arrangement the panel ships with.")}
+                >
+                  {t("Back to the panel's own")}
+                </button>
+              )}
               {absent.length > 0 && (
                 <select
                   value=""
                   onChange={(event) => {
                     const one = catalogue.find((item) => item.key === event.target.value);
-                    if (one) setEditing([...current, { key: one.key, width: one.width }]);
+                    if (!one) return;
+                    // It may be in the record already, hidden; putting it
+                    // back is unhiding it, not placing a second copy.
+                    setEditing(current.some((placed) => placed.key === one.key)
+                      ? current.map((placed) => placed.key === one.key ? { ...placed, hidden: false } : placed)
+                      : [...current, { key: one.key, width: one.width }]);
                   }}
                   data-testid="board-add"
                 >
@@ -151,13 +396,21 @@ export function Board({
                   {absent.map((one) => <option key={one.key} value={one.key}>{t(one.title)}</option>)}
                 </select>
               )}
+              <button className="secondary" onClick={() => setShowEarlier(!showEarlier)} data-testid="board-earlier">
+                {t("Earlier arrangements")}
+              </button>
               <span className="source">{t("Drag a tile by its bar to move it. The arrangement is the installation's: everybody sees it.")}</span>
             </>
           )}
         </div>
       )}
       <div
-        className={["widgets", "arranged", dragging !== null ? "dragging-over" : ""].join(" ").trim()}
+        ref={gridRef}
+        onPointerMove={dragTo}
+        onPointerUp={letGo}
+        onPointerCancel={letGo}
+        style={placedNow ? { gridAutoRows: `${BOARD_ROW}px` } : undefined}
+        className={["widgets", "arranged", placedNow ? "placed" : "", dragging !== null || grab !== null ? "dragging-over" : ""].join(" ").trim()}
         /* The empty part of the board is a place to drop a tile too: dropped
            where nothing is, it goes to the end of the order, and the dense
            flow then pulls it into the first hole it fits. Without this a
@@ -171,10 +424,20 @@ export function Board({
         }}
         data-testid="board-grid"
       >
-        {current.map((placed, index) => (
+        {positions.map((placed, index) => (
           <div
             key={placed.key}
-            style={{ gridRow: `span ${placed.height ?? 1}` }}
+            style={placedNow
+              ? {
+                  gridColumn: `${(placed.x ?? 0) + 1} / span ${placed.width}`,
+                  gridRow: `${(placed.y ?? 0) + 1} / span ${placed.height ?? 2}`,
+                }
+              : { gridRow: `span ${placed.height ?? 1}` }}
+            /* A height somebody chose is a box of that height, and the
+               content scrolls inside it: a list that grows by ten rows must
+               not push every panel below it down the screen. A tile nobody
+               gave a height to is still as tall as what it holds. */
+            data-rows={placed.height ? placed.height : undefined}
             className={[
               `span-${placed.width}`,
               dragging === index ? "dragging" : "",
@@ -205,7 +468,11 @@ export function Board({
             data-testid={editing !== null ? "board-tile" : undefined}
           >
             {editing !== null && (
-              <div className="widget-handle" data-testid="widget-handle">
+              <div
+                className="widget-handle"
+                data-testid="widget-handle"
+                onPointerDown={(event) => takeHold(event, placed.key, "move")}
+              >
                 <span className="widget-grip" aria-hidden="true">⠿</span>
                 <span>{t(titleOf(placed.key))}</span>
                 {/* Wider and narrower, taller and shorter. A tile that holds
@@ -252,12 +519,43 @@ export function Board({
                 >
                   ← →
                 </span>
-                <button className="secondary" onClick={() => setEditing(current.filter((one) => one.key !== placed.key))}>
+                <button
+                  className="secondary"
+                  onClick={() => setEditing(current.map((one) =>
+                    one.key === placed.key ? { ...one, hidden: true } : one))}
+                >
                   {t("Remove")}
                 </button>
               </div>
             )}
             {drawn[placed.key]}
+            {editing !== null && (
+              /* The corner. Taking hold of it sets the width and the height
+                 together, which is how anybody expects to resize a box. */
+              <span
+                className="widget-corner"
+                data-testid={`widget-corner-${placed.key}`}
+                role="button"
+                tabIndex={0}
+                aria-label={t("Drag to resize")}
+                title={t("Drag to resize")}
+                onPointerDown={(event) => takeHold(event, placed.key, "size")}
+                onKeyDown={(event) => {
+                  // The keyboard resizes too, a step at a time.
+                  const step = (dw: number, dh: number) => {
+                    event.preventDefault();
+                    resize(index, {
+                      width: Math.min(Math.max(placed.width + dw, 1), BOARD_COLUMNS),
+                      height: Math.min(Math.max((placed.height ?? 2) + dh, 1), BOARD_HEIGHTS.max),
+                    });
+                  };
+                  if (event.key === "ArrowRight") step(1, 0);
+                  if (event.key === "ArrowLeft") step(-1, 0);
+                  if (event.key === "ArrowDown") step(0, 1);
+                  if (event.key === "ArrowUp") step(0, -1);
+                }}
+              />
+            )}
           </div>
         ))}
       </div>

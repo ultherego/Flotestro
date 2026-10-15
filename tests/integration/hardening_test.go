@@ -45,7 +45,9 @@ func TestIdentityTokensAreIssuedRevokedAndDisabled(t *testing.T) {
 		} `json:"items"`
 	}
 	find := func() (id string, bindings, tokens int) {
-		h.get("/api/v1/principals", &listing)
+		// Searched for by name: the list is paged and ordered by subject, so
+		// page one is not the installation.
+		h.get("/api/v1/principals?q="+subject, &listing)
 		for _, item := range listing.Items {
 			if item.Subject == subject {
 				return item.ID, len(item.Bindings), len(item.Tokens)
@@ -145,7 +147,11 @@ func TestAnIdentityCannotDisableItself(t *testing.T) {
 			Subject string `json:"subject"`
 		} `json:"items"`
 	}
-	h.get("/api/v1/principals", &listing)
+	// Asked for by name. Looking on page one of a list ordered by subject
+	// made this test skip itself in any installation with more identities
+	// than a page holds - a silent pass over the refusal it exists to check,
+	// which is worse than a failure because nothing says it happened.
+	h.get("/api/v1/principals?q="+url.QueryEscape(me.Subject), &listing)
 	for _, item := range listing.Items {
 		if item.Subject == me.Subject {
 			h.do(http.MethodDelete, "/api/v1/principals/"+item.ID+"?reason="+url.QueryEscape(hardeningReason),
@@ -153,7 +159,7 @@ func TestAnIdentityCannotDisableItself(t *testing.T) {
 			return
 		}
 	}
-	t.Skip("the test identity is not on the list of principals")
+	t.Fatalf("the identity this suite runs as (%s) is not in the list its own search answers", me.Subject)
 }
 
 // TestEnrollmentDoorIsThrottledPerMachine: the public endpoint answers a

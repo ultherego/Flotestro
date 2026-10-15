@@ -10,7 +10,8 @@ import { ErrorBox, Time, Empty } from "../components/ui";
 import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Stat, StatGrid, Toolbar, Verdict } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
 import { PARTIAL_REASONS } from "../components/FleetCoverage";
-import { StatusBar } from "../components/widgets";
+import { SeverityBar } from "../components/SeverityBar";
+import { Board } from "../components/board";
 import { useConfirm } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { bytes } from "../lib/format";
@@ -405,29 +406,59 @@ export function FleetMonitoring() {
         {data && <span>{t("as of")} <Time value={data.generated_at} /></span>}
       </Verdict>
 
-      <div className="widgets">
-        <Card
+      <Board
+        screen="monitoring"
+        catalogue={[
+          { key: "firing_now", title: "Firing now", width: 12 },
+          { key: "message", title: "Notice", width: 12 },
+          { key: "firing_alerts", title: "Firing alerts", width: 12 },
+          { key: "rules", title: "Rules", width: 12 },
+          { key: "recent_alerts", title: "Recent alerts", width: 8 },
+          { key: "silences", title: "Silences in force", width: 4 },
+          { key: "agent_footprint", title: "Agent footprint", width: 12 },
+        ]}
+        drawn={{
+          firing_now: (
+            <>
+              <Card
           className="span-12"
           title={t("Firing now")}
           description={t("By severity, across the hosts you can see.")}
         >
-          <StatusBar segments={[
-            { label: t("Critical"), value: counts?.critical, tone: "error" },
-            { label: t("Warning"), value: counts?.warning, tone: "warn" },
-            { label: t("Info"), value: counts?.info, tone: "info" },
-            { label: t("Acknowledged"), value: counts?.acknowledged, tone: "ok" },
-            { label: t("Pending"), value: counts?.pending, tone: "unknown" },
-            { label: t("Silenced"), value: counts?.silenced, tone: "neutral" },
-          ]} />
+          {/* Severity first and on its own. The three counts beside it -
+              acknowledged, pending, silenced - are not severities but what
+              has been done about them, and a bar that mixed the two asked
+              the eye to compare "critical" with "silenced". A severity at
+              zero keeps its block, greyed: a row that changes shape as the
+              fleet changes cannot be read by position, and "nothing
+              critical" is the answer worth seeing at a glance. */}
+          <SeverityBar counts={{
+            critical: counts?.critical,
+            warning: counts?.warning,
+            info: counts?.info,
+          }} />
+          <p className="source monitoring-handled">
+            {t("{n} acknowledged", { n: counts?.acknowledged ?? 0 })}
+            {" · "}
+            {t("{n} pending", { n: counts?.pending ?? 0 })}
+            {" · "}
+            {t("{n} silenced", { n: counts?.silenced ?? 0 })}
+          </p>
         </Card>
-
-        {message && (
+            </>
+          ),
+          message: (
+            <>
+              {message && (
           <div className="span-12">
             <p className="hm-message">{message}</p>
           </div>
         )}
-
-        <Card
+            </>
+          ),
+          firing_alerts: (
+            <>
+              <Card
           className="span-12"
           title={t("Firing alerts")}
           description={t("What tripped, where, and whether somebody has it.")}
@@ -473,8 +504,11 @@ export function FleetMonitoring() {
             />
           </div>
         )}
-
-        <Card
+            </>
+          ),
+          rules: (
+            <>
+              <Card
           className="span-12"
           title={t("Rules")}
           description={t("What turns a sample into an alert.")}
@@ -555,8 +589,11 @@ export function FleetMonitoring() {
             </table>
           )}
         </Card>
-
-        <Card
+            </>
+          ),
+          recent_alerts: (
+            <>
+              <Card
           className="span-8"
           title={t("Recent alerts")}
           description={t("The last fifty, newest first.")}
@@ -619,8 +656,11 @@ export function FleetMonitoring() {
             </p>
           )}
         </Card>
-
-        <Card
+            </>
+          ),
+          silences: (
+            <>
+              <Card
           className="span-4"
           title={t("Silences in force")}
           description={t("Every silence ends by itself.")}
@@ -676,9 +716,16 @@ export function FleetMonitoring() {
             <FleetSilenceForm canSilenceGlobal={canSilenceGlobal} onDone={refresh} onMessage={setMessage} />
           )}
         </Card>
+            </>
+          ),
+          agent_footprint: (
+            <>
+              <AgentFootprintCard footprint={data?.agent_footprint} loaded={data !== undefined} />
+            </>
+          )
+        }}
+      />
 
-        <AgentFootprintCard footprint={data?.agent_footprint} loaded={data !== undefined} />
-      </div>
     </>
   );
 }

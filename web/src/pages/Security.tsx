@@ -4,6 +4,7 @@ import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { api, loadedItems, LIST_PAGE } from "../lib/api";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import type { RemediationOrder, RemediationPreview, Whoami } from "../lib/types";
+import { Board } from "../components/board";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { Actions, Card, Columns, Field, FieldGrid, PageHeader } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
@@ -164,12 +165,17 @@ export function FleetSecurity() {
       />
       <FleetCoverage coverage={data} />
 
-      <div className="widgets">
-        {/* The fleet-wide sums, one segment per verdict: a finding on a
-            hundred hosts counts a hundred times, because that is how many
-            jobs the fix takes. Fixable is a part of "need action", named
-            because it is the part that takes no decision. */}
-        <Card
+      <Board
+        screen="security"
+        catalogue={[
+          { key: "findings", title: "Findings", width: 12 },
+          { key: "checks", title: "Checks", width: 8 },
+          { key: "by_severity", title: "By severity", width: 4 },
+        ]}
+        drawn={{
+          findings: (
+            <>
+              <Card
           className="span-12"
           title={t("Findings")}
           description={`${t("{n} hosts", { n: data.hosts })} · ${t("{n} checks", { n: data.checks.length })}`}
@@ -182,8 +188,11 @@ export function FleetSecurity() {
             { label: t("Fixable"), value: fixable, tone: "info" },
           ]} />
         </Card>
-
-        <Card
+            </>
+          ),
+          checks: (
+            <>
+              <Card
           className="span-8"
           flush
           footer={<p>{t("{n} hosts", { n: data.hosts })} · {t("computed")} <Time value={data.generated_at} /></p>}
@@ -262,8 +271,11 @@ export function FleetSecurity() {
             </tbody>
           </table>
         </Card>
-
-        <Card className="span-4" title={t("By severity")} description={t("Findings that need action, by the severity of the check.")}>
+            </>
+          ),
+          by_severity: (
+            <>
+              <Card className="span-4" title={t("By severity")} description={t("Findings that need action, by the severity of the check.")}>
           <div className="fp-tones">
             <Breakdown items={[
               ...bySeverity.map((row) => ({ label: row.severity, value: row.count, tone: severityTone(row.severity) })),
@@ -288,7 +300,10 @@ export function FleetSecurity() {
         {remediates && selected.size > 0 && (
           <FleetRemediation checks={data.checks} selected={selected} />
         )}
-      </div>
+            </>
+          )
+        }}
+      />
     </>
   );
 }

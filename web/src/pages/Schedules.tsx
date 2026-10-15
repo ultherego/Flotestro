@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
 import type { Campaign } from "../lib/types";
+import { Board } from "../components/board";
 import { ErrorBox, Empty, JobState, Time } from "../components/ui";
 import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
 import { useConfirm } from "../components/Modal";
@@ -471,8 +472,16 @@ export function Schedules() {
         </Card>
       )}
 
-      <div className="widgets">
-        <Card className="span-12" title={t("Schedules")} flush
+      <Board
+        screen="schedules"
+        catalogue={[
+          { key: "schedules", title: "Schedules", width: 12 },
+          { key: "calendar", title: "Maintenance calendar", width: 12 },
+        ]}
+        drawn={{
+          schedules: (
+            <>
+              <Card className="span-12" title={t("Schedules")} flush
           description={t("The next to fire first. A schedule places orders under the rights of whoever last wrote it, read again at every moment.")}>
           {!schedules.data ? (
             <Empty>{t("Loading…")}</Empty>
@@ -527,8 +536,11 @@ export function Schedules() {
             </table>
           )}
         </Card>
-
-        <Card className="span-12" title={t("Maintenance calendar")}
+            </>
+          ),
+          calendar: (
+            <>
+              <Card className="span-12" title={t("Maintenance calendar")}
           description={t("Hosts in maintenance, campaign windows and the moments of the schedules, in the browser's zone.")}
           actions={
             <Toolbar>
@@ -543,7 +555,10 @@ export function Schedules() {
             <MonthView year={month.year} month={month.month} entries={calendar.data?.items ?? []} loading={!calendar.data} />
           )}
         </Card>
-      </div>
+            </>
+          )
+        }}
+      />
     </>
   );
 }

@@ -513,6 +513,10 @@ func (s *Server) Routes() http.Handler {
 	// same screen and can talk to each other over it.
 	s.route(mux, "GET /api/v1/settings/layout/{screen}", s.handleDashboardLayout)
 	s.route(mux, "PUT /api/v1/settings/layout/{screen}", s.handleSetDashboardLayout)
+	// Putting a screen back: the arrangement the panel ships with, and what
+	// the screen looked like before the last few changes.
+	s.route(mux, "DELETE /api/v1/settings/layout/{screen}", s.handleResetScreenLayout)
+	s.route(mux, "GET /api/v1/settings/layout/{screen}/history", s.handleScreenLayoutHistory)
 	// The monitoring retentions are the installation's own setting rather than
 	// the process's: read here, and written without a restart.
 	s.route(mux, "GET /api/v1/settings/monitoring", s.handleMonitoringSettings)

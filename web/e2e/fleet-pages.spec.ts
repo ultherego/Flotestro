@@ -376,7 +376,13 @@ test.describe("settings", () => {
     // mark beside the title rather than taking the top of every page view.
     await expect(page.getByTestId("page-help")).toHaveCount(0);
     await page.getByTestId("page-help-toggle").click();
-    await expect(page.getByTestId("page-help")).toContainText(settings.source);
+    // In the screen's own words, not in the server's. The API sends a source
+    // string, but putting it on the page would print an English constant to
+    // a Polish reader - so what is checked is that the page states the rule
+    // that string exists for: these values are read at start and a change
+    // needs a restart.
+    await expect(page.getByTestId("page-help")).toContainText("needs a restart");
+    await expect(page.locator(".parts-head")).toContainText("Read at start");
 
     // The areas the API reports, not the retention editor beside them: that
     // one writes and has no entry in /api/v1/settings.
@@ -414,12 +420,10 @@ test.describe("access", () => {
     expect(response.ok(), `GET /api/v1/access/review answered ${response.status()}`).toBeTruthy();
     const review = (await response.json()) as { count: number; flagged: number; items: { flags: string[] }[] };
 
-    await page.goto("/access");
-    await expect(header(page, "Access")).toBeVisible();
-    const tabs = page.locator(".tabs").first();
-    await expect(tabs.getByRole("button", { name: "Identities" })).toHaveClass(/active/);
-    await tabs.getByRole("button", { name: "Access review" }).click();
-    await expect(tabs.getByRole("button", { name: "Access review" })).toHaveClass(/active/);
+    // Access became a tab of Settings on 15.10; the screen is there now.
+    await page.goto("/settings?tab=review");
+    await expect(header(page, "Settings")).toBeVisible();
+    await expect(page.getByTestId("settings-tab-review")).toHaveClass(/active/);
 
     const stats = page.locator(".stats");
     await expect(stats.locator(".stat").filter({ hasText: "Identities" }).locator(".stat-value")).toHaveText(String(review.count));
