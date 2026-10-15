@@ -97,8 +97,12 @@ func (s *Store) EnsurePrincipal(ctx context.Context, tx pgx.Tx,
 // nil, until revoked.
 func (s *Store) GrantRole(ctx context.Context, tx pgx.Tx,
 	principalID string, role Role, scope Scope, validUntil *time.Time, createdBy string) error {
-	if !KnownRole(role) {
-		return fmt.Errorf("unknown role %q", role)
+	// Both kinds of role are bindable, so the question is asked of the table
+	// rather than of the compiled list - inside this transaction, so a role
+	// deleted between the check and the insert cannot slip through. The
+	// foreign key is the last word either way.
+	if err := roleBindable(ctx, tx, role); err != nil {
+		return err
 	}
 	// A binding names a team or a site, never both: the two are different
 	// vocabularies, and the insert follows the constraint rather than letting the
@@ -522,13 +526,28 @@ func (s *Store) allBindingsOf(ctx context.Context, principalID string) ([]Bindin
 	return s.readBindings(ctx, principalID, false)
 }
 
+// grantedByRole is the permissions of a role the installation defined, read
+// in the same query as the binding that names it.
+//
+// Not a catalogue held in memory and refreshed on a timer: a request is
+// decided by what the role carries now, and a cache would decide some of them
+// by what it carried a minute ago - on one replica and not the other. The
+// column is empty for a built-in role, whose permissions are compiled in.
+const grantedByRole = `
+	left join (
+		select role, array_agg(permission) as granted
+		from role_permissions group by role
+	) rp on rp.role = %s.role`
+
 func (s *Store) readBindings(ctx context.Context, principalID string, liveOnly bool) ([]Binding, error) {
-	query := `select role, site, environment, coalesce(team_id::text, ''), team_any, owners, tags, valid_until
-		from role_bindings where principal_id = $1`
+	query := `select b.role, b.site, b.environment, coalesce(b.team_id::text, ''), b.team_any,
+		       b.owners, b.tags, b.valid_until, coalesce(rp.granted, '{}')
+		from role_bindings b` + fmt.Sprintf(grantedByRole, "b") + `
+		where b.principal_id = $1`
 	if liveOnly {
-		query += ` and (valid_until is null or valid_until > now())`
+		query += ` and (b.valid_until is null or b.valid_until > now())`
 	}
-	rows, err := s.pool.Query(ctx, query+` order by role, site, environment`, principalID)
+	rows, err := s.pool.Query(ctx, query+` order by b.role, b.site, b.environment`, principalID)
 	if err != nil {
 		return nil, err
 	}
@@ -537,14 +556,30 @@ func (s *Store) readBindings(ctx context.Context, principalID string, liveOnly b
 	var bindings []Binding
 	for rows.Next() {
 		var binding Binding
+		var granted []string
 		if err := rows.Scan(&binding.Role, &binding.Scope.Site, &binding.Scope.Environment,
 			&binding.Scope.Team, &binding.Scope.TeamAny,
-			&binding.Scope.Owners, &binding.Scope.Tags, &binding.ValidUntil); err != nil {
+			&binding.Scope.Owners, &binding.Scope.Tags, &binding.ValidUntil, &granted); err != nil {
 			return nil, err
 		}
+		binding.Granted = permissionsOf(granted)
 		bindings = append(bindings, binding)
 	}
 	return bindings, rows.Err()
+}
+
+// permissionsOf turns the column into the model's type. A nil stays nil: a
+// binding to a built-in role carries no list, and an empty one would read the
+// same on the wire while meaning something else here.
+func permissionsOf(values []string) []Permission {
+	if len(values) == 0 {
+		return nil
+	}
+	permissions := make([]Permission, 0, len(values))
+	for _, value := range values {
+		permissions = append(permissions, Permission(value))
+	}
+	return permissions
 }
 
 // ListPrincipals returns the identities together with their roles.
@@ -622,8 +657,8 @@ type GroupMapping struct {
 // CreateGroupMapping adds a mapping from a group to a role.
 func (s *Store) CreateGroupMapping(ctx context.Context, tx pgx.Tx,
 	issuer, groupName string, role Role, scope Scope, createdBy string) (*GroupMapping, error) {
-	if !KnownRole(role) {
-		return nil, fmt.Errorf("unknown role %q", role)
+	if err := roleBindable(ctx, tx, role); err != nil {
+		return nil, err
 	}
 	if issuer == "" || groupName == "" {
 		return nil, fmt.Errorf("a mapping requires an issuer and a group name")

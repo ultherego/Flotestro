@@ -36,26 +36,6 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleListRoles describes the role catalogue and its permissions.
-func (s *Server) handleListRoles(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authorize(w, r, authz.PermHostRead, authz.GlobalScope, "role", ""); !ok {
-		return
-	}
-	type roleInfo struct {
-		Role        string   `json:"role"`
-		Permissions []string `json:"permissions"`
-	}
-	items := make([]roleInfo, 0)
-	for _, role := range authz.AllRoles() {
-		permissions := make([]string, 0)
-		for _, permission := range role.Permissions() {
-			permissions = append(permissions, string(permission))
-		}
-		items = append(items, roleInfo{Role: string(role), Permissions: permissions})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
-}
-
 // principalView is an identity as the access screen shows it: with the live
 // tokens, so that one of them can be revoked by its identifier, and with the
 // moment it was disabled when it was.
@@ -528,8 +508,7 @@ func (s *Server) handleRevokeRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	role := authz.Role(r.PathValue("role"))
-	if !authz.KnownRole(role) {
-		problem(w, http.StatusBadRequest, "unknown_role", "unknown role "+string(role))
+	if _, ok := s.resolveRole(w, r, role); !ok {
 		return
 	}
 	var request revokeRoleRequest
@@ -674,14 +653,48 @@ func trimmedList(values []string) []string {
 // has that permission in a scope containing the one being granted: the
 // comparison is on what a binding reaches, not on columns that happen to match,
 // so "any team" cannot be handed out by somebody bound to one team.
-func mayGrant(actor authz.Principal, role authz.Role, scope authz.Scope) error {
-	for _, permission := range role.Permissions() {
+//
+// The permissions are passed in rather than read off the role, and that is the
+// whole of it: a role an installation defined carries nothing in the compiled
+// map, so a guard that asked the role would have found an empty list, found
+// nothing to object to, and let anybody holding principal.manage hand out a
+// role they had just defined with every permission in the product. The caller
+// resolves the role against the store, which answers for both kinds and
+// refuses a name that is neither.
+func mayGrant(actor authz.Principal, role authz.Role, permissions []authz.Permission, scope authz.Scope) error {
+	if len(permissions) == 0 {
+		// Not "nothing to check": a role resolved to nothing is a role nobody
+		// read, and handing one out is the thing this refuses.
+		return errors.New("the role " + string(role) + " carries no permission that could be checked against yours")
+	}
+	for _, permission := range permissions {
 		if !holdsInScope(actor, permission, scope) {
 			return errors.New("the role " + string(role) + " carries " + string(permission) +
 				", which you do not hold in " + scope.String())
 		}
 	}
 	return nil
+}
+
+// resolveRole answers what a role carries - the product's own from the code,
+// an installation's own from its database - and writes the refusal itself for
+// a name that is neither.
+//
+// Every caller that used to ask authz.KnownRole asks this instead. The
+// difference matters in both directions: the compiled list would refuse a
+// role the installation defined, and an empty answer for an unresolvable name
+// would be read by the escalation guard as a role carrying nothing.
+func (s *Server) resolveRole(w http.ResponseWriter, r *http.Request, role authz.Role) ([]authz.Permission, bool) {
+	permissions, err := s.authz.RolePermissions(r.Context(), role)
+	if errors.Is(err, authz.ErrUnknownRole) {
+		problem(w, http.StatusBadRequest, "unknown_role", "unknown role "+string(role))
+		return nil, false
+	}
+	if err != nil {
+		s.fail(w, err)
+		return nil, false
+	}
+	return permissions, true
 }
 
 func holdsInScope(actor authz.Principal, permission authz.Permission, scope authz.Scope) bool {
@@ -706,11 +719,13 @@ func (s *Server) refuseEscalation(w http.ResponseWriter, r *http.Request,
 	problem(w, http.StatusForbidden, "scope_escalation", err.Error())
 }
 
-// parse checks the role and reads the validity.
+// parse reads the scope and the validity. Whether the name is a role at all
+// is not answered here: an installation defines roles of its own, so that
+// question belongs to the store, and the caller asks it with resolveRole.
 func (request roleRequest) parse() (authz.Role, authz.Scope, *time.Time, error) {
 	role := authz.Role(request.Role)
-	if !authz.KnownRole(role) {
-		return "", authz.Scope{}, nil, errors.New("unknown role " + request.Role)
+	if strings.TrimSpace(request.Role) == "" {
+		return "", authz.Scope{}, nil, errors.New("a binding names a role")
 	}
 	scope, err := request.scope()
 	if err != nil {
@@ -785,7 +800,11 @@ func (s *Server) handleGrantRole(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_binding", err.Error())
 		return
 	}
-	if err := mayGrant(actor, role, scope); err != nil {
+	carried, ok := s.resolveRole(w, r, role)
+	if !ok {
+		return
+	}
+	if err := mayGrant(actor, role, carried, scope); err != nil {
 		s.refuseEscalation(w, r, actor, "principal.role.grant", target.ID, err)
 		return
 	}
@@ -873,7 +892,11 @@ func (s *Server) handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 			problem(w, http.StatusBadRequest, "invalid_binding", err.Error())
 			return
 		}
-		if err := mayGrant(actor, role, scope); err != nil {
+		carried, ok := s.resolveRole(w, r, role)
+		if !ok {
+			return
+		}
+		if err := mayGrant(actor, role, carried, scope); err != nil {
 			s.refuseEscalation(w, r, actor, "principal.create", request.Subject, err)
 			return
 		}
@@ -1025,8 +1048,7 @@ func (s *Server) handleCreateGroupMapping(w http.ResponseWriter, r *http.Request
 	if request.Issuer == "" && s.oidc != nil {
 		request.Issuer = s.oidc.Issuer()
 	}
-	if !authz.KnownRole(authz.Role(request.Role)) {
-		problem(w, http.StatusBadRequest, "unknown_role", "unknown role "+request.Role)
+	if _, ok := s.resolveRole(w, r, authz.Role(request.Role)); !ok {
 		return
 	}
 

@@ -1649,6 +1649,24 @@ a.count-tile:hover { background: var(--bg-hover); text-decoration: none; color: 
 .count-tile.info { --segment: var(--blue); }
 .count-tile.neutral { --segment: var(--border-strong); }
 
+/* Choosing the permissions of a role: 188 of them, so they are grouped by the
+   part of the name before the first dot and the box scrolls rather than
+   pushing the save button off the screen. */
+.permission-picker { max-height: 360px; overflow-y: auto; margin: 0 0 12px; }
+.permission-group {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.permission-group legend { font-size: 12px; color: var(--text-muted); padding: 0 4px; }
+.permission-group label { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; }
+.permission-group label .mono { overflow-wrap: anywhere; }
+
 /* The states with nothing in them: named, not drawn. A zero is news as a
    word and noise as an area. */
 .status-bar-quiet { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }

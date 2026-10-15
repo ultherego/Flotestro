@@ -364,6 +364,87 @@ const (
 	PermSupportBundleRead   Permission = "support.bundle.read"
 )
 
+// allPermissions is every permission the product defines, in the order they
+// are declared above.
+//
+// A role an installation defines is a set of these and nothing else, so the
+// set has to exist at run time - the constants alone are a compile-time
+// fiction as far as a request naming "hosts.read" is concerned. The list is
+// written out rather than derived from the roles, because a permission no
+// built-in role happens to carry is still one somebody may put in a role of
+// their own.
+//
+// It cannot drift: TestEveryPermissionConstantIsInTheCatalogue reads the
+// constants out of this file and compares the two.
+var allPermissions = []Permission{
+	PermHostRead, PermInventoryRead, PermInventoryRefresh, PermAuditRead,
+	PermJobRead, PermJobCreate, PermJobApprove, PermJobCancel,
+	PermHostEnrollCreate, PermHostEnrollRead, PermHostEnrollRevoke, PermHostEnrollBatch,
+	PermRelayEnrollCreate, PermRelayManage, PermHostIdentityReplace, PermHostQuarantine,
+	PermHostQuarantineRelease, PermHostDecommission, PermPrincipalManage, PermHostScopeWrite,
+	PermTeamBindingWrite, PermUnitStart, PermUnitStop, PermUnitRestart,
+	PermUnitReload, PermJournalRead, PermPackagesPlan, PermPackagesUpgrade,
+	PermAgentUpgrade, PermPackagesRepair, PermSystemReboot, PermUnitStatus,
+	PermUnitEnableWrite, PermUnitMaskWrite, PermUnitResetFailed, PermLogFileRead,
+	PermJournalFollow, PermProcessRead, PermProcessSignal, PermPackagesRead,
+	PermPackagesInstall, PermPackagesRemove, PermPackagesHold, PermPackagesRepository,
+	PermScheduleWrite, PermScheduleDisable, PermScheduleRemove, PermScheduleRun,
+	PermSchedulePreview, PermScheduleRootExec, PermFileWriteUnvalidated, PermNetworkRead,
+	PermNetworkWrite, PermNetworkRouteWrite, PermNetworkMTUWrite, PermNetworkRollback,
+	PermNetworkLinkWrite, PermNetworkLinkRemove, PermDNSRead, PermDNSPlan,
+	PermDNSHostWrite, PermDNSDirectoryWrite, PermFirewallRead, PermFirewallWrite,
+	PermFirewallRuleRemove, PermFirewallZoneWrite, PermFirewallServiceWrite, PermFirewallRestore,
+	PermStorageRead, PermStorageMountWrite, PermStorageMountRemove, PermStorageFsck,
+	PermStorageSmartRead, PermStorageLVMWrite, PermStorageFilesystemWrite, PermStorageDestructive,
+	PermStorageWipe, PermStorageRAIDFail, PermStorageRAIDRemove, PermStorageRAIDAdd,
+	PermStorageLVMVolumeCreate, PermStorageLVMVolumeRemove, PermStorageLVMGroupExtend, PermStorageLVMSnapshotCreate,
+	PermStorageLVMSnapshotRemove, PermSSHRead, PermSSHConfigWrite, PermSSHHostKeyRotate,
+	PermSecurityRead, PermSecurityScan, PermSecurityRemediate, PermSecurityMACWrite,
+	PermSecurityAuditReload, PermBackupRead, PermBackupRun, PermBackupVerify,
+	PermBackupRestore, PermVulnerabilityRead, PermMonitoringRead, PermMonitoringProbe,
+	PermMonitoringSilence, PermMonitoringRulesWrite, PermNotificationRead, PermNotificationManage,
+	PermHostMaintenanceWrite, PermHostTagWrite, PermHostGroupWrite, PermSystemShutdown,
+	PermSystemHostnameWrite, PermTimeRead, PermTimePlan, PermTimeWrite,
+	PermTimezoneWrite, PermKernelRead, PermKernelModulePlan, PermKernelSysctlWrite,
+	PermKernelModuleWrite, PermKernelModuleBlacklist, PermFileRead, PermFilePlan,
+	PermFileWrite, PermFileRemove, PermFileRollback, PermDockerRead,
+	PermDockerEvents, PermDockerLogs, PermDockerStart, PermDockerStop,
+	PermDockerRestart, PermDockerRemove, PermDockerPull, PermDockerPrune,
+	PermDockerPlan, PermDockerContainerEnsure, PermDockerNetworkEnsure, PermDockerNetworkRemove,
+	PermDockerVolumeEnsure, PermDockerVolumeRemove, PermComposePlan, PermComposeDeploy,
+	PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,
+	PermBudgetRead, PermBudgetWrite, PermPolicyRead, PermPolicyWrite,
+	PermPolicyPublish, PermPolicyRemediateAuto, PermIdentityRead, PermIdentityPolicyRead,
+	PermIdentityUserWrite, PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
+	PermIdentityHostLeave, PermIdentityKeytabRotate, PermLocalUserRead, PermLocalUserCreate,
+	PermLocalUserLock, PermLocalUserUnlock, PermLocalSSHKeyWrite, PermLocalSSHKeyAdd,
+	PermLocalSSHKeyRemove, PermLocalSSHKeyReplace, PermAccountsPrivilegedGroups, PermLocalUserGroupsWrite,
+	PermLocalUserExpiryWrite, PermLocalUserDelete, PermMetricsRead, PermSecretRead,
+	PermSecretWrite, PermSecretDestroy, PermCertificatePlan, PermCertificateRead,
+	PermCertificateWatch, PermCertificateDeploy, PermCertificateTrustPlan, PermCertificateTrustWrite,
+	PermCertificateTrustRemove, PermCertificateRenew, PermPKIRead, PermPKIRotate,
+	PermSettingsRead, PermSettingsAdvertiseWrite, PermSupportBundleCreate, PermSupportBundleRead,
+}
+
+// AllPermissions returns every permission the product defines, sorted.
+func AllPermissions() []Permission {
+	permissions := append([]Permission(nil), allPermissions...)
+	sort.Slice(permissions, func(i, j int) bool { return permissions[i] < permissions[j] })
+	return permissions
+}
+
+// KnownPermission says whether the name is a permission of this product. A
+// name that is not must never be stored in a role: it would read as a right
+// nobody can grant and nobody can take away.
+func KnownPermission(permission Permission) bool {
+	for _, known := range allPermissions {
+		if known == permission {
+			return true
+		}
+	}
+	return false
+}
+
 // Role groups permissions. The split matches the roles from the document:
 // platform admin, operator, auditor and approver.
 type Role string
@@ -567,10 +648,21 @@ var rolePermissions = map[Role][]Permission{
 	},
 }
 
-// KnownRole checks whether the role exists.
-func KnownRole(role Role) bool {
+// BuiltIn says whether the role is one the product defines. A role of the
+// installation's own is not one, and its permissions live in the database.
+func BuiltIn(role Role) bool {
 	_, ok := rolePermissions[role]
 	return ok
+}
+
+// KnownRole checks whether the role is one of the product's own.
+//
+// It is NOT the question "may this name be bound": an installation defines
+// roles of its own, and those are known to the store, not to this package.
+// Ask Store.RolePermissions, which answers for both kinds and refuses a name
+// that is neither.
+func KnownRole(role Role) bool {
+	return BuiltIn(role)
 }
 
 // Permissions returns the sorted list of the role's permissions.
@@ -590,7 +682,8 @@ func (r Role) Has(permission Permission) bool {
 	return false
 }
 
-// AllRoles returns the sorted list of roles.
+// AllRoles returns the sorted list of the product's own roles. The roles an
+// installation defined are in its database; Store.ListRoles has both.
 func AllRoles() []Role {
 	roles := make([]Role, 0, len(rolePermissions))
 	for role := range rolePermissions {
@@ -867,6 +960,42 @@ type Binding struct {
 	// ValidUntil is the moment the binding stops granting anything. Nil means
 	// until somebody revokes it.
 	ValidUntil *time.Time `json:"valid_until,omitempty"`
+	// Granted is what the role carries when the role is one the installation
+	// defined. It is read with the binding, in the same query, so a decision
+	// about a request never stands on a catalogue cached from some earlier
+	// moment.
+	//
+	// It is empty for a built-in role, whose permissions are compiled in. It is
+	// also empty for a binding to a role of the installation that was built
+	// without reading the permissions - and that case grants nothing at all,
+	// which is the right way round: a binding whose powers were never read is
+	// not a binding to everything.
+	Granted []Permission `json:"granted,omitempty"`
+}
+
+// Grants says whether the binding carries the permission, by the role's
+// definition - compiled for a built-in role, read from the installation for
+// one of its own.
+func (b Binding) Grants(permission Permission) bool {
+	if _, builtIn := rolePermissions[b.Role]; builtIn {
+		return b.Role.Has(permission)
+	}
+	for _, granted := range b.Granted {
+		if granted == permission {
+			return true
+		}
+	}
+	return false
+}
+
+// Permissions is everything the binding carries, sorted.
+func (b Binding) Permissions() []Permission {
+	if _, builtIn := rolePermissions[b.Role]; builtIn {
+		return b.Role.Permissions()
+	}
+	permissions := append([]Permission(nil), b.Granted...)
+	sort.Slice(permissions, func(i, j int) bool { return permissions[i] < permissions[j] })
+	return permissions
 }
 
 // Active says whether the binding still grants its role at the given moment.
@@ -901,7 +1030,7 @@ func (p Principal) live() []Binding {
 // Can checks whether the identity has the permission within the target's scope.
 func (p Principal) Can(permission Permission, target Scope) bool {
 	for _, binding := range p.live() {
-		if binding.Role.Has(permission) && binding.Scope.Matches(target) {
+		if binding.Grants(permission) && binding.Scope.Matches(target) {
 			return true
 		}
 	}
@@ -912,7 +1041,7 @@ func (p Principal) Can(permission Permission, target Scope) bool {
 // all.
 func (p Principal) CanAnywhere(permission Permission) bool {
 	for _, binding := range p.live() {
-		if binding.Role.Has(permission) {
+		if binding.Grants(permission) {
 			return true
 		}
 	}
@@ -924,7 +1053,7 @@ func (p Principal) CanAnywhere(permission Permission) bool {
 func (p Principal) Permissions() []string {
 	unique := map[string]bool{}
 	for _, binding := range p.live() {
-		for _, permission := range binding.Role.Permissions() {
+		for _, permission := range binding.Permissions() {
 			unique[string(permission)] = true
 		}
 	}
@@ -941,7 +1070,7 @@ func (p Principal) Permissions() []string {
 func (p Principal) ScopesFor(permission Permission) []Scope {
 	var scopes []Scope
 	for _, binding := range p.live() {
-		if binding.Role.Has(permission) {
+		if binding.Grants(permission) {
 			scopes = append(scopes, binding.Scope)
 		}
 	}
