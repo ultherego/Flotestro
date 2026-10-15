@@ -4,7 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
-import { Settings } from "./Settings";
+import { ApiError } from "../lib/api";
+import { hubState, Settings } from "./Settings";
 
 /**
  * A configuration screen is read with one name in mind. It used to answer
@@ -36,6 +37,12 @@ const settings = {
   ],
 };
 
+/** What the sign-in of a test holds, and what each counted collection answers. */
+const answers: { permissions: string[]; collections: Record<string, unknown> } = {
+  permissions: [],
+  collections: {},
+};
+
 vi.mock("../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/api")>();
   return {
@@ -45,11 +52,34 @@ vi.mock("../lib/api", async (importOriginal) => {
       get: (path: string) => {
         // The panel of this test has no monitoring, so that card draws nothing.
         if (path.startsWith("/api/v1/settings/monitoring")) return Promise.reject(new Error("no monitoring"));
-        return Promise.resolve(settings);
+        if (path === "/api/v1/whoami") {
+          return Promise.resolve({ subject: "tester", permissions: answers.permissions });
+        }
+        if (path in answers.collections) {
+          const answer = answers.collections[path];
+          return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
+        }
+        if (path.startsWith("/api/v1/settings")) return Promise.resolve(settings);
+        return Promise.reject(new actual.ApiError(403, "forbidden", "not for you"));
       },
     },
   };
 });
+
+/** Everything the hub can count, so a test names only what it changes. */
+function grantEverything() {
+  answers.permissions = [
+    "notification.read", "host.enroll.read", "principal.manage", "budget.read", "policy.read",
+  ];
+  answers.collections = {
+    "/api/v1/notifications/channels": { items: [{}, {}, {}], count: 3 },
+    "/api/v1/relays": { items: [{}] },
+    "/api/v1/roles": { items: [{}, {}], count: 2 },
+    "/api/v1/group-mappings": { items: [], count: 0 },
+    "/api/v1/budgets": { items: [{}, {}, {}, {}] },
+    "/api/v1/policies": { items: [{}], count: 1 },
+  };
+}
 
 function draw(node: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -60,13 +90,22 @@ function draw(node: ReactNode) {
   );
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  answers.permissions = [];
+  answers.collections = {};
+});
+
+/** The tiles of the read-only facts, now that writable tiles stand above them. */
+function areaTiles() {
+  return document.querySelectorAll('[data-testid="settings-areas"] .part');
+}
 
 describe("the settings screen", () => {
   it("puts every area on the screen as a tile, with how many values it holds", async () => {
     draw(<Settings />);
-    await waitFor(() => expect(document.querySelectorAll(".part").length).toBe(2));
-    for (const tile of Array.from(document.querySelectorAll(".part"))) {
+    await waitFor(() => expect(areaTiles().length).toBe(2));
+    for (const tile of Array.from(areaTiles())) {
       expect(tile.querySelector(".part-summary")?.textContent).toContain("2 values");
     }
     // The values themselves are there, not behind anything.
@@ -77,8 +116,8 @@ describe("the settings screen", () => {
     draw(<Settings />);
     await waitFor(() => expect(screen.getByTestId("settings-search")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("settings-search"), { target: { value: "lifetime" } });
-    await waitFor(() => expect(document.querySelectorAll(".part").length).toBe(1));
-    const tile = document.querySelector(".part") as HTMLElement;
+    await waitFor(() => expect(areaTiles().length).toBe(1));
+    const tile = areaTiles()[0] as HTMLElement;
     expect(tile.textContent).toContain("Server");
     expect(tile.querySelector(".part-summary")?.textContent).toContain("1 value");
     expect(screen.queryByText("Agent gateway")).toBeNull();
@@ -95,5 +134,98 @@ describe("the settings screen", () => {
     draw(<Settings />);
     await waitFor(() => expect(screen.getByText("set")).toBeInTheDocument());
     expect(screen.queryByText(/postgres:\/\/flotestro@/)).not.toBeNull();
+  });
+});
+
+/*
+ * The hub: the configuration the installation holds, told apart from what the
+ * process was started with.
+ *
+ * The rule under every one of these is the product's own: a number nobody
+ * could take is not a count of nothing. A viewer who may not read the roles
+ * has to see that, because "0 roles" reads as an installation with nobody in
+ * it - and somebody would go and grant themselves one.
+ */
+describe("hubState", () => {
+  it("counts what the collection says it holds", () => {
+    expect(hubState({ items: [{}, {}], count: 2 }, null, false)).toEqual({ kind: "count", n: 2 });
+    // A collection that answers with the items alone is still counted.
+    expect(hubState({ items: [{}] }, null, false)).toEqual({ kind: "count", n: 1 });
+    // An empty collection is a count, and the only honest zero here.
+    expect(hubState({ items: [], count: 0 }, null, false)).toEqual({ kind: "count", n: 0 });
+  });
+
+  it("tells a refusal apart from an empty collection", () => {
+    expect(hubState(undefined, new ApiError(403, "forbidden", "no"), false)).toEqual({ kind: "forbidden" });
+  });
+
+  it("says it does not know rather than naming a number it has not got", () => {
+    // Still asking.
+    expect(hubState(undefined, null, true)).toEqual({ kind: "unknown" });
+    // Asked and failed: a timeout, a replica that is down, a proxy in the way.
+    expect(hubState(undefined, new Error("network"), false)).toEqual({ kind: "unknown" });
+    expect(hubState(undefined, new ApiError(500, "internal", "boom"), false)).toEqual({ kind: "unknown" });
+    // An answer of a shape nothing can be counted from is not zero either.
+    expect(hubState({ nothing: true }, null, false)).toEqual({ kind: "unknown" });
+    expect(hubState(null, null, false)).toEqual({ kind: "unknown" });
+  });
+});
+
+describe("the configuration hub", () => {
+  it("puts every configurable resource on the screen with what is set now and the way in", async () => {
+    grantEverything();
+    draw(<Settings />);
+    await waitFor(() => expect(screen.getByTestId("hub-channels")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("hub-channels-state").textContent).toContain("set: 3"));
+    expect(screen.getByTestId("hub-budgets-state").textContent).toContain("set: 4");
+    // A collection that holds nothing says so in words, not as a count tile.
+    await waitFor(() =>
+      expect(screen.getByTestId("hub-mappings-state").textContent).toContain("none set"));
+    // Every tile offers the screen that owns the resource.
+    const channels = screen.getByTestId("hub-channels");
+    expect(channels.querySelector("a")).toHaveAttribute("href", "/notifications");
+    expect(screen.getByTestId("hub-roles").querySelector("a"))
+      .toHaveAttribute("href", "/access?tab=roles");
+    // And the facts of the process are still their own section, named as such.
+    expect(screen.getByText("What the process was started with")).toBeInTheDocument();
+  });
+
+  it("says a resource is not the viewer's to read rather than drawing it as none", async () => {
+    grantEverything();
+    answers.permissions = answers.permissions.filter((one) => one !== "principal.manage");
+    draw(<Settings />);
+    await waitFor(() =>
+      expect(screen.getByTestId("hub-roles-state").textContent).toContain("not yours to read"));
+    expect(screen.getByTestId("hub-roles-state").textContent).not.toContain("0");
+    // No way in is offered to a screen that would refuse on arrival.
+    expect(screen.getByTestId("hub-roles").querySelector("a")).toBeNull();
+    // The resource is still named: the installation has roles, they are not
+    // this viewer's to see.
+    expect(screen.getByTestId("hub-roles").textContent).toContain("Roles");
+    // And the tile beside it, which this sign-in may read, still counts.
+    await waitFor(() =>
+      expect(screen.getByTestId("hub-channels-state").textContent).toContain("set: 3"));
+  });
+
+  it("says a collection that refused is unread, with the resource still open", async () => {
+    grantEverything();
+    // The permission is held, and the collection refuses anyway: a role scoped
+    // to an owner or a tag, which the server decides and the panel cannot know.
+    answers.collections["/api/v1/budgets"] = new ApiError(403, "forbidden", "not yours");
+    draw(<Settings />);
+    await waitFor(() =>
+      expect(screen.getByTestId("hub-budgets-state").textContent).toContain("not yours to read"));
+    expect(screen.getByTestId("hub-budgets-state").textContent).not.toContain("set: 0");
+  });
+
+  it("does not claim a refusal while the sign-in is still unknown", async () => {
+    // Nothing answers: the permissions have not arrived. A tile that read the
+    // empty set as "nothing granted" would accuse every viewer of that.
+    answers.permissions = [];
+    answers.collections = {};
+    draw(<Settings />);
+    await waitFor(() => expect(screen.getByTestId("hub-roles-state")).toBeInTheDocument());
+    expect(screen.getByTestId("hub-roles-state").textContent).toContain("not known");
   });
 });
