@@ -78,6 +78,9 @@ export const pl: Record<string, string> = {
   "Decisions nobody has taken": "Decyzje, których nikt nie podjął",
   "Found on the hosts": "Znalezione na hostach",
   "Agents behind the newest": "Agenci starsi niż najnowszy",
+  /* Widgety: stan, ktorego nikt nie policzyl, ma swoje miejsce. */
+  "Not counted, so what is above is a share of the rest:": "Nie policzono, więc to powyżej jest udziałem z pozostałych:",
+  "Not counted:": "Nie policzono:",
   "Every counter here is taken in the database over the hosts you are allowed to see, not over a page of them. A counter the server could not answer honestly for your view is left out rather than drawn as zero, and a count at zero is a word under the row rather than a tile.": "Każdy licznik tutaj liczy się w bazie po hostach, które wolno Ci widzieć - nie po jednej stronie listy. Licznika, na który serwer nie umie uczciwie odpowiedzieć dla Twojego widoku, nie ma wcale, zamiast pokazywać zero; a licznik na zerze schodzi pod wiersz jako słowo, nie kafelek.",
   /* Settings: konfiguracja procesu i wyszukiwanie ustawienia. */
   "What the process was started with": "Z czym wystartował proces",

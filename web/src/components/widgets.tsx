@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { useT } from "../i18n";
 
 /** The tone of a segment or a bar; it is a state colour, never the accent. */
 export type WidgetTone = "ok" | "warn" | "error" | "unknown" | "info" | "neutral";
@@ -32,10 +33,22 @@ export type Segment = {
  *
  * Unknown is not zero. A segment with no value at all keeps its own mark and
  * is never folded in with the empty ones.
+ *
+ * And it is not only the mark. A bar divides a width between the states, so
+ * it says "this is the whole and these are its parts" - which it cannot say
+ * when one of the states was never counted: the denominator is the counted
+ * ones alone, so every share is a share of the rest. The bar used to keep
+ * that to itself and leave the uncounted state as a dash in small type among
+ * the zeros. It is said in words now, under the bar, in the one case it is
+ * true - the state that was not counted is named there.
  */
 export function StatusBar({ segments, compact = false }: { segments: Segment[]; compact?: boolean }) {
-  const counted = segments.filter((segment) => (segment.value ?? 0) > 0);
-  const quiet = segments.filter((segment) => (segment.value ?? 0) <= 0);
+  const t = useT();
+  const counted = segments.filter((segment) => segment.value !== undefined && segment.value > 0);
+  // The three kinds are told apart by the value and nothing else: a count, a
+  // nothing, and a number that was never taken.
+  const quiet = segments.filter((segment) => segment.value !== undefined && segment.value <= 0);
+  const uncounted = segments.filter((segment) => segment.value === undefined);
   const total = counted.reduce((sum, segment) => sum + (segment.value ?? 0), 0);
 
   const draw = (segment: Segment, className: string, style?: React.CSSProperties) => {
@@ -73,10 +86,17 @@ export function StatusBar({ segments, compact = false }: { segments: Segment[]; 
       )}
       {quiet.length > 0 && (
         <div className="status-bar-quiet">
-          {quiet.map((segment) => draw(
-            segment,
-            `status-bar-quiet-item ${segment.tone} ${segment.value === undefined ? "unset" : "zero"}`,
-          ))}
+          {quiet.map((segment) => draw(segment, `status-bar-quiet-item ${segment.tone} zero`))}
+        </div>
+      )}
+      {uncounted.length > 0 && (
+        <div className="status-bar-uncounted" data-testid="status-bar-uncounted">
+          <span className="status-bar-uncounted-note">
+            {counted.length > 0
+              ? t("Not counted, so what is above is a share of the rest:")
+              : t("Not counted:")}
+          </span>
+          {uncounted.map((segment) => draw(segment, `status-bar-quiet-item ${segment.tone} unset`))}
         </div>
       )}
     </div>
@@ -98,8 +118,13 @@ export function StatusBar({ segments, compact = false }: { segments: Segment[]; 
  * StatusBar, because a zero is news as a word and noise as an area.
  */
 export function CountRow({ counts }: { counts: Segment[] }) {
-  const present = counts.filter((count) => (count.value ?? 0) > 0);
-  const quiet = counts.filter((count) => (count.value ?? 0) <= 0);
+  const t = useT();
+  const present = counts.filter((count) => count.value !== undefined && count.value > 0);
+  const quiet = counts.filter((count) => count.value !== undefined && count.value <= 0);
+  // A count nobody took does not belong under a row of zeros, here either:
+  // these counts are of different things, so the only reading of a dash among
+  // them is "there is none", which is the one thing it does not mean.
+  const uncounted = counts.filter((count) => count.value === undefined);
 
   const draw = (count: Segment, className: string) => {
     const body = (
@@ -124,10 +149,13 @@ export function CountRow({ counts }: { counts: Segment[] }) {
       )}
       {quiet.length > 0 && (
         <div className="status-bar-quiet">
-          {quiet.map((count) => draw(
-            count,
-            `status-bar-quiet-item ${count.tone} ${count.value === undefined ? "unset" : "zero"}`,
-          ))}
+          {quiet.map((count) => draw(count, `status-bar-quiet-item ${count.tone} zero`))}
+        </div>
+      )}
+      {uncounted.length > 0 && (
+        <div className="status-bar-uncounted" data-testid="status-bar-uncounted">
+          <span className="status-bar-uncounted-note">{t("Not counted:")}</span>
+          {uncounted.map((count) => draw(count, `status-bar-quiet-item ${count.tone} unset`))}
         </div>
       )}
     </div>

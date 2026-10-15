@@ -3,7 +3,7 @@ import { cleanup, render, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import type { ReactElement } from "react";
-import { AreaChart, BarChart, Breakdown, ChartLegend, Meter, StatusBar } from "./widgets";
+import { AreaChart, BarChart, Breakdown, ChartLegend, CountRow, Meter, StatusBar } from "./widgets";
 
 /** A segment may be a router link, so the widgets render inside a router. */
 function draw(element: ReactElement) {
@@ -114,9 +114,100 @@ describe("StatusBar", () => {
     expect(quiet[1]).toHaveTextContent("\u2014");
   });
 
+  // A bar divides a width between the states, so it says "this is the whole".
+  // With a state that was never counted it cannot say that: the denominator is
+  // the counted ones, so every share is a share of the rest.
+  it("says the bar is a share of the rest when a state was not counted", () => {
+    const { container, getByTestId } = draw(
+      <StatusBar segments={[
+        { label: "Online", value: 9, tone: "ok" },
+        { label: "Offline", value: 1, tone: "error" },
+        { label: "Unreachable", value: undefined, tone: "unknown" },
+      ]} />,
+    );
+    const note = getByTestId("status-bar-uncounted");
+    expect(note).toHaveTextContent("Not counted, so what is above is a share of the rest:");
+    // The state that was not counted is named in it, with its dash.
+    expect(note).toHaveTextContent("Unreachable");
+    expect(note).toHaveTextContent("\u2014");
+    // And it is not among the zeros, where it would read as "there is none".
+    expect(container.querySelector(".status-bar-quiet")).toBeNull();
+    expect(container.querySelectorAll(".status-bar-segment")).toHaveLength(2);
+  });
+
+  it("does not claim a share of anything when nothing was counted at all", () => {
+    const { getByTestId, container } = draw(
+      <StatusBar segments={[
+        { label: "Online", value: undefined, tone: "ok" },
+        { label: "Offline", value: undefined, tone: "error" },
+      ]} />,
+    );
+    expect(getByTestId("status-bar-uncounted")).toHaveTextContent("Not counted:");
+    // No bar, no hero: there is no number to draw one from.
+    expect(container.querySelector(".status-bar")).toBeNull();
+    expect(container.querySelector(".status-bar-hero")).toBeNull();
+  });
+
+  it("keeps the zeros and the uncounted in rows of their own", () => {
+    const { container } = draw(
+      <StatusBar segments={[
+        { label: "Online", value: 4, tone: "ok" },
+        { label: "Stale", value: 0, tone: "warn" },
+        { label: "Unreachable", value: undefined, tone: "unknown" },
+      ]} />,
+    );
+    const zeros = container.querySelectorAll(".status-bar-quiet .status-bar-quiet-item");
+    expect(zeros).toHaveLength(1);
+    expect(zeros[0]).toHaveTextContent("Stale");
+    const unset = container.querySelectorAll(".status-bar-uncounted .status-bar-quiet-item");
+    expect(unset).toHaveLength(1);
+    expect(unset[0]).toHaveClass("unset");
+    expect(unset[0]).not.toHaveClass("zero");
+  });
+
   it("takes the compact form on request", () => {
     const { getByRole } = draw(<StatusBar compact segments={[{ label: "Online", value: 1, tone: "ok" }]} />);
     expect(getByRole("list")).toHaveClass("status-bar-group", "compact");
+  });
+});
+
+/*
+ * The counts that are not parts of one whole: three different things side by
+ * side. There is no share to be wrong about here, which is exactly why a
+ * count nobody took must not sit among the zeros - among counts of different
+ * things, the only reading of a dash down there is "there is none of it".
+ */
+describe("CountRow", () => {
+  it("draws the counts it has, and names what was not counted apart from the zeros", () => {
+    const { container, getByTestId } = draw(
+      <CountRow counts={[
+        { label: "Security findings", value: 19, tone: "error" },
+        { label: "Failed jobs", value: 0, tone: "warn" },
+        { label: "Unknown checks", value: undefined, tone: "unknown" },
+      ]} />,
+    );
+    expect(container.querySelectorAll(".count-tile")).toHaveLength(1);
+    const zeros = container.querySelectorAll(".status-bar-quiet .status-bar-quiet-item");
+    expect(zeros).toHaveLength(1);
+    expect(zeros[0]).toHaveTextContent("Failed jobs");
+    const note = getByTestId("status-bar-uncounted");
+    expect(note).toHaveTextContent("Not counted:");
+    expect(note).toHaveTextContent("Unknown checks");
+    expect(note.querySelector(".status-bar-quiet-item")).toHaveClass("unset");
+  });
+
+  it("turns a count with a destination into a link, uncounted or not", () => {
+    const { container } = draw(
+      <CountRow counts={[
+        { label: "Security findings", value: 19, tone: "error", to: "/security" },
+        { label: "Unknown checks", value: undefined, tone: "unknown", to: "/readiness" },
+      ]} />,
+    );
+    const links = container.querySelectorAll("a");
+    expect(links).toHaveLength(2);
+    expect(links[0]).toHaveAttribute("href", "/security");
+    // A count nobody took is still somewhere to go and find out why.
+    expect(links[1]).toHaveAttribute("href", "/readiness");
   });
 });
 

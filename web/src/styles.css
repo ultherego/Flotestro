@@ -1666,6 +1666,11 @@ a.count-tile:hover { background: var(--bg-hover); text-decoration: none; color: 
    the unknown, because unknown is not zero. */
 .status-bar-quiet-item.unset .status-bar-value { color: var(--unknown-text, var(--text-muted)); }
 .status-bar-quiet-item.unset .status-bar-label { font-style: italic; }
+/* The states that were never counted, with the sentence that says what the
+   bar above is a share of. Not among the zeros: a number nobody took and a
+   number that came back empty are different news. */
+.status-bar-uncounted { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.status-bar-uncounted-note { font-size: 12px; color: var(--unknown-text, var(--text-muted)); }
 a.status-bar-quiet-item:hover { color: var(--text); text-decoration: underline; }
 a.status-bar-segment:hover { filter: brightness(1.08); text-decoration: none; color: var(--segment-text, var(--text)); }
 .status-bar-value { font-size: 28px; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
