@@ -226,14 +226,27 @@ export function Dashboard() {
       <Board screen="dashboard" catalogue={DASHBOARD_CATALOGUE} drawn={{
             // A count nobody has yet is a dash, not a nought: a fleet that
             // has not answered is not a fleet with nothing wrong with it.
-            hosts_total: <MetricTile label={t("Hosts")} value={s?.hosts ?? null} size="xl" />,
+            // The two headline numbers wear the accent, filled: they say
+            // "start here", which is what the accent is for - it carries no
+            // state, so a glowing tile never claims a fleet is healthy. The
+            // two that follow carry state instead, and therefore do not
+            // glow. Two filled tiles on a screen and no more.
+            hosts_total: <MetricTile label={t("Hosts")} value={s?.hosts ?? null} size="xl" hero />,
+            hosts_online: (
+              <MetricTile
+                label={t("Online")}
+                value={s?.online ?? null}
+                size="xl"
+                hero
+                footnote={s === undefined ? undefined : t("{n} offline", { n: s.offline })}
+              />
+            ),
             hosts_offline: (
               <MetricTile
                 label={t("Offline")}
                 value={s?.offline ?? null}
                 size="xl"
                 state={s === undefined ? undefined : s.offline > 0 ? "error" : "ok"}
-                footnote={s === undefined ? undefined : t("{n} online", { n: s.online })}
               />
             ),
             security_updates: (
@@ -444,9 +457,10 @@ export const DASHBOARD_CATALOGUE: BoardEntry[] = [
   // narrow, as measurements rather than as rows of a bar: the fleet's size,
   // how much of it is out of reach, and the two counts that mean work.
   { key: "hosts_total", title: "Hosts", width: 3 },
-  { key: "hosts_offline", title: "Offline", width: 3 },
-  { key: "security_updates", title: "Security updates", width: 3 },
-  { key: "failed_units", title: "Failed units", width: 3 },
+  { key: "hosts_online", title: "Online", width: 3 },
+  { key: "hosts_offline", title: "Offline", width: 2 },
+  { key: "security_updates", title: "Security updates", width: 2 },
+  { key: "failed_units", title: "Failed units", width: 2 },
   { key: "host_availability", title: "Host availability", width: 12 },
   { key: "operations_24h", title: "Operations, last 24 h", width: 6 },
   { key: "fleet_composition", title: "Fleet composition", width: 6 },

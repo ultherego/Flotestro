@@ -1340,11 +1340,18 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
    the foot keep their own padding, so a flush body can let a table reach
    the edges without the title moving. */
 .card {
-  --card-pad-x: 16px;
-  --card-pad-y: 14px;
+  /* The surface the whole panel is made of, and until 15.10 the one thing
+     the rewrite had not touched: a 10px box with a hairline border and
+     tight padding. The dark operations panels the owner pointed at have
+     no borders at all - a card is separated from the page by being
+     lighter than it, which our two surfaces already are - and they give
+     the content room. Rounder, unbordered and roomier is most of what
+     "it looks like the screens" turns out to mean. */
+  --card-pad-x: 22px;
+  --card-pad-y: 18px;
   background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: 1px solid transparent;
+  border-radius: var(--radius-card);
   min-width: 0;
   /* The card is the container its contents measure themselves against: a
      fact list in a card a third of the page wide stacks, the same list with
@@ -1361,7 +1368,9 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
   flex-wrap: wrap;
   padding: var(--card-pad-y) var(--card-pad-x) 12px;
 }
-.card-head + .card-body { border-top: 1px solid var(--border); }
+/* No rule between the title and what it introduces: the title is a label
+   in muted ink now, not a headline that needs separating from the body. */
+.card-head + .card-body { border-top: 0; padding-top: 0; }
 .card-head-text { flex: 1 1 240px; min-width: 0; }
 /* The title of a card is a label, not a headline.
  *
@@ -1938,7 +1947,9 @@ a.status-bar-segment:hover { filter: brightness(1.08); text-decoration: none; co
 .widgets {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 16px;
+  /* Room between the cards, as in the references: at sixteen the page read
+     as one mass of panels, at twenty-two each one is a thing of its own. */
+  gap: 22px;
   /* Each card is as tall as what it holds. Stretched to the row's height, a
      card with one row of a table beside a card with eight stood half empty,
      and an empty box reads as something that failed to load. */
@@ -2357,8 +2368,8 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
    sentence and its contents together in one surface, so a screen of cards
    was a screen of undifferentiated boxes. */
 .card-head {
-  background: var(--bg-raised);
-  border-radius: var(--radius) var(--radius) 0 0;
+  background: transparent;
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
   border-bottom: 1px solid var(--border);
   padding: 8px var(--card-pad-x);
 }
@@ -2416,7 +2427,8 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 .metric-tile {
   background: var(--bg-panel);
   border-radius: var(--radius-card);
-  padding: 20px 22px;
+  padding: 22px 24px;
+  justify-content: center;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -2466,7 +2478,13 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
   background: var(--grad-hero);
   border-color: transparent;
   color: var(--accent-contrast);
+  /* The headline tile is the one thing on the page allowed to be loud, so
+     it gets the room to be: the number sits large in a filled block with
+     air around it, the way the references open a screen. */
+  padding: 26px 28px;
 }
+
+.metric-tile-hero .metric-value { letter-spacing: -0.03em; }
 
 .metric-tile-hero .metric-label,
 .metric-tile-hero .metric-unit,
