@@ -26,6 +26,39 @@ import { Problem } from "./kit";
  * hold of and how it looks while it is being done.
  */
 
+/**
+ * Nothing stands on anything else.
+ *
+ * What the hand is holding keeps the cell it was put on; everything it
+ * landed on moves down until the grid is clear again, in the order it was
+ * already in. Without this a container made wider simply covers its
+ * neighbour, which reads as a panel that has broken rather than as a
+ * grid that has been rearranged.
+ */
+export function settle(widgets: BoardWidget[], held: string): BoardWidget[] {
+  const over = (a: BoardWidget, b: BoardWidget) => {
+    const ax = a.x ?? 0, ay = a.y ?? 0, bx = b.x ?? 0, by = b.y ?? 0;
+    const ah = a.height ?? 2, bh = b.height ?? 2;
+    return ax < bx + b.width && bx < ax + a.width && ay < by + bh && by < ay + ah;
+  };
+  const order = [...widgets].sort((a, b) => {
+    if (a.key === held) return -1;
+    if (b.key === held) return 1;
+    return (a.y ?? 0) - (b.y ?? 0) || (a.x ?? 0) - (b.x ?? 0);
+  });
+  const settled: BoardWidget[] = [];
+  for (const one of order) {
+    const placed = { ...one };
+    // A row at a time, downwards: the grid has no ceiling, so this ends.
+    while (settled.some((other) => over(placed, other))) {
+      placed.y = (placed.y ?? 0) + 1;
+    }
+    settled.push(placed);
+  }
+  // The record keeps the order it had; only the places changed.
+  return widgets.map((one) => settled.find((other) => other.key === one.key) ?? one);
+}
+
 export function Board({ screen, catalogue, drawn }: {
   /**
    * The name the arrangement is stored under. The server takes lower-case
@@ -144,7 +177,9 @@ export function Board({ screen, catalogue, drawn }: {
       next.width = Math.min(Math.max(start.width + dx, 1), BOARD_COLUMNS - (start.x ?? 0));
       next.height = Math.min(Math.max((start.height ?? 2) + dy, BOARD_HEIGHTS.min), BOARD_HEIGHTS.max);
     }
-    setEditing(current.map((one) => (one.key === hold.key ? { ...one, ...next } : one)));
+    const moved = current.map((one) => (one.key === hold.key ? { ...one, ...next } : one));
+    const visible = settle(moved.filter((one) => !one.hidden), hold.key);
+    setEditing([...visible, ...moved.filter((one) => one.hidden)]);
   };
 
   const letGo = () => setHold(null);

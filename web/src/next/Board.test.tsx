@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
-import { Board } from "./Board";
+import { Board, settle } from "./Board";
 import { ToastProvider } from "../components/Toast";
 import { Card } from "./kit";
 
@@ -77,6 +77,30 @@ beforeEach(() => {
   });
 });
 afterEach(cleanup);
+
+describe("settling the grid", () => {
+  const at = (key: string, x: number, y: number, width: number, height: number) => ({ key, x, y, width, height });
+
+  it("leaves what the hand is holding where it was put", () => {
+    const after = settle([at("held", 0, 0, 6, 3), at("other", 3, 0, 6, 2)], "held");
+    expect(after.find((one) => one.key === "held")).toMatchObject({ x: 0, y: 0 });
+  });
+
+  it("moves what it landed on down, rather than letting one cover the other", () => {
+    const after = settle([at("held", 0, 0, 6, 3), at("other", 3, 0, 6, 2)], "held");
+    expect(after.find((one) => one.key === "other")?.y).toBe(3);
+  });
+
+  it("leaves a neighbour beside it alone", () => {
+    const after = settle([at("held", 0, 0, 6, 3), at("other", 6, 0, 6, 2)], "held");
+    expect(after.find((one) => one.key === "other")).toMatchObject({ x: 6, y: 0 });
+  });
+
+  it("keeps the order of the record, whatever moved", () => {
+    const after = settle([at("a", 0, 0, 6, 2), at("b", 0, 0, 6, 2), at("c", 0, 4, 6, 2)], "b");
+    expect(after.map((one) => one.key)).toEqual(["a", "b", "c"]);
+  });
+});
 
 describe("arranging a screen", () => {
   it("draws what the catalogue names until somebody arranges it", async () => {
