@@ -4,6 +4,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { Time, OptionalFlag, OptionalNumber, Empty, ErrorBox, ErrorCode, JobState } from "../../components/ui";
 import { Icon, type IconName } from "../../components/icons";
 import { Meter } from "../../components/widgets";
+import { MetricTile } from "../../components/MetricTile";
 import { api, ApiError, loadedItems } from "../../lib/api";
 import { bytes, relativeTime } from "../../lib/format";
 import {
@@ -40,6 +41,27 @@ type SystemState = {
  */
 const OVERVIEW_CHANGES = ["system.hostname.set", "host.quarantine", "host.quarantine.release", "host.decommission"];
 
+/**
+ * How full the root filesystem is, and whether that is a condition.
+ *
+ * Three answers rather than two: a host that has not reported its disk is
+ * unknown, not empty - and the difference matters most exactly here, where
+ * a nought would read as "plenty of room" on a host nobody can see.
+ *
+ * The thresholds are the ones an operator acts on: past ninety per cent a
+ * full disk is a matter of hours, past eighty it is a matter of planning.
+ */
+export function diskPressure(total?: number, free?: number): {
+  used?: number;
+  share?: number;
+  state?: "ok" | "warn" | "error";
+} {
+  if (total === undefined || free === undefined || total <= 0) return {};
+  const used = total - free;
+  const share = used / total;
+  return { used, share, state: share > 0.9 ? "error" : share > 0.8 ? "warn" : "ok" };
+}
+
 export function Overview() {
   const t = useT();
   const host = useHost();
@@ -62,9 +84,9 @@ export function Overview() {
   // A host that has not reported its adapters has an unknown registry,
   // not an empty one: the bar shows dashes until the first report.
   const adapters = host.capabilities?.length ? host.capabilities : undefined;
-  const rootUsed = hardware?.root_fs_bytes !== undefined && hardware.root_fs_free_bytes !== undefined
-    ? hardware.root_fs_bytes - hardware.root_fs_free_bytes
-    : undefined;
+  const root = diskPressure(hardware?.root_fs_bytes, hardware?.root_fs_free_bytes);
+  const rootUsed = root.used;
+  const rootShare = root.share;
 
   return (
     <ModulePage>
@@ -75,6 +97,30 @@ export function Overview() {
       <ModuleFreshness fragment={module.data} />
 
       <Widgets>
+        {/* The host read from across the room, in the three numbers an
+            operator looks for first. Each is a measurement the agent
+            reported; none of them is computed from an assumption, and a
+            figure the host has not sent is a dash rather than a nought -
+            an empty disk and an unknown disk are not the same host.
+
+            The disk carries a state because it is the one of the three that
+            becomes an incident: over 90 per cent full is an error, over 80
+            a warning. Cores and memory are facts, not conditions, so they
+            carry none - a tile that glowed for "16 GB" would be teaching
+            the eye to ignore colour. */}
+        <MetricTile
+          label={t("Disk used")}
+          value={rootShare === undefined ? null : Math.round(rootShare * 100)}
+          unit="%"
+          state={root.state}
+          footnote={rootUsed === undefined || hardware?.root_fs_bytes === undefined
+            ? undefined
+            : `${bytes(rootUsed)} ${t("of")} ${bytes(hardware.root_fs_bytes)}`}
+          size="l"
+        />
+        <MetricTile label={t("Memory")} value={hardware?.memory_bytes === undefined ? null : bytes(hardware.memory_bytes)} size="l" />
+        <MetricTile label={t("CPU cores")} value={hardware?.cpu_cores ?? null} size="l" />
+
         {/* The two bars are the host read from across the room: what the
             panel can do here, and what wants a decision. */}
         <Summary

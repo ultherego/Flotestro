@@ -6103,4 +6103,7 @@ export const pl: Record<string, string> = {
   "over all {n} that match, not only this page": "po wszystkich {n} pasujących, nie tylko po tej stronie",
   // Kafel pomiaru: wartość nieznana nigdy nie jest zerem.
   "{label}: unknown": "{label}: nieznane",
+  // Kafle-bohaterowie przeglądu hosta.
+  "Disk used": "Zajętość dysku",
+  "of": "z",
 };

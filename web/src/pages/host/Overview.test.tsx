@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom/vitest";
 import type { Host } from "../../lib/types";
-import { HostTeam, renameOrder } from "./Overview";
+import { diskPressure, HostTeam, renameOrder } from "./Overview";
 import { emptyForm, operationForm, type FormValue } from "../../lib/operations";
 
 /**
@@ -152,5 +152,31 @@ describe("renameOrder", () => {
       expect(renameOrder(hostname, pretty).problems)
         .toEqual(entry?.validate({ ...emptyForm(entry), hostname, pretty }));
     }
+  });
+});
+
+/**
+ * How full the disk is, and the difference between an empty one and one
+ * nobody has measured. The tile on the overview draws this: a nought where
+ * the answer is unknown would read as "plenty of room" on exactly the host
+ * nobody can see.
+ */
+describe("the pressure on the root filesystem", () => {
+  it("answers nothing at all when the host has not reported it", () => {
+    expect(diskPressure(undefined, undefined)).toEqual({});
+    expect(diskPressure(100, undefined)).toEqual({});
+    expect(diskPressure(undefined, 100)).toEqual({});
+    // A filesystem of no bytes is not a full filesystem; it is no answer.
+    expect(diskPressure(0, 0)).toEqual({});
+  });
+
+  it("counts what is used and calls the thresholds an operator acts on", () => {
+    expect(diskPressure(100, 100)).toMatchObject({ used: 0, share: 0, state: "ok" });
+    expect(diskPressure(100, 15)).toMatchObject({ used: 85, state: "warn" });
+    expect(diskPressure(100, 5)).toMatchObject({ used: 95, state: "error" });
+    // Exactly at a threshold is still the calmer of the two: the warning
+    // is for passing it, not for reaching it.
+    expect(diskPressure(100, 20).state).toBe("ok");
+    expect(diskPressure(100, 10).state).toBe("warn");
   });
 });
