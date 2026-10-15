@@ -82,6 +82,34 @@ describe("the verifier's reading", () => {
   });
 });
 
+describe("the reading the server decided", () => {
+  it("is taken from the row rather than worked out again", () => {
+    // The rule moved into SQL on 15.10: the list is paged and counted on the
+    // server, so a screen that classified on its own would put numbers above
+    // a list that disagree with it. What the row says wins over what this
+    // code would have derived - here the two deliberately differ.
+    const reading = { expected: "on", observed: "off" };
+    expect(readingKind("applied_unverified", reading, "could_not_read")).toBe("could_not_read");
+    expect(readingKind("applied_unverified", null, "did_not_hold")).toBe("did_not_hold");
+    expect(readingKind("outcome_unknown", null, "did_not_hold")).toBe("did_not_hold");
+  });
+
+  it("falls back to the old derivation for a row that carries none", () => {
+    // A panel being upgraded serves rows from before the field: they are
+    // classified rather than left blank.
+    expect(readingKind("applied_unverified", { expected: "on", observed: "off" })).toBe("did_not_hold");
+    expect(readingKind("applied_unverified", { expected: "on", observed: "unknown" })).toBe("could_not_read");
+    expect(readingKind("outcome_unknown", null)).toBe("outcome_unknown");
+  });
+
+  it("ignores a value it does not know rather than trusting it", () => {
+    // The field crosses the wire, so it is host-shaped data in the end: a
+    // reading nobody defined is derived instead of displayed.
+    expect(readingKind("applied_unverified", { expected: "on", observed: "off" }, "something-else"))
+      .toBe("did_not_hold");
+  });
+});
+
 describe("what a row actually says", () => {
   it("is a conclusion when the host answered and shows something else", () => {
     expect(readingKind("applied_unverified", { expected: "on", observed: "off" })).toBe("did_not_hold");

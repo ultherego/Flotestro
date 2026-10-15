@@ -78,16 +78,25 @@ func (s *Server) handleUnresolved(w http.ResponseWriter, r *http.Request) {
 	}
 	query := r.URL.Query()
 	filter := jobs.UnresolvedFilter{
-		Scopes: principal.ScopesFor(authz.PermJobRead),
-		HostID: query.Get("host_id"),
-		Kind:   query.Get("kind"),
-		Search: query.Get("q"),
+		Scopes:  principal.ScopesFor(authz.PermJobRead),
+		HostID:  query.Get("host_id"),
+		Kind:    query.Get("kind"),
+		Reading: query.Get("reading"),
+		Search:  query.Get("q"),
 	}
 	switch filter.Kind {
 	case "", jobs.UncertaintyOutcomeUnknown, jobs.UncertaintyAppliedUnverified:
 	default:
 		problem(w, http.StatusBadRequest, "invalid_filter",
 			"kind is outcome_unknown or applied_unverified; they are different questions and are not summed")
+		return
+	}
+	switch filter.Reading {
+	case "", jobs.ReadingDidNotHold, jobs.ReadingCouldNotRead, jobs.ReadingOutcomeUnknown:
+	default:
+		problem(w, http.StatusBadRequest, "invalid_filter",
+			"reading is did_not_hold, could_not_read or outcome_unknown: a host that answered with "+
+				"something else is a conclusion, and a host that could not be read is the absence of one")
 		return
 	}
 	if raw := query.Get("limit"); raw != "" {

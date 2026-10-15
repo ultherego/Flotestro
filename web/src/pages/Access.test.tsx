@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { expiresSoon, grantRequest, matchesIdentity, permissionMatrix, previewScope, scopeKind, scopeTeam, tabFromParam } from "./Access";
+import { expiresSoon, grantRequest, matchesIdentity, permissionMatrix, previewScope, scopeKind, scopeTeam, tabFromParam, anyMappingList, listFromText } from "./Access";
 import { exportFileName, targetLink, toLocalInput } from "./Audit";
 
 /* The access screen decides a few things without the server: which tab
@@ -177,5 +177,35 @@ describe("scopeKind", () => {
     expect(scopeKind({ site: "lab", environment: "prod", team_scope: { mode: "any" } })).toBe("site");
     expect(scopeKind(undefined)).toBe("site");
     expect(scopeTeam({ site: "*", environment: "*", team_scope: { mode: "any" } })).toBe("");
+  });
+});
+
+describe("the categories a group mapping narrows by", () => {
+  it("leaves a category out rather than sending it empty", () => {
+    // The server reads a missing category as every one of them and an empty
+    // list as none. Sending the wrong one of those two either widens the rule
+    // or makes it reach nobody, so nothing typed has to become undefined and
+    // not [].
+    expect(listFromText("")).toBeUndefined();
+    expect(listFromText("   ")).toBeUndefined();
+    expect(listFromText(" , ,")).toBeUndefined();
+  });
+
+  it("takes the values as typed, trimmed and without the gaps", () => {
+    expect(listFromText("team-a")).toEqual(["team-a"]);
+    expect(listFromText(" team-a , team-b ")).toEqual(["team-a", "team-b"]);
+    expect(listFromText("team-a,,team-b")).toEqual(["team-a", "team-b"]);
+  });
+
+  it("counts a rule narrowed to an owner as one that does not reach the fleet", () => {
+    // The same mistake the server made with these two categories: reading a
+    // narrowing as nothing at all.
+    expect(anyMappingList(["team-a"])).toBe(false);
+    expect(anyMappingList(["*"])).toBe(true);
+    expect(anyMappingList(undefined)).toBe(true);
+    // An emptied category reaches nothing, and "reaches nothing" is not
+    // "reaches everything" - but it is also not a narrowing anybody meant, so
+    // the screen marks it rather than counting it as fleet-wide.
+    expect(anyMappingList([])).toBe(true);
   });
 });

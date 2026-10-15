@@ -29,6 +29,28 @@ type verifyLoop struct {
 	place  string
 	images []string
 	body   string
+	// workflow is the workflow the loop's certificate identity names, spelled
+	// as the file is: images.yml, release.yml. Empty when the loop asks for no
+	// identity, which cosign refuses on its own.
+	workflow string
+}
+
+// identityWorkflow reads the workflow out of a cosign certificate identity.
+// The pattern in the documentation is a regular expression, so the dot of the
+// file name is escaped there and the escape is optional here.
+var identityWorkflow = regexp.MustCompile(`workflows/([A-Za-z0-9_-]+)(?:\\?\.|\[\.\])(ya?ml)`)
+
+// identityAsked says the loop demands a certificate identity at all. A loop
+// that asks for one this check cannot read is a finding of its own: skipping
+// it silently is how a wrong identity would pass.
+var identityAsked = regexp.MustCompile(`--certificate-identity`)
+
+func workflowOfIdentity(body string) string {
+	match := identityWorkflow.FindStringSubmatch(body)
+	if match == nil {
+		return ""
+	}
+	return match[1] + "." + match[2]
 }
 
 var (
@@ -118,9 +140,10 @@ func loopsIn(name, content string) []verifyLoop {
 			}
 		}
 		loops = append(loops, verifyLoop{
-			place:  fmt.Sprintf("%s:%d", name, number+1),
-			images: images,
-			body:   joined,
+			place:    fmt.Sprintf("%s:%d", name, number+1),
+			images:   images,
+			body:     joined,
+			workflow: workflowOfIdentity(joined),
 		})
 		vector = ""
 	}
@@ -214,14 +237,36 @@ func airgapImagesAreSigned(root string) ([]finding, error) {
 			continue
 		}
 		for _, short := range loop.images {
-			if signed["flotestro-"+short] {
+			signers := signed["flotestro-"+short]
+			if len(signers) == 0 {
+				findings = append(findings, finding{
+					place: loop.place,
+					said: fmt.Sprintf("tells the operator to verify flotestro-%s, which no job signs; "+
+						"the images signed are %s", short, strings.Join(signedNames(signed), ", ")),
+				})
 				continue
 			}
-			findings = append(findings, finding{
-				place: loop.place,
-				said: fmt.Sprintf("tells the operator to verify flotestro-%s, which no job signs; "+
-					"the images signed are %s", short, strings.Join(sorted(signed), ", ")),
-			})
+			// And by the workflow whose identity this loop demands. The image
+			// of the package repository is signed by release.yml and the other
+			// three by images.yml, so a loop copied with its identity pattern
+			// refuses an image that is correctly signed - the documentation
+			// warns about exactly that in a sentence nothing used to enforce.
+			if loop.workflow == "" && identityAsked.MatchString(loop.body) {
+				findings = append(findings, finding{
+					place: loop.place,
+					said: "asks for a certificate identity this check cannot read a workflow out of, " +
+						"so nothing holds it against the workflow that signs the image",
+				})
+				continue
+			}
+			if loop.workflow != "" && !signers[loop.workflow] {
+				findings = append(findings, finding{
+					place: loop.place,
+					said: fmt.Sprintf("asks for the identity of %s and flotestro-%s is signed by %s; "+
+						"cosign would refuse an image that is correctly signed",
+						loop.workflow, short, strings.Join(sorted(signers), ", ")),
+				})
+			}
 		}
 	}
 	return findings, nil
@@ -241,13 +286,17 @@ func airgapImagesAreSigned(root string) ([]finding, error) {
 // that signs. Shell comments are cut out of those scripts first: a name
 // mentioned in a comment beside the signing would otherwise read as signed,
 // and this check exists to refuse exactly that kind of agreement.
-func signedImages(root string) (map[string]bool, error) {
+// signedImages names every image some job signs, and which workflow each
+// signature comes from. The workflow matters because the procedure's cosign
+// verify demands a certificate identity, and one naming another workflow
+// refuses an image that is correctly signed.
+func signedImages(root string) (map[string]map[string]bool, error) {
 	dir := filepath.Join(root, ".github", "workflows")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("reading the workflows: %w", err)
 	}
-	signed := map[string]bool{}
+	signed := map[string]map[string]bool{}
 	read := 0
 	for _, entry := range entries {
 		name := entry.Name()
@@ -271,7 +320,7 @@ func signedImages(root string) (map[string]bool, error) {
 			continue
 		}
 		for i := 0; i+1 < len(jobs.Content); i += 2 {
-			collectSignedImages(jobs.Content[i+1], signed)
+			collectSignedImages(jobs.Content[i+1], signed, name)
 		}
 	}
 	if read == 0 {
@@ -282,7 +331,7 @@ func signedImages(root string) (map[string]bool, error) {
 
 // collectSignedImages adds the images one job signs, and nothing when it does
 // not sign.
-func collectSignedImages(job *yaml.Node, signed map[string]bool) {
+func collectSignedImages(job *yaml.Node, signed map[string]map[string]bool, workflow string) {
 	steps := field(job, "steps")
 	if steps == nil {
 		return
@@ -305,13 +354,13 @@ func collectSignedImages(job *yaml.Node, signed map[string]bool) {
 	if include := field(field(field(job, "strategy"), "matrix"), "include"); include != nil {
 		for _, entry := range include.Content {
 			if image := field(entry, "image"); image != nil && image.Value != "" {
-				signed[image.Value] = true
+				noteSigner(signed, image.Value, workflow)
 			}
 		}
 	}
 	for _, script := range scripts {
 		for _, name := range imageNames.FindAllString(withoutShellComments(script), -1) {
-			signed[name] = true
+			noteSigner(signed, name, workflow)
 		}
 	}
 }

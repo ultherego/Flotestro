@@ -625,10 +625,42 @@ const Wildcard = "*"
 // field and missing one grants nothing at all - which is the safe way round,
 // and this is how a caller says it meant "any".
 func Placement(site, environment string) Scope {
+	return PlacementWithin(site, environment, nil, nil)
+}
+
+// PlacementWithin is a placement narrowed by owner and by tag as well.
+//
+// A nil list means every one of that category, which is what Placement has
+// always handed out; an EMPTY list reaches none, and that difference is the
+// product's rule about unknown and nothing rather than a quirk here. The
+// caller that read a row of no owners from the database therefore has to pass
+// the row's list, not a nil it filled in for a missing column.
+func PlacementWithin(site, environment string, owners, tags []string) Scope {
+	if owners == nil {
+		owners = []string{Wildcard}
+	}
+	if tags == nil {
+		tags = []string{Wildcard}
+	}
 	return Scope{
 		Site: site, Environment: environment, TeamAny: true,
-		Owners: []string{Wildcard}, Tags: []string{Wildcard},
+		Owners: owners, Tags: tags,
 	}
+}
+
+// orWildcardList is orWildcard for a category of a scope: nothing given means
+// every one of them, and that is not the same as a list somebody emptied.
+func orWildcardList(values []string) []string {
+	if values == nil {
+		return []string{Wildcard}
+	}
+	kept := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			kept = append(kept, trimmed)
+		}
+	}
+	return kept
 }
 
 // OfTeam is the scope of a binding that narrows to one team, and to nothing

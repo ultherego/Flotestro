@@ -951,7 +951,13 @@ type createGroupMappingRequest struct {
 	Role        string `json:"role"`
 	Site        string `json:"site"`
 	Environment string `json:"environment"`
-	Reason      string `json:"reason"`
+	// Owners and Tags narrow the mapping as they narrow a binding made by
+	// hand. Left out they mean every one of that category; sent empty they
+	// reach none, and the store refuses that rather than writing a rule
+	// somebody would read as granting something.
+	Owners []string `json:"owners"`
+	Tags   []string `json:"tags"`
+	Reason string   `json:"reason"`
 }
 
 // handleListGroupMappings returns the mappings of external groups to
@@ -1043,7 +1049,8 @@ func (s *Server) handleCreateGroupMapping(w http.ResponseWriter, r *http.Request
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
 	mapping, err := s.authz.CreateGroupMapping(r.Context(), tx, request.Issuer, request.GroupName,
-		authz.Role(request.Role), authz.Scope{Site: request.Site, Environment: request.Environment},
+		authz.Role(request.Role),
+		authz.PlacementWithin(request.Site, request.Environment, request.Owners, request.Tags),
 		actor.Subject)
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_mapping", err.Error())

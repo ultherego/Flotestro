@@ -487,11 +487,17 @@ func TestSignedImagesReadsOnlyTheJobThatSigns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(signed) != 2 || !signed["flotestro-control-plane"] || !signed["flotestro-relay"] {
-		t.Fatalf("the signed set is not the matrix of the signing job: %v", sorted(signed))
+	if len(signed) != 2 || signed["flotestro-control-plane"] == nil || signed["flotestro-relay"] == nil {
+		t.Fatalf("the signed set is not the matrix of the signing job: %v", signedNames(signed))
 	}
-	if signed["flotestro-package-repository"] {
+	if signed["flotestro-package-repository"] != nil {
 		t.Fatal("a build-only matrix was counted as signed")
+	}
+	// And it says WHICH workflow signed them, because the procedure's
+	// certificate identity names one and an image signed elsewhere refuses.
+	if !signed["flotestro-control-plane"]["images.yml"] {
+		t.Errorf("the signer of flotestro-control-plane is recorded as %v, want images.yml",
+			sorted(signed["flotestro-control-plane"]))
 	}
 }
 

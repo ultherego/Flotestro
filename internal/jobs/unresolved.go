@@ -41,6 +41,41 @@ const (
 	UncertaintyAppliedUnverified = "applied_unverified"
 )
 
+// The three readings an attempt can carry, which is not the same as the two
+// questions. "Did it hold?" covers a host that answered and shows something
+// else - where the panel KNOWS the change did not hold - and a host that could
+// not be read at all, which is the absence of that conclusion. The owner read
+// the screen on 14.10 and could not tell which he was looking at; the decision
+// of 15.10 was to separate them, at the level of the list.
+//
+// The rule lives here, in SQL, and nowhere else. It was in the panel first,
+// and a panel that classifies while the server pages and counts would make the
+// numbers above a list disagree with the list - which is how an operator
+// learns to trust neither.
+const (
+	// ReadingDidNotHold is a host that answered with something other than
+	// what was ordered: a conclusion, not the absence of one.
+	ReadingDidNotHold = "did_not_hold"
+	// ReadingCouldNotRead is a verifier that could not read the host. The
+	// state is unknown, and unknown is never a success.
+	ReadingCouldNotRead = "could_not_read"
+	// ReadingOutcomeUnknown belongs to the other question entirely: the agent
+	// restarted while the host was carrying the operation.
+	ReadingOutcomeUnknown = "outcome_unknown"
+)
+
+// readingSQL classifies one attempt. A verification that records no observed
+// value, or records it as "unknown", is the verifier saying it could not look;
+// anything else is a reading of the host.
+const readingSQL = `
+	case when a.error_code = '` + UncertaintyOutcomeUnknown + `'
+	          then '` + ReadingOutcomeUnknown + `'
+	     when a.verification is null
+	          or (a.verification ->> 'observed') is null
+	          or (a.verification ->> 'observed') = 'unknown'
+	          then '` + ReadingCouldNotRead + `'
+	     else '` + ReadingDidNotHold + `' end`
+
 // Unresolved is one attempt whose outcome nobody could confirm.
 type Unresolved struct {
 	AttemptID string `json:"attempt_id"`
@@ -50,6 +85,11 @@ type Unresolved struct {
 	Action    string `json:"action"`
 	// Kind is which question is open; the two are never added together.
 	Kind string `json:"kind"`
+	// Reading is which of the three the row actually says: the change did not
+	// hold, the host could not be read, or the outcome of the operation is
+	// unknown. Computed here so that the screen renders a decision rather
+	// than making a second one of its own.
+	Reading string `json:"reading"`
 	// Reason is what the host said, in its own words.
 	Reason string `json:"reason,omitempty"`
 	// Verification is what the verifier looked for and what it found, for an
@@ -72,6 +112,13 @@ type UnresolvedCounts struct {
 	OutcomeUnknownHosts         int `json:"outcome_unknown_hosts"`
 	AppliedUnverifiedOperations int `json:"applied_unverified_operations"`
 	AppliedUnverifiedHosts      int `json:"applied_unverified_hosts"`
+	// The two inside "did it hold?", counted apart for the same reason the
+	// questions are: one is a conclusion an operator can act on, the other is
+	// the absence of one, and they call for different work.
+	DidNotHoldOperations   int `json:"did_not_hold_operations"`
+	DidNotHoldHosts        int `json:"did_not_hold_hosts"`
+	CouldNotReadOperations int `json:"could_not_read_operations"`
+	CouldNotReadHosts      int `json:"could_not_read_hosts"`
 }
 
 // UnresolvedFilter narrows the list the way the screen does.
@@ -84,6 +131,10 @@ type UnresolvedFilter struct {
 	Kind   string
 	HostID string
 	Limit  int
+	// Reading narrows to one of the three above. It is not a second Kind: an
+	// outcome_unknown reading can only come from that kind, and a reading of
+	// the other two can only come from applied_unverified.
+	Reading string
 	// Search narrows by what the operator can see on the row: the host's name
 	// and the operation. Not the reason - that is the host's own sentence, in
 	// the host's own words, and a search that matched it would answer
@@ -121,6 +172,10 @@ func unresolvedWhere(f UnresolvedFilter) (string, []any) {
 	if f.HostID != "" {
 		args = append(args, f.HostID)
 		conditions = append(conditions, fmt.Sprintf("j.host_id = $%d", len(args)))
+	}
+	switch f.Reading {
+	case ReadingDidNotHold, ReadingCouldNotRead, ReadingOutcomeUnknown:
+		conditions = append(conditions, "("+readingSQL+") = '"+f.Reading+"'")
 	}
 	if needle := searchNeedle(f.Search); needle != "" {
 		args = append(args, needle)
@@ -209,6 +264,7 @@ func (s *Store) UnresolvedList(ctx context.Context, f UnresolvedFilter) ([]Unres
 		select a.id, a.job_id, j.host_id, coalesce(h.hostname, ''), j.action_type,
 		       coalesce(a.error_code, ''), coalesce(a.message, ''),
 		       a.verification,
+		       `+readingSQL+`,
 		       -- Carrying a verification is not the same as having failed one:
 		       -- a row selected by its error code may hold a reading that
 		       -- succeeded, and calling that applied_unverified would put the
@@ -234,7 +290,7 @@ func (s *Store) UnresolvedList(ctx context.Context, f UnresolvedFilter) ([]Unres
 		var errorCode string
 		var verificationFailed bool
 		if err := rows.Scan(&one.AttemptID, &one.JobID, &one.HostID, &one.Hostname,
-			&one.Action, &errorCode, &one.Reason, &one.Verification,
+			&one.Action, &errorCode, &one.Reason, &one.Verification, &one.Reading,
 			&verificationFailed, &one.FirstSeen, &one.LastCheckedAt); err != nil {
 			return nil, err
 		}
@@ -308,8 +364,10 @@ func (s *Store) UnresolvedAttemptIDs(ctx context.Context, f UnresolvedFilter, mo
 // that disagrees with the list it heads is how an operator learns to trust
 // neither.
 func (s *Store) UnresolvedCount(ctx context.Context, f UnresolvedFilter) (UnresolvedCounts, error) {
-	// The kind filter belongs to the list, not here: this answers both.
+	// The kind and the reading belong to the list, not here: this answers for
+	// all of them, so that a narrowed list cannot make the fleet look settled.
 	f.Kind = ""
+	f.Reading = ""
 	where, args := unresolvedWhere(f)
 	var counts UnresolvedCounts
 	err := s.pool.QueryRow(ctx, `
@@ -317,7 +375,8 @@ func (s *Store) UnresolvedCount(ctx context.Context, f UnresolvedFilter) (Unreso
 		  select j.host_id,
 		         case when a.error_code = '`+UncertaintyOutcomeUnknown+`'
 		              then '`+UncertaintyOutcomeUnknown+`'
-		              else '`+UncertaintyAppliedUnverified+`' end as kind
+		              else '`+UncertaintyAppliedUnverified+`' end as kind,
+		         `+readingSQL+` as reading
 		    from job_attempts a
 		    join jobs j on j.id = a.job_id
 		  `+where+`
@@ -326,10 +385,16 @@ func (s *Store) UnresolvedCount(ctx context.Context, f UnresolvedFilter) (Unreso
 		  count(*) filter (where kind = '`+UncertaintyOutcomeUnknown+`'),
 		  count(distinct host_id) filter (where kind = '`+UncertaintyOutcomeUnknown+`'),
 		  count(*) filter (where kind = '`+UncertaintyAppliedUnverified+`'),
-		  count(distinct host_id) filter (where kind = '`+UncertaintyAppliedUnverified+`')
+		  count(distinct host_id) filter (where kind = '`+UncertaintyAppliedUnverified+`'),
+		  count(*) filter (where reading = '`+ReadingDidNotHold+`'),
+		  count(distinct host_id) filter (where reading = '`+ReadingDidNotHold+`'),
+		  count(*) filter (where reading = '`+ReadingCouldNotRead+`'),
+		  count(distinct host_id) filter (where reading = '`+ReadingCouldNotRead+`')
 		  from open`, args...).
 		Scan(&counts.OutcomeUnknownOperations, &counts.OutcomeUnknownHosts,
-			&counts.AppliedUnverifiedOperations, &counts.AppliedUnverifiedHosts)
+			&counts.AppliedUnverifiedOperations, &counts.AppliedUnverifiedHosts,
+			&counts.DidNotHoldOperations, &counts.DidNotHoldHosts,
+			&counts.CouldNotReadOperations, &counts.CouldNotReadHosts)
 	return counts, err
 }
 

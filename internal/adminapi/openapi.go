@@ -537,6 +537,7 @@ var queryParameters = map[string][]queryParameter{
 	"GET /api/v1/unresolved": {
 		{"kind", "string", "outcome_unknown or applied_unverified; both when left out. They are different questions and are never summed."},
 		{"host_id", "string", "One host's unconfirmed operations."},
+		{"reading", "string", "did_not_hold, could_not_read or outcome_unknown. It narrows inside the question rather than beside it: a host that answered with something other than what was ordered is a conclusion, and a host the verifier could not read is the absence of one. The two call for different work and are counted apart."},
 		{"q", "string", "A fragment of the host's name or of the operation; case-insensitive. Not the reason: that is the host's own sentence in the host's own words, and a search over it would answer differently for two hosts that did the same thing."},
 		{"limit", "integer", "Rows on this page. The default is 100 and the most is 500; a larger number is served 500 rather than dropped to the default."},
 		{"offset", "integer", "Where the page starts. The order is total, so no row appears on two pages."},
@@ -1500,6 +1501,19 @@ func roleNames() []string {
 
 // bindingScope is the scope half of a role binding: a site and an environment,
 // each of which may be the wildcard.
+// withoutTeamScope is bindingScope for an endpoint that does not read the
+// team, so the document says what the code does.
+func withoutTeamScope(scope map[string]any) map[string]any {
+	kept := make(map[string]any, len(scope))
+	for name, schema := range scope {
+		if name == "team_scope" {
+			continue
+		}
+		kept[name] = schema
+	}
+	return kept
+}
+
 func bindingScope() map[string]any {
 	return map[string]any{
 		"site":        map[string]any{"type": "string", "maxLength": hosts.MaxPlacementLength, "description": "The site the role is held over; '*' means every site."},
@@ -1926,7 +1940,12 @@ var requestSchemas = map[string]map[string]any{
 		"Why the relay loses the right to mediate; kept in the audit trail."),
 	"POST /api/v1/group-mappings": {
 		"type": "object",
-		"properties": mergedProperties(bindingScope(), map[string]any{
+		// bindingScope without team_scope: a mapping has never narrowed by
+		// team and this endpoint does not read that field. It was advertised
+		// here all the same, and a document that promises a narrowing the code
+		// drops is worse than one that offers none - the caller believes the
+		// role is held over less than it is.
+		"properties": mergedProperties(withoutTeamScope(bindingScope()), map[string]any{
 			"issuer":     map[string]any{"type": "string", "description": "The identity provider the group comes from."},
 			"group_name": map[string]any{"type": "string", "description": "The group as that provider names it."},
 			"role":       map[string]any{"type": "string", "enum": roleNames()},

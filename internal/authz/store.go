@@ -603,14 +603,20 @@ func nullable(value string) any {
 
 // GroupMapping binds an external group to a role within a scope.
 type GroupMapping struct {
-	ID          string    `json:"id"`
-	Issuer      string    `json:"issuer"`
-	GroupName   string    `json:"group_name"`
-	Role        Role      `json:"role"`
-	Site        string    `json:"site"`
-	Environment string    `json:"environment"`
-	CreatedBy   string    `json:"created_by"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string `json:"id"`
+	Issuer      string `json:"issuer"`
+	GroupName   string `json:"group_name"`
+	Role        Role   `json:"role"`
+	Site        string `json:"site"`
+	Environment string `json:"environment"`
+	// Owners and Tags narrow the mapping further, as they narrow a binding
+	// made by hand. A single * is every one of that category; an empty list
+	// reaches none, which is why nothing given becomes the wildcard and not
+	// the empty list.
+	Owners    []string  `json:"owners"`
+	Tags      []string  `json:"tags"`
+	CreatedBy string    `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // CreateGroupMapping adds a mapping from a group to a role.
@@ -625,16 +631,26 @@ func (s *Store) CreateGroupMapping(ctx context.Context, tx pgx.Tx,
 	mapping := &GroupMapping{
 		ID: uuid.NewString(), Issuer: issuer, GroupName: groupName, Role: role,
 		Site: orWildcard(scope.Site), Environment: orWildcard(scope.Environment),
+		Owners: orWildcardList(scope.Owners), Tags: orWildcardList(scope.Tags),
 		CreatedBy: createdBy,
 	}
+	// A mapping that reaches nobody is not a mapping, it is a rule somebody
+	// will read as granting something. Nothing given means every one of that
+	// category; a list emptied on purpose is refused here rather than written.
+	if len(mapping.Owners) == 0 || len(mapping.Tags) == 0 {
+		return nil, fmt.Errorf("a mapping with an empty list of owners or tags reaches no host; " +
+			"leave the category out to mean every one of them")
+	}
 	const query = `
-		insert into group_role_mappings (id, issuer, group_name, role, site, environment, created_by)
-		values ($1, $2, $3, $4, $5, $6, $7)
-		on conflict (issuer, group_name, role, site, environment) do update
+		insert into group_role_mappings
+			(id, issuer, group_name, role, site, environment, owners, tags, created_by)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		on conflict (issuer, group_name, role, site, environment, owners, tags) do update
 			set created_by = group_role_mappings.created_by
 		returning id, created_at`
 	if err := tx.QueryRow(ctx, query, mapping.ID, issuer, groupName, string(role),
-		mapping.Site, mapping.Environment, createdBy).Scan(&mapping.ID, &mapping.CreatedAt); err != nil {
+		mapping.Site, mapping.Environment, mapping.Owners, mapping.Tags,
+		createdBy).Scan(&mapping.ID, &mapping.CreatedAt); err != nil {
 		return nil, fmt.Errorf("saving the group mapping: %w", err)
 	}
 	return mapping, nil
@@ -643,7 +659,7 @@ func (s *Store) CreateGroupMapping(ctx context.Context, tx pgx.Tx,
 // ListGroupMappings returns the group mappings.
 func (s *Store) ListGroupMappings(ctx context.Context) ([]GroupMapping, error) {
 	const query = `
-		select id, issuer, group_name, role, site, environment, created_by, created_at
+		select id, issuer, group_name, role, site, environment, owners, tags, created_by, created_at
 		from group_role_mappings
 		order by issuer, group_name, role`
 	rows, err := s.pool.Query(ctx, query)
@@ -656,7 +672,8 @@ func (s *Store) ListGroupMappings(ctx context.Context) ([]GroupMapping, error) {
 	for rows.Next() {
 		var mapping GroupMapping
 		if err := rows.Scan(&mapping.ID, &mapping.Issuer, &mapping.GroupName, &mapping.Role,
-			&mapping.Site, &mapping.Environment, &mapping.CreatedBy, &mapping.CreatedAt); err != nil {
+			&mapping.Site, &mapping.Environment, &mapping.Owners, &mapping.Tags,
+			&mapping.CreatedBy, &mapping.CreatedAt); err != nil {
 			return nil, err
 		}
 		mappings = append(mappings, mapping)

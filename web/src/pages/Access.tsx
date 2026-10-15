@@ -13,6 +13,22 @@ import { useTeams } from "./Teams";
 import { useT } from "../i18n";
 
 /** A scope part that names no site or environment: an asterisk, as the server keeps it, or nothing. */
+/**
+ * A comma-separated list as a form takes it. Nothing typed returns undefined,
+ * which the caller leaves OUT of the request - a missing category is every one
+ * of them and an empty list is none, and sending the wrong one of those two
+ * either widens a rule or makes it reach nobody.
+ */
+export function listFromText(text: string): string[] | undefined {
+  const values = text.split(",").map((one) => one.trim()).filter(Boolean);
+  return values.length > 0 ? values : undefined;
+}
+
+/** A mapping's category that names every value: absent, empty of narrowing, or a lone asterisk. */
+export function anyMappingList(values: string[] | undefined): boolean {
+  return !values || values.length === 0 || values.includes("*");
+}
+
 function anyScope(value: string | undefined): boolean {
   return !value || value === "*";
 }
@@ -279,6 +295,8 @@ function Mappings() {
   const [role, setRole] = useState("viewer");
   const [site, setSite] = useState("");
   const [environment, setEnvironment] = useState("");
+  const [owners, setOwners] = useState("");
+  const [tags, setTags] = useState("");
   const [reason, setReason] = useState("");
   // The mapping about to be removed; the reason is asked beside the list.
   const [removing, setRemoving] = useState<GroupMapping | null>(null);
@@ -296,8 +314,15 @@ function Mappings() {
       api.post<GroupMapping>("/api/v1/group-mappings", {
         group_name: group.trim(), role,
         site: site.trim(), environment: environment.trim(), reason: reason.trim(),
+        // Left out rather than sent empty: the server reads a missing category
+        // as every one of them and an empty list as none, and those are two
+        // different rules.
+        ...(listFromText(owners) ? { owners: listFromText(owners) } : {}),
+        ...(listFromText(tags) ? { tags: listFromText(tags) } : {}),
       }),
-    onSuccess: () => { setForm(false); setGroup(""); setReason(""); refresh(); },
+    onSuccess: () => {
+      setForm(false); setGroup(""); setReason(""); setOwners(""); setTags(""); refresh();
+    },
     onError: (error) => setWarning(error instanceof ApiError ? error : null),
   });
 
@@ -320,7 +345,12 @@ function Mappings() {
   const byRole = ROLES.map((role) => ({ role, count: mappings.filter((mapping) => mapping.role === role).length }));
   // The server keeps "any" as an asterisk and older records as an empty
   // string; both reach the whole fleet.
-  const fleetWide = mappings.filter((mapping) => anyScope(mapping.site) && anyScope(mapping.environment)).length;
+  const fleetWide = mappings.filter((mapping) =>
+    anyScope(mapping.site) && anyScope(mapping.environment) &&
+    // A rule narrowed to an owner or a tag does not reach the fleet, and
+    // counting it as one was the same mistake the server made with these two
+    // categories: it read a narrowing as nothing at all.
+    anyMappingList(mapping.owners) && anyMappingList(mapping.tags)).length;
   const aside = form || removing !== null;
 
   return (
@@ -346,7 +376,10 @@ function Mappings() {
                   <tr key={mapping.id}>
                     <td className="mono">{mapping.group_name}</td>
                     <td>{mapping.role}</td>
-                    <td className="source"><ScopeText scope={{ site: mapping.site, environment: mapping.environment }} /></td>
+                    <td className="source"><ScopeText scope={{
+                      site: mapping.site, environment: mapping.environment,
+                      owners: mapping.owners, tags: mapping.tags,
+                    }} /></td>
                     <td className="source">{mapping.created_by}</td>
                     <td><Time value={mapping.created_at} /></td>
                     <td className="actions-cell">
@@ -395,6 +428,21 @@ function Mappings() {
               </Field>
               <Field label={t("Environment (empty = all)")}>
                 <input value={environment} onChange={(e) => setEnvironment(e.target.value)} placeholder="test" />
+              </Field>
+              {/* The two categories a mapping could not express until 15.10.
+                  Empty means every one of them, which is what every mapping
+                  made before today holds. */}
+              <Field
+                label={t("Owners (empty = all)")}
+                hint={t("Comma-separated. The role is held only over hosts of these owners.")}
+              >
+                <input value={owners} onChange={(e) => setOwners(e.target.value)} placeholder="team-a, team-b" />
+              </Field>
+              <Field
+                label={t("Tags (empty = all)")}
+                hint={t("Comma-separated. A host carrying any one of them is in scope.")}
+              >
+                <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="db" />
               </Field>
               <Field label={t("Reason for the change")} wide>
                 <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("e.g. new on-call team")} />

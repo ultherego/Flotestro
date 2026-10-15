@@ -159,3 +159,51 @@ func TestTheKeyOfASpooledAnswerSurvivesARestart(t *testing.T) {
 		t.Error("after a restart the spool no longer knows which operation its answer is about")
 	}
 }
+
+// A status this agent does not know does not free the result.
+//
+// The switch over the acknowledgement's status used to choose a log line and
+// nothing else: every answer, STATUS_UNSPECIFIED included, fell through to the
+// release. The zero value of that enum is also what a field nobody set looks
+// like, so "the panel said nothing about what it did with this" read as "the
+// panel took it". Keeping the copy costs a duplicate delivery, which the
+// idempotency key makes harmless; releasing it costs work already carried out
+// on the host.
+func TestAnAcknowledgementWithAStatusTheAgentDoesNotKnowFreesNothing(t *testing.T) {
+	for _, status := range []agentv1.TaskResultAck_Status{
+		agentv1.TaskResultAck_STATUS_UNSPECIFIED,
+		// A status from a newer panel: refusing it keeps the answer, which is
+		// the safe direction for a protocol that may grow.
+		agentv1.TaskResultAck_Status(99),
+	} {
+		t.Run(status.String(), func(t *testing.T) {
+			spool := openResultSpool(t, t.TempDir(), ResultSpoolSize, ResultSpoolBytes)
+			panel := &fakePanel{}
+			delivery := panel.session(t, spool, true)
+			result := &agentv1.TaskResult{TaskId: "attempt-1", IdempotencyKey: "operation-a"}
+			if err := spool.Enqueue(result); err != nil {
+				t.Fatalf("the result was not spooled: %v", err)
+			}
+
+			delivery.acknowledge(&agentv1.TaskResultAck{
+				TaskId:         "attempt-1",
+				IdempotencyKey: "operation-a",
+				Status:         status,
+			})
+			if spool.Len() != 1 {
+				t.Fatalf("the answer was freed by an acknowledgement of status %s", status)
+			}
+
+			// And the one it does know still frees it, so this is a narrowing
+			// and not a spool that has stopped answering.
+			delivery.acknowledge(&agentv1.TaskResultAck{
+				TaskId:         "attempt-1",
+				IdempotencyKey: "operation-a",
+				Status:         agentv1.TaskResultAck_STATUS_SETTLED,
+			})
+			if spool.Len() != 0 {
+				t.Error("a settled acknowledgement did not free the answer")
+			}
+		})
+	}
+}
