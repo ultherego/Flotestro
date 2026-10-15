@@ -147,7 +147,7 @@
 </table>
 </div>
 <p>Tabele poniżej nazywają samą zmienną. Każdą, która niesie sekret, należy czytać jako postać <code>_FILE</code>.</p>
-<p>Zmiana dowolnej zmiennej działa od następnego startu usługi: nic tutaj nie jest odczytywane ponownie w trakcie pracy procesu. Ekran ustawień w panelu pokazuje wartości obowiązujące, z zamaskowanymi sekretami; ekran stanu pokazuje, co robią postawione na nich pętle.</p>
+<p>Zmiana dowolnej zmiennej działa od następnego startu usługi: nic tutaj nie jest odczytywane ponownie w trakcie pracy procesu. Ekran ustawień w panelu pokazuje wartości obowiązujące, z zamaskowanymi sekretami, pod konfiguracją, którą instalacja trzyma i może zmienić bez restartu &mdash; retencje monitoringu, kanały powiadomień, relaye, role, mapowania grup, budżety i polityki, każde z wejściem na ekran, który danym zasobem zarządza. Ekran stanu pokazuje, co robią postawione na tych zmiennych pętle.</p>
 <p>Czasy trwania zapisuje się tak, jak czyta je Go: <code>30s</code>, <code>5m</code>, <code>8h</code>, <code>720h</code>. Nieczytelny czas trwania zostawia wartość domyślną, zamiast wyłączać zabezpieczenie.</p>
 <h2 id="control-plane-flotestro-control-plane">Control plane (<code>flotestro-control-plane</code>)</h2>
 <h3 id="database-and-listeners">Baza danych i nasłuchy</h3>

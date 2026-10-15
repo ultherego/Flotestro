@@ -120,7 +120,7 @@
 
   <main class="content">
 <h1>8. API</h1>
-<p class="lede">Wszystko, co robi panel, może zrobić program. API to ta sama powierzchnia, na której działa panel webowy: 230 tras pod <code>/api/v1</code>, odpowiedzi w JSON, autoryzacja tymi samymi uprawnieniami i zapis do tego samego śladu audytowego. Ta strona to tabela tras w postaci, w jakiej rejestruje je <code>internal/adminapi/adminapi.go</code>, oraz konwencje opisane w <code>internal/adminapi/openapi.go</code>; panel udostępnia własny dokument OpenAPI pod <code>GET /api/v1/openapi.json</code>. Po wywołania do wklejenia w terminal, z odpowiedziami, jakie dały, zob. <a href="examples.html">11. Przykłady użycia</a>.</p>
+<p class="lede">Wszystko, co robi panel, może zrobić program. API to ta sama powierzchnia, na której działa panel webowy: 239 tras pod <code>/api/v1</code>, odpowiedzi w JSON, autoryzacja tymi samymi uprawnieniami i zapis do tego samego śladu audytowego. Ta strona to tabela tras w postaci, w jakiej rejestruje je <code>internal/adminapi/adminapi.go</code>, oraz konwencje opisane w <code>internal/adminapi/openapi.go</code>; panel udostępnia własny dokument OpenAPI pod <code>GET /api/v1/openapi.json</code>. Po wywołania do wklejenia w terminal, z odpowiedziami, jakie dały, zob. <a href="examples.html">11. Przykłady użycia</a>.</p>
 <h2 id="basics">Kształt interfejsu</h2>
 <ul><li>Odczyty idą przez <code>GET</code>. Plany, operacje i kampanie tworzy się przez <code>POST</code>; mają też własne jawne endpointy <code>approve</code>, <code>cancel</code>, <code>pause</code> i <code>resume</code>.</li><li>Każda lista jest stronicowana po stronie serwera.</li><li>Błędy to obiekty problem ze stabilnym kodem.</li><li>Dokument opisuje sam siebie: <code>GET /api/v1/openapi.json</code> powstaje z zarejestrowanych tras, więc nie może się od nich rozjechać.</li><li>Panel nasłuchuje na <code>FLOTESTRO_ADMIN_ADDR</code>, domyślnie <code>127.0.0.1:8080</code>, po zwykłym HTTP; ma stać za reverse proxy, które terminuje TLS.</li></ul>
 <h2 id="authentication">Uwierzytelnianie</h2>
@@ -181,16 +181,16 @@
 <table>
 <thead><tr><th>Sekcja</th><th>Trasy</th></tr></thead>
 <tbody>
-<tr><td><a href="#routes-service">Endpointy serwisowe</a></td><td>17</td></tr>
+<tr><td><a href="#routes-service">Endpointy serwisowe</a></td><td>19</td></tr>
 <tr><td><a href="#routes-caller">Logowanie i własne rekordy wywołującego</a></td><td>8</td></tr>
-<tr><td><a href="#routes-fleet">Flota w skrócie</a></td><td>7</td></tr>
+<tr><td><a href="#routes-fleet">Flota w skrócie</a></td><td>8</td></tr>
 <tr><td><a href="#routes-hosts">Hosty</a></td><td>59</td></tr>
 <tr><td><a href="#routes-enrollment">Enrollment, relaye i CA floty</a></td><td>14</td></tr>
-<tr><td><a href="#routes-work">Operacje, odczyty i kampanie</a></td><td>37</td></tr>
+<tr><td><a href="#routes-work">Operacje, odczyty i kampanie</a></td><td>40</td></tr>
 <tr><td><a href="#routes-compliance">Polityki, zgodność, podatności, certyfikaty i kopie zapasowe</a></td><td>20</td></tr>
 <tr><td><a href="#routes-monitoring">Monitoring i powiadomienia</a></td><td>20</td></tr>
-<tr><td><a href="#routes-directory">Katalog</a></td><td>18</td></tr>
-<tr><td><a href="#routes-access">Tożsamości, zespoły, role i sekrety</a></td><td>27</td></tr>
+<tr><td><a href="#routes-directory">Katalog</a></td><td>19</td></tr>
+<tr><td><a href="#routes-access">Tożsamości, zespoły, role i sekrety</a></td><td>32</td></tr>
 <tr><td><a href="#routes-audit">Ślad audytowy</a></td><td>2</td></tr>
 <tr><td><a href="#routes-support">Pakiety diagnostyczne</a></td><td>5</td></tr>
 </tbody></table></div>
@@ -208,6 +208,8 @@
 <tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/advertised</code><br><span class="caption">Administrator zatwierdza jeden z nich. Wykryty adres nigdy nie wchodzi sam z siebie, a zatwierdzenie jest odrzucane tam, gdzie adres deklaruje <code>FLOTESTRO_ADVERTISE</code>.</span></td><td><code>settings.advertise.write</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings/monitoring</code><br><span class="caption">Retencje monitoringu są ustawieniem instalacji, a nie procesu: czyta się je tutaj i zapisuje bez restartu.</span></td><td><code>settings.read</code></td></tr>
 <tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/monitoring</code></td><td><code>monitoring.rules.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings/layout/{screen}</code><br><span class="caption">Układ kafelków ekranu. Układ należy do instalacji, więc wszyscy widzą ten sam.</span></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/layout/{screen}</code></td><td><code>settings.advertise.write</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/setup</code><br><span class="caption">Pierwsze uruchomienie: czego instalacji jeszcze brakuje oraz dwa testy połączenia, które lista kontrolna udostępnia na miejscu.</span></td><td><span class="caption">dowolna uwierzytelniona tożsamość</span></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/setup/test-directory</code></td><td><code>identity.read</code></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/setup/test-oidc</code></td><td><code>settings.read</code>, <code>principal.manage</code></td></tr>
@@ -240,6 +242,7 @@
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/events</code><br><span class="caption">Strumień zdarzeń całej widocznej floty. Jedno połączenie na kartę wystarcza dla wszystkich trwających operacji.</span></td><td><code>job.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/fleet/activity</code></td><td><code>host.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/fleet/summary</code></td><td><code>host.read</code>, <code>audit.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/fleet/readiness</code><br><span class="caption">Czy flota jest gotowa na to, o co panel ma zostać poproszony: kroki zmierzone i te, które nie są.</span></td><td><code>host.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/maintenance/calendar</code></td><td><code>campaign.read</code>, <code>host.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/reports/{name}</code></td><td><code>host.read</code>, <code>campaign.read</code>, <code>policy.read</code>, <code>security.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/search</code><br><span class="caption">Jedno zapytanie po wszystkich rodzajach obiektów, które wywołujący może czytać.</span></td><td><span class="caption">dowolna uwierzytelniona tożsamość</span></td></tr>
@@ -334,6 +337,9 @@
 <table>
 <thead><tr><th>Metoda</th><th>Ścieżka</th><th>Uprawnienie</th></tr></thead>
 <tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/unresolved</code><br><span class="caption">Operacje o nieznanym wyniku: te, które nie zaszły, i te, których dowodu nie dało się odczytać. Liczone osobno.</span></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/unresolved/{id}/ruling</code><br><span class="caption">Ktoś rozstrzyga, czym była jedna nierozstrzygnięta próba, z podstawą rozstrzygnięcia. Rozstrzygnięcie nigdy nie zmienia zapisu samej próby.</span></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/unresolved/rulings</code></td><td><code>job.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/budgets</code></td><td><code>budget.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/budgets/{key...}</code></td><td><code>budget.read</code></td></tr>
 <tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/budgets/{key...}</code></td><td><code>budget.write</code></td></tr>
@@ -429,6 +435,7 @@
 <table>
 <thead><tr><th>Metoda</th><th>Ścieżka</th><th>Uprawnienie</th></tr></thead>
 <tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/access-arrears</code><br><span class="caption">Konta lokalne na hostach, których katalog nie wyjaśnia: dostęp, który ktoś ma, a którego nikt nie nadał przez katalog.</span></td><td><code>identity.read</code></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/access/simulate</code><br><span class="caption">Dostęp efektywny: symulacja katalogu dla pary użytkownik-host oraz rzut reguł na jednego hosta.</span></td><td><code>identity.policy.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/changes</code><br><span class="caption">Zmiany w katalogu: plan, zatwierdzenie i wykonanie faza po fazie.</span></td><td><code>identity.read</code></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/changes</code></td><td>uprawnienie właściwe dla typu zmiany: <code>identity.user.write</code>, <code>identity.group.write</code>, <code>identity.policy.write</code>, <code>dns.directory.write</code>, <code>identity.keytab.rotate</code> albo, dla symulacji, <code>identity.policy.read</code></td></tr>
@@ -466,9 +473,14 @@
 <tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/sessions/{sid}</code></td><td><code>principal.manage</code></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/principals/{id}/team-roles</code><br><span class="caption">Rola nad zespołem, obok powiązań o zakresie site.</span></td><td><code>principal.manage</code>, <code>team.binding.write</code></td></tr>
 <tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/team-roles/{role}</code></td><td><code>principal.manage</code>, <code>team.binding.write</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/principals/{id}/directory-account</code><br><span class="caption">Którym kontem katalogu jest ta tożsamość. Powiązanie jest wymagane, zanim grupy katalogu cokolwiek jej nadadzą: uid wyglądający jak nazwa użytkownika nie jest dowodem tej samej osoby.</span></td><td><code>principal.manage</code></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/principals/{id}/tokens</code></td><td><code>principal.manage</code></td></tr>
 <tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/tokens/{token}</code></td><td><code>principal.manage</code></td></tr>
-<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/roles</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/permissions</code><br><span class="caption">Każde uprawnienie, jakie definiuje produkt, z grupą, od której zaczyna się jego nazwa. To słownik, w którym pisze się rolę własną.</span></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/roles</code><br><span class="caption">Cały katalog: sześć ról wbudowanych i role zdefiniowane w tej instalacji, każda z uprawnieniami i flagą <code>built_in</code>.</span></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/roles</code><br><span class="caption">Definiuje rolę własną tej instalacji. Wolno w nią włożyć tylko uprawnienia, które wołający ma wszędzie.</span></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/roles/{role}</code><br><span class="caption">Zastępuje definicję w całości: to, czego nie ma na liście, zostaje odebrane każdemu, kto ma tę rolę — przy jego następnym żądaniu.</span></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/roles/{role}</code><br><span class="caption">Usuwa rolę, której nikt nie ma. Rola, do której ktoś jest przypisany, dostaje odmowę role_in_use.</span></td><td><code>principal.manage</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/secrets</code></td><td><code>secret.read</code></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/secrets</code></td><td><code>secret.write</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/secrets/{name}</code></td><td><code>secret.read</code></td></tr>

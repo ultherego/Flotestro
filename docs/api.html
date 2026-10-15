@@ -125,7 +125,7 @@
 
   <main class="content">
 <h1>8. API</h1>
-<p class="lede">Everything the panel does, a program can do. The API is the same surface the web panel runs on: 230 routes under <code>/api/v1</code>, answered in JSON, authorised by the same permissions and written to the same audit trail. This page is the route table as <code>internal/adminapi/adminapi.go</code> registers it and the conventions as <code>internal/adminapi/openapi.go</code> describes them; the panel serves its own OpenAPI document at <code>GET /api/v1/openapi.json</code>. For calls to paste into a terminal, with the answers they gave, see <a href="examples.html">11. Worked examples</a>.</p>
+<p class="lede">Everything the panel does, a program can do. The API is the same surface the web panel runs on: 239 routes under <code>/api/v1</code>, answered in JSON, authorised by the same permissions and written to the same audit trail. This page is the route table as <code>internal/adminapi/adminapi.go</code> registers it and the conventions as <code>internal/adminapi/openapi.go</code> describes them; the panel serves its own OpenAPI document at <code>GET /api/v1/openapi.json</code>. For calls to paste into a terminal, with the answers they gave, see <a href="examples.html">11. Worked examples</a>.</p>
 <h2 id="basics">The shape of the interface</h2>
 <ul><li>Reads use <code>GET</code>. Plans, operations and campaigns are created with <code>POST</code> and have explicit <code>approve</code>, <code>cancel</code>, <code>pause</code> and <code>resume</code> endpoints of their own.</li><li>Every list is paged on the server.</li><li>Errors are problem objects with a stable code.</li><li>The document describes itself: <code>GET /api/v1/openapi.json</code> is generated from the registered routes, so it can never drift from them.</li><li>The panel listens on <code>FLOTESTRO_ADMIN_ADDR</code>, <code>127.0.0.1:8080</code> by default, in plain HTTP; it is meant to sit behind a reverse proxy that terminates TLS.</li></ul>
 <h2 id="authentication">Authentication</h2>
@@ -186,16 +186,16 @@
 <table>
 <thead><tr><th>Section</th><th>Routes</th></tr></thead>
 <tbody>
-<tr><td><a href="#routes-service">Service endpoints</a></td><td>17</td></tr>
+<tr><td><a href="#routes-service">Service endpoints</a></td><td>19</td></tr>
 <tr><td><a href="#routes-caller">Signing in, and the caller's own records</a></td><td>8</td></tr>
-<tr><td><a href="#routes-fleet">The fleet at a glance</a></td><td>7</td></tr>
+<tr><td><a href="#routes-fleet">The fleet at a glance</a></td><td>8</td></tr>
 <tr><td><a href="#routes-hosts">Hosts</a></td><td>59</td></tr>
 <tr><td><a href="#routes-enrollment">Enrollment, relays and the fleet CA</a></td><td>14</td></tr>
-<tr><td><a href="#routes-work">Operations, reads and campaigns</a></td><td>37</td></tr>
+<tr><td><a href="#routes-work">Operations, reads and campaigns</a></td><td>40</td></tr>
 <tr><td><a href="#routes-compliance">Policies, compliance, vulnerabilities, certificates and backups</a></td><td>20</td></tr>
 <tr><td><a href="#routes-monitoring">Monitoring and notifications</a></td><td>20</td></tr>
-<tr><td><a href="#routes-directory">The directory</a></td><td>18</td></tr>
-<tr><td><a href="#routes-access">Identities, teams, roles and secrets</a></td><td>27</td></tr>
+<tr><td><a href="#routes-directory">The directory</a></td><td>19</td></tr>
+<tr><td><a href="#routes-access">Identities, teams, roles and secrets</a></td><td>32</td></tr>
 <tr><td><a href="#routes-audit">The audit trail</a></td><td>2</td></tr>
 <tr><td><a href="#routes-support">Support bundles</a></td><td>5</td></tr>
 </tbody></table></div>
@@ -213,6 +213,8 @@
 <tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/advertised</code><br><span class="caption">An administrator confirms one. A detected address is never adopted by itself, and a confirmation is refused where <code>FLOTESTRO_ADVERTISE</code> declares the address instead.</span></td><td><code>settings.advertise.write</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings/monitoring</code><br><span class="caption">The monitoring retentions are the installation's own setting rather than the process's: read here, and written without a restart.</span></td><td><code>settings.read</code></td></tr>
 <tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/monitoring</code></td><td><code>monitoring.rules.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings/layout/{screen}</code><br><span class="caption">How a screen's tiles are arranged. The arrangement is the installation's, so everybody sees the same one.</span></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/layout/{screen}</code></td><td><code>settings.advertise.write</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/setup</code><br><span class="caption">The first run: what the installation still lacks, and the two connection tests the checklist offers in place.</span></td><td><span class="caption">any authenticated identity</span></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/setup/test-directory</code></td><td><code>identity.read</code></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/setup/test-oidc</code></td><td><code>settings.read</code>, <code>principal.manage</code></td></tr>
@@ -245,6 +247,7 @@
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/events</code><br><span class="caption">The event stream of the whole visible fleet. One connection per tab is enough for all the operations in progress.</span></td><td><code>job.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/fleet/activity</code></td><td><code>host.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/fleet/summary</code></td><td><code>host.read</code>, <code>audit.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/fleet/readiness</code><br><span class="caption">Whether the fleet is ready for what the panel is about to be asked: the steps that are measured and the ones that are not.</span></td><td><code>host.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/maintenance/calendar</code></td><td><code>campaign.read</code>, <code>host.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/reports/{name}</code></td><td><code>host.read</code>, <code>campaign.read</code>, <code>policy.read</code>, <code>security.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/search</code><br><span class="caption">One question across every kind the caller may read.</span></td><td><span class="caption">any authenticated identity</span></td></tr>
@@ -339,6 +342,9 @@
 <table>
 <thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead>
 <tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/unresolved</code><br><span class="caption">The operations whose outcome is not known: the ones that did not happen and the ones whose evidence could not be read. The two are counted apart.</span></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/unresolved/{id}/ruling</code><br><span class="caption">Somebody decides what one unresolved attempt was, with the basis for deciding it. The ruling never changes the attempt's own record.</span></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/unresolved/rulings</code></td><td><code>job.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/budgets</code></td><td><code>budget.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/budgets/{key...}</code></td><td><code>budget.read</code></td></tr>
 <tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/budgets/{key...}</code></td><td><code>budget.write</code></td></tr>
@@ -434,6 +440,7 @@
 <table>
 <thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead>
 <tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/access-arrears</code><br><span class="caption">Local accounts on the hosts that the directory does not account for: access somebody has that nobody granted through the directory.</span></td><td><code>identity.read</code></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/access/simulate</code><br><span class="caption">The effective access: the directory's own simulation for a user and a host, and the projection of the rules onto one host.</span></td><td><code>identity.policy.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/changes</code><br><span class="caption">Directory changes: plan, approval and execution phase by phase.</span></td><td><code>identity.read</code></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/changes</code></td><td>the permission of the change type: <code>identity.user.write</code>, <code>identity.group.write</code>, <code>identity.policy.write</code>, <code>dns.directory.write</code>, <code>identity.keytab.rotate</code> or, for a simulation, <code>identity.policy.read</code></td></tr>
@@ -471,9 +478,14 @@
 <tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/sessions/{sid}</code></td><td><code>principal.manage</code></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/principals/{id}/team-roles</code><br><span class="caption">A role over a team, beside the site-scoped bindings.</span></td><td><code>principal.manage</code>, <code>team.binding.write</code></td></tr>
 <tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/team-roles/{role}</code></td><td><code>principal.manage</code>, <code>team.binding.write</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/principals/{id}/directory-account</code><br><span class="caption">Which directory account this identity is. A link is required before the directory's groups may grant it anything: a uid that looks like a username is not evidence of the same person.</span></td><td><code>principal.manage</code></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/principals/{id}/tokens</code></td><td><code>principal.manage</code></td></tr>
 <tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/tokens/{token}</code></td><td><code>principal.manage</code></td></tr>
-<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/roles</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/permissions</code><br><span class="caption">Every permission this product defines, with the group each one's name begins with. It is the vocabulary a role of your own is written in.</span></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/roles</code><br><span class="caption">The whole catalogue: the six built-in roles and the ones this installation defined, each with its permissions and a <code>built_in</code> flag.</span></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/roles</code><br><span class="caption">Defines a role of this installation's own. Only permissions the caller holds everywhere may be put in it.</span></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/roles/{role}</code><br><span class="caption">Replaces the definition whole: what is left out is taken from everybody bound to the role, on their next request.</span></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/roles/{role}</code><br><span class="caption">Removes a role nobody holds. One somebody is bound to is refused with role_in_use.</span></td><td><code>principal.manage</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/secrets</code></td><td><code>secret.read</code></td></tr>
 <tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/secrets</code></td><td><code>secret.write</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/secrets/{name}</code></td><td><code>secret.read</code></td></tr>
