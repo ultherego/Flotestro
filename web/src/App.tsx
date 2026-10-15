@@ -150,7 +150,9 @@ export function App() {
     return (
       <ToastProvider>
         <ModalProvider>
-          <NextPanel />
+          <PreferencesProvider applyTheme={setTheme}>
+            <NextPanel />
+          </PreferencesProvider>
         </ModalProvider>
       </ToastProvider>
     );

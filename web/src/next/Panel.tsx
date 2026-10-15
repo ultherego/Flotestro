@@ -31,9 +31,9 @@ export function NextPanel() {
   return (
     <Shell trail={{ section: title }}>
       <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/hosts" element={<Hosts />} />
+        <Route path="/next" element={<Dashboard />} />
+        <Route path="/next/dashboard" element={<Dashboard />} />
+        <Route path="/next/hosts" element={<Hosts />} />
         <Route path="*" element={<NotYet />} />
       </Routes>
     </Shell>
