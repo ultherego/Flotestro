@@ -54,6 +54,31 @@
   --radius: 10px;
   --radius-sm: 8px;
   --radius-xs: 6px;
+  /* A widget is a surface, not a control, so it is rounder than a button. */
+  --radius-card: 14px;
+
+  /* A measurement is read from across the room and its label only if the
+     number asks a question, so the number has a scale of its own rather
+     than being the body text in bold. */
+  --metric-xl: 56px;
+  --metric-l: 40px;
+  --metric-m: 28px;
+
+  /* The categorical palette of a chart. It never borrows a state colour: a
+     slice of a ring is not "ok" or "broken", and a reader who has learnt
+     that green means healthy must not meet green again as "the third
+     category". The three hues follow the theme, so the light one darkens
+     them without anything here changing. */
+  --chart-1: var(--blue);
+  --chart-2: var(--teal);
+  --chart-3: var(--lavender);
+  --chart-4: var(--accent);
+
+  /* The two gradients of the house, and there are no others: the hero tile
+     and the bars of a chart. The accent may carry them because the accent
+     carries no state - a tile that glows says "look here", not "healthy". */
+  --grad-hero: linear-gradient(135deg, var(--accent) 0%, var(--lavender) 100%);
+  --grad-bar: linear-gradient(180deg, var(--teal) 0%, var(--lavender) 100%);
 
   --font-sans: -apple-system, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
@@ -2317,3 +2342,119 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 /* A paragraph meant to be read rather than scanned: the measure is what makes
    that possible. */
 .prose { max-width: 70ch; line-height: 1.6; }
+
+/* ---------------------------------------------------------------------------
+   The measurement tile and the severity row.
+
+   Both follow the same rule: colour says state, and a filled surface says
+   "look here first". The hero tile is the only filled one, and it carries the
+   accent, which means nothing by itself - so a glowing tile never claims a
+   number is healthy.
+   --------------------------------------------------------------------------- */
+
+.metric-tile {
+  background: var(--bg-panel);
+  border-radius: var(--radius-card);
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  /* A transparent border keeps the box the same size in every state, so a
+     tile does not jump by a pixel when a host goes critical. */
+  border: 1px solid transparent;
+}
+
+.metric-value {
+  font-size: var(--metric-l);
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.metric-tile-xl .metric-value { font-size: var(--metric-xl); }
+.metric-tile-m .metric-value { font-size: var(--metric-m); }
+
+.metric-unit {
+  font-size: 0.42em;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.metric-unknown { color: var(--unknown-text); }
+
+.metric-label {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.metric-footnote {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.metric-tile-warn  { border-color: var(--warn); }
+.metric-tile-error { border-color: var(--error); }
+.metric-tile-unknown { border-color: var(--border-strong); }
+
+.metric-tile-hero {
+  background: var(--grad-hero);
+  border-color: transparent;
+  color: var(--accent-contrast);
+}
+
+.metric-tile-hero .metric-label,
+.metric-tile-hero .metric-unit,
+.metric-tile-hero .metric-footnote {
+  color: color-mix(in srgb, var(--accent-contrast) 72%, transparent);
+}
+
+.severity-bar {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 2px;
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+
+.severity-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 14px 8px;
+  border: 0;
+  font: inherit;
+  color: var(--accent-contrast);
+  text-align: center;
+}
+
+button.severity-block { cursor: pointer; }
+
+.severity-count {
+  font-size: var(--metric-m);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.severity-label {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.severity-critical { background: var(--error); }
+.severity-warning  { background: var(--warn); }
+.severity-info     { background: var(--blue); }
+.severity-unknown  { background: var(--unknown); }
+
+/* An empty severity keeps its place and stops shouting. */
+.severity-empty {
+  background: var(--bg-sunken);
+  color: var(--text-faint);
+}
