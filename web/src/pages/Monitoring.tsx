@@ -524,7 +524,7 @@ export function FleetMonitoring() {
                     <td><SeverityBadge severity={rule.severity} /></td>
                     <td className="source">{describeSelector(rule.selector)}</td>
                     <td>
-                      <label className="toggle" style={{ margin: 0 }}>
+                      <label className="toggle">
                         <input
                           type="checkbox"
                           checked={rule.enabled}

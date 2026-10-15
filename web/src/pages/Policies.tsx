@@ -5,7 +5,7 @@ import { api, ApiError, type Collection } from "../lib/api";
 import type { Policy, PolicyRule, PolicyVerdict, PolicyRemediationMode, Whoami } from "../lib/types";
 import { POLICY_MODES } from "../lib/types";
 import { ErrorBox, Empty, Time } from "../components/ui";
-import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader } from "../components/layout";
+import { Actions, Card, EmptyState, Field, FieldGrid, SectionHead } from "../components/layout";
 import { StatusBar, type WidgetTone } from "../components/widgets";
 import { useT } from "../i18n";
 
@@ -177,8 +177,7 @@ export function Policies() {
 
   return (
     <>
-      <PageHeader
-        icon="security"
+      <SectionHead
         title={t("Policies")}
         description={t("What is to be true on a group of hosts.")}
         help={<p>{t("What is to be true on a group of hosts: a package installed, a unit running, a file at a known content, a setting at a value, a key on an account. The panel judges every host from its inventory; a drift is reported, or turned into a campaign that waits for approval.")}</p>}

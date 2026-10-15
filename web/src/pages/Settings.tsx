@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import { goDuration } from "../lib/format";
@@ -8,6 +8,13 @@ import { Empty, ErrorBox, Pair, Pairs, Time } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
 import { useToast } from "../components/Toast";
 import { Board } from "../components/board";
+import { AdvertisedAddressSection } from "./AdvertisedAddress";
+import { Identities, Mappings, Review, Roles, Warning } from "./Access";
+import { CertificateAuthority } from "./CertificateAuthority";
+import { AccessHolders } from "./AccessHolders";
+import { Budgets } from "./Budgets";
+import { Notifications } from "./Notifications";
+import { Policies } from "./Policies";
 import { useT } from "../i18n";
 
 /**
@@ -37,90 +44,146 @@ export function hubState(data: unknown, error: unknown, loading: boolean): HubSt
 }
 
 /**
- * The resources this installation configures, each owned by the screen that
- * holds its list.
+ * The resources this installation configures that are kept on screens of
+ * their own.
  *
- * Deliberately not a copy of those screens. A section says the state set now
- * and gives the way to change it: the control here when it is small, the
- * screen that owns the resource when the resource is a list. A page of links
- * is not management; a state with a way in is. Decision of 15.10.
+ * They were six tiles across the top of this screen for half a day, and the
+ * owner read them for what they were: *"setting przypomina przejdz do
+ * zakladki X-Y a nie ustawienia"*. A box whose whole content is a sentence
+ * and a button to go elsewhere is a menu, and a settings screen whose first
+ * third is a menu is not a settings screen.
+ *
+ * So they are one compact table at the end, under a heading that says what it
+ * is. The state each one is in is still here - that is the part worth having
+ * on a settings screen, and it is still never a zero somebody could mistake
+ * for an answer nobody got.
  */
-type HubEntry = {
-  key: string;
-  title: string;
-  /** What the resource decides, in one line. */
-  what: string;
-  to: string;
-  path: string;
-  /** The permission the owning screen is behind, so a tile never offers a way in that refuses. */
-  permission: string;
-  open: string;
-};
+/**
+ * The tabs of the settings area.
+ *
+ * Everything an installation configures is here, each tab holding the screen
+ * that does the work rather than a link to it. The six were pages of their
+ * own, reached from the navigation, and the settings screen was a list of
+ * places to go - which the owner read for what it was on 15.10: *"setting
+ * przypomina przejdz do zakladki X-Y a nie ustawienia"*.
+ *
+ * A tab is drawn only for somebody who may read what is inside it. The
+ * permission named here is the one the body's own requests need, so a tab is
+ * never offered that answers with a refusal.
+ */
+const TABS = [
+  { key: "general", label: "General", permission: "" },
+  { key: "users", label: "Users", permission: "principal.manage" },
+  { key: "roles", label: "Roles", permission: "host.read" },
+  { key: "mappings", label: "Group mappings", permission: "principal.manage" },
+  { key: "review", label: "Access review", permission: "principal.manage" },
+  { key: "ca", label: "Fleet CA", permission: "principal.manage" },
+  { key: "channels", label: "Notification channels", permission: "notification.read" },
+  { key: "budgets", label: "Budgets", permission: "budget.read" },
+  { key: "policies", label: "Policies", permission: "policy.read" },
+] as const;
 
-const CONFIGURED: HubEntry[] = [
-  {
-    key: "channels",
-    title: "Notification channels",
-    what: "Where an alert, a finished campaign or a failed delivery is sent.",
-    to: "/notifications", path: "/api/v1/notifications/channels",
-    permission: "notification.read", open: "Open the channels",
-  },
-  {
-    key: "relays",
-    title: "Relays",
-    what: "The hosts that carry traffic for a network this panel cannot reach.",
-    to: "/relays", path: "/api/v1/relays",
-    permission: "host.enroll.read", open: "Open the relays",
-  },
-  {
-    key: "roles",
-    title: "Roles",
-    what: "What a sign-in is allowed to see and to order.",
-    to: "/access?tab=roles", path: "/api/v1/roles",
-    permission: "principal.manage", open: "Open the roles",
-  },
-  {
-    key: "mappings",
-    title: "Group mappings",
-    what: "Which group of the identity provider is granted which role.",
-    to: "/access?tab=mappings", path: "/api/v1/group-mappings",
-    permission: "principal.manage", open: "Open the mappings",
-  },
-  {
-    key: "budgets",
-    title: "Budgets",
-    what: "How much of the fleet one campaign may touch, and how fast.",
-    to: "/budgets", path: "/api/v1/budgets",
-    permission: "budget.read", open: "Open the budgets",
-  },
-  {
-    key: "policies",
-    title: "Policies",
-    what: "What every host is held to, and what counts as a drift from it.",
-    to: "/policies", path: "/api/v1/policies",
-    permission: "policy.read", open: "Open the policies",
-  },
-];
+type TabKey = (typeof TABS)[number]["key"];
 
 /**
- * The configuration of this panel: the resources the installation holds and
- * can change, the retentions it stores itself, and - told apart from both -
- * what the process was started with.
+ * The tab the address names, or the first one for a name that is not a tab.
+ *
+ * A tab the sign-in may not open is not one either: an address kept in a
+ * bookmark from a wider role must land somewhere that exists rather than on
+ * an empty screen.
+ */
+export function settingsTab(value: string | null, permissions: Set<string>): TabKey {
+  const open = TABS.filter((tab) => tab.permission === "" || permissions.has(tab.permission));
+  const named = open.find((tab) => tab.key === value);
+  return (named ?? open[0] ?? TABS[0]).key;
+}
+
+/**
+ * The settings area: everything an installation configures, in one place,
+ * with the screen that does the work inside each tab.
  */
 export function Settings() {
   const t = useT();
-  // What this sign-in holds, asked once for every tile. A tile is behind the
-  // same permission as the screen that owns its resource, so the hub never
-  // offers a way in that refuses on arrival.
+  const [searchParams, setSearchParams] = useSearchParams();
   const whoami = useQuery({
     queryKey: ["whoami"],
     queryFn: () => api.get<Whoami>("/api/v1/whoami"),
     staleTime: 5 * 60 * 1000,
   });
   const permissions = new Set(whoami.data?.permissions ?? []);
-  // Until the answer is here the set is empty, which is not the same as a
-  // sign-in that holds nothing: a tile waits rather than claiming a refusal.
-  const principalKnown = whoami.data !== undefined;
+  const tab = settingsTab(searchParams.get("tab"), permissions);
+  // The certificate authority reports a refusal that belongs above its own
+  // card rather than inside it: rotating a CA is the kind of thing somebody
+  // has to read before they try again.
+  const [caWarning, setCaWarning] = useState<ApiError | null>(null);
+  const setTab = (next: TabKey) => setSearchParams(next === "general" ? {} : { tab: next });
+
+  return (
+    <>
+      <PageHeader
+        icon="settings"
+        title={t("Settings")}
+        description={t("Everything this installation is configured with.")}
+        help={
+          <>
+            <p>{t("What the panel stores is set here and takes effect without a restart: who may sign in and what they hold, the retentions, the address the agents dial, the channels, the budgets and the policies.")}</p>
+            <p>{t("Your own preferences - the theme, your sessions and what your sign-in carries - are under your name at the top right.")}</p>
+            <p>{t("Under General, below those, are the values the process was started with. They come from the deployment and are read when the panel starts, so a change to them needs a restart.")}</p>
+            <p>{t("A tab is here only if this sign-in may read what is inside it.")}</p>
+          </>
+        }
+      />
+
+      <div className="tabs" data-testid="settings-tabs">
+        {TABS.filter((one) => one.permission === "" || permissions.has(one.permission)).map((one) => (
+          <button
+            key={one.key}
+            className={tab === one.key ? "active" : ""}
+            onClick={() => setTab(one.key)}
+            data-testid={`settings-tab-${one.key}`}
+          >
+            {t(one.label)}
+          </button>
+        ))}
+      </div>
+
+      {tab === "general" && <GeneralSettings permissions={permissions} />}
+      {tab === "users" && (
+        <>
+          {/* Who may sign in comes first: it is the question an administrator
+              opens this tab with. The identities below are the panel's own
+              records - where a token is issued, a session ended, a role
+              bound by hand. */}
+          <div className="widgets"><AccessHolders /></div>
+          <Identities initialSearch={searchParams.get("q") ?? ""} />
+        </>
+      )}
+      {tab === "roles" && <Roles />}
+      {tab === "mappings" && <Mappings />}
+      {tab === "review" && <Review />}
+      {tab === "ca" && (
+        <>
+          <Warning error={caWarning} close={() => setCaWarning(null)} />
+          <CertificateAuthority reportError={setCaWarning} />
+        </>
+      )}
+      {tab === "channels" && <Notifications />}
+      {tab === "budgets" && <Budgets />}
+      {tab === "policies" && <Policies />}
+    </>
+  );
+}
+
+/**
+ * The panel's own settings, and under them the values it was started with.
+ *
+ * The two are kept apart on purpose and labelled: the first take effect as
+ * soon as they are stored, the second need the deployment changed and the
+ * process restarted. A screen that mixed them would be telling somebody they
+ * can change a thing they cannot.
+ */
+function GeneralSettings({ permissions }: { permissions: Set<string> }) {
+  const t = useT();
   const { data, error } = useQuery({
     queryKey: ["settings"],
     queryFn: () => api.get<SettingsView>("/api/v1/settings"),
@@ -143,32 +206,25 @@ export function Settings() {
 
   return (
     <>
-      <PageHeader
-        icon="settings"
-        title={t("Settings")}
-        description={t("What this installation is configured with, and what it was started with.")}
-        help={
-          <>
-            <p>{t("The top of the screen is the configuration the installation holds: what is set now, and the way to change it. A count is a link into the screen that owns the resource; the retentions are changed here.")}</p>
-            <p>{t("Below it are the values that come from {source} and are read when the panel starts, so a change to them needs a restart.", { source: t(data?.source ?? "the environment of the control plane process") })}</p>
-            <p>{t("A resource this sign-in may not read says so. It is never shown as none: an installation with no channels and one whose channels are not yours to see are different things.")}</p>
-          </>
-        }
-      />
       {error && <ErrorBox error={error} />}
       {!error && !data && <Card><Empty>{t("Loading…")}</Empty></Card>}
-      <div className="parts-head">
-        <h2>{t("What this installation configures")}</h2>
-        <span className="source">{t("Stored by the panel; a change takes effect without a restart.")}</span>
-      </div>
-      <div className="parts" data-testid="settings-hub">
-        {CONFIGURED.map((entry) => (
-          <HubTile key={entry.key} entry={entry} permissions={permissions} known={principalKnown} />
-        ))}
-      </div>
+
+      {/* What this tab itself stores. Side by side where there is room and
+          stacked where there is not: the grid decides that, not a width
+          written into either card. */}
       <div className="widgets">
         <MonitoringSettingsCard />
+        {(permissions.has("settings.read") || permissions.has("principal.manage")) && (
+          <Card
+            className="span-5"
+            title={t("Advertised address")}
+            description={t("The address the agents dial to reach this panel.")}
+          >
+            <AdvertisedAddressSection mayConfirm={permissions.has("settings.advertise.write")} />
+          </Card>
+        )}
       </div>
+
       {data && (
         <>
           {/* The tiles stand on the page, not inside a card: a tile is a
@@ -200,80 +256,6 @@ export function Settings() {
       )}
     </>
   );
-}
-
-/* ---------------------------------------------------------------------- */
-/* The hub: one configurable resource each, with the way in.               */
-/* ---------------------------------------------------------------------- */
-
-/**
- * One resource of the installation: what it decides, how much of it is set
- * now, and the screen that changes it.
- *
- * The count is asked for here rather than taken from a screen that holds the
- * list, because this tile has to say three different things and only the
- * answer to its own request tells them apart: a number, a refusal, and not
- * knowing. A tile that cannot count still names the resource and still opens
- * it - a hub that hides what it could not count is a hub that lies about what
- * the installation has.
- */
-function HubTile({
-  entry, permissions, known,
-}: {
-  entry: HubEntry;
-  permissions: Set<string>;
-  /** Whether the sign-in's permissions have arrived. */
-  known: boolean;
-}) {
-  const t = useT();
-  const allowed = permissions.has(entry.permission);
-  const collection = useQuery({
-    queryKey: ["settings", "hub", entry.key],
-    queryFn: () => api.get<{ count?: number; items?: unknown[] }>(entry.path),
-    enabled: known && allowed,
-    retry: false,
-    staleTime: 30 * 1000,
-  });
-  const state: HubState = known && !allowed
-    ? { kind: "forbidden" }
-    : hubState(collection.data, collection.error, collection.isPending);
-
-  return (
-    <section className={`part${state.kind === "count" ? "" : " unknown"}`} data-testid={`hub-${entry.key}`}>
-      <h3 className="part-head">
-        <span className="part-name">{t(entry.title)}</span>
-        <span className="part-summary" data-testid={`hub-${entry.key}-state`}>
-          <HubSummary state={state} />
-        </span>
-      </h3>
-      <div className="part-body">
-        <p className="part-reason">{t(entry.what)}</p>
-        <Actions>
-          {state.kind === "forbidden" && known
-            ? <span className="source">{t("Whoever administers this installation changes it.")}</span>
-            : <Link className="button secondary" to={entry.to}>{t(entry.open)}</Link>}
-        </Actions>
-      </div>
-    </section>
-  );
-}
-
-/**
- * The one line that says how much is set - or that the number is not to be had.
- *
- * The count is written after a colon rather than before a noun on purpose: the
- * panel has two languages, and one of them declines the noun by the number.
- */
-function HubSummary({ state }: { state: HubState }) {
-  const t = useT();
-  if (state.kind === "forbidden") {
-    return <span className="badge unknown">{t("not yours to read")}</span>;
-  }
-  if (state.kind === "unknown") {
-    return <span className="badge unknown">{t("not known")}</span>;
-  }
-  if (state.n === 0) return <span>{t("none set")}</span>;
-  return <span className="num">{t("set: {n}", { n: state.n })}</span>;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -418,7 +400,7 @@ function MonitoringSettingsCard() {
 
   return (
     <Card
-      className="span-12"
+      className="span-7"
       title={t("Monitoring retention")}
       description={t("How long the panel keeps what the hosts send.")}
       footer={

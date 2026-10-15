@@ -12,6 +12,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/paging"
 )
 
 // handleWhoami returns the request principal and its roles. The endpoint
@@ -67,21 +68,50 @@ func (s *Server) handleListPrincipals(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
 		return
 	}
-	principals, err := s.authz.ListPrincipals(r.Context())
+	query := r.URL.Query()
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	limit = paging.Limit(limit, defaultListPage, maxListPage)
+	offset, _ := strconv.Atoi(query.Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	filter := authz.PrincipalFilter{Query: query.Get("q"), Limit: limit, Offset: offset}
+	page, err := s.authz.ListPrincipals(r.Context(), filter)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	items := make([]principalView, 0, len(principals))
-	for _, principal := range principals {
-		tokens, err := s.authz.ListTokens(r.Context(), principal.ID)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		items = append(items, principalView{Principal: principal, Tokens: tokens})
+	// The tokens of this page, in one query rather than one per identity.
+	tokens, err := s.authz.TokensOfMany(r.Context(), principalIDs(page.Items))
+	if err != nil {
+		s.fail(w, err)
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
+	items := make([]principalView, 0, len(page.Items))
+	for _, principal := range page.Items {
+		held := tokens[principal.ID]
+		if held == nil {
+			held = []authz.Token{}
+		}
+		items = append(items, principalView{Principal: principal, Tokens: held})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": items, "count": len(items),
+		"total": page.Total, "limit": limit, "offset": offset,
+		// Counted over everything the filter matches rather than over the
+		// page: a screen that pages and then counts what it drew tells an
+		// administrator there are four services in a fleet with eighteen.
+		"by_kind": page.ByKind, "by_role": page.ByRole,
+		"without_bindings": page.WithoutBindings,
+	})
+}
+
+func principalIDs(principals []authz.Principal) []string {
+	ids := make([]string, 0, len(principals))
+	for _, principal := range principals {
+		ids = append(ids, principal.ID)
+	}
+	return ids
 }
 
 // principalTarget resolves the identity named in the path.

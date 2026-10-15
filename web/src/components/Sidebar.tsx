@@ -78,10 +78,10 @@ export function badgeFor(to: string, counts?: BadgeCounts): { count: number; ton
       tone = "error";
       title = "alerts firing";
       break;
-    case "/policies":
-      count = counts.hosts_drifted;
-      title = "hosts drifted";
-      break;
+    // The policies moved into the settings area on 15.10 and the navigation
+    // no longer has an entry for them. A warning badge on "Settings" would
+    // say nothing a reader could act on, so the drifted hosts are read from
+    // the dashboard's compliance card and from the policy screen itself.
     case "/unresolved":
       // Nothing ages this one out: it waits until somebody rules on it.
       count = counts.operations_unconfirmed;

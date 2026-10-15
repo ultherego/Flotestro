@@ -120,14 +120,27 @@ export function AdvertisedAddressSection({ mayConfirm }: { mayConfirm: boolean }
 
   if (address.error) return <ErrorBox error={address.error} />;
   const state = address.data;
-  if (!state) return <p className="source" style={{ marginTop: 12 }}>{t("Loading…")}</p>;
+  if (!state) return <p className="source">{t("Loading…")}</p>;
+  // An answer without the address in force is not an address of none: it is
+  // an answer this section cannot read, and it says so rather than taking
+  // the screen down with it. It read `state.in_force.join` straight out, so
+  // an older panel - or any answer of another shape - threw inside the
+  // render and blanked every card around it. The settings screen now shows
+  // this section beside others, which is where that would have been paid for.
+  if (!Array.isArray(state.in_force)) {
+    return (
+      <p className="source" data-testid="advertised-address">
+        {t("This panel did not say which address is in force.")}
+      </p>
+    );
+  }
 
   const names = chosenAddress(picked, typed);
   const ready = confirmable(names, state.environment_in_force);
 
   return (
-    <div style={{ marginTop: 12 }} data-testid="advertised-address">
-      <p style={{ margin: 0 }}>
+    <div data-testid="advertised-address">
+      <p>
         <strong>{t("In force:")}</strong>{" "}
         <code className="mono">{state.in_force.join(", ")}</code>{" "}
         <span className={`badge ${sourceTone(state.source, state.loopback_only)}`}>
@@ -137,7 +150,7 @@ export function AdvertisedAddressSection({ mayConfirm }: { mayConfirm: boolean }
         </span>
       </p>
       {state.source === "confirmed" && state.confirmed_by && (
-        <p className="source" style={{ marginTop: 6 }}>
+        <p className="source">
           {t("Confirmed by {who} on {when}.", {
             who: state.confirmed_by,
             when: absoluteTime(state.confirmed_at ?? "") || (state.confirmed_at ?? ""),
@@ -145,17 +158,17 @@ export function AdvertisedAddressSection({ mayConfirm }: { mayConfirm: boolean }
         </p>
       )}
       {state.loopback_only && (
-        <p className="source" style={{ marginTop: 6 }}>
+        <p className="source">
           {t("This reaches only the machine the panel runs on, so a host elsewhere is turned away at enrolment rather than left to fail a handshake later.")}
         </p>
       )}
       {state.mismatch && (
-        <div className="warning" style={{ marginTop: 12 }}>
-          <p style={{ margin: 0 }}>{state.mismatch}</p>
+        <div className="warning">
+          <p>{state.mismatch}</p>
         </div>
       )}
       {state.superseded && state.superseded.length > 0 && (
-        <p className="source" style={{ marginTop: 6 }}>
+        <p className="source">
           {t("Held back from any relay as well, because an agent not yet reconfigured still dials it: {names}.", {
             names: state.superseded.join(", "),
           })}
@@ -163,22 +176,22 @@ export function AdvertisedAddressSection({ mayConfirm }: { mayConfirm: boolean }
       )}
 
       {state.environment_in_force ? (
-        <p className="source" style={{ marginTop: 12 }}>
+        <p className="source">
           {t("This installation declares the address in the environment of the control plane ({names}), and that declaration decides. Change it there; a confirmation made here would be refused rather than kept where it does not take effect.", {
             names: (state.environment ?? []).join(", "),
           })}
         </p>
       ) : !mayConfirm ? (
-        <p className="source" style={{ marginTop: 12 }}>
+        <p className="source">
           {t("Only a platform administrator names the address the fleet connects to; ask one.")}
         </p>
       ) : (
-        <div style={{ marginTop: 14 }}>
-          <p style={{ margin: "0 0 8px" }}>
+        <div>
+          <p>
             <strong>{t("Found on this machine")}</strong>{" "}
             <span className="badge unknown">{t("proposal")}</span>
           </p>
-          <p className="source" style={{ margin: "0 0 10px" }}>
+          <p className="source">
             {t("The panel read these off its own interfaces. It cannot tell which of them the hosts route to, so none of them is in use until you pick one and confirm it.")}
           </p>
           <FieldGrid>
@@ -226,7 +239,7 @@ export function AdvertisedAddressSection({ mayConfirm }: { mayConfirm: boolean }
             </Field>
           </FieldGrid>
           {refusal && (
-            <p className="page-error" style={{ marginTop: 8 }}>
+            <p className="page-error">
               {refusal.code === "advertised_address_from_environment"
                 ? t("The deployment declares the address, so it is not confirmed here.")
                 : refusal.message}
@@ -241,7 +254,7 @@ export function AdvertisedAddressSection({ mayConfirm }: { mayConfirm: boolean }
                   : t("Confirm the address")}
             </button>
           </Actions>
-          <p className="source" style={{ marginTop: 8 }}>{state.note}</p>
+          <p className="source">{state.note}</p>
         </div>
       )}
 
@@ -268,13 +281,13 @@ function AgentConfiguration() {
   });
   if (profile.error) return <ErrorBox error={profile.error} />;
   const data = profile.data;
-  if (!data) return <p className="source" style={{ marginTop: 12 }}>{t("Loading…")}</p>;
+  if (!data) return <p className="source">{t("Loading…")}</p>;
   return (
-    <div style={{ marginTop: 16 }}>
-      <p style={{ margin: "0 0 6px" }}>
+    <div>
+      <p>
         <strong>{t("The agent configuration that now applies")}</strong>
       </p>
-      <p className="source" style={{ margin: "0 0 8px" }}>
+      <p className="source">
         {t("This is what the add-host screen hands out from now on; it is written to {path} on the host.", { path: data.config.path })}
       </p>
       <pre className="mono" data-testid="advertised-agent-config">{data.config.content}</pre>

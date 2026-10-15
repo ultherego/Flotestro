@@ -11,9 +11,18 @@ import { exportFileName, targetLink, toLocalInput } from "./Audit";
 describe("tabFromParam", () => {
   it("opens the tab the address names and the first tab for anything else", () => {
     expect(tabFromParam("identities")).toBe("identities");
-    expect(tabFromParam("roles")).toBe("roles");
-    expect(tabFromParam("nonsense")).toBe("mappings");
-    expect(tabFromParam(null)).toBe("mappings");
+    expect(tabFromParam("review")).toBe("review");
+    expect(tabFromParam("ca")).toBe("ca");
+    expect(tabFromParam("nonsense")).toBe("identities");
+    expect(tabFromParam(null)).toBe("identities");
+  });
+
+  // The roles and the group mappings moved into the settings area on 15.10.
+  // An address kept from before lands on the first tab of this screen rather
+  // than on an empty one.
+  it("sends the tabs that moved to the first tab here", () => {
+    expect(tabFromParam("roles")).toBe("identities");
+    expect(tabFromParam("mappings")).toBe("identities");
   });
 });
 

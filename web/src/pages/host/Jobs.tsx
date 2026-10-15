@@ -185,9 +185,9 @@ export function HostJobs() {
       </Summary>
       <Section title={t("By module")} span={4} description={t("Which modules the operations belong to.")}>
         {!jobs ? (
-          <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>
+          <p className="source">{t("Loading…")}</p>
         ) : !operations.length ? (
-          <p className="source" style={{ margin: 0 }}>{t("No jobs for this host.")}</p>
+          <p className="source">{t("No jobs for this host.")}</p>
         ) : (
           <Breakdown items={operations.map(([module, count]) => ({ label: <span className="hm-mono">{module}</span>, value: count }))} />
         )}
@@ -336,7 +336,7 @@ export function HostJobs() {
                 {reviewing === job.id && job.state === "awaiting_approval" && (
                   <tr className="detail-row">
                     <td colSpan={columns}>
-                      <p className="source" style={{ marginTop: 0 }}>
+                      <p className="source">
                         {t("You approve exactly this payload for {operation} on {host}; the consent is bound to hash {hash}.", {
                           operation: job.action_type, host: host.hostname, hash: job.payload_hash.slice(0, 12),
                         })}
@@ -395,7 +395,7 @@ export function HostJobs() {
                   <tr className="detail-row">
                     <td colSpan={columns}>
                       <Attempts jobId={job.id} />
-                      <p className="source" style={{ marginBottom: 0 }}>
+                      <p className="source">
                         <Link to={`/jobs/${job.id}`}>{t("Open the job: full payload, plan and output")}</Link>
                         {" · "}
                         <Link to={`/hosts/${host.id}/logs?job=${job.id}`}>{t("Read the journal of this job")}</Link>
@@ -437,8 +437,8 @@ function Attempts({ jobId }: { jobId: string }) {
     queryFn: () => api.get<Collection<Attempt>>(`/api/v1/jobs/${jobId}/attempts`),
   });
   if (error) return <ErrorBox error={error} />;
-  if (!data) return <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>;
-  if (!data.items.length) return <p className="source" style={{ margin: 0 }}>{t("No execution attempts.")}</p>;
+  if (!data) return <p className="source">{t("Loading…")}</p>;
+  if (!data.items.length) return <p className="source">{t("No execution attempts.")}</p>;
   return (
     <div>
       {data.items.map((attempt) => (

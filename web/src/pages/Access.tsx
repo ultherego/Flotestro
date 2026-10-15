@@ -1,15 +1,15 @@
 import { Fragment, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { api, ApiError, type Collection } from "../lib/api";
 import { copyToClipboard } from "../lib/clipboard";
 import type { AccessReview, ApiToken, GroupMapping, Principal, ReviewFlag, ReviewedPrincipal } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { toInstant } from "../lib/format";
-import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, StatGrid, Stat, Toolbar } from "../components/layout";
+import { Actions, Card, EmptyState, Field, FieldGrid, StatGrid, Stat, Toolbar, Pager} from "../components/layout";
 import { Breakdown } from "../components/widgets";
-import { CertificateAuthority } from "./CertificateAuthority";
 import { useTeams } from "./Teams";
+import { DataTable } from "../components/table";
 import { useT } from "../i18n";
 
 /** A scope part that names no site or environment: an asterisk, as the server keeps it, or nothing. */
@@ -228,61 +228,39 @@ const DEFAULT_TOKEN_TTL_HOURS = 720;
 /** The longest life the server gives a token: a year. */
 const MAX_TOKEN_TTL_HOURS = 8760;
 
-const TABS = ["mappings", "identities", "roles", "review", "ca"] as const;
+/*
+ * The tabs this screen keeps. The group mappings and the roles moved into
+ * the settings area on 15.10, where the rest of an installation's
+ * configuration is; what is left here is who exists, what they hold, and the
+ * authority their certificates come from.
+ */
+const TABS = ["identities", "review", "ca"] as const;
 type Tab = (typeof TABS)[number];
 
 /** The tab named in the address, or the first one for a name that is not a tab. */
 export function tabFromParam(value: string | null): Tab {
-  return (TABS as readonly string[]).includes(value ?? "") ? (value as Tab) : "mappings";
+  return (TABS as readonly string[]).includes(value ?? "") ? (value as Tab) : "identities";
 }
 
 /**
- * Panel access management. These operations change the access rules
- * themselves, so the panel demands a fresh authentication and a reason.
+ * Where the old address of this screen leads.
+ *
+ * Everything it held is a tab of the settings area since 15.10: who may sign
+ * in, the roles, the mappings of the provider's groups onto them, the review
+ * and the authority the panel's own certificates come from. The address is in
+ * bookmarks, in the manual and in the panel's own links, so it answers and
+ * carries the tab across rather than landing somebody on a page that is
+ * gone.
  */
-export function Access() {
-  const t = useT();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const tab = tabFromParam(searchParams.get("tab"));
-  const setTab = (next: Tab) => setSearchParams({ tab: next });
-  const [warning, setWarning] = useState<ApiError | null>(null);
-
-  return (
-    <>
-      <PageHeader
-        title={t("Access")}
-        description={t("Who may do what in this panel.")}
-        help={
-          <p>{t("A group in an identity provider's token grants nothing by itself: the role comes from a mapping made here. Beside the mappings are the local identities, the roles themselves and what each one may do, the review of every enabled identity, and the authority the panel issues its own certificates from.")}</p>
-        }
-      />
-
-      <div className="tabs">
-        <button className={tab === "mappings" ? "active" : ""} onClick={() => setTab("mappings")}>
-          {t("Group mappings")}
-        </button>
-        <button className={tab === "identities" ? "active" : ""} onClick={() => setTab("identities")}>
-          {t("Identities")}
-        </button>
-        <button className={tab === "roles" ? "active" : ""} onClick={() => setTab("roles")}>
-          {t("Roles")}
-        </button>
-        <button className={tab === "review" ? "active" : ""} onClick={() => setTab("review")}>
-          {t("Access review")}
-        </button>
-        <button className={tab === "ca" ? "active" : ""} onClick={() => setTab("ca")}>
-          {t("Fleet CA")}
-        </button>
-      </div>
-
-      {tab === "ca" && <Warning error={warning} close={() => setWarning(null)} />}
-      {tab === "mappings" && <Mappings />}
-      {tab === "identities" && <Identities initialSearch={searchParams.get("q") ?? ""} />}
-      {tab === "roles" && <Roles />}
-      {tab === "review" && <Review />}
-      {tab === "ca" && <CertificateAuthority reportError={setWarning} />}
-    </>
-  );
+export function AccessRedirect() {
+  const [searchParams] = useSearchParams();
+  const moved: Record<string, string> = {
+    identities: "users", mappings: "mappings", roles: "roles", review: "review", ca: "ca",
+  };
+  const tab = moved[searchParams.get("tab") ?? ""] ?? "users";
+  const query = searchParams.get("q");
+  const address = `/settings?tab=${tab}${query ? `&q=${encodeURIComponent(query)}` : ""}`;
+  return <Navigate to={address} replace />;
 }
 
 /** A reason long enough for the trail. */
@@ -331,7 +309,7 @@ function ConfirmCard({ title, text, action, danger = false, busy = false, disabl
   );
 }
 
-function Mappings() {
+export function Mappings() {
   const t = useT();
   const queryClient = useQueryClient();
   // The roles on offer, and the roles the breakdown counts by: read, not
@@ -418,32 +396,46 @@ function Mappings() {
           flush
         >
           {list.data?.items.length ? (
-            <table>
-              <thead>
-                <tr><th scope="col">{t("Group")}</th><th scope="col">{t("Role")}</th><th scope="col">{t("Scope")}</th><th scope="col">{t("Added by")}</th><th scope="col">{t("When")}</th><th scope="col" /></tr>
-              </thead>
-              <tbody>
-                {list.data.items.map((mapping) => (
-                  <tr key={mapping.id}>
-                    <td className="mono">{mapping.group_name}</td>
-                    <td>{mapping.role}</td>
-                    <td className="source"><ScopeText scope={{
-                      site: mapping.site, environment: mapping.environment,
-                      owners: mapping.owners, tags: mapping.tags,
-                    }} /></td>
-                    <td className="source">{mapping.created_by}</td>
-                    <td><Time value={mapping.created_at} /></td>
-                    <td className="actions-cell">
-                      <div className="row-actions">
-                        <button className="danger" onClick={() => { setForm(false); setRemoving(mapping); }}>
-                          {t("Remove")}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <DataTable
+              rows={list.data.items}
+              rowKey={(mapping) => mapping.id}
+              columns={[
+                {
+                  key: "group", head: t("Group"), rowHeader: true,
+                  cell: (mapping) => <span className="mono">{mapping.group_name}</span>,
+                },
+                { key: "role", head: t("Role"), cell: (mapping) => mapping.role },
+                {
+                  key: "scope", head: t("Scope"),
+                  cell: (mapping) => (
+                    <span className="source">
+                      <ScopeText scope={{
+                        site: mapping.site, environment: mapping.environment,
+                        owners: mapping.owners, tags: mapping.tags,
+                      }} />
+                    </span>
+                  ),
+                },
+                {
+                  key: "by", head: t("Added by"), wideOnly: true,
+                  cell: (mapping) => <span className="source">{mapping.created_by}</span>,
+                },
+                {
+                  key: "when", head: t("When"), wideOnly: true,
+                  cell: (mapping) => <Time value={mapping.created_at} />,
+                },
+                {
+                  key: "actions", actions: true,
+                  cell: (mapping) => (
+                    <div className="row-actions">
+                      <button className="danger" onClick={() => { setForm(false); setRemoving(mapping); }}>
+                        {t("Remove")}
+                      </button>
+                    </div>
+                  ),
+                },
+              ]}
+            />
           ) : (
             <EmptyState action={!form && <button onClick={() => setForm(true)}>{t("Add mapping")}</button>}>
               {t("No mappings. Without them nobody gets a role from the identity provider.")}
@@ -543,6 +535,18 @@ type IssuedToken = { subject: string; token: string; token_expires_at?: string }
 /** An identity as the list carries it, with the moment it was disabled when it was. */
 type ListedPrincipal = Principal & { disabled_at?: string };
 
+/**
+ * A page of identities: the rows, how many there are in all, and the counts
+ * the cards beside the list show - taken by the server over everything the
+ * search matches rather than over the page.
+ */
+type PrincipalList = Collection<ListedPrincipal> & {
+  total?: number;
+  by_kind?: Record<string, number>;
+  by_role?: Record<string, number>;
+  without_bindings?: number;
+};
+
 /** A live browser session of an identity, as the panel lists it. */
 type SessionView = {
   id: string;
@@ -589,7 +593,7 @@ type Pending =
   | { kind: "revoke-team-role"; principal: ListedPrincipal; role: string; team: string; teamName: string }
   | { kind: "revoke-session"; principal: ListedPrincipal; session: SessionView };
 
-function Identities({ initialSearch }: { initialSearch: string }) {
+export function Identities({ initialSearch }: { initialSearch: string }) {
   const t = useT();
   // What roles there are to grant, from the installation rather than a copy.
   const catalogue = useRoles();
@@ -604,9 +608,23 @@ function Identities({ initialSearch }: { initialSearch: string }) {
   const [pending, setPending] = useState<Pending | null>(null);
   const [creating, setCreating] = useState(false);
   const [sessionsOf, setSessionsOf] = useState<ListedPrincipal | null>(null);
+  // Who to ask for, and which page of them. The search goes to the server:
+  // an installation whose suites have been running for a month had 1803
+  // identities, and the person looking for their own name could not find it
+  // among the leftovers because the screen drew the first of everything.
+  const [page, setPage] = useState(1);
+  const [size, setSize] = useState(50);
+  const needle = search.trim();
   const { data, error } = useQuery({
-    queryKey: ["principals", showDisabled],
-    queryFn: () => api.get<Collection<ListedPrincipal>>(showDisabled ? "/api/v1/principals?disabled=true" : "/api/v1/principals"),
+    queryKey: ["principals", showDisabled, needle, page, size],
+    queryFn: () => {
+      if (showDisabled) return api.get<PrincipalList>("/api/v1/principals?disabled=true");
+      const params = new URLSearchParams({
+        limit: String(size), offset: String((page - 1) * size),
+      });
+      if (needle) params.set("q", needle);
+      return api.get<PrincipalList>(`/api/v1/principals?${params}`);
+    },
     retry: false,
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["principals"] });
@@ -709,17 +727,26 @@ function Identities({ initialSearch }: { initialSearch: string }) {
   if (error) return <ErrorBox error={error} />;
 
   const all = data?.items ?? [];
-  const shown = all.filter((principal) => matchesIdentity(principal, search));
+  // The disabled list is not paged - an installation has few of them, and
+  // the question it answers is "who could be let back in" - so that one is
+  // still filtered here.
+  const shown = showDisabled ? all.filter((principal) => matchesIdentity(principal, search)) : all;
+  const total = showDisabled ? shown.length : data?.total ?? 0;
 
   // The identities by kind, and the roles their direct assignments hand out;
   // an identity without assignments is named, because its roles, if any,
-  // come from the group mappings and are not visible here.
-  const tally = (keys: (principal: Principal) => string[]) => Object.entries(
-    all.reduce<Record<string, number>>((acc, principal) => { for (const k of keys(principal)) acc[k] = (acc[k] ?? 0) + 1; return acc; }, {}),
-  ).sort((x, y) => y[1] - x[1]);
-  const byKind = tally((principal) => [principal.kind]);
-  const byRole = tally((principal) => (principal.bindings ?? []).map((binding) => binding.role));
-  const unassigned = all.filter((principal) => (principal.bindings ?? []).length === 0).length;
+  // come from the group mappings and are not visible here. The server counts
+  // these over everything the search matches: counting the page would answer
+  // a question nobody asked.
+  const sorted = (counts: Record<string, number> | undefined) =>
+    Object.entries(counts ?? {}).sort((x, y) => y[1] - x[1]);
+  const byKind = showDisabled
+    ? Object.entries(all.reduce<Record<string, number>>((acc, one) => { acc[one.kind] = (acc[one.kind] ?? 0) + 1; return acc; }, {}))
+    : sorted(data?.by_kind);
+  const byRole = showDisabled ? [] : sorted(data?.by_role);
+  const unassigned = showDisabled
+    ? all.filter((principal) => (principal.bindings ?? []).length === 0).length
+    : data?.without_bindings ?? 0;
   const aside = grant !== null || pending !== null || creating;
 
   return (
@@ -752,8 +779,17 @@ function Identities({ initialSearch }: { initialSearch: string }) {
           actions={!creating && <button onClick={openCreate}>{t("Create identity")}</button>}
           flush
         >
-          <Toolbar end={<span>{t("{n} identities", { n: shown.length })}</span>}>
-            <input placeholder={t("subject, name or identifier")} value={search} onChange={(e) => setSearch(e.target.value)} />
+          <Toolbar
+            end={showDisabled
+              ? <span>{t("{n} identities", { n: shown.length })}</span>
+              : <Pager page={page} size={size} total={total} onPage={setPage} onSize={setSize} />}
+          >
+            <input
+              placeholder={t("subject, name or identifier")}
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              data-testid="identity-search"
+            />
             <select value={showDisabled ? "disabled" : "enabled"} onChange={(e) => { setShowDisabled(e.target.value === "disabled"); setPending(null); setSessionsOf(null); }}>
               <option value="enabled">{t("Enabled")}</option>
               <option value="disabled">{t("Disabled")}</option>
@@ -1363,41 +1399,42 @@ export function Roles() {
               {t("No role of this installation's own. The product's six are described below; define one when none of them is the job somebody actually does.")}
             </EmptyState>
           ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">{t("Role")}</th>
-                  <th scope="col">{t("What it is for")}</th>
-                  <th scope="col">{t("Permissions")}</th>
-                  <th scope="col">{t("In use")}</th>
-                  <th scope="col">{t("Defined by")}</th>
-                  <th scope="col" />
-                </tr>
-              </thead>
-              <tbody>
-                {own.map((role) => (
-                  <tr key={role.role}>
-                    <td className="mono">{role.role}</td>
-                    <td className="source">{role.description || "—"}</td>
-                    <td className="num">{role.permissions.length}</td>
-                    <td>
-                      <RoleUsage role={role} />
-                    </td>
-                    <td className="source">{role.created_by || "—"}</td>
-                    <td className="actions-cell">
-                      <div className="row-actions">
-                        <button className="secondary" onClick={() => { setRemoving(null); setEditing(role); }}>
-                          {t("Edit")}
-                        </button>
-                        <button className="danger" onClick={() => { setEditing(null); setRemoving(role); }}>
-                          {t("Remove")}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <DataTable
+              rows={own}
+              rowKey={(role) => role.role}
+              columns={[
+                {
+                  key: "role", head: t("Role"), rowHeader: true,
+                  cell: (role) => <span className="mono">{role.role}</span>,
+                },
+                {
+                  key: "what", head: t("What it is for"), wideOnly: true,
+                  cell: (role) => <span className="source">{role.description || "—"}</span>,
+                },
+                {
+                  key: "permissions", head: t("Permissions"), numeric: true,
+                  cell: (role) => role.permissions.length,
+                },
+                { key: "use", head: t("In use"), cell: (role) => <RoleUsage role={role} /> },
+                {
+                  key: "by", head: t("Defined by"), wideOnly: true,
+                  cell: (role) => <span className="source">{role.created_by || "—"}</span>,
+                },
+                {
+                  key: "actions", actions: true,
+                  cell: (role) => (
+                    <div className="row-actions">
+                      <button className="secondary" onClick={() => { setRemoving(null); setEditing(role); }}>
+                        {t("Edit")}
+                      </button>
+                      <button className="danger" onClick={() => { setEditing(null); setRemoving(role); }}>
+                        {t("Remove")}
+                      </button>
+                    </div>
+                  ),
+                },
+              ]}
+            />
           )}
         </Card>
 
@@ -1625,7 +1662,7 @@ function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
  * The access review: every enabled identity with what it can do, when it was
  * last used and what the reviewer should look at.
  */
-function Review() {
+export function Review() {
   const t = useT();
   const [only, setOnly] = useState<ReviewFlag | "flagged" | "all">("all");
   const { data, error } = useQuery({
@@ -1753,7 +1790,7 @@ function ReviewRow({ principal }: { principal: ReviewedPrincipal }) {
       <td>
         {principal.flags.length === 0
           ? <span className="badge ok">{t("nothing to review")}</span>
-          : principal.flags.map((flag) => <span key={flag} className="badge warn" style={{ marginRight: 6 }}>{t(FLAG_LABELS[flag])}</span>)}
+          : principal.flags.map((flag) => <span key={flag} className="badge warn">{t(FLAG_LABELS[flag])}</span>)}
       </td>
     </tr>
   );
@@ -1771,7 +1808,7 @@ const FLAG_LABELS: Record<ReviewFlag, string> = {
  * A refusal because of a stale authentication is not an application error:
  * the panel is to offer signing in again and come back to the same place.
  */
-function Warning({ error, close }: { error: ApiError | null; close: () => void }) {
+export function Warning({ error, close }: { error: ApiError | null; close: () => void }) {
   const t = useT();
   if (!error) return null;
 

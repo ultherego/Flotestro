@@ -534,11 +534,11 @@ export function Vulnerabilities() {
 
       <Section title={t("Most affected packages")} span={4} description={t("Findings per package; one advisory can touch several.")}>
         {!data ? (
-          <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>
+          <p className="source">{t("Loading…")}</p>
         ) : affected === undefined ? (
-          <p className="source" style={{ margin: 0 }}>{t("Not assessed: no package on this host was checked against a feed.")}</p>
+          <p className="source">{t("Not assessed: no package on this host was checked against a feed.")}</p>
         ) : !packages.length ? (
-          <p className="source" style={{ margin: 0 }}>{t("No package on this host is known to be affected.")}</p>
+          <p className="source">{t("No package on this host is known to be affected.")}</p>
         ) : (
           <Breakdown items={packages.map(([name, count]) => ({ label: <span className="hm-mono">{name}</span>, value: count, tone: "warn" as const }))} />
         )}

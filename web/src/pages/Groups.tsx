@@ -775,7 +775,7 @@ function UsedBy({ usage, kind }: { usage: GroupUsage; kind: HostGroup["kind"] })
       ? t("No campaign or policy names this group in its selector.")
       : kind === "dynamic"
         ? t("A change of the selector reaches every policy listed at its next check; a campaign keeps the snapshot it froze.")
-        : t("A change of the members reaches every policy listed at its next check; a campaign keeps the snapshot it froze.")}>
+        : t("A change of the members reaches every policy listed at its next check; a campaign keeps the snapshot it froze.")} flush>
       {total > 0 && (
         <table>
           <thead>
@@ -994,14 +994,7 @@ function GroupPage({ id }: { id: string }) {
             </p>
           )}
           {selected.size > 0 && (
-            <div
-              data-testid="selection-bar"
-              style={{
-                position: "sticky", bottom: 0, zIndex: 4,
-                display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
-                padding: "10px 16px", background: "var(--bg-panel)", borderTop: "1px solid var(--border)",
-              }}
-            >
+            <div className="selection-bar" data-testid="selection-bar">
               <span>{t("{n} selected", { n: selected.size })}</span>
               <button type="button" className="primary" onClick={() => navigate(bulkAddress(g.name, [...selected]))}>
                 {t("Open in Bulk workspace ({n})", { n: selected.size })}

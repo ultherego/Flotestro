@@ -20,8 +20,9 @@ test.beforeAll(async ({ request }) => {
 });
 
 /** The page header of a fleet page, with its title. */
-function header(page: Page, title: string) {
-  return page.locator(".page-header").getByRole("heading", { name: title });
+/** The head of a section inside a page: what a tab of the settings area has. */
+function section(page: Page, title: string) {
+  return page.locator(".parts-head").getByRole("heading", { name: title });
 }
 
 /** A whole-text match: "Capacity" must not find "Capacity of the fleet". */
@@ -85,9 +86,13 @@ test.describe("budgets", () => {
     const items = await budgets(request);
 
     await page.goto("/dashboard");
-    await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Budgets" }).click();
-    await expect(page).toHaveURL(/\/budgets$/);
-    await expect(header(page, "Budgets")).toBeVisible();
+    // The budgets moved into the settings area on 15.10: the navigation
+    // leads to Settings and the budgets are a tab of it.
+    await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Settings" }).click();
+    await expect(page).toHaveURL(/\/settings$/);
+    await page.getByTestId("settings-tab-budgets").click();
+    await expect(page).toHaveURL(/\/settings\?tab=budgets$/);
+    await expect(section(page, "Budgets")).toBeVisible();
 
     if (items === null) {
       await expect(page.getByText("Budgets are disabled in this installation.")).toBeVisible();
@@ -166,8 +171,8 @@ test.describe("budgets", () => {
     const items = (await budgets(request)) ?? [];
     test.skip(items.length === 0, absent("no budget is configured in this installation"));
 
-    await page.goto("/budgets");
-    await expect(header(page, "Budgets")).toBeVisible();
+    await page.goto("/settings?tab=budgets");
+    await expect(section(page, "Budgets")).toBeVisible();
     const buttons = page.locator("table").first().getByRole("button", { name: "Edit" });
     await expect(buttons).toHaveCount(granted.has("budget.write") ? items.length : 0);
   });
@@ -191,8 +196,8 @@ test.describe("budgets", () => {
     const stamp = Date.now().toString(36);
 
     try {
-      await page.goto("/budgets");
-      await expect(header(page, "Budgets")).toBeVisible();
+      await page.goto("/settings?tab=budgets");
+      await expect(section(page, "Budgets")).toBeVisible();
       const row = rowOf(page, chosen.key);
       await row.getByRole("button", { name: "Edit" }).click();
       const editor = page.locator(`tr[data-testid='budget-editor'][data-key='${chosen.key}']`);

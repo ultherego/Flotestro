@@ -318,7 +318,7 @@ export function Services() {
             ]}
           />
         ) : (
-          <p className="source" style={{ margin: 0 }}>{t("Known after a read from the host.")}</p>
+          <p className="source">{t("Known after a read from the host.")}</p>
         )}
       </Section>
 
@@ -559,7 +559,7 @@ function UnitDetailPanel({
   if (!detail) {
     return (
       <div className="hm-section-body">
-        <p className="source" style={{ margin: 0 }}>
+        <p className="source">
           {loading ? t("Reading the unit from the host…") : t("The detail has not been read yet.")}
         </p>
       </div>
@@ -632,10 +632,10 @@ function UnitDetailPanel({
 
       <p className="widget-subhead">{t("Drop-ins")}</p>
       {!detail.drop_ins?.length ? (
-        <p className="source" style={{ margin: 0 }}>{t("No override files.")}</p>
+        <p className="source">{t("No override files.")}</p>
       ) : (
         (detail.drop_ins ?? []).map((dropIn) => (
-          <div key={dropIn.path} style={{ marginBottom: 8 }}>
+          <div key={dropIn.path}>
             <span className="hm-mono">{dropIn.path}</span>
             {dropIn.error ? (
               <span className="badge unknown" title={dropIn.error}> {t("not read")}</span>
@@ -650,11 +650,11 @@ function UnitDetailPanel({
       {detail.journal_error ? (
         <p className="warning"><span>{detail.journal_error}</span></p>
       ) : lines.length === 0 ? (
-        <p className="source" style={{ margin: 0 }}>{t("The journal has nothing for this unit.")}</p>
+        <p className="source">{t("The journal has nothing for this unit.")}</p>
       ) : (
         <pre className="hm-log">{lines.join("\n")}</pre>
       )}
-      <div className="operations" style={{ marginTop: 8 }}>
+      <div className="operations">
         {/* The Logs page continues right after the last line shown here:
             the cursor travels in the address. */}
         <Link className="button" to={logs}>{t("Follow in Logs")}</Link>
@@ -668,7 +668,7 @@ function UnitDetailPanel({
 /** A labelled row of unit chips, each a link to its unit in the list. */
 function UnitChips({ label, units }: { label: string; units: string[] }) {
   return (
-    <div className="operations" style={{ alignItems: "center", marginBottom: 6 }}>
+    <div className="operations" style={{ alignItems: "center" }}>
       <span className="source">{label}</span>
       {units.map((name) => (
         <Link key={name} className="chip chip-mono" to={`?unit=${encodeURIComponent(name)}`}>{name}</Link>

@@ -200,7 +200,7 @@ export function Processes() {
         {listed ? (
           <Breakdown items={users.map(([user, count]) => ({ label: user, value: count }))} />
         ) : (
-          <p className="source" style={{ margin: 0 }}>{t("Known after a read from the host.")}</p>
+          <p className="source">{t("Known after a read from the host.")}</p>
         )}
         {listed && (
           <>

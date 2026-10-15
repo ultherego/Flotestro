@@ -105,6 +105,10 @@ describe("the pages the router can reach", () => {
         without.push(`${name}: ${where.from} exports no ${where.exported}`);
         continue;
       }
+      // A route that only forwards draws nothing, so there is no header to
+      // ask for: the screens that moved into the settings area keep their old
+      // addresses answering, and those answers are a <Navigate>.
+      if (/Redirect$/.test(where.exported)) continue;
       // PageHeader for an ordinary page; the host section's header is its
       // context bar, which carries the connection state and the freshness of
       // the data as well as the name - the one section whose header is not the

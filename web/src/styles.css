@@ -1341,10 +1341,25 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
 .card-title { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.4; }
 .card-description { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; max-width: 80ch; }
 .card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* The body owns the rhythm of what is inside it.
+ *
+ * Forty-seven places in the pages wrote `style={{ margin: 0 }}` to cancel the
+ * browser's paragraph margin, and two dozen more wrote a marginTop of 6, 8,
+ * 10, 12, 14 or 16 to put it back - so the gap between two blocks depended on
+ * which screen you were looking at. The owner read the result as every
+ * subpage living its own life, which is what it was. One gap, decided here. */
 .card-body { padding: var(--card-pad-y) var(--card-pad-x); min-width: 0; }
+.card-body > p, .card-body > h3, .card-body > h4, .card-body > ul, .card-body > ol, .card-body > dl {
+  margin: 0;
+}
+.card-body > * + * { margin-top: 12px; }
 .card-body > :first-child { margin-top: 0; }
 .card-body > :last-child { margin-bottom: 0; }
 .card-body > h3:first-child { margin-top: 0; }
+/* The same inside a tile of a board, which is the other container. */
+.part-body > p, .part-body > h4, .part-body > ul, .part-body > ol { margin: 0; }
+.part-body > * + * { margin-top: 10px; }
+.part-body > :first-child { margin-top: 0; }
 .card-foot {
   padding: 12px var(--card-pad-x);
   border-top: 1px solid var(--border);
@@ -1371,6 +1386,96 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
 .card-body.flush > .virtual { border: none; border-radius: 0; background: transparent; }
 .card-body.flush > .warning { margin: 12px var(--card-pad-x); padding: 12px 16px; }
 .card-body.flush > table + .virtual, .card-body.flush > p + .virtual { border-top: 1px solid var(--border); }
+
+/* A menu hanging off a chip: the directory's "More" and the host bar's
+   "Actions" were the same object written twice, in two files, with two sets
+   of numbers. */
+.menu-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 5;
+  min-width: 220px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  white-space: normal;
+}
+.menu-popover.to-the-left { left: auto; right: 0; }
+.menu-popover > button { text-align: left; }
+.chip.has-menu { position: relative; }
+.chip.has-menu > summary { cursor: pointer; list-style: none; }
+
+/* One day of the maintenance calendar. */
+.calendar-day {
+  min-height: 84px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-width: 0;
+}
+.calendar-day.other-month { opacity: 0.45; }
+.calendar-day.today { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.calendar-entry {
+  font-size: 11px;
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The bar that appears under a list when rows are picked: what is selected
+   and what can be done with it, held at the bottom of the card. Written
+   inline, identically, on the host list and the group list - two copies of
+   one object, which is how two screens drift apart. */
+.selection-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px var(--card-pad-x, 16px);
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+}
+
+/* A block of prose or controls inside a flush card body, which has no
+   padding of its own to lend it. */
+.flush-block { padding: 14px var(--card-pad-x); }
+
+/* A button small enough to sit inside a table row without raising it. */
+.button.tiny, button.tiny { padding: 0 6px; font-size: 11px; }
+
+/* A badge in a row of badges, and one standing after a name. */
+.badge + .badge { margin-left: 6px; }
+.badge.after-name { margin-left: 6px; }
+
+/* A table in a card reaches the card's edges, whatever the body around it is
+   doing.
+ *
+ * Half the screens put their table in a flush card, where it did; the other
+ * half put it in a padded body beside a sentence or a heading, where it sat
+ * inset by sixteen pixels. Same product, same kind of list, two different
+ * gaps - which is what the owner was looking at on 15.10 when he said the
+ * tables keep to no norm. The body keeps its padding for the prose; the
+ * table steps back out of it. */
+.card-body:not(.flush) > table,
+.card-body:not(.flush) > * > table {
+  width: calc(100% + 2 * var(--card-pad-x));
+  margin-left: calc(-1 * var(--card-pad-x));
+  margin-right: calc(-1 * var(--card-pad-x));
+  max-width: none;
+}
+/* Prose and a table are different things and the gap above a table says so. */
+.card-body:not(.flush) > * + table, .card-body:not(.flush) > * > * + table { margin-top: 12px; }
 
 /* The table in a card: the header row on the page ground, the cells with
    room for the border of the card, no line under the last row. */
@@ -1486,9 +1591,17 @@ a.stat-link:hover { text-decoration: none; border-color: var(--border-strong); b
 
 /* The form fields: a label above the control, a hint below it, in
    columns that fold into one on a narrow screen. */
+/* A form's fields. The tracks share what there is, as they always did, but
+   the form itself has a measure: stretched across a card three and a half
+   thousand pixels wide, six inputs sat a hand's width apart with their hints
+   in ribbons. Capping the track instead of the form was worse - at 834 two
+   tracks of 420 no longer fit, so six fields stood in one column beside half
+   an empty card. The measure caps how wide the form grows; inside it the
+   tracks still fill the line. */
 .field-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  max-width: 1180px;
   gap: 14px 16px;
 }
 .field-grid + .field-grid, .field-grid + .actions, .field-grid + .toggle, .field-grid + p { margin-top: 14px; }
@@ -1545,6 +1658,17 @@ a.button.primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(-
 
 /* The state of a campaign next to its name, under the page title. */
 .page-description .badge { vertical-align: middle; }
+
+/* What only earns its place where there is room: prose beside a row, which
+   on a phone squeezes the columns carrying the answer and the way to act on
+   it, and the long form of a label on a button. The row still says what it
+   is and what to do; the sentence and the long name wait for a wider
+   screen. The pair is exclusive, so exactly one of them is ever drawn. */
+.narrow-only { display: none; }
+@media (max-width: 900px) {
+  .wide-only { display: none; }
+  .narrow-only { display: inline; }
+}
 
 @media (max-width: 600px) {
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -2000,12 +2124,28 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
    and the columns pack upwards, so there are no holes between them. */
 .masonry { display: flex; align-items: flex-start; gap: 14px; }
 .masonry-column { flex: 1 1 0; min-width: 0; }
-.parts { columns: 380px; column-gap: 14px; }
+/* Tiles that are not a board: equal columns that fill the width there is.
+ *
+ * This was `columns: 380px`, and CSS columns do not keep a tile together -
+ * they fill one column to the bottom and carry on, so on a wide screen the
+ * head of a tile sat in one column and its body and its button in the next.
+ * The owner saw it on the settings screen on 15.10 and said so. The same
+ * reason Masonry was taken out of this panel: a layout that cuts its own
+ * contents in half is not a layout. A grid of equal tracks keeps every tile
+ * whole from a phone to a 4k monitor, and `auto-fill` decides how many fit
+ * rather than a number written here. */
+.parts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+  gap: 14px;
+  align-items: start;
+}
 /* A container is a header and a body. The name of the thing stands on a bar
    of its own above it rather than as the first line inside it, which is how
    the arrange mode drew it and what the owner asked for everywhere: a
    heading over a box reads as a label, a heading in a box reads as content. */
-.part { display: flex; flex-direction: column; min-width: 0; margin: 0 0 12px; }
+/* In a grid the gap does the spacing; the margin was for the columns. */
+.part { display: flex; flex-direction: column; min-width: 0; margin: 0; }
 .part-head {
   display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
   margin: 0; padding: 7px 12px;
@@ -2043,6 +2183,11 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 /* The heading of a grid of tiles, with whatever narrows it. */
 .masonry + .masonry { margin-top: 14px; }
 .parts-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 20px 0 10px; }
+/* The actions of a section sit at the right end of its bar, as a page's do. */
+.parts-head-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.parts-head h2 { display: flex; align-items: center; gap: 6px; }
+/* The first bar on a screen needs no gap above it: the page header is there. */
+.page-header + .parts-head, .tabs + .parts-head { margin-top: 0; }
 .parts-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
 .parts-head .settings-search { margin-left: auto; }
 

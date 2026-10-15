@@ -707,7 +707,7 @@ function InterfaceChange({
       {/* Changing the management interface is changing the branch we sit
           on: the operator is to read this before, not see it after. */}
       {management && (
-        <p className="warning" style={{ margin: 0 }}>
+        <p className="warning">
           <span>
             {t("This is the interface the panel talks to. If the change breaks it, the host will roll back on its own after the rollback window — but until then it is unreachable, and no further command will arrive.")}
           </span>
@@ -846,7 +846,7 @@ function InterfaceChange({
             setting and report none of them back. The panel says so instead
             of offering the fields. */}
         {ipv6Off && (
-          <p className="warning" style={{ margin: 0 }}>
+          <p className="warning">
             <span>{t("IPv6 is switched off on {iface}, so nothing written there would take effect. That is a kernel setting, not a profile one.", { iface: iface.name })}</span>
           </p>
         )}
@@ -1080,7 +1080,7 @@ function LayerBuild({
         )}
 
         {problems.length > 0 && (
-          <p className="warning" style={{ margin: 0 }}>
+          <p className="warning">
             <span>{problems[0]}</span>
           </p>
         )}

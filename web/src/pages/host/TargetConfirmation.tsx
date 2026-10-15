@@ -41,9 +41,9 @@ export function TargetConfirmation({
   return (
     <div className={danger ? "form danger" : "form"} data-testid="target-confirmation">
       <h2>{label}</h2>
-      <p className="subtitle" style={{ margin: 0 }}>{description}</p>
+      <p className="subtitle">{description}</p>
       {/* The target repeated in the dialog: the operator approves a specific machine. */}
-      <p className="source" style={{ margin: 0 }}>
+      <p className="source">
         {t("Target: {host}", { host: host.hostname })}
         {host.management_address ? ` · ${host.management_address}` : ` · ${t("address unknown")}`}
         {` · ${host.site} / ${host.environment}`}

@@ -76,6 +76,7 @@ export function Health() {
           title={t("Keytab")}
           tone={connector && !connector.keytab_readable ? "warn" : undefined}
           description={t("The connector's own keytab as the panel reads it. A keytab file carries no expiry date - only the key version and the stamp of its last write - so none is shown.")}
+        flush
         >
           {!connector ? (
             <Empty>{t("No directory connector is configured.")}</Empty>
@@ -103,6 +104,7 @@ export function Health() {
       <Card
         title={t("Hosts offline from the directory")}
         description={t("Enrolled hosts whose SSSD last reported itself cut off from the directory, with the panel's verdict on their logins from the facts each host reported.")}
+      flush
       >
         <StatGrid compact>
           <Stat label={t("Offline from the directory")} value={fleet ? fleet.offline_count : "—"} tone={fleet?.offline_count ? "warn" : undefined} />

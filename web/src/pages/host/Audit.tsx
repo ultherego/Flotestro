@@ -137,9 +137,9 @@ export function HostAudit() {
       />
       <Section title={t("By actor")} span={4} description={t("Who caused the most of them.")}>
         {!events ? (
-          <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>
+          <p className="source">{t("Loading…")}</p>
         ) : !actors.length ? (
-          <p className="source" style={{ margin: 0 }}>{t("No events.")}</p>
+          <p className="source">{t("No events.")}</p>
         ) : (
           <Breakdown items={actors.map(({ event, count }) => {
             const who = actorLabel(event, host, t);
@@ -250,7 +250,7 @@ export function HostAudit() {
                     {open && (
                       <tr className="detail-row">
                         <td colSpan={5}>
-                          <pre style={{ margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(event, null, 2)}</pre>
+                          <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(event, null, 2)}</pre>
                         </td>
                       </tr>
                     )}

@@ -69,7 +69,8 @@ func repeatOfInterruptedChange(change Change, hold Hold) ([]Phase, State, string
 // SessionRevoker revokes the panel sessions that belong to an identity.
 type SessionRevoker interface {
 	RevokeSessionsOf(ctx context.Context, principalID, reason string) (int64, error)
-	ListPrincipals(ctx context.Context) ([]authz.Principal, error)
+	// AllPrincipals: this work asks about every identity, not a page of them.
+	AllPrincipals(ctx context.Context) ([]authz.Principal, error)
 }
 
 // ProviderLogout ends the sessions a user holds at the identity provider.
@@ -675,7 +676,7 @@ func (e *Executor) denyDirectoryUser(ctx context.Context, uid, reason string, de
 	if e.sessions == nil {
 		return 0, fmt.Errorf("the panel identities cannot be read, so it is not known whom to deny")
 	}
-	principals, err := e.sessions.ListPrincipals(ctx)
+	principals, err := e.sessions.AllPrincipals(ctx)
 	if err != nil {
 		// Not knowing the identities is not knowing that there are none.
 		return 0, fmt.Errorf("reading the panel identities of %s: %w", uid, err)
@@ -731,7 +732,7 @@ func (e *Executor) identitiesOfDirectoryUser(ctx context.Context, uid string) ([
 	if e.sessions == nil {
 		return nil, nil
 	}
-	principals, err := e.sessions.ListPrincipals(ctx)
+	principals, err := e.sessions.AllPrincipals(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -899,7 +900,7 @@ func (e *Executor) accessPrincipals(ctx context.Context, uid string) ([]AccessPr
 		return nil, fmt.Errorf(
 			"the panel identities cannot be read, so it is not known whose access is owed")
 	}
-	principals, err := e.sessions.ListPrincipals(ctx)
+	principals, err := e.sessions.AllPrincipals(ctx)
 	if err != nil {
 		// Not knowing the identities is not knowing that there are none.
 		return nil, fmt.Errorf("reading the panel identities of %s: %w", uid, err)

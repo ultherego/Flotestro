@@ -348,7 +348,7 @@ export function Security() {
             }))}
           />
         ) : (
-          <p className="source" style={{ margin: 0 }}>{t("Computing findings…")}</p>
+          <p className="source">{t("Computing findings…")}</p>
         )}
         <p className="widget-subhead">{t("Listening sockets")}</p>
         {/* By reach, as the host names it; an unread list is a sentence,
@@ -362,7 +362,7 @@ export function Security() {
             ]}
           />
         ) : (
-          <p className="source" style={{ margin: 0 }}>{t("This host did not report its listening sockets.")}</p>
+          <p className="source">{t("This host did not report its listening sockets.")}</p>
         )}
       </Section>
 

@@ -255,15 +255,9 @@ function HostActions({ host }: { host: Host }) {
   const refresh = useInventoryRefresh(host);
   const online = host.connection_state === "online";
   return (
-    <details className="chip inventory-refresh" style={{ position: "relative" }}>
-      <summary style={{ cursor: "pointer", listStyle: "none" }}>{t("Actions")} ▾</summary>
-      <div
-        style={{
-          position: "absolute", top: "100%", left: 0, zIndex: 5, minWidth: 220, marginTop: 4, padding: 8,
-          display: "flex", flexDirection: "column", gap: 6, background: "var(--bg-panel)",
-          border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", whiteSpace: "normal",
-        }}
-      >
+    <details className="chip has-menu inventory-refresh">
+      <summary>{t("Actions")} ▾</summary>
+      <div className="menu-popover">
         <button
           type="button"
           className="link"

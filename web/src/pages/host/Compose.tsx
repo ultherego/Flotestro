@@ -157,9 +157,9 @@ export function Compose() {
       />
       <Section title={t("Plan")} span={4} description={t("What the plan would change on this host, by kind.")}>
         {!plan ? (
-          <p className="source" style={{ margin: 0 }}>{t("No plan yet.")}</p>
+          <p className="source">{t("No plan yet.")}</p>
         ) : !changes.length ? (
-          <p className="source" style={{ margin: 0 }}>{t("Nothing would change on this host.")}</p>
+          <p className="source">{t("Nothing would change on this host.")}</p>
         ) : (
           <Breakdown
             items={changes.map(([action, count]) => ({

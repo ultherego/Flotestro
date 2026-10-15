@@ -525,7 +525,7 @@ export function Hosts() {
             </MoreFilters>
           </Toolbar>
           {activeFilters.length > 0 && (
-            <div className="filters" style={{ padding: "0 16px", marginBottom: 12 }} data-testid="active-filters">
+            <div className="filters flush-block" data-testid="active-filters">
               {activeFilters.map((key) => (
                 <span key={key} className="chip">
                   <span className="chip-tag">{chipLabels[key]}</span>
@@ -715,14 +715,7 @@ export function Hosts() {
               The bar sticks to the bottom of the view, so a selection made
               two hundred rows up is one click away without scrolling back. */}
           {selected.size > 0 && (
-            <div
-              data-testid="selection-bar"
-              style={{
-                position: "sticky", bottom: 0, zIndex: 4,
-                display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
-                padding: "10px 16px", background: "var(--bg-panel)", borderTop: "1px solid var(--border)",
-              }}
-            >
+            <div className="selection-bar" data-testid="selection-bar">
               <span>{t("{n} selected", { n: selected.size })}</span>
               <button type="button" className="primary" onClick={openInBulk}>
                 {t("Open in Bulk workspace ({n})", { n: selected.size })}

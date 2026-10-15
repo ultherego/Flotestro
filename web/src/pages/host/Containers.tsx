@@ -296,7 +296,7 @@ export function Containers() {
               ]}
             />
           ) : (
-            <p className="source" style={{ margin: 0 }}>{t("Known after a read from the host.")}</p>
+            <p className="source">{t("Known after a read from the host.")}</p>
           )}
         </div>
       </Section>
@@ -660,7 +660,7 @@ function PlanView({ plan, stale }: { plan: ComputedPlan; stale: boolean }) {
         />
       )}
       {plan.pinned_image && (
-        <p className="source" style={{ margin: 0 }}>
+        <p className="source">
           {t("The image is bound to {digest} ({source}).", {
             digest: plan.pinned_image, source: plan.digest_source ?? "",
           })}
@@ -680,17 +680,17 @@ function PlanView({ plan, stale }: { plan: ComputedPlan; stale: boolean }) {
           </tbody>
         </Table>
       ) : (
-        <p className="source" style={{ margin: 0 }}>{t("No setting differs.")}</p>
+        <p className="source">{t("No setting differs.")}</p>
       )}
       {plan.detaches?.length ? (
-        <p className="source" style={{ margin: 0 }}>
+        <p className="source">
           {t("These containers lose the network and are not reattached: {names}", {
             names: plan.detaches.join(", "),
           })}
         </p>
       ) : null}
       {plan.warnings?.map((warning) => (
-        <p key={warning} className="source" style={{ margin: 0 }}>{warning}</p>
+        <p key={warning} className="source">{warning}</p>
       ))}
     </div>
   );
@@ -1254,7 +1254,7 @@ function NetworkTable({
           <tr key={network.id}>
             <td>
               <span className="hm-mono hm-primary">{network.name}</span>
-              {network.predefined && <span className="badge" style={{ marginLeft: 6 }}>{t("built-in")}</span>}
+              {network.predefined && <span className="badge after-name">{t("built-in")}</span>}
             </td>
             <td>{network.driver}{network.scope && network.scope !== "local" ? ` · ${network.scope}` : ""}</td>
             <td className="hm-mono">

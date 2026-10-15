@@ -1193,6 +1193,7 @@ function ScopeStep({
     <Card
       title={`1. ${t("Scope")}`}
       description={t("Name the campaign and pick what it does on every host; the next step chooses the hosts. Only operations the registry opens to the fleet are listed - an operation missing here is a deliberate refusal, not a missing screen.")}
+    flush
     >
       {refusal && (
         <p className="page-error">
@@ -2214,7 +2215,7 @@ function ApprovalStep({ campaignID, campaign, nav }: { campaignID: string; campa
       {campaign.state === "awaiting_approval" ? (
         // The card is flush for the target table under it; the form
         // keeps the card's own padding so it does not touch the edges.
-        <div style={{ padding: "14px var(--card-pad-x)" }}>
+        <div className="flush-block">
           <FieldGrid>
             {/* The consent is what the audit record keeps next to the
                 fingerprint; a consent without a reason is noise there, so

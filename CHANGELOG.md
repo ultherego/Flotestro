@@ -42,6 +42,30 @@ day the tag was published.
 
 ### Changed
 
+- **Settings is where an installation is configured, and the configuration is
+  in it.** The screen listed values to read and places to go; it is an area
+  with tabs now, and each tab holds the screen that does the work: the
+  monitoring retentions and the address the agents dial, the notification
+  channels, the roles, the group mappings, the budgets and the policies. Those
+  five left the navigation and the access screen, which keeps the identities,
+  their review and the fleet CA. Their old addresses still answer and lead to
+  the tab, so a bookmark and a link in the manual keep working. A tab is drawn
+  only for somebody who may read what is inside it, and an address naming a
+  tab they may not open lands on the first one they may.
+- **One shape for a screen, held to by a test.** The containers own the
+  spacing: a card body sets the gap between the blocks inside it, and a table
+  in a card reaches the card's edges whether the body around it is padded for
+  prose or not. Eighty-six inline margins are gone from twenty-eight pages,
+  and the sticky selection bar, the menu hanging off a chip, the calendar day
+  and the small button in a row are classes rather than numbers written twice.
+  `web/src/pages/layout.test.ts` reads the JSX and refuses a page that sets a
+  margin or a padding of its own.
+- **The panel lays its tiles out in a grid at every width.** `.parts` was CSS
+  multi-column, which fills one column to the bottom and carries on, so on a
+  wide screen the head of a tile stood in one column and its body in the next.
+  Measured from 390 to 3840 pixels; the stylesheet check now refuses
+  `columns`, `column-count` and `column-width` outright.
+
 - **The screen of unconfirmed operations tells the two kinds apart at the
   level of the list**: the operations that did not happen and the ones whose
   evidence could not be read are two counts with a way into each, rather than

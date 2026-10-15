@@ -488,7 +488,7 @@ function FanOutPage({ id }: { id: string }) {
               ? t("The lines of every host in one sequence by their timestamps. The order between hosts is best-effort - clocks differ - and the order within a host is the host's own.")
               : t("The lines of every host, host by host, as each gave them.")}
             actions={
-              <div className="tabs" style={{ margin: 0, borderBottom: 0 }}>
+              <div className="tabs" style={{ borderBottom: 0 }}>
                 <button className={grouping === "timeline" ? "active" : ""} onClick={() => setGrouping("timeline")}>{t("merged timeline")}</button>
                 <button className={grouping === "host" ? "active" : ""} onClick={() => setGrouping("host")}>{t("group by host")}</button>
               </div>

@@ -100,7 +100,7 @@ export function Overview() {
           {/* A dash is not a zero: the host has not counted, and the
               operator is told where the count comes from. */}
           {(host.pending_updates === null || host.pending_updates === undefined) && (
-            <p className="source" style={{ margin: "8px 0 0" }}>
+            <p className="source">
               {t("The update counts are unknown until the host plans its updates.")}{" "}
               <Link to={`/hosts/${host.id}/packages`}>{t("Packages")}</Link>
             </p>
@@ -453,7 +453,7 @@ function HostNotes({ host, editable }: { host: Host; editable: boolean }) {
           ? <p className="hm-notes">{notes}</p>
           : <span className="badge unknown">{t("no notes")}</span>}
         {editable && (
-          <p style={{ margin: "8px 0 0" }}>
+          <p>
             <button type="button" className="link" onClick={open}>{notes ? t("edit") : t("write a note")}</button>
           </p>
         )}

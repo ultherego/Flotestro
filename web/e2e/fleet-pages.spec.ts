@@ -417,7 +417,7 @@ test.describe("access", () => {
     await page.goto("/access");
     await expect(header(page, "Access")).toBeVisible();
     const tabs = page.locator(".tabs").first();
-    await expect(tabs.getByRole("button", { name: "Group mappings" })).toHaveClass(/active/);
+    await expect(tabs.getByRole("button", { name: "Identities" })).toHaveClass(/active/);
     await tabs.getByRole("button", { name: "Access review" }).click();
     await expect(tabs.getByRole("button", { name: "Access review" })).toHaveClass(/active/);
 

@@ -454,13 +454,13 @@ export function Storage() {
         {deviceTypes.length ? (
           <Breakdown items={deviceTypes.map(([type, count]) => ({ label: type, value: count }))} />
         ) : (
-          <p className="source" style={{ margin: 0 }}>{t("This host reports no block device.")}</p>
+          <p className="source">{t("This host reports no block device.")}</p>
         )}
         <p className="widget-subhead">{t("Volume groups")}</p>
         {snapshot?.lvm_unavailable_reason ? (
-          <p className="source" style={{ margin: 0 }}>{t("No LVM here: {reason}", { reason: snapshot.lvm_unavailable_reason })}</p>
+          <p className="source">{t("No LVM here: {reason}", { reason: snapshot.lvm_unavailable_reason })}</p>
         ) : !snapshot?.groups?.length ? (
-          <p className="source" style={{ margin: 0 }}>{t("This host has LVM but no volume groups.")}</p>
+          <p className="source">{t("This host has LVM but no volume groups.")}</p>
         ) : (
           <Breakdown
             items={(snapshot?.groups ?? []).map((group) => ({
@@ -474,9 +474,9 @@ export function Storage() {
             and the rebuild; this card says only how many there are. */}
         <p className="widget-subhead">{t("Software RAID")}</p>
         {snapshot?.raid_unavailable_reason ? (
-          <p className="source" style={{ margin: 0 }}>{t("No software RAID here: {reason}", { reason: snapshot.raid_unavailable_reason })}</p>
+          <p className="source">{t("No software RAID here: {reason}", { reason: snapshot.raid_unavailable_reason })}</p>
         ) : !snapshot?.arrays?.length ? (
-          <p className="source" style={{ margin: 0 }}>{t("This kernel has software RAID and no array assembled.")}</p>
+          <p className="source">{t("This kernel has software RAID and no array assembled.")}</p>
         ) : (
           <Breakdown
             items={snapshot.arrays.map((array) => ({

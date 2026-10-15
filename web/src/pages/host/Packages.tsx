@@ -437,7 +437,7 @@ export function Packages() {
           {/* A dash is not a zero: the operator is told why the host has
               no count, and what produces one. */}
           {pending === undefined && (
-            <p className="source" style={{ margin: "8px 0 0" }}>
+            <p className="source">
               {packages?.unavailable_reason
                 ? t("The update counts could not be read: {reason}", { reason: packages.unavailable_reason })
                 : t("The host has not counted its updates yet; plan updates below to count them.")}
@@ -1102,7 +1102,7 @@ function InstalledPackages({
       </Section>
       {current && (pacman ? (
         <Section title={t("Upgrade {name}", { name: current.name })}>
-          <p className="source" style={{ margin: 0 }}>
+          <p className="source">
             {t("pacman upgrades the whole system at once: a single package cannot be moved on its own without leaving the host partially upgraded. Plan updates above and upgrade the host as a whole.")}
           </p>
         </Section>

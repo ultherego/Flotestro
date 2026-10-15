@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Collection } from "../lib/api";
 import type { Whoami } from "../lib/types";
 import { ErrorBox, Empty, Time } from "../components/ui";
-import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader } from "../components/layout";
+import { Actions, Card, EmptyState, Field, FieldGrid, SectionHead } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
 import { useConfirm } from "../components/Modal";
 import { useToast } from "../components/Toast";
@@ -375,6 +375,11 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * The channels and the delivery log, as a tab of the settings area. It was a
+ * page of its own until 15.10; the owner moved the configuration of an
+ * installation into one place.
+ */
 export function Notifications() {
   const t = useT();
   const queryClient = useQueryClient();
@@ -499,12 +504,10 @@ export function Notifications() {
 
   return (
     <>
-      <PageHeader
-        icon="notifications"
-        title={t("Notifications")}
+      <SectionHead
+        title={t("Notification channels")}
         description={t("Where the fleet reports when nobody is watching the panel.")}
         help={<p>{t("Where the fleet reports to when nobody is looking at the panel: a webhook, a mailbox, a chat room. Every attempt is in the log below with its reason.")}</p>}
-        breadcrumb={[{ label: t("Monitoring"), to: "/monitoring" }]}
         actions={canManage && (
           <button className="primary" onClick={() => { setEditing(emptyForm()); setEditingID(""); setErrorMessage(""); }} disabled={Boolean(editing)}>
             {t("New channel")}

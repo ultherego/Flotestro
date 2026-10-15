@@ -167,8 +167,8 @@ export function DirectoryConfirmation({
   return (
     <div className={danger ? "form danger" : "form"} data-testid="target-confirmation">
       <h2>{label}</h2>
-      <p className="subtitle" style={{ margin: 0 }}>{description}</p>
-      <p className="source" style={{ margin: 0 }}>{t("Target: {name}", { name: target })}</p>
+      <p className="subtitle">{description}</p>
+      <p className="source">{t("Target: {name}", { name: target })}</p>
       <label>
         {t("Reason (at least 8 characters, kept in the audit trail)")}
         <input value={reason} onChange={(e) => setReason(e.target.value)} />

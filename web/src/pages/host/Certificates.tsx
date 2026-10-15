@@ -311,9 +311,9 @@ export function Certificates() {
       />
       <Section title={t("Renewal")} span={4} description={t("What renews each certificate, and where the panel learnt of it.")}>
         {!known ? (
-          <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>
+          <p className="source">{t("Loading…")}</p>
         ) : !list.length ? (
-          <p className="source" style={{ margin: 0 }}>{t("No certificate is watched on this host yet.")}</p>
+          <p className="source">{t("No certificate is watched on this host yet.")}</p>
         ) : (
           <>
             <Breakdown
