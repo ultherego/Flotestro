@@ -90,6 +90,11 @@ td.fp-meter-cell .meter { width: 100%; }
 
 /* The pager is a segmented group, so it is the same object as the      */
 /* filters above it rather than a row of loose buttons.                */
+/* The rows-per-page control that stands beside the pager. It was a label
+   with a class nothing styled, which is why it sat on the baseline of the
+   bar rather than in the middle of it. */
+.rows-per-page { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; }
+.rows-per-page select { font-size: 12px; padding: 2px 6px; }
 .pager { flex-wrap: nowrap; }
 .pager button { min-width: 30px; padding: 4px 8px; justify-content: center; font-variant-numeric: tabular-nums; }
 .pager button:disabled { color: var(--text-faint); background: var(--bg-panel); }

@@ -1,14 +1,13 @@
 import { Fragment, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { api, ApiError, type Collection } from "../lib/api";
 import { copyToClipboard } from "../lib/clipboard";
 import type { AccessReview, ApiToken, GroupMapping, Principal, ReviewFlag, ReviewedPrincipal } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { toInstant } from "../lib/format";
-import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, StatGrid, Stat, Toolbar } from "../components/layout";
+import { Actions, Card, EmptyState, Field, FieldGrid, StatGrid, Stat, Toolbar, Pager} from "../components/layout";
 import { Breakdown } from "../components/widgets";
-import { CertificateAuthority } from "./CertificateAuthority";
 import { useTeams } from "./Teams";
 import { useT } from "../i18n";
 
@@ -243,44 +242,24 @@ export function tabFromParam(value: string | null): Tab {
 }
 
 /**
- * Panel access management. These operations change the access rules
- * themselves, so the panel demands a fresh authentication and a reason.
+ * Where the old address of this screen leads.
+ *
+ * Everything it held is a tab of the settings area since 15.10: who may sign
+ * in, the roles, the mappings of the provider's groups onto them, the review
+ * and the authority the panel's own certificates come from. The address is in
+ * bookmarks, in the manual and in the panel's own links, so it answers and
+ * carries the tab across rather than landing somebody on a page that is
+ * gone.
  */
-export function Access() {
-  const t = useT();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const tab = tabFromParam(searchParams.get("tab"));
-  const setTab = (next: Tab) => setSearchParams({ tab: next });
-  const [warning, setWarning] = useState<ApiError | null>(null);
-
-  return (
-    <>
-      <PageHeader
-        title={t("Access")}
-        description={t("Who may do what in this panel.")}
-        help={
-          <p>{t("The identities this panel knows, the review of every one of them, and the authority it issues its own certificates from. What grants access - the roles and the mappings of the provider's groups onto them - is configured under Settings.")}</p>
-        }
-      />
-
-      <div className="tabs">
-        <button className={tab === "identities" ? "active" : ""} onClick={() => setTab("identities")}>
-          {t("Identities")}
-        </button>
-        <button className={tab === "review" ? "active" : ""} onClick={() => setTab("review")}>
-          {t("Access review")}
-        </button>
-        <button className={tab === "ca" ? "active" : ""} onClick={() => setTab("ca")}>
-          {t("Fleet CA")}
-        </button>
-      </div>
-
-      {tab === "ca" && <Warning error={warning} close={() => setWarning(null)} />}
-      {tab === "identities" && <Identities initialSearch={searchParams.get("q") ?? ""} />}
-      {tab === "review" && <Review />}
-      {tab === "ca" && <CertificateAuthority reportError={setWarning} />}
-    </>
-  );
+export function AccessRedirect() {
+  const [searchParams] = useSearchParams();
+  const moved: Record<string, string> = {
+    identities: "users", mappings: "mappings", roles: "roles", review: "review", ca: "ca",
+  };
+  const tab = moved[searchParams.get("tab") ?? ""] ?? "users";
+  const query = searchParams.get("q");
+  const address = `/settings?tab=${tab}${query ? `&q=${encodeURIComponent(query)}` : ""}`;
+  return <Navigate to={address} replace />;
 }
 
 /** A reason long enough for the trail. */
@@ -541,6 +520,18 @@ type IssuedToken = { subject: string; token: string; token_expires_at?: string }
 /** An identity as the list carries it, with the moment it was disabled when it was. */
 type ListedPrincipal = Principal & { disabled_at?: string };
 
+/**
+ * A page of identities: the rows, how many there are in all, and the counts
+ * the cards beside the list show - taken by the server over everything the
+ * search matches rather than over the page.
+ */
+type PrincipalList = Collection<ListedPrincipal> & {
+  total?: number;
+  by_kind?: Record<string, number>;
+  by_role?: Record<string, number>;
+  without_bindings?: number;
+};
+
 /** A live browser session of an identity, as the panel lists it. */
 type SessionView = {
   id: string;
@@ -587,7 +578,7 @@ type Pending =
   | { kind: "revoke-team-role"; principal: ListedPrincipal; role: string; team: string; teamName: string }
   | { kind: "revoke-session"; principal: ListedPrincipal; session: SessionView };
 
-function Identities({ initialSearch }: { initialSearch: string }) {
+export function Identities({ initialSearch }: { initialSearch: string }) {
   const t = useT();
   // What roles there are to grant, from the installation rather than a copy.
   const catalogue = useRoles();
@@ -602,9 +593,23 @@ function Identities({ initialSearch }: { initialSearch: string }) {
   const [pending, setPending] = useState<Pending | null>(null);
   const [creating, setCreating] = useState(false);
   const [sessionsOf, setSessionsOf] = useState<ListedPrincipal | null>(null);
+  // Who to ask for, and which page of them. The search goes to the server:
+  // an installation whose suites have been running for a month had 1803
+  // identities, and the person looking for their own name could not find it
+  // among the leftovers because the screen drew the first of everything.
+  const [page, setPage] = useState(1);
+  const [size, setSize] = useState(50);
+  const needle = search.trim();
   const { data, error } = useQuery({
-    queryKey: ["principals", showDisabled],
-    queryFn: () => api.get<Collection<ListedPrincipal>>(showDisabled ? "/api/v1/principals?disabled=true" : "/api/v1/principals"),
+    queryKey: ["principals", showDisabled, needle, page, size],
+    queryFn: () => {
+      if (showDisabled) return api.get<PrincipalList>("/api/v1/principals?disabled=true");
+      const params = new URLSearchParams({
+        limit: String(size), offset: String((page - 1) * size),
+      });
+      if (needle) params.set("q", needle);
+      return api.get<PrincipalList>(`/api/v1/principals?${params}`);
+    },
     retry: false,
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["principals"] });
@@ -707,17 +712,26 @@ function Identities({ initialSearch }: { initialSearch: string }) {
   if (error) return <ErrorBox error={error} />;
 
   const all = data?.items ?? [];
-  const shown = all.filter((principal) => matchesIdentity(principal, search));
+  // The disabled list is not paged - an installation has few of them, and
+  // the question it answers is "who could be let back in" - so that one is
+  // still filtered here.
+  const shown = showDisabled ? all.filter((principal) => matchesIdentity(principal, search)) : all;
+  const total = showDisabled ? shown.length : data?.total ?? 0;
 
   // The identities by kind, and the roles their direct assignments hand out;
   // an identity without assignments is named, because its roles, if any,
-  // come from the group mappings and are not visible here.
-  const tally = (keys: (principal: Principal) => string[]) => Object.entries(
-    all.reduce<Record<string, number>>((acc, principal) => { for (const k of keys(principal)) acc[k] = (acc[k] ?? 0) + 1; return acc; }, {}),
-  ).sort((x, y) => y[1] - x[1]);
-  const byKind = tally((principal) => [principal.kind]);
-  const byRole = tally((principal) => (principal.bindings ?? []).map((binding) => binding.role));
-  const unassigned = all.filter((principal) => (principal.bindings ?? []).length === 0).length;
+  // come from the group mappings and are not visible here. The server counts
+  // these over everything the search matches: counting the page would answer
+  // a question nobody asked.
+  const sorted = (counts: Record<string, number> | undefined) =>
+    Object.entries(counts ?? {}).sort((x, y) => y[1] - x[1]);
+  const byKind = showDisabled
+    ? Object.entries(all.reduce<Record<string, number>>((acc, one) => { acc[one.kind] = (acc[one.kind] ?? 0) + 1; return acc; }, {}))
+    : sorted(data?.by_kind);
+  const byRole = showDisabled ? [] : sorted(data?.by_role);
+  const unassigned = showDisabled
+    ? all.filter((principal) => (principal.bindings ?? []).length === 0).length
+    : data?.without_bindings ?? 0;
   const aside = grant !== null || pending !== null || creating;
 
   return (
@@ -750,8 +764,17 @@ function Identities({ initialSearch }: { initialSearch: string }) {
           actions={!creating && <button onClick={openCreate}>{t("Create identity")}</button>}
           flush
         >
-          <Toolbar end={<span>{t("{n} identities", { n: shown.length })}</span>}>
-            <input placeholder={t("subject, name or identifier")} value={search} onChange={(e) => setSearch(e.target.value)} />
+          <Toolbar
+            end={showDisabled
+              ? <span>{t("{n} identities", { n: shown.length })}</span>
+              : <Pager page={page} size={size} total={total} onPage={setPage} onSize={setSize} />}
+          >
+            <input
+              placeholder={t("subject, name or identifier")}
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              data-testid="identity-search"
+            />
             <select value={showDisabled ? "disabled" : "enabled"} onChange={(e) => { setShowDisabled(e.target.value === "disabled"); setPending(null); setSessionsOf(null); }}>
               <option value="enabled">{t("Enabled")}</option>
               <option value="disabled">{t("Disabled")}</option>
@@ -1623,7 +1646,7 @@ function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
  * The access review: every enabled identity with what it can do, when it was
  * last used and what the reviewer should look at.
  */
-function Review() {
+export function Review() {
   const t = useT();
   const [only, setOnly] = useState<ReviewFlag | "flagged" | "all">("all");
   const { data, error } = useQuery({
@@ -1769,7 +1792,7 @@ const FLAG_LABELS: Record<ReviewFlag, string> = {
  * A refusal because of a stale authentication is not an application error:
  * the panel is to offer signing in again and come back to the same place.
  */
-function Warning({ error, close }: { error: ApiError | null; close: () => void }) {
+export function Warning({ error, close }: { error: ApiError | null; close: () => void }) {
   const t = useT();
   if (!error) return null;
 

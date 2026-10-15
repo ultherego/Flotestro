@@ -88,8 +88,9 @@ export const pl: Record<string, string> = {
   "Find a setting": "Znajdź ustawienie",
   "No setting of that name.": "Nie ma ustawienia o takiej nazwie.",
   /* Settings jako centrum konfiguracji: zasoby instalacji i droga do zmiany. */
+  "What the panel stores is set here and takes effect without a restart: who may sign in and what they hold, the retentions, the address the agents dial, the channels, the budgets and the policies.": "To, co panel zapisuje, ustawia się tutaj i działa bez restartu: kto może się zalogować i co ma nadane, retencje, adres, pod który dzwonią agenci, kanały, budżety i polityki.",
+  "Your own preferences - the theme, your sessions and what your sign-in carries - are under your name at the top right.": "Twoje własne ustawienia — motyw, Twoje sesje i to, co niesie Twoje zalogowanie — są pod Twoim nazwiskiem w prawym górnym rogu.",
   "Everything this installation is configured with.": "Wszystko, czym ta instalacja jest skonfigurowana.",
-  "What the panel stores is set here and takes effect without a restart: the retentions, the address the agents dial, the channels, the roles, the mappings of the provider's groups, the budgets and the policies.": "To, co panel zapisuje, ustawia się tutaj i działa bez restartu: retencje, adres, pod który dzwonią agenci, kanały, role, mapowania grup dostawcy tożsamości, budżety i polityki.",
   "Under General, below those, are the values the process was started with. They come from the deployment and are read when the panel starts, so a change to them needs a restart.": "W zakładce Ogólne, pod nimi, są wartości, z którymi wystartował proces. Pochodzą z wdrożenia i są czytane przy starcie panelu, więc ich zmiana wymaga restartu.",
   "A tab is here only if this sign-in may read what is inside it.": "Zakładka jest tu tylko wtedy, gdy to zalogowanie może czytać jej zawartość.",
   "General": "Ogólne",

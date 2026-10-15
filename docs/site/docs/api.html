@@ -731,6 +731,16 @@
 <tr><td><code>since</code></td><td><code>string</code></td><td>RFC 3339; deliveries at or after this moment.</td></tr>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>100 by default, 500 at most.</td></tr>
 </tbody></table></div>
+<h3 id="filters-get-api-v1-principals"><code>GET /api/v1/principals</code></h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>q</code></td><td><code>string</code></td><td>A fragment of the subject or the display name; case-insensitive. The search is the server&rsquo;s: an installation accumulates identities, and a screen that drew the first hundred left the person looking for their own name to scroll.</td></tr>
+<tr><td><code>limit</code></td><td><code>integer</code></td><td>The page size: 100 by default, 500 at most.</td></tr>
+<tr><td><code>offset</code></td><td><code>integer</code></td><td>Where the page starts. The order is by subject and is total, so no identity appears on two pages.</td></tr>
+<tr><td><code>disabled</code></td><td><code>boolean</code></td><td>true lists the disabled identities instead &mdash; a different question, answered whole rather than paged.</td></tr>
+</tbody></table></div>
 <h3 id="filters-get-api-v1-policies-id-results"><code>GET /api/v1/policies/{id}/results</code></h3>
 <div class="table-scroll">
 <table>

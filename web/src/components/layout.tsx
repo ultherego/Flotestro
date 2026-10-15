@@ -78,6 +78,124 @@ export function PageHeader({
 }
 
 /**
+ * The page sizes a list offers. One set for the whole panel: a screen that
+ * invents its own is a screen that answers "how many rows" differently from
+ * the one beside it.
+ */
+export const PAGE_SIZES = [25, 50, 100, 200] as const;
+
+/**
+ * The numbers a pager shows: the first, the last, the ones around the
+ * current, and a gap where it skipped.
+ */
+export function pageNumbers(current: number, pages: number, around = 2): (number | "gap")[] {
+  if (pages < 1) return [];
+  const wanted = new Set<number>([1, pages]);
+  for (let n = current - around; n <= current + around; n++) {
+    if (n >= 1 && n <= pages) wanted.add(n);
+  }
+  const ordered = [...wanted].sort((a, b) => a - b);
+  const out: (number | "gap")[] = [];
+  let previous = 0;
+  for (const n of ordered) {
+    if (previous && n - previous > 1) out.push("gap");
+    out.push(n);
+    previous = n;
+  }
+  return out;
+}
+
+/**
+ * Walking a list too long to draw: the rows per page, where in the whole the
+ * page is, and the way to another one.
+ *
+ * It lived in one screen and was about to be written a second time for the
+ * identities, which is how the panel came to have thirty screens that each
+ * did their own thing. The toolbar of a list takes this in its `end`.
+ */
+export function Pager({
+  page, size, total, onPage, onSize, sizes = PAGE_SIZES,
+}: {
+  /** One-based. */
+  page: number;
+  size: number;
+  total: number;
+  onPage: (page: number) => void;
+  onSize: (size: number) => void;
+  /**
+   * The sizes this list offers, where they are not the panel's own: the
+   * screen of unconfirmed operations rules on a page at a time and its
+   * largest page is what the server accepts in one ruling.
+   */
+  sizes?: readonly number[];
+}) {
+  const t = useT();
+  const pages = Math.max(1, Math.ceil(total / Math.max(1, size)));
+  return (
+    <>
+      <label className="rows-per-page">
+        {t("Rows per page")}
+        <select
+          value={size}
+          onChange={(event) => { onSize(Number(event.target.value)); onPage(1); }}
+          data-testid="page-size"
+        >
+          {sizes.map((one) => <option key={one} value={one}>{one}</option>)}
+        </select>
+      </label>
+      <span data-testid="page-of">
+        {total > 0
+          ? t("{n} of {total}", {
+              n: `${(page - 1) * size + 1}-${Math.min(page * size, total)}`,
+              total,
+            })
+          : t("{n} of {total}", { n: 0, total: 0 })}
+      </span>
+      {pages > 1 && (
+        <nav className="pager segmented" aria-label={t("Pages")}>
+          <button
+            type="button"
+            disabled={page <= 1}
+            onClick={() => onPage(page - 1)}
+            data-testid="page-previous"
+            aria-label={t("Previous")}
+          >
+            ‹
+          </button>
+          {pageNumbers(page, pages).map((one, index) =>
+            one === "gap" ? (
+              /* The gap is not a button and is hidden from a screen reader:
+                 the numbers either side of it are the ones to press. */
+              <span key={`gap-${index}`} className="pager-gap" aria-hidden="true">…</span>
+            ) : (
+              <button
+                key={one}
+                type="button"
+                className={one === page ? "active" : ""}
+                aria-current={one === page ? "page" : undefined}
+                onClick={() => onPage(one)}
+                data-testid={`page-${one}`}
+              >
+                {one}
+              </button>
+            ),
+          )}
+          <button
+            type="button"
+            disabled={page >= pages}
+            onClick={() => onPage(page + 1)}
+            data-testid="page-next"
+            aria-label={t("Next")}
+          >
+            ›
+          </button>
+        </nav>
+      )}
+    </>
+  );
+}
+
+/**
  * The head of a section inside a page: a title, one line about it, the rest
  * behind the mark, and the actions on the right.
  *

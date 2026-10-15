@@ -9,7 +9,8 @@ import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layou
 import { useToast } from "../components/Toast";
 import { Board } from "../components/board";
 import { AdvertisedAddressSection } from "./AdvertisedAddress";
-import { Mappings, Roles } from "./Access";
+import { Identities, Mappings, Review, Roles, Warning } from "./Access";
+import { CertificateAuthority } from "./CertificateAuthority";
 import { Budgets } from "./Budgets";
 import { Notifications } from "./Notifications";
 import { Policies } from "./Policies";
@@ -71,9 +72,12 @@ export function hubState(data: unknown, error: unknown, loading: boolean): HubSt
  */
 const TABS = [
   { key: "general", label: "General", permission: "" },
-  { key: "channels", label: "Notification channels", permission: "notification.read" },
+  { key: "users", label: "Users", permission: "principal.manage" },
   { key: "roles", label: "Roles", permission: "host.read" },
   { key: "mappings", label: "Group mappings", permission: "principal.manage" },
+  { key: "review", label: "Access review", permission: "principal.manage" },
+  { key: "ca", label: "Fleet CA", permission: "principal.manage" },
+  { key: "channels", label: "Notification channels", permission: "notification.read" },
   { key: "budgets", label: "Budgets", permission: "budget.read" },
   { key: "policies", label: "Policies", permission: "policy.read" },
 ] as const;
@@ -107,6 +111,10 @@ export function Settings() {
   });
   const permissions = new Set(whoami.data?.permissions ?? []);
   const tab = settingsTab(searchParams.get("tab"), permissions);
+  // The certificate authority reports a refusal that belongs above its own
+  // card rather than inside it: rotating a CA is the kind of thing somebody
+  // has to read before they try again.
+  const [caWarning, setCaWarning] = useState<ApiError | null>(null);
   const setTab = (next: TabKey) => setSearchParams(next === "general" ? {} : { tab: next });
 
   return (
@@ -117,7 +125,8 @@ export function Settings() {
         description={t("Everything this installation is configured with.")}
         help={
           <>
-            <p>{t("What the panel stores is set here and takes effect without a restart: the retentions, the address the agents dial, the channels, the roles, the mappings of the provider's groups, the budgets and the policies.")}</p>
+            <p>{t("What the panel stores is set here and takes effect without a restart: who may sign in and what they hold, the retentions, the address the agents dial, the channels, the budgets and the policies.")}</p>
+            <p>{t("Your own preferences - the theme, your sessions and what your sign-in carries - are under your name at the top right.")}</p>
             <p>{t("Under General, below those, are the values the process was started with. They come from the deployment and are read when the panel starts, so a change to them needs a restart.")}</p>
             <p>{t("A tab is here only if this sign-in may read what is inside it.")}</p>
           </>
@@ -138,9 +147,17 @@ export function Settings() {
       </div>
 
       {tab === "general" && <GeneralSettings permissions={permissions} />}
-      {tab === "channels" && <Notifications />}
+      {tab === "users" && <Identities initialSearch={searchParams.get("q") ?? ""} />}
       {tab === "roles" && <Roles />}
       {tab === "mappings" && <Mappings />}
+      {tab === "review" && <Review />}
+      {tab === "ca" && (
+        <>
+          <Warning error={caWarning} close={() => setCaWarning(null)} />
+          <CertificateAuthority reportError={setCaWarning} />
+        </>
+      )}
+      {tab === "channels" && <Notifications />}
       {tab === "budgets" && <Budgets />}
       {tab === "policies" && <Policies />}
     </>

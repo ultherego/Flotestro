@@ -11,7 +11,7 @@ import type {
   UnresolvedRulings,
 } from "../lib/types";
 import { ErrorBox, Empty, Time } from "../components/ui";
-import { Actions, Card, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
+import { Actions, Card, Field, FieldGrid, PageHeader, Toolbar, Pager} from "../components/layout";
 import { Icon } from "../components/icons";
 import { useT } from "../i18n";
 
@@ -138,23 +138,6 @@ export const PAGE_SIZES = [5, 10, 20, 50, 100, BATCH_LIMIT];
  * one: a list of thirty pages does not fit, and a reader needs to know how
  * far the list goes as much as where in it they are.
  */
-export function pageNumbers(current: number, pages: number, around = 2): (number | "gap")[] {
-  if (pages < 1) return [];
-  const wanted = new Set<number>([1, pages]);
-  for (let n = current - around; n <= current + around; n++) {
-    if (n >= 1 && n <= pages) wanted.add(n);
-  }
-  const sorted = [...wanted].sort((a, b) => a - b);
-  const out: (number | "gap")[] = [];
-  sorted.forEach((n, i) => {
-    // A single skipped number is printed rather than hidden behind a gap that
-    // takes as much room as it would.
-    if (i > 0 && n - sorted[i - 1] === 2) out.push(n - 1);
-    else if (i > 0 && n - sorted[i - 1] > 1) out.push("gap");
-    out.push(n);
-  });
-  return out;
-}
 
 export default function Unresolved() {
   const t = useT();
@@ -351,67 +334,8 @@ export default function Unresolved() {
         <Toolbar
           end={
             <>
-              <label className="inline">
-                {t("Rows per page")}
-                <select
-                  value={size}
-                  onChange={(e) => { setSize(Number(e.target.value)); setPage(1); }}
-                  data-testid="page-size"
-                >
-                  {PAGE_SIZES.map((one) => (
-                    <option key={one} value={one}>{one}</option>
-                  ))}
-                </select>
-              </label>
-              <span data-testid="page-of">
-                {total > 0
-                  ? t("{n} of {total}", {
-                      n: `${(page - 1) * size + 1}-${Math.min(page * size, total)}`,
-                      total,
-                    })
-                  : t("{n} of {total}", { n: 0, total: 0 })}
-              </span>
-              {pages > 1 && (
-                <nav className="pager segmented" aria-label={t("Pages")}>
-                  <button
-                    type="button"
-                    disabled={page <= 1}
-                    onClick={() => setPage(page - 1)}
-                    data-testid="page-previous"
-                    aria-label={t("Previous")}
-                  >
-                    ‹
-                  </button>
-                  {pageNumbers(page, pages).map((one, i) =>
-                    one === "gap" ? (
-                      /* The gap is not a button and is hidden from a screen
-                         reader: the numbers either side of it are the ones to
-                         press. */
-                      <span key={`gap-${i}`} className="pager-gap" aria-hidden="true">…</span>
-                    ) : (
-                      <button
-                        key={one}
-                        type="button"
-                        className={one === page ? "active" : ""}
-                        aria-current={one === page ? "page" : undefined}
-                        onClick={() => setPage(one)}
-                        data-testid={`page-${one}`}
-                      >
-                        {one}
-                      </button>
-                    ),
-                  )}
-                  <button
-                    type="button"
-                    disabled={page >= pages}
-                    onClick={() => setPage(page + 1)}
-                    data-testid="page-next"
-                    aria-label={t("Next")}
-                  >
-                    ›
-                  </button>
-                </nav>
-              )}
+              <Pager page={page} size={size} total={total} sizes={PAGE_SIZES}
+                     onPage={setPage} onSize={setSize} />
             </>
           }
         >

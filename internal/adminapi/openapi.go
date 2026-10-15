@@ -535,6 +535,12 @@ var csvExports = map[string]bool{
 }
 
 var queryParameters = map[string][]queryParameter{
+	"GET /api/v1/principals": {
+		{"q", "string", "A fragment of the subject or the display name; case-insensitive. The search is the server's: an installation accumulates identities, and a screen that drew the first hundred of them left the person looking for their own name to scroll."},
+		{"limit", "integer", "Rows on this page. The default is 100 and the most is 500."},
+		{"offset", "integer", "Where the page starts. The order is by subject and is total, so no identity appears on two pages."},
+		{"disabled", "boolean", "true lists the identities that were disabled instead - a different question, answered whole rather than paged."},
+	},
 	"GET /api/v1/unresolved": {
 		{"kind", "string", "outcome_unknown or applied_unverified; both when left out. They are different questions and are never summed."},
 		{"host_id", "string", "One host's unconfirmed operations."},
@@ -945,13 +951,28 @@ var responseSchemas = map[string]map[string]any{
 	"GET /api/v1/installation-profiles":           ref("InstallationProfile"),
 	"GET /api/v1/monitoring/alerts":               pagedCollection("Alert"),
 	"GET /api/v1/policies/{id}/campaigns":         collection("PolicyCampaignLink"),
-	"GET /api/v1/principals":                      collection("Principal"),
-	"GET /api/v1/reads/{id}":                      ref("Read"),
-	"GET /api/v1/setup":                           ref("Setup"),
-	"GET /api/v1/support/bundles/{id}":            ref("SupportBundle"),
-	"GET /api/v1/tags":                            collection("Tag"),
-	"GET /api/v1/vulnerabilities":                 ref("FleetVulnerabilities"),
-	"GET /api/v1/vulnerabilities/cves":            ref("FleetCVEs"),
+	"GET /api/v1/principals": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"items":  map[string]any{"type": "array", "items": ref("Principal")},
+			"count":  count(),
+			"total":  map[string]any{"type": "integer", "description": "How many identities the search matches, of which this is one page."},
+			"limit":  count(),
+			"offset": count(),
+			// Counted over the search rather than over the page, because a
+			// count of a page is a number about the page and reads as a
+			// number about the installation.
+			"by_kind":          map[string]any{"type": "object", "description": "How many identities of each kind the search matches.", "additionalProperties": map[string]any{"type": "integer"}},
+			"by_role":          map[string]any{"type": "object", "description": "How many of them hold each role by a binding of their own. A role granted through a group mapping is not a binding and is not counted here.", "additionalProperties": map[string]any{"type": "integer"}},
+			"without_bindings": map[string]any{"type": "integer", "description": "How many hold no binding at all; their roles, if any, come from a group mapping."},
+		},
+	},
+	"GET /api/v1/reads/{id}":           ref("Read"),
+	"GET /api/v1/setup":                ref("Setup"),
+	"GET /api/v1/support/bundles/{id}": ref("SupportBundle"),
+	"GET /api/v1/tags":                 collection("Tag"),
+	"GET /api/v1/vulnerabilities":      ref("FleetVulnerabilities"),
+	"GET /api/v1/vulnerabilities/cves": ref("FleetCVEs"),
 	"GET /api/v1/hosts/{id}/local-accounts": map[string]any{
 		"type": "object",
 		"properties": map[string]any{

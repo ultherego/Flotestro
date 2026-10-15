@@ -25,7 +25,7 @@ type fakeSessions struct {
 	listErr    error
 }
 
-func (f *fakeSessions) ListPrincipals(context.Context) ([]authz.Principal, error) {
+func (f *fakeSessions) AllPrincipals(context.Context) ([]authz.Principal, error) {
 	return f.principals, f.listErr
 }
 
@@ -1060,7 +1060,7 @@ type principalLister struct {
 	revoked    []string
 }
 
-func (p *principalLister) ListPrincipals(context.Context) ([]authz.Principal, error) {
+func (p *principalLister) AllPrincipals(context.Context) ([]authz.Principal, error) {
 	return p.principals, nil
 }
 

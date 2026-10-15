@@ -76,7 +76,7 @@ import { Reads } from "./pages/Reads";
 import { PolicyPage } from "./pages/Policy";
 import { HostPolicies } from "./pages/host/Policies";
 import { Directory } from "./pages/Directory";
-import { Access } from "./pages/Access";
+import { AccessRedirect } from "./pages/Access";
 import { Audit } from "./pages/Audit";
 import { Settings } from "./pages/Settings";
 
@@ -247,7 +247,6 @@ export function App() {
         ...(capabilities.directory ? [{ to: "/directory", label: "Directory", icon: "directory" as const }] : []),
         // Access management is seen only by whoever can change anything in
         // it; for the rest the item would lead to a bare refusal.
-        ...(managesAccess ? [{ to: "/access", label: "Access", icon: "access" as const }] : []),
         // A team is a boundary of authority rather than a label, so it
         // stands with the access rules and not with the groups and the tags,
         // which only choose hosts inside what somebody may touch.
@@ -383,7 +382,10 @@ export function App() {
               {seesCampaigns && <Route path="/campaigns/:id" element={<Campaign />} />}
               {seesBudgets && <Route path="/budgets" element={<Navigate to="/settings?tab=budgets" replace />} />}
               {capabilities.directory && <Route path="/directory" element={<Directory />} />}
-              {managesAccess && <Route path="/access" element={<Access />} />}
+              {/* The access screen became four tabs of the settings area on
+                  15.10, where the roles and the mappings had already gone.
+                  The address answers and leads to the right one. */}
+              {managesAccess && <Route path="/access" element={<AccessRedirect />} />}
               {seesAudit && <Route path="/audit" element={<Audit />} />}
               {seesSettings && <Route path="/settings" element={<Settings />} />}
               {seesSupport && <Route path="/support" element={<Support />} />}

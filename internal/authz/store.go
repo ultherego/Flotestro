@@ -199,6 +199,40 @@ func (s *Store) ListTokens(ctx context.Context, principalID string) ([]Token, er
 }
 
 // RevokeToken ends one token of an identity.
+// TokensOfMany reads the live tokens of a page of identities in one query.
+//
+// One query per identity is fine for a screen showing one and ruinous for a
+// screen showing a thousand: with 1803 identities the listing made 1803 of
+// them, and that was half of why it took as long as it did.
+func (s *Store) TokensOfMany(ctx context.Context, principalIDs []string) (map[string][]Token, error) {
+	out := map[string][]Token{}
+	if len(principalIDs) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		select t.id, t.principal_id, p.subject, coalesce(t.description, ''),
+		       t.expires_at, t.last_used_at, t.created_at
+		from api_tokens t
+		join principals p on p.id = t.principal_id
+		where t.principal_id = any($1)
+		  and t.revoked_at is null
+		  and (t.expires_at is null or t.expires_at > now())
+		order by t.principal_id, t.created_at`, principalIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var token Token
+		if err := rows.Scan(&token.ID, &token.PrincipalID, &token.Subject, &token.Description,
+			&token.ExpiresAt, &token.LastUsedAt, &token.CreatedAt); err != nil {
+			return nil, err
+		}
+		out[token.PrincipalID] = append(out[token.PrincipalID], token)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) RevokeToken(ctx context.Context, tx pgx.Tx, principalID, tokenID string) (bool, error) {
 	tag, err := tx.Exec(ctx, `
 		update api_tokens set revoked_at = now()
@@ -582,44 +616,231 @@ func permissionsOf(values []string) []Permission {
 	return permissions
 }
 
-// ListPrincipals returns the identities together with their roles.
-func (s *Store) ListPrincipals(ctx context.Context) ([]Principal, error) {
-	const query = `
+// AllPrincipals returns every enabled identity, with what it takes to tell
+// whether one is a given directory account and nothing more.
+//
+// The screens page; this is for the work that has to look at all of them -
+// denying a directory account the panel it is linked to, for one. It reads no
+// bindings and no tokens, which is the difference between a question about
+// names and a question about access.
+func (s *Store) AllPrincipals(ctx context.Context) ([]Principal, error) {
+	rows, err := s.pool.Query(ctx, `
 		select id, subject, display_name, kind, coalesce(directory_uid, '')
 		from principals
 		where disabled_at is null
-		order by subject`
-	rows, err := s.pool.Query(ctx, query)
+		order by subject`)
 	if err != nil {
 		return nil, err
 	}
-	var principals []Principal
+	defer rows.Close()
+	principals := []Principal{}
+	for rows.Next() {
+		var principal Principal
+		if err := rows.Scan(&principal.ID, &principal.Subject,
+			&principal.DisplayName, &principal.Kind, &principal.DirectoryUID); err != nil {
+			return nil, err
+		}
+		principals = append(principals, principal)
+	}
+	return principals, rows.Err()
+}
+
+// PrincipalPage is what a list of identities answers: the page asked for,
+// how many there are to ask for, and the counts the screen puts beside it.
+//
+// The counts are taken over everything the filter matches, not over the page.
+// A screen that pages and then counts what it drew says "4 services" of a
+// fleet with eighteen, which is the kind of number somebody acts on.
+type PrincipalPage struct {
+	Items []Principal
+	Total int
+	// ByKind counts the identities of each kind, ByRole the direct bindings
+	// of each role, and WithoutBindings the identities holding none - whose
+	// roles, if they have any, come from a group mapping.
+	ByKind          map[string]int
+	ByRole          map[string]int
+	WithoutBindings int
+}
+
+// PrincipalFilter narrows and pages a listing of identities.
+type PrincipalFilter struct {
+	// Query matches the subject or the display name, anywhere in either.
+	Query  string
+	Limit  int
+	Offset int
+}
+
+// ListPrincipals returns a page of the identities, together with their roles.
+//
+// It used to answer with every identity there was, and to ask the database
+// twice more about each one - its bindings and its tokens. An installation
+// whose suites had been running for a month had 1803 of them, so opening the
+// screen cost 3607 round trips and a megabyte on the wire, and the person
+// looking for their own name could not find it among the leftovers. The page
+// is three queries now whatever its size: the identities, their bindings, and
+// the count of what the filter matches.
+func (s *Store) ListPrincipals(ctx context.Context, filter PrincipalFilter) (PrincipalPage, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	// An empty query matches everything, which ILIKE '%%' already does; the
+	// pattern is built here so the two queries below cannot disagree.
+	pattern := "%" + strings.ToLower(strings.TrimSpace(filter.Query)) + "%"
+
+	var page PrincipalPage
+	if err := s.pool.QueryRow(ctx, `
+		select count(*) from principals
+		where disabled_at is null
+		  and (lower(subject) like $1 or lower(coalesce(display_name, '')) like $1)`,
+		pattern).Scan(&page.Total); err != nil {
+		return PrincipalPage{}, err
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		select id, subject, display_name, kind, coalesce(directory_uid, '')
+		from principals
+		where disabled_at is null
+		  and (lower(subject) like $1 or lower(coalesce(display_name, '')) like $1)
+		order by subject
+		limit $2 offset $3`, pattern, limit, offset)
+	if err != nil {
+		return PrincipalPage{}, err
+	}
+	principals := []Principal{}
 	for rows.Next() {
 		var principal Principal
 		if err := rows.Scan(&principal.ID, &principal.Subject,
 			&principal.DisplayName, &principal.Kind, &principal.DirectoryUID); err != nil {
 			rows.Close()
-			return nil, err
+			return PrincipalPage{}, err
 		}
 		principals = append(principals, principal)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return PrincipalPage{}, err
 	}
 
+	bindings, err := s.bindingsOfMany(ctx, identifiersOf(principals))
+	if err != nil {
+		return PrincipalPage{}, err
+	}
 	for i := range principals {
-		bindings, err := s.allBindingsOf(ctx, principals[i].ID)
-		if err != nil {
+		// An empty list is not the same as a missing list.
+		principals[i].Bindings = bindings[principals[i].ID]
+		if principals[i].Bindings == nil {
+			principals[i].Bindings = []Binding{}
+		}
+	}
+	page.Items = principals
+
+	if err := s.countPrincipals(ctx, pattern, &page); err != nil {
+		return PrincipalPage{}, err
+	}
+	return page, nil
+}
+
+// countPrincipals fills the counts a listing shows beside its page.
+func (s *Store) countPrincipals(ctx context.Context, pattern string, page *PrincipalPage) error {
+	page.ByKind = map[string]int{}
+	page.ByRole = map[string]int{}
+
+	const matching = `
+		from principals p
+		where p.disabled_at is null
+		  and (lower(p.subject) like $1 or lower(coalesce(p.display_name, '')) like $1)`
+
+	rows, err := s.pool.Query(ctx, `select p.kind, count(*) `+matching+` group by p.kind`, pattern)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var kind string
+		var count int
+		if err := rows.Scan(&kind, &count); err != nil {
+			rows.Close()
+			return err
+		}
+		page.ByKind[kind] = count
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	rows, err = s.pool.Query(ctx, `
+		select b.role, count(distinct b.principal_id)
+		from role_bindings b
+		join principals p on p.id = b.principal_id
+		where p.disabled_at is null
+		  and (lower(p.subject) like $1 or lower(coalesce(p.display_name, '')) like $1)
+		group by b.role`, pattern)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var role string
+		var count int
+		if err := rows.Scan(&role, &count); err != nil {
+			rows.Close()
+			return err
+		}
+		page.ByRole[role] = count
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	return s.pool.QueryRow(ctx, `
+		select count(*) `+matching+`
+		  and not exists (select 1 from role_bindings b where b.principal_id = p.id)`,
+		pattern).Scan(&page.WithoutBindings)
+}
+
+func identifiersOf(principals []Principal) []string {
+	ids := make([]string, 0, len(principals))
+	for _, principal := range principals {
+		ids = append(ids, principal.ID)
+	}
+	return ids
+}
+
+// bindingsOfMany reads the bindings of a page of identities in one query,
+// expired ones included: the screen says when a binding ended.
+func (s *Store) bindingsOfMany(ctx context.Context, principalIDs []string) (map[string][]Binding, error) {
+	out := map[string][]Binding{}
+	if len(principalIDs) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		select b.principal_id, b.role, b.site, b.environment, coalesce(b.team_id::text, ''),
+		       b.team_any, b.owners, b.tags, b.valid_until, coalesce(rp.granted, '{}')
+		from role_bindings b`+fmt.Sprintf(grantedByRole, "b")+`
+		where b.principal_id = any($1)
+		order by b.principal_id, b.role, b.site, b.environment`, principalIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var binding Binding
+		var granted []string
+		if err := rows.Scan(&id, &binding.Role, &binding.Scope.Site, &binding.Scope.Environment,
+			&binding.Scope.Team, &binding.Scope.TeamAny,
+			&binding.Scope.Owners, &binding.Scope.Tags, &binding.ValidUntil, &granted); err != nil {
 			return nil, err
 		}
-		// An empty list is not the same as a missing list.
-		if bindings == nil {
-			bindings = []Binding{}
-		}
-		principals[i].Bindings = bindings
+		binding.Granted = permissionsOf(granted)
+		out[id] = append(out[id], binding)
 	}
-	return principals, nil
+	return out, rows.Err()
 }
 
 // CountPrincipals says whether the system has any identity yet.
