@@ -29,7 +29,7 @@ export function ActionGuard({
       <fieldset disabled aria-disabled="true" style={{ display: "contents" }}>
         {children}
       </fieldset>
-      <span className="source action-guard-hint" style={{ marginLeft: 8 }}>{reason}</span>
+      <span className="source action-guard-hint">{reason}</span>
     </span>
   );
 }
@@ -51,6 +51,6 @@ export function ReadOnlyModuleNotice({ host, actions }: { host: string; actions:
       reasons: [...access.reasons, ...access.permissions.map((permission) => t("missing permission {permission}", { permission }))].join("; "),
     });
   return (
-    <p className="hm-message action-guard-notice" data-testid="module-read-only">{text}</p>
+    <p className="hm-message" data-testid="module-read-only">{text}</p>
   );
 }

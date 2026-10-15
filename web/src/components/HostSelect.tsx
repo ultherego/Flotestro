@@ -265,7 +265,7 @@ export function HostSelect() {
   const label = selected ? selected.hostname : t("Select host…");
 
   return (
-    <div className="host-picker host-select" ref={container}>
+    <div className="host-picker" ref={container}>
       <button
         type="button"
         className={selected ? "host-picker-trigger host-select-trigger on-host" : "host-picker-trigger host-select-trigger"}

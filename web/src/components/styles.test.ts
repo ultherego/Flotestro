@@ -23,13 +23,20 @@ const SRC = dirname(dirname(fileURLToPath(import.meta.url)));
  * may only shrink: a name added to the markup without a rule fails, and a
  * name here that has since been given a rule fails too, so the list cannot
  * quietly become a place to put new ones.
+ *
+ * It is empty as of 15.10. The eighteen it held were three different things.
+ * Five carried their appearance in a `style={{...}}` beside the name, which
+ * is the same defect with the evidence attached; those declarations moved
+ * into the stylesheet. Six named nothing at all and nothing selected them -
+ * `plan-arch`, `plan-blocked`, `plan-changes`, `plan-toggle`, `host-select`,
+ * `action-guard-notice` - and a name that draws nothing and says nothing to
+ * anybody is noise in the markup, so they are gone from it. The rest were
+ * given the rule they were always meant to have, `no-print` and
+ * `report-print-head` among them: those two had their rules all along, in a
+ * template literal in Reports.tsx, which this check could not read until it
+ * read the sources as well as the stylesheets.
  */
-const INHERITED = [
-  "action-guard", "action-guard-denied", "action-guard-hint", "action-guard-notice",
-  "column-chooser", "fp-host-tags", "hm-notes", "hm-panel-row", "host-picker-kind",
-  "host-select", "no-print", "plan-arch", "plan-blocked", "plan-changes", "plan-toggle",
-  "prose", "report-print-head", "title",
-];
+const INHERITED: string[] = [];
 
 function sources(dir: string, match: RegExp): string[] {
   const out: string[] = [];
@@ -45,8 +52,29 @@ function sources(dir: string, match: RegExp): string[] {
   return out;
 }
 
+/**
+ * Every rule the panel ships, wherever it is written.
+ *
+ * Most are in the stylesheets. A page that prints as a document carries its
+ * own, in a template literal it injects into a <style> element - and a rule
+ * there is a rule: reading only the .css files, this check called those
+ * classes unstyled and kept two of them on an exceptions list for weeks.
+ */
+function everyRule(): string {
+  const stylesheets = sources(SRC, /\.css$/).map((path) => readFileSync(path, "utf8"));
+  const injected: string[] = [];
+  for (const path of sources(SRC, /\.tsx$/)) {
+    const text = readFileSync(path, "utf8");
+    // A template literal holding something that looks like a rule block.
+    for (const found of text.matchAll(/`([^`]*\{[^`]*\})`/g)) {
+      if (/^[\s\S]*\.[a-zA-Z][\w-]*[\s\S]*\{/.test(found[1])) injected.push(found[1]);
+    }
+  }
+  return [...stylesheets, ...injected].join("\n");
+}
+
 describe("the class names the panel's markup uses", () => {
-  const styles = sources(SRC, /\.css$/).map((path) => readFileSync(path, "utf8")).join("\n");
+  const styles = everyRule();
   const defined = new Set([...styles.matchAll(/\.([a-zA-Z][\w-]*)/g)].map((m) => m[1]));
   const used = new Map<string, string[]>();
   for (const path of sources(SRC, /\.tsx$/)) {

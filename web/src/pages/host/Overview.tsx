@@ -450,7 +450,7 @@ function HostNotes({ host, editable }: { host: Host; editable: boolean }) {
     return (
       <div data-testid="fact-notes">
         {notes
-          ? <p className="hm-notes" style={{ whiteSpace: "pre-wrap", margin: 0 }}>{notes}</p>
+          ? <p className="hm-notes">{notes}</p>
           : <span className="badge unknown">{t("no notes")}</span>}
         {editable && (
           <p style={{ margin: "8px 0 0" }}>

@@ -593,7 +593,7 @@ export function Hosts() {
                             its tag, so a role is one click from "every
                             host with this role". */}
                         {host.tags.length > 0 && (
-                          <span className="fp-host-tags" style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                          <span className="fp-host-tags">
                             {host.tags.map((tag) => (
                               <button
                                 key={tag}

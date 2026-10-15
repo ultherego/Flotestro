@@ -123,7 +123,7 @@ function Guarded({ allowed, children }: { allowed: boolean; children: ReactNode 
       <fieldset disabled aria-disabled="true" style={{ display: "contents" }}>
         {children}
       </fieldset>
-      <span className="source action-guard-hint" style={{ marginLeft: 8 }}>{reason}</span>
+      <span className="source action-guard-hint">{reason}</span>
     </span>
   );
 }

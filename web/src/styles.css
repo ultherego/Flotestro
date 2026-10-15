@@ -1214,6 +1214,10 @@ a.button:hover { background: var(--bg-hover); text-decoration: none; }
   font-size: 12px;
 }
 .bulk-steps .step .reason { font-size: 11px; color: var(--text-faint); font-weight: 400; }
+/* The step's own name. In a flex row a label with no minimum of zero cannot
+   be made smaller than its longest word, so it pushes the reason out of the
+   button instead of wrapping. */
+.bulk-steps .step .title { min-width: 0; overflow-wrap: anywhere; }
 
 /*
  * A windowed table: the container scrolls, the header stays in view, and
@@ -2118,3 +2122,40 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 .card-description { margin-top: 2px; }
 .card.warn > .card-head { box-shadow: inset 3px 0 0 var(--warn); }
 .card.error > .card-head { box-shadow: inset 3px 0 0 var(--error); }
+
+/* ----------------------------------------------------------------------- *
+ * The classes that drew nothing.
+ *
+ * Each of these named something in the markup and had no rule anywhere, so
+ * the browser drew its default; several carried their appearance in a
+ * style={{...}} beside the name, which is the same defect with the evidence
+ * attached. The declarations are here now, where the rest of the panel's
+ * appearance is, and web/src/components/styles.test.ts keeps the list of
+ * exceptions at nothing.
+ * ----------------------------------------------------------------------- */
+
+/* A control somebody may not use: the reason is in the title, and once more
+   under the control for whoever does not hover. */
+.action-guard { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.action-guard-denied > fieldset { border: 0; margin: 0; padding: 0; }
+.action-guard-hint { font-size: 12px; }
+
+/* The chooser of a table's columns: a button with a popover hanging off it. */
+.column-chooser { position: relative; display: inline-block; }
+
+/* The tags of a host in the fleet list, as many as the row can hold. */
+.fp-host-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* What somebody wrote down about a host, their line breaks kept. */
+.hm-notes { white-space: pre-wrap; margin: 0; }
+
+/* The row of a table that holds an open panel instead of a record: it belongs
+   to the row above it, and the shade says so. */
+.hm-panel-row > td { background: var(--bg-raised); }
+
+/* The mark of what kind of thing a suggestion is, in the host picker. */
+.host-picker-kind { grid-area: dot; display: inline-flex; color: var(--text-muted); }
+
+/* A paragraph meant to be read rather than scanned: the measure is what makes
+   that possible. */
+.prose { max-width: 70ch; line-height: 1.6; }
