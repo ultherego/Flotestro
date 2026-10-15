@@ -2024,15 +2024,17 @@ a.status-bar-segment:hover { filter: brightness(1.08); text-decoration: none; co
   /* Room between the cards, as in the references: at sixteen the page read
      as one mass of panels, at twenty-two each one is a thing of its own. */
   gap: 22px;
-  /* Cards of a row share its height. They used to be as tall as what they
-     held, which left a row with a short card and a tall one looking like a
-     torn edge - the thing the owner meant by "dziwny odstęp". The empty
-     space inside a short card is the price, and it is a smaller price than
-     a page with no horizontal line anywhere. */
-  align-items: stretch;
+  /* A card is as tall as what it holds.
+     For an hour on 15.10 they were stretched to the row's height instead,
+     to get the even edges the reference screens have. It was the wrong
+     reading of those screens: their rows look even because the panels in
+     a row hold comparable amounts, not because a box was forced open. Here
+     it turned a card with one line in it into a tall empty rectangle, which
+     is worse than an uneven edge by a long way. */
+  align-items: start;
 }
 .widgets > * { min-width: 0; margin: 0; }
-.widgets > .card { display: flex; flex-direction: column; height: 100%; }
+.widgets > .card { display: flex; flex-direction: column; }
 .widgets > .card > .card-body { flex: 1 1 auto; }
 /* Every width from one to twelve has a class. Until 15.10 only five did,
    and the server refused the rest - which was honest but narrow: the rows
@@ -2436,7 +2438,10 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 /* An arranged board: rows of a fixed height, so a tile can be told to take
    two of them, and dense flow, so the short ones fall into the gaps the tall
    ones leave rather than standing in a row of their own. */
-.widgets.arranged { grid-auto-rows: minmax(150px, auto); grid-auto-flow: row dense; align-items: stretch; }
+/* The arranged board keeps the dense flow - a narrow tile fills the hole a
+   wider neighbour leaves - without a floor under the row height: a panel
+   holding one line is one line tall. */
+.widgets.arranged { grid-auto-rows: auto; grid-auto-flow: row dense; align-items: start; }
 .widgets.arranged > div { min-width: 0; display: flex; flex-direction: column; }
 /* The widget fills the box the arrangement gave it; the bar of the arrange
    mode is a bar. Given the same flex as the widget it took half the box,
@@ -2514,8 +2519,7 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
 .metric-tile {
   background: var(--bg-panel);
   border-radius: var(--radius-card);
-  padding: 22px 24px;
-  justify-content: center;
+  padding: 20px 22px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -2581,9 +2585,13 @@ button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent
   color: var(--text-faint);
 }
 
-.metric-tile-warn  { border-color: var(--warn); }
-.metric-tile-error { border-color: var(--error); }
-.metric-tile-unknown { border-color: var(--border-strong); }
+/* The state colours the number, not the box.
+   A row of four tiles with two of them framed in amber and red read as two
+   error boxes beside two cards - the row stopped being a row. The figure
+   is the thing the state is about, so the figure carries it. */
+.metric-tile-warn .metric-value  { color: var(--warn-text); }
+.metric-tile-error .metric-value { color: var(--error-text); }
+.metric-tile-unknown .metric-value { color: var(--unknown-text); }
 
 .metric-tile-hero {
   background: var(--grad-hero);
