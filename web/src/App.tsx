@@ -411,7 +411,7 @@ async function signOut(event: MouseEvent) {
   window.location.href = result.logout_url || "/";
 }
 
-function LoginScreen({ provider }: { provider: boolean }) {
+export function LoginScreen({ provider }: { provider: boolean }) {
   const t = useT();
   return (
     <div className="login-screen">
@@ -465,7 +465,8 @@ function BootstrapTokenEntry() {
       <p className="source">
         {t("The bootstrap token is printed at the first start and lies in the state directory. It is for the first group mapping only: the first-run checklist warns while it still works.")}
       </p>
-      <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="flta…" autoComplete="off" style={{ width: "100%", marginBottom: 8 }} />
+      <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="flta…" autoComplete="off"
+             data-testid="bootstrap-token" style={{ width: "100%", marginBottom: 8 }} />
       <button className="secondary" disabled={token.trim() === ""} onClick={() => {
         try { sessionStorage.setItem(BEARER_TOKEN_KEY, token.trim()); } catch { /* a window without storage: the token is simply not kept */ }
         window.location.href = "/setup";
