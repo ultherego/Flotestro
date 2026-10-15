@@ -2797,6 +2797,8 @@ export const pl: Record<string, string> = {
   "The security section needs the right to read the security module.": "Sekcja bezpieczeństwa wymaga uprawnienia do odczytu modułu bezpieczeństwa.",
   "The selector does not resolve: {reason}": "Selektor się nie rozwiązuje: {reason}",
   "The selector matches {n} hosts": "Selektor pasuje do {n} hostów",
+  "Counting the hosts the selector matches…": "Liczę hosty pasujące do selektora…",
+  "How many hosts the selector matches is not known yet.": "Nie wiadomo jeszcze, do ilu hostów pasuje selektor.",
   "The selector names more hosts than one campaign may carry.": "Selektor wskazuje więcej hostów, niż uniesie jedna kampania.",
   "The selector names more hosts than this read fans out to; narrow it.": "Selektor wskazuje więcej hostów, niż ten odczyt obejmuje fan-outem; zawęź go.",
   "The server validates the payload when the campaign is created and names what is wrong.": "Serwer waliduje payload przy tworzeniu kampanii i wskazuje, co jest nie tak.",

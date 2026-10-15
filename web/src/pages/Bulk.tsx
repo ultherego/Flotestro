@@ -189,7 +189,8 @@ export function Bulk() {
               />
             );
           case 1:
-            return <TargetsStep order={order} change={change} preview={preview.data} refusal={preview.error} nav={nav} />;
+            return <TargetsStep order={order} change={change} preview={preview.data}
+              checking={preview.isLoading} refusal={preview.error} nav={nav} />;
           case 2:
             return <EligibilityStep order={order} preview={preview.data} checking={preview.isLoading} nav={nav} />;
           case 3:
@@ -1436,16 +1437,46 @@ const TARGET_WAYS: [mode: TargetMode, label: string, meaning: string][] = [
   ["hosts", "a list of hosts picked by hand", "Tick the hosts one by one; nothing else decides. The right way for a handful of named machines."],
 ];
 
+/**
+ * What the screen can honestly say about how many hosts the selector matches.
+ *
+ * Four states and not three, because "nobody answered yet" is not "the
+ * selector matches nobody". The screen said the second over the first until
+ * 15.10 - the count was `preview?.count ?? 0` - so an operator who narrowed
+ * the fleet and looked while the answer was in flight read that their
+ * selector hits no host. Unknown is not zero, here as everywhere.
+ */
+export type MatchedState =
+  | { kind: "unnarrowed" }
+  | { kind: "counting" }
+  | { kind: "unknown" }
+  | { kind: "counted"; n: number };
+
+export function matchedState(
+  names: boolean,
+  count: number | undefined,
+  checking: boolean | undefined,
+): MatchedState {
+  if (!names) return { kind: "unnarrowed" };
+  if (count === undefined) return checking ? { kind: "counting" } : { kind: "unknown" };
+  return { kind: "counted", n: count };
+}
+
 function TargetsStep({
   order,
   change,
   preview,
+  checking,
   refusal,
   nav,
 }: {
   order: Order;
   change: (delta: Partial<Order>) => void;
   preview?: Preview;
+  // Whether an answer is on its way. Without it this step could not tell "the
+  // selector matches nobody" from "nobody has answered yet", and it told the
+  // operator the first over the second.
+  checking?: boolean;
   // The server's refusal of the selector, when there is one: a compensation
   // narrowed to a host the original did not change is refused here, with the
   // host named, rather than at the creation.
@@ -1471,8 +1502,14 @@ function TargetsStep({
     targetMode: mode,
     hostIDs: mode === "hosts" ? order.hostIDs : [],
   });
-  const count = preview?.count ?? 0;
+  // No "?? 0" here, and that is the whole point: a count nobody has taken is
+  // not a count of nothing. Until 15.10 this line read `preview?.count ?? 0`
+  // and the screen said "the selector matches 0 hosts" while the answer was
+  // still in flight - an operator reading it then is told their selector hits
+  // nobody, which is the one thing that must never be guessed.
+  const count = preview?.count;
   const names = selectorNames(order);
+  const matched = matchedState(Boolean(names), count, checking);
   return (
     <Card
       title={`2. ${t("Targets")}`}
@@ -1495,9 +1532,13 @@ function TargetsStep({
               ? order.hostIDs.length === 0
                 ? t("No host is picked yet; tick at least one in the list above.")
                 : t("{n} hosts picked by hand; the campaign is created on those alone.", { n: order.hostIDs.length })
-              : !names
+              : matched.kind === "unnarrowed"
                 ? t("The fleet is not narrowed yet: name a site, an environment or an OS family above, or a group and tag rules. An empty selector is not an order on everything")
-                : t("The selector matches {n} hosts", { n: count })}
+                : matched.kind === "counting"
+                  ? t("Counting the hosts the selector matches…")
+                  : matched.kind === "unknown"
+                    ? t("How many hosts the selector matches is not known yet.")
+                    : t("The selector matches {n} hosts", { n: matched.n })}
             {order.targetMode !== "hosts" && names && preview && preview.count > preview.limit && (
               <> — {t("more than the {n} one campaign may carry", { n: preview.limit })}</>
             )}
