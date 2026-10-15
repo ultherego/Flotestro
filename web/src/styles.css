@@ -1168,15 +1168,38 @@ a.count-tile:hover { background: var(--bg-hover); text-decoration: none; }
   color: var(--text-muted);
   font-size: var(--t-small);
 }
+/* The label is a dt and the bar a dd, which is what the markup writes. */
+.breakdown dt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--t-small);
+}
+.breakdown dd { min-width: 0; }
+.breakdown-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--t-small);
+}
 .breakdown-bar { height: 8px; border-radius: 999px; background: var(--bg-sunken); overflow: hidden; }
-.breakdown-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--tone, var(--blue)); }
+.breakdown-fill, .meter-fill, .breakdown-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--blue);
+}
+.breakdown-fill.ok, .meter-fill.ok { background: var(--ok); }
+.breakdown-fill.warn, .meter-fill.warn { background: var(--warn); }
+.breakdown-fill.error, .meter-fill.error { background: var(--error); }
+.breakdown-fill.info, .meter-fill.info { background: var(--blue); }
+.breakdown-fill.unknown, .meter-fill.unknown { background: var(--unknown); }
+.breakdown-fill.neutral, .meter-fill.neutral { background: var(--border-strong); }
 .breakdown-count { text-align: right; font-size: var(--t-small); font-variant-numeric: tabular-nums; color: var(--text); }
-.breakdown.ok .breakdown-bar > span { background: var(--ok); }
-.breakdown.warn .breakdown-bar > span { background: var(--warn); }
-.breakdown.error .breakdown-bar > span { background: var(--error); }
-.breakdown.info .breakdown-bar > span { background: var(--blue); }
-.breakdown.unknown .breakdown-bar > span { background: var(--unknown); }
-.breakdown.neutral .breakdown-bar > span { background: var(--border-strong); }
 
 .meter, .meter-track, .progress-track { height: 8px; border-radius: 999px; background: var(--bg-sunken); overflow: hidden; min-width: 60px; }
 .meter-value, .progress-fill { display: block; height: 100%; border-radius: 999px; background: var(--tone, var(--blue)); }
@@ -1688,3 +1711,146 @@ a.count-tile:hover { background: var(--bg-hover); text-decoration: none; }
   background-image: repeating-linear-gradient(to bottom, var(--border) 0 1px, transparent 1px var(--s8));
   background-size: 100% 80px;
 }
+
+/* A few marks the markup builds by name.
+   A dot for a connection state, a swatch for a theme, a link made out of
+   a statistic, and the group a plan's hosts are gathered into. */
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--unknown); flex: none; }
+.dot.online, .dot.ok { background: var(--ok); }
+.dot.stale, .dot.warn { background: var(--warn); }
+.dot.offline, .dot.error { background: var(--error); }
+.dot.unknown { background: var(--unknown); }
+
+.theme-swatch { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border); flex: none; }
+.theme-swatch.latte { background: linear-gradient(135deg, #eff1f5 50%, #1e66f5 50%); }
+.theme-swatch.mocha-peach { background: linear-gradient(135deg, #1b1b28 50%, #fab387 50%); }
+.theme-swatch.mocha-green { background: linear-gradient(135deg, #1b1b28 50%, #a6e3a1 50%); }
+
+.stat-link { color: inherit; }
+.stat-link:hover { text-decoration: none; color: var(--accent-text); }
+
+.plan-group { display: grid; gap: var(--s2); padding: var(--s3) 0; border-top: 1px solid var(--border); }
+.plan-group-unknown { opacity: 0.75; }
+
+/* =====================================================================
+   12. The kit (ui-*)
+   ---------------------------------------------------------------------
+   The namespace the rebuild lands in. Every rule above this line styles
+   markup the screens grew; every rule below styles a piece of the kit.
+   As a screen is converted its old names leave both files, and when the
+   last one has gone everything above goes with it.
+   ===================================================================== */
+
+.ui-pagehead { display: flex; align-items: flex-start; gap: var(--s4); margin-bottom: var(--s6); }
+.ui-pagehead-mark { flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: var(--radius); background: var(--accent-soft); color: var(--accent-text); }
+.ui-pagehead-text { flex: 1 1 auto; min-width: 0; }
+.ui-pagehead-title { font-size: var(--t-title); font-weight: 650; letter-spacing: -0.02em; line-height: 1.2; }
+.ui-pagehead-lead { margin-top: var(--s1); color: var(--text-muted); font-size: var(--t-body); max-width: 90ch; }
+.ui-pagehead-actions { flex: none; display: flex; flex-wrap: wrap; gap: var(--s2); }
+.ui-pagehead-help > summary { cursor: pointer; color: var(--text-faint); list-style: none; }
+.ui-pagehead-help > div { margin-top: var(--s2); padding: var(--s4); border-radius: var(--radius); background: var(--bg-panel); color: var(--text-muted); font-size: var(--t-body); max-width: 100ch; }
+
+.ui-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--s5); align-items: start; }
+.ui-col { min-width: 0; }
+.ui-col-1 { grid-column: span 1; }
+.ui-col-2 { grid-column: span 2; }
+.ui-col-3 { grid-column: span 3; }
+.ui-col-4 { grid-column: span 4; }
+.ui-col-6 { grid-column: span 6; }
+.ui-col-8 { grid-column: span 8; }
+.ui-col-9 { grid-column: span 9; }
+.ui-col-12 { grid-column: span 12; }
+@media (max-width: 1200px) {
+  .ui-col-1, .ui-col-2, .ui-col-3, .ui-col-4 { grid-column: span 6; }
+  .ui-col-8, .ui-col-9 { grid-column: span 12; }
+}
+@media (max-width: 900px) {
+  .ui-grid { gap: var(--s4); }
+  .ui-col { grid-column: span 12; }
+}
+
+.ui-panel { min-width: 0; background: var(--bg-panel); border-radius: var(--radius-card); container: uipanel / inline-size; }
+.ui-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s2) var(--s4); flex-wrap: wrap; padding: var(--s5) var(--s5) 0; }
+.ui-panel-headtext { flex: 1 1 240px; min-width: 0; }
+.ui-panel-title { font-size: var(--t-label); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.ui-panel-note { margin-top: var(--s1); color: var(--text-muted); font-size: var(--t-body); max-width: 90ch; }
+.ui-panel-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.ui-panel-body { padding: var(--s4) var(--s5) var(--s5); min-width: 0; }
+.ui-panel-body.ui-flush { padding: 0; }
+.ui-panel-foot { padding: var(--s3) var(--s5); border-top: 1px solid var(--border); color: var(--text-muted); font-size: var(--t-small); }
+.ui-panel-ok { box-shadow: inset 3px 0 0 var(--ok); }
+.ui-panel-warn { box-shadow: inset 3px 0 0 var(--warn); }
+.ui-panel-error { box-shadow: inset 3px 0 0 var(--error); }
+.ui-panel-info { box-shadow: inset 3px 0 0 var(--blue); }
+.ui-panel-unknown { box-shadow: inset 3px 0 0 var(--unknown); }
+.ui-panel-neutral { box-shadow: inset 3px 0 0 var(--border-strong); }
+
+.ui-stat { display: flex; flex-direction: column; min-width: 0; padding: var(--s5); border-radius: var(--radius-card); background: var(--bg-panel); }
+.ui-stat-mark { width: 40px; height: 40px; display: grid; place-items: center; margin-bottom: var(--s4); border-radius: var(--radius); background: var(--accent-soft); color: var(--accent-text); }
+.ui-stat-value { display: flex; align-items: baseline; gap: var(--s1); min-width: 0; font-weight: 650; line-height: 1.05; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.ui-stat-m .ui-stat-value { font-size: var(--metric-m); }
+.ui-stat-l .ui-stat-value { font-size: var(--metric-l); }
+.ui-stat-xl .ui-stat-value { font-size: var(--metric-xl); }
+.ui-stat-unit { font-size: 0.4em; font-weight: 500; color: var(--text-muted); }
+.ui-stat-dash { color: var(--unknown-text); }
+.ui-stat-foot { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); margin-top: var(--s2); }
+.ui-stat-label { color: var(--text-muted); font-size: var(--t-body); min-width: 0; }
+.ui-stat-note { margin-top: var(--s1); color: var(--text-faint); font-size: var(--t-small); }
+.ui-stat-delta { font-size: var(--t-small); font-weight: 600; white-space: nowrap; }
+.ui-good { color: var(--ok-text); }
+.ui-bad { color: var(--error-text); }
+/* The state is on the figure. There is no bordered tile in this kit. */
+.ui-stat-ok .ui-stat-value { color: var(--ok-text); }
+.ui-stat-warn .ui-stat-value { color: var(--warn-text); }
+.ui-stat-error .ui-stat-value { color: var(--error-text); }
+.ui-stat-unknown .ui-stat-value { color: var(--unknown-text); }
+
+.ui-table-holder { overflow-x: auto; min-width: 0; }
+.ui-table { width: 100%; border-collapse: collapse; font-size: var(--t-body); }
+.ui-table th { text-align: left; padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border); color: var(--text-faint); font-size: var(--t-label); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+.ui-table td { padding: var(--s3) var(--s4); border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); min-width: 0; }
+.ui-table tbody tr:last-child td { border-bottom: 0; }
+.ui-table tbody tr:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.ui-numeric { text-align: right; font-variant-numeric: tabular-nums; }
+@container uipanel (max-width: 560px) { .ui-secondary { display: none; } }
+
+.ui-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); padding: var(--s3) var(--s5); border-bottom: 1px solid var(--border); }
+.ui-toolbar-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); }
+
+.ui-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: var(--s3) var(--s5); min-width: 0; }
+.ui-fact { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ui-fact dt { color: var(--text-faint); font-size: var(--t-small); }
+.ui-fact dd { min-width: 0; overflow-wrap: anywhere; }
+@container uipanel (max-width: 420px) { .ui-facts { grid-template-columns: minmax(0, 1fr); } }
+
+.ui-pill { display: inline-flex; align-items: center; gap: var(--s1); padding: 1px var(--s2); border-radius: 999px; background: var(--bg-raised); color: var(--text-muted); font-size: var(--t-label); font-weight: 600; white-space: nowrap; }
+.ui-pill-ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok-text); }
+.ui-pill-warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn-text); }
+.ui-pill-error { background: color-mix(in srgb, var(--error) 18%, transparent); color: var(--error-text); }
+.ui-pill-info { background: color-mix(in srgb, var(--blue) 18%, transparent); color: var(--blue); }
+.ui-pill-unknown { background: var(--bg-raised); color: var(--unknown-text); }
+.ui-pill-neutral { background: var(--bg-raised); color: var(--text-muted); }
+
+.ui-empty { padding: var(--s6); text-align: center; color: var(--text-faint); font-size: var(--t-body); }
+
+.ui-bar { display: block; height: 8px; border-radius: 999px; background: var(--bg-sunken); overflow: hidden; min-width: 40px; }
+.ui-bar-fill { display: block; height: 100%; border-radius: 999px; background: var(--blue); }
+.ui-bar-ok { background: var(--ok); }
+.ui-bar-warn { background: var(--warn); }
+.ui-bar-error { background: var(--error); }
+.ui-bar-info { background: var(--blue); }
+.ui-bar-unknown { background: var(--unknown); }
+.ui-bar-neutral { background: var(--border-strong); }
+
+/* Three tracks: the words, the bar, the number. The bar never runs under
+   the words - that is what made the fleet composition unreadable. */
+.ui-barlist { display: grid; gap: var(--s2); min-width: 0; }
+.ui-barlist-row { display: grid; grid-template-columns: minmax(70px, max-content) minmax(60px, 1fr) max-content; gap: var(--s3); align-items: center; }
+.ui-barlist-row dt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: var(--t-small); }
+.ui-barlist-row dd { min-width: 0; }
+
+.ui-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.ui-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: var(--s4); max-width: 1180px; }
+.ui-field { display: flex; flex-direction: column; gap: var(--s1); min-width: 0; font-size: var(--t-body); }
+.ui-field-label { color: var(--text); font-weight: 500; }
+.ui-field-hint { color: var(--text-faint); font-size: var(--t-small); }
