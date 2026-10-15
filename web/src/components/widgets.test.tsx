@@ -359,7 +359,7 @@ describe("AreaChart", () => {
     );
     expect(container.querySelectorAll("path.line")).toHaveLength(2);
     expect(container.querySelectorAll("path.area")).toHaveLength(1);
-    expect(container.querySelectorAll("circle")).toHaveLength(0);
+    expect(container.querySelectorAll(":not(.chart-peak) > circle")).toHaveLength(0);
     expect(getByRole("img")).toHaveClass("chart");
   });
 
@@ -370,7 +370,7 @@ describe("AreaChart", () => {
       <AreaChart times={minutes(4)} series={[{ name: "CPU", tone: "accent", values: [1, undefined, 3, 4] }]} />,
     );
     expect(container.querySelectorAll("path.area")).toHaveLength(2);
-    expect(container.querySelectorAll("circle")).toHaveLength(1);
+    expect(container.querySelectorAll(":not(.chart-peak) > circle")).toHaveLength(1);
     const lines = container.querySelectorAll("path.line");
     expect(lines).toHaveLength(1);
     // The line starts at the third instant, not at the first: a path that
@@ -385,7 +385,7 @@ describe("AreaChart", () => {
       <AreaChart times={minutes(3)} series={[{ name: "CPU", tone: "accent", values: [undefined, undefined, undefined] }]} />,
     );
     expect(container.querySelectorAll("path")).toHaveLength(0);
-    expect(container.querySelectorAll("circle")).toHaveLength(0);
+    expect(container.querySelectorAll(":not(.chart-peak) > circle")).toHaveLength(0);
     expect(container.querySelector("line.axis")).not.toBeNull();
   });
 
@@ -561,5 +561,34 @@ describe("a status bar with a long tail of zeros", () => {
   it("folds nothing when there are only a few", () => {
     const { queryByTestId } = draw(<StatusBar segments={many.slice(0, 4)} />);
     expect(queryByTestId("status-bar-more-at-zero")).toBeNull();
+  });
+});
+
+/* A chart answers "how high did it get" more often than anything else.
+   The peak of the first series is marked and named, so nobody measures it
+   against the axis by eye. */
+describe("the peak of an area chart", () => {
+  const minute = (n: number) => new Date(Date.UTC(2026, 9, 15, 12, n)).toISOString();
+
+  it("marks the highest point of the first series and prints its value", () => {
+    const { container, getByTestId } = draw(
+      <AreaChart
+        times={[minute(0), minute(1), minute(2)]}
+        series={[{ name: "memory", tone: "info", values: [10, 68, 20] }]}
+        format={(value) => `${value} MB`}
+      />,
+    );
+    const peak = getByTestId("chart-peak");
+    expect(peak).toBeInTheDocument();
+    expect(peak.textContent).toBe("68 MB");
+    // One label, not one per series: there is room for one.
+    expect(container.querySelectorAll(".chart-peak")).toHaveLength(1);
+  });
+
+  it("marks nothing on a chart with nothing in it", () => {
+    const { queryByTestId } = draw(
+      <AreaChart times={[minute(0), minute(1)]} series={[{ name: "memory", tone: "info", values: [0, 0] }]} />,
+    );
+    expect(queryByTestId("chart-peak")).toBeNull();
   });
 });

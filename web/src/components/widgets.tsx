@@ -312,6 +312,12 @@ export function AreaChart({
       : timed ? pad.left + ((stamps[i] - first) / span) * innerW
         : pad.left + (i / (count - 1)) * innerW;
   const y = (value: number) => pad.top + innerH - (Math.min(value, top) / top) * innerH;
+  // Where the first series reached its highest. One series is marked, not
+  // four: a chart with room for one label would otherwise carry four.
+  const topPoint = (series[0]?.values ?? []).reduce<{ i: number; value: number } | undefined>(
+    (best, value, i) => (value !== undefined && (best === undefined || value > best.value) ? { i, value } : best),
+    undefined,
+  );
   const ticks: number[] = [];
   for (let v = 0; v <= top + step / 1000; v += step) ticks.push(v);
   // Five labels evenly spaced along the axis. On a timed axis they are five
@@ -378,6 +384,30 @@ export function AreaChart({
           d={runPath(run, x, y)}
         />
       ))}
+      {/* The highest point of the first series, marked and named. A chart
+          answers "how high did it get" more often than anything else, and
+          the reader was left to measure it against the axis by eye. The
+          label is held inside the frame so it cannot be cut off. */}
+      {highest > 0 && topPoint && (
+        <g className="chart-peak" data-testid="chart-peak">
+          <circle cx={x(topPoint.i)} cy={y(topPoint.value)} r={3.5} />
+          <rect
+            x={Math.min(Math.max(x(topPoint.i) - 26, pad.left), width - pad.right - 52)}
+            y={Math.max(y(topPoint.value) - 24, 2)}
+            width={52}
+            height={16}
+            rx={4}
+          />
+          <text
+            className="chart-peak-label"
+            x={Math.min(Math.max(x(topPoint.i), pad.left + 26), width - pad.right - 26)}
+            y={Math.max(y(topPoint.value) - 12, 14)}
+            textAnchor="middle"
+          >
+            {format(topPoint.value)}
+          </text>
+        </g>
+      )}
       {labels.map((tick, k) => tick !== undefined && (
         <text key={k} x={tick.at} y={height - 6} textAnchor={k === 0 ? "start" : k === labels.length - 1 ? "end" : "middle"}>
           {label(tick.iso)}

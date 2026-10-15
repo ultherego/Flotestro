@@ -2709,3 +2709,10 @@ tr.row-open > td { background: var(--bg-raised); }
    they fold into one chip of the same cloth, which names the rest in its
    title rather than printing them. */
 .status-bar-quiet-item.zero { color: var(--text-faint); }
+
+/* The peak of a chart, marked and named. The bubble wears the accent,
+   which carries no state, so naming a high point never reads as a verdict
+   on it. */
+.chart-peak circle { fill: var(--accent); }
+.chart-peak rect { fill: var(--accent); }
+.chart-peak-label { fill: var(--accent-contrast); font-size: 10px; font-weight: 600; }
