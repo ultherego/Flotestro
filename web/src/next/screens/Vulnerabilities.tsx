@@ -376,15 +376,17 @@ function VulnerabilityList() {
   };
 
   return (
-    <Board screen={VULNERABILITIES_SCREEN} catalogue={VULNERABILITIES} drawn={{
-      coverage: coverageReasons.length > 0 ? (
+    <Board
+      screen={VULNERABILITIES_SCREEN}
+      catalogue={VULNERABILITIES}
+      notices={coverageReasons.length > 0 ? (
         <Banner tone="warn">
           {t("Those hosts show no findings because nothing could be decided for them, not because they are clean: {reasons}.", {
             reasons: coverageReasons.map(([code, count]) => `${count} × ${reasonOf(code)}`).join(", "),
           })}
         </Banner>
-      ) : undefined,
-
+      ) : undefined}
+      drawn={{
       findings: (
         <Kpi
           hero
@@ -1236,7 +1238,6 @@ function OneAdvisory({ cve }: { cve: string }) {
 export const VULNERABILITIES_SCREEN = "next_vulnerabilities";
 
 export const VULNERABILITIES: BoardEntry[] = [
-  { key: "coverage", title: "Incomplete coverage", width: 12, height: 1 },
   { key: "findings", title: "Open findings", width: 3, height: 1 },
   { key: "fixable", title: "Vendor fix released", width: 3, height: 1 },
   { key: "nofix", title: "No fix yet", width: 3, height: 1 },

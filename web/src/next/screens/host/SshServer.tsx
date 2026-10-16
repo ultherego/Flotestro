@@ -230,8 +230,7 @@ export function SshServer({ host }: { host: Host }) {
           onCancel={() => setIntent(null)}
         />
       )}
-      <Board screen={SSH_SCREEN} catalogue={SSH_BOARD} drawn={{
-        notices: notices.length > 0 ? <Stack>{notices}</Stack> : undefined,
+      <Board screen={SSH_SCREEN} catalogue={SSH_BOARD} notices={notices.length > 0 ? <Stack>{notices}</Stack> : undefined} drawn={{
         ports: (
           <Kpi
             hero
@@ -745,7 +744,6 @@ export const SSH_SCREEN = "next_host_ssh";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const SSH_BOARD: BoardEntry[] = [
-  { key: "notices", title: "What has to be read first", width: 12, height: 1 },
   { key: "ports", title: "Ports", width: 3, height: 1 },
   { key: "open", title: "Methods enabled", width: 3, height: 1 },
   { key: "rootlogin", title: "Root login", width: 3, height: 1 },

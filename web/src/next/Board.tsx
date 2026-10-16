@@ -71,7 +71,7 @@ export function settle(widgets: BoardWidget[], held: string): BoardWidget[] {
  */
 export const ROW = 152;
 
-export function Board({ screen, catalogue, drawn }: {
+export function Board({ screen, catalogue, drawn, notices }: {
   /**
    * The name the arrangement is stored under. The server takes lower-case
    * letters, digits and underscores and refuses anything else, and a
@@ -83,6 +83,15 @@ export function Board({ screen, catalogue, drawn }: {
       undefined, null, or the false of `{open && <Card/>}` - is left out
       rather than placed as an empty cell. */
   drawn: Record<string, ReactNode>;
+  /**
+   * What has to be read before the board is read at all.
+   *
+   * It stands above the grid rather than in a cell of its own. A notice
+   * is not a container somebody arranges, and a cell is a whole row tall
+   * whatever it holds - so a one-line banner on the board opened the
+   * screen with a hand's width of empty floor under it.
+   */
+  notices?: ReactNode;
 }) {
   const t = useT();
   const toast = useToast();
@@ -202,6 +211,8 @@ export function Board({ screen, catalogue, drawn }: {
 
   return (
     <>
+      {notices}
+
       {layout.error instanceof ApiError && layout.error.status >= 500 && (
         <Problem>{t("The stored arrangement could not be read; this is the one the panel ships with.")}</Problem>
       )}

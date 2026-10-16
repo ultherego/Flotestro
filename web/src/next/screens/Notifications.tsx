@@ -646,18 +646,21 @@ export function Notifications() {
         />
       )}
 
-      <Board screen={NOTIFICATIONS_SCREEN} catalogue={NOTIFICATIONS} drawn={{
-        // What the server refused stays on the screen until it is read.
-        // A toast says it once and goes; a write that failed is a fact
-        // about the installation until somebody has dealt with it.
-        problem: errorMessage ? (
+      <Board
+        screen={NOTIFICATIONS_SCREEN}
+        catalogue={NOTIFICATIONS}
+        /* What the server refused stays on the screen until it is read.
+           A toast says it once and goes; a write that failed is a fact
+           about the installation until somebody has dealt with it. */
+        notices={errorMessage ? (
           <Banner
             tone="error"
             actions={<Button kind="quiet" onClick={() => setErrorMessage("")}>{t("Close")}</Button>}
           >
             {errorMessage}
           </Banner>
-        ) : null,
+        ) : null}
+        drawn={{
         channels_count: (
           <Kpi
             hero
@@ -1029,7 +1032,6 @@ function ChannelFields({ form, subjects, severities, onChange }: {
 export const NOTIFICATIONS_SCREEN = "next_notifications";
 
 export const NOTIFICATIONS: BoardEntry[] = [
-  { key: "problem", title: "What went wrong", width: 12, height: 1 },
   { key: "channels_count", title: "Channels", width: 3, height: 1 },
   { key: "carrying", title: "Carrying events", width: 3, height: 1 },
   { key: "dead", title: "Dead letters", width: 3, height: 1 },

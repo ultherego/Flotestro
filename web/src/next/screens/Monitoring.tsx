@@ -385,7 +385,15 @@ export function Monitoring() {
 
   return (
     <>
-      <Board screen={MONITORING_SCREEN} catalogue={MONITORING} drawn={{
+      <Board
+        screen={MONITORING_SCREEN}
+        catalogue={MONITORING}
+        notices={notice !== "" && (
+          <Banner tone="info" actions={<button type="button" className="fl-plain fl-small" onClick={() => setNotice("")}>{t("Dismiss")}</button>}>
+            {notice}
+          </Banner>
+        )}
+        drawn={{
         waiting: (
           <Kpi
             hero
@@ -423,11 +431,6 @@ export function Monitoring() {
             tone={data === undefined ? undefined : data.rules === 0 ? "warn" : undefined}
             note={data?.rules === 0 ? t("nothing turns a sample into an alert") : t("what turns a sample into an alert")}
           />
-        ),
-        notice: notice !== "" && (
-          <Banner tone="info" actions={<button type="button" className="fl-plain fl-small" onClick={() => setNotice("")}>{t("Dismiss")}</button>}>
-            {notice}
-          </Banner>
         ),
         severity: (
           <Card title={t("Firing now")} note={t("By severity, across the hosts you can see.")}>
@@ -1205,7 +1208,6 @@ export const MONITORING: BoardEntry[] = [
   { key: "reporting", title: "Hosts reporting", width: 3, height: 1 },
   { key: "quiet", title: "Gone quiet", width: 3, height: 1 },
   { key: "watching", title: "Rules enabled", width: 3, height: 1 },
-  { key: "notice", title: "Notice", width: 12, height: 1 },
   { key: "severity", title: "Firing now", width: 5, height: 2 },
   { key: "footprint", title: "Agent footprint", width: 7, height: 2 },
   { key: "firing", title: "Firing alerts", width: 12, height: 5 },

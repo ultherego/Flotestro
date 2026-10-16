@@ -494,8 +494,10 @@ export function Logs({ host }: { host: Host }) {
   );
 
   return (
-    <Board screen={HOST_LOGS_SCREEN} catalogue={HOST_LOGS} drawn={{
-      notices: stacked(
+    <Board
+      screen={HOST_LOGS_SCREEN}
+      catalogue={HOST_LOGS}
+      notices={stacked(
         readOnly && <Banner tone="info">{readOnly}</Banner>,
         errorMessage && <Problem>{errorMessage}</Problem>,
         // A view that has ended still says what it could not carry: the
@@ -507,7 +509,8 @@ export function Logs({ host }: { host: Host }) {
         // A second gap, and not the same one: these messages never reached
         // the host's journal at all, so they are in no view and in no read.
         !preview && hostGap && <Banner tone="unknown">{hostGap.text}</Banner>,
-      ),
+      )}
+      drawn={{
       counts: (
         <Card
           title={t("Lines on screen")}
@@ -823,7 +826,6 @@ export const HOST_LOGS_SCREEN = "next_host_logs";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const HOST_LOGS: BoardEntry[] = [
-  { key: "notices", title: "Notices", width: 12, height: 1 },
   { key: "counts", title: "Lines on screen", width: 8, height: 2 },
   { key: "reading", title: "Reading", width: 4, height: 2 },
   { key: "read", title: "Read", width: 5, height: 5 },

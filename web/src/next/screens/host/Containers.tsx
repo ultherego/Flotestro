@@ -456,8 +456,7 @@ export function Containers({ host }: { host: Host }) {
           onCancel={() => setPending(null)}
         />
       )}
-      <Board screen={CONTAINERS_SCREEN} catalogue={CONTAINERS_BOARD} drawn={{
-        notices: notices.length > 0 ? <Stack>{notices}</Stack> : undefined,
+      <Board screen={CONTAINERS_SCREEN} catalogue={CONTAINERS_BOARD} notices={notices.length > 0 ? <Stack>{notices}</Stack> : undefined} drawn={{
         running: (
           <Kpi
             hero
@@ -1718,7 +1717,6 @@ export const CONTAINERS_SCREEN = "next_host_containers";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const CONTAINERS_BOARD: BoardEntry[] = [
-  { key: "notices", title: "What has to be read first", width: 12, height: 1 },
   { key: "running", title: "Running", width: 3, height: 1 },
   { key: "unhealthy", title: "Unhealthy", width: 3, height: 1 },
   { key: "restarting", title: "Restarting", width: 3, height: 1 },

@@ -263,8 +263,7 @@ export function Resolver({ host }: { host: Host }) {
           onCancel={() => setIntent(null)}
         />
       )}
-      <Board screen={RESOLVER_SCREEN} catalogue={RESOLVER_BOARD} drawn={{
-        notices: notices.length > 0 ? <Stack>{notices}</Stack> : undefined,
+      <Board screen={RESOLVER_SCREEN} catalogue={RESOLVER_BOARD} notices={notices.length > 0 ? <Stack>{notices}</Stack> : undefined} drawn={{
         servers: (
           <Kpi
             hero
@@ -818,7 +817,6 @@ export const RESOLVER_SCREEN = "next_host_dns";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const RESOLVER_BOARD: BoardEntry[] = [
-  { key: "notices", title: "What has to be read first", width: 12, height: 1 },
   { key: "servers", title: "Name servers", width: 3, height: 1 },
   { key: "domains", title: "Search domains", width: 3, height: 1 },
   { key: "encrypted", title: "Links with DoT", width: 3, height: 1 },

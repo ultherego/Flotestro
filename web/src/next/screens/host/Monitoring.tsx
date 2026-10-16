@@ -291,8 +291,10 @@ export function Monitoring({ host }: { host: Host }) {
         />
       </HeadActions>
 
-      <Board screen={HOST_MONITORING_SCREEN} catalogue={HOST_MONITORING} drawn={{
-        notices: stacked(
+      <Board
+        screen={HOST_MONITORING_SCREEN}
+        catalogue={HOST_MONITORING}
+        notices={stacked(
           readOnly && <Banner tone="info">{readOnly}</Banner>,
           message && <Banner tone="info">{message}</Banner>,
           // A hole in the data and a quiet machine read alike on a chart,
@@ -316,7 +318,8 @@ export function Monitoring({ host }: { host: Host }) {
               })}
             </Banner>
           ),
-        ),
+        )}
+        drawn={{
         alerts_band: (
           <Card
             title={t("Alerts")}
@@ -952,7 +955,6 @@ export const HOST_MONITORING_SCREEN = "next_host_monitoring";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const HOST_MONITORING: BoardEntry[] = [
-  { key: "notices", title: "Notices", width: 12, height: 1 },
   { key: "alerts_band", title: "Alerts", width: 8, height: 2 },
   { key: "freshness", title: "Sampling", width: 4, height: 2 },
   { key: "cpu", title: "CPU", width: 6, height: 3 },

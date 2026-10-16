@@ -56,8 +56,10 @@ export function Readiness() {
   return (
     <>
       
-      <Board screen={READINESS_SCREEN} catalogue={READINESS} drawn={{
-        verdict: (
+      <Board
+        screen={READINESS_SCREEN}
+        catalogue={READINESS}
+        notices={
           <Banner tone={verdict ? verdictTone(verdict) : "unknown"}>
             {!data || !verdict
               ? t("Asking the fleet what it can be sent…")
@@ -75,7 +77,8 @@ export function Readiness() {
                     </>
                   )}
           </Banner>
-        ),
+        }
+        drawn={{
         hosts: (
           <Kpi
             hero
@@ -257,7 +260,6 @@ function Said({ gap }: { gap: ReadinessGap }) {
 export const READINESS_SCREEN = "next_readiness";
 
 export const READINESS: BoardEntry[] = [
-  { key: "verdict", title: "Verdict", width: 12, height: 1 },
   { key: "hosts", title: "Hosts", width: 3, height: 1 },
   { key: "silent", title: "Silent about their adapters", width: 3, height: 1 },
   { key: "operations", title: "Operations that need an adapter", width: 3, height: 1 },

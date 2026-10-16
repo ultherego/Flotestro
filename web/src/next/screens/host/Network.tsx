@@ -454,8 +454,7 @@ export function Network({ host }: { host: Host }) {
           onCancel={() => setIntent(null)}
         />
       )}
-      <Board screen={NETWORK_SCREEN} catalogue={NETWORK_BOARD} drawn={{
-        notices: notices.length > 0 ? <Stack>{notices}</Stack> : undefined,
+      <Board screen={NETWORK_SCREEN} catalogue={NETWORK_BOARD} notices={notices.length > 0 ? <Stack>{notices}</Stack> : undefined} drawn={{
         up: (
           <Kpi
             hero
@@ -1306,7 +1305,6 @@ export const NETWORK_SCREEN = "next_host_network";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const NETWORK_BOARD: BoardEntry[] = [
-  { key: "notices", title: "What has to be read first", width: 12, height: 1 },
   { key: "up", title: "Interfaces up", width: 3, height: 1 },
   { key: "addressed", title: "Interfaces with an address", width: 3, height: 1 },
   { key: "routecount", title: "Routes", width: 3, height: 1 },

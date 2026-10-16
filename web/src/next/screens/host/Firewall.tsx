@@ -333,8 +333,7 @@ export function Firewall({ host }: { host: Host }) {
           onCancel={() => setIntent(null)}
         />
       )}
-      <Board screen={FIREWALL_SCREEN} catalogue={FIREWALL_BOARD} drawn={{
-        notices: notices.length > 0 ? <Stack>{notices}</Stack> : undefined,
+      <Board screen={FIREWALL_SCREEN} catalogue={FIREWALL_BOARD} notices={notices.length > 0 ? <Stack>{notices}</Stack> : undefined} drawn={{
         ours: (
           <Kpi
             hero
@@ -905,7 +904,6 @@ export const FIREWALL_SCREEN = "next_host_firewall";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const FIREWALL_BOARD: BoardEntry[] = [
-  { key: "notices", title: "What has to be read first", width: 12, height: 1 },
   { key: "ours", title: "Rules owned by Flotestro", width: 3, height: 1 },
   { key: "total", title: "Rules in force", width: 3, height: 1 },
   { key: "drift", title: "Differences from the boot source", width: 3, height: 1 },

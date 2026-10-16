@@ -215,8 +215,10 @@ export function Compose({ host }: { host: Host }) {
   const reasonReady = reason.trim().length >= MIN_REASON;
 
   return (
-    <Board screen={HOST_COMPOSE_SCREEN} catalogue={HOST_COMPOSE} drawn={{
-      notices: stacked(
+    <Board
+      screen={HOST_COMPOSE_SCREEN}
+      catalogue={HOST_COMPOSE}
+      notices={stacked(
         readOnly && <Banner tone="info">{readOnly}</Banner>,
         message && <Problem>{message}</Problem>,
         ordered && (
@@ -230,7 +232,8 @@ export function Compose({ host }: { host: Host }) {
             <Link to={`/next/hosts/${host.id}/jobs`}>{t("See all jobs")}</Link>
           </Banner>
         ),
-      ),
+      )}
+      drawn={{
       deployments: (
         <Card
           title={t("Deployments")}
@@ -456,7 +459,6 @@ export const HOST_COMPOSE_SCREEN = "next_host_compose";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const HOST_COMPOSE: BoardEntry[] = [
-  { key: "notices", title: "Notices", width: 12, height: 1 },
   { key: "deployments", title: "Deployments", width: 8, height: 2 },
   { key: "changes_by_kind", title: "What the plan would change", width: 4, height: 2 },
   { key: "project", title: "Project", width: 7, height: 4 },
