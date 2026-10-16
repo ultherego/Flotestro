@@ -307,7 +307,7 @@ export function System({ host }: { host: Host }) {
                   key: "adapter", head: t("Adapter"), tight: true, cell: (one) => {
                     const segment = adapterSegment(one.name);
                     return segment
-                      ? <Tag to={`/next/hosts/${host.id}/${segment}`}>{one.name}</Tag>
+                      ? <Tag to={`/hosts/${host.id}/${segment}`}>{one.name}</Tag>
                       : one.name;
                   },
                 },

@@ -282,7 +282,7 @@ export function AddHost() {
   useEffect(() => {
     if (ready && state?.enrolled_host_id && state.kind === "agent") {
       const timer = window.setTimeout(
-        () => navigate(`/next/hosts/${state.enrolled_host_id}/overview`), 1500);
+        () => navigate(`/hosts/${state.enrolled_host_id}/overview`), 1500);
       return () => window.clearTimeout(timer);
     }
   }, [ready, state?.enrolled_host_id, state?.kind, navigate]);
@@ -913,7 +913,7 @@ export function AddHost() {
             foot={
               <Actions>
                 {state?.enrolled_host_id && state.kind === "agent" && (
-                  <Link to={`/next/hosts/${state.enrolled_host_id}/overview`} data-testid="open-host">
+                  <Link to={`/hosts/${state.enrolled_host_id}/overview`} data-testid="open-host">
                     {t("Open host")}
                   </Link>
                 )}

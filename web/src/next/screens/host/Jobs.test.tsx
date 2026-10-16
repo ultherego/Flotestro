@@ -106,7 +106,7 @@ describe("the jobs module of a host", () => {
     await waitFor(() => expect(screen.getByTestId("job-j1")).toBeInTheDocument());
     expect(asked.some((one) => one.includes("host_id=h1"))).toBe(true);
     const row = screen.getByTestId("job-j1");
-    expect(within(row).getByText("unit.restart").closest("a")).toHaveAttribute("href", "/next/jobs/j1");
+    expect(within(row).getByText("unit.restart").closest("a")).toHaveAttribute("href", "/jobs/j1");
     expect(within(row).getByText("succeeded")).toBeInTheDocument();
   });
 
@@ -230,7 +230,7 @@ describe("the jobs module of a host", () => {
     await waitFor(() => expect(screen.getByTestId("stdout-at1")).toBeInTheDocument());
     expect(screen.getByTestId("stdout-at1")).toHaveTextContent("restarted sshd.service");
     expect(screen.getByRole("link", { name: /Read the journal of this job/ }))
-      .toHaveAttribute("href", "/next/hosts/h1/logs?job=j1");
+      .toHaveAttribute("href", "/hosts/h1/logs?job=j1");
     // Under the job's own row, across the whole width, which is where the
     // panel being replaced opened it.
     const row = screen.getByTestId("job-j1");

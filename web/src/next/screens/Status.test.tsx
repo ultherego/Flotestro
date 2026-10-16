@@ -152,9 +152,9 @@ describe("the condition of the installation", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("relays-band")).toBeInTheDocument());
     const relays = within(screen.getByTestId("relays-band")).getByRole("listitem");
-    expect(relays).toHaveAttribute("href", "/next/relays");
+    expect(relays).toHaveAttribute("href", "/relays");
     const queued = within(screen.getByTestId("scheduler-band")).getAllByRole("listitem");
-    expect(queued.some((one) => one.getAttribute("href") === "/next/jobs?state=queued")).toBe(true);
+    expect(queued.some((one) => one.getAttribute("href") === "/jobs?state=queued")).toBe(true);
   });
 
   it("waits for a second reading before it draws a line over time", async () => {

@@ -206,9 +206,9 @@ export function JobLine({ job, hostID }: { job: Job; hostID: string }) {
           : t("Job {id} has been queued.", { id: job.id.slice(0, 8) })}
       </span>
       {" "}
-      <Link to={`/next/jobs/${job.id}`}>{t("Open the job")}</Link>
+      <Link to={`/jobs/${job.id}`}>{t("Open the job")}</Link>
       {" "}
-      <Link to={`/next/hosts/${hostID}/jobs`}>{t("See all jobs")}</Link>
+      <Link to={`/hosts/${hostID}/jobs`}>{t("See all jobs")}</Link>
     </Note>
   );
 }
@@ -496,7 +496,7 @@ export function dashedBootID(id: string): string {
 /** The Logs module of this host, narrowed to one boot. */
 export function bootLogsPath(hostID: string, bootID: string): string {
   const bare = bootID.replace(/-/g, "").toLowerCase();
-  return `/next/hosts/${encodeURIComponent(hostID)}/logs?boot=${encodeURIComponent(bare)}`;
+  return `/hosts/${encodeURIComponent(hostID)}/logs?boot=${encodeURIComponent(bare)}`;
 }
 
 /** The uptime in a form that reads without arithmetic in one's head. */

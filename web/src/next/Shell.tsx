@@ -101,7 +101,7 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
         key: group.key,
         label: group.label,
         icon: group.icon,
-        items: group.items.map((item) => ({ to: `/next${item.to}`, label: item.label, icon: item.icon })),
+        items: group.items.map((item) => ({ to: item.to, label: item.label, icon: item.icon })),
       })),
   };
   const shown = face ?? fleet;
@@ -116,7 +116,7 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
   // Which module of a machine is open, if one is: picking another host
   // from the finder lands on the same one. An operator comparing the
   // packages of two machines should not be sent back to the overview.
-  const onModule = /^\/next\/hosts\/(?!new$)([^/]+)\/([^/]+)/.exec(location.pathname);
+  const onModule = /^\/hosts\/(?!new$)([^/]+)\/([^/]+)/.exec(location.pathname);
   const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || "");
   const keyHint = mac ? "\u2318 K" : "Ctrl K";
 
@@ -139,7 +139,7 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
         <a href="#fl-main" className="fl-skip">{t("Skip to content")}</a>
 
         <aside className={drawer ? "fl-rail fl-open" : "fl-rail"}>
-          <Link to="/next" className="fl-brand">
+          <Link to="/" className="fl-brand">
             <span className="fl-brand-mark" aria-hidden="true">
               {/* The holes of the mark are cut in the badge it sits on, and the
                   badge is the brand's colour in every theme. */}
@@ -192,7 +192,7 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
               <>
                 <Icon name="chevron" />
                 <Link
-                  to={`/next/hosts/${trail.host.id}`}
+                  to={`/hosts/${trail.host.id}`}
                   className={trail.module ? "fl-crumbs-host" : "fl-crumbs-host fl-crumbs-here"}
                   title={t("Open the host overview")}
                 >
@@ -235,7 +235,7 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
             <span className="fl-search-key">{keyHint}</span>
           </button>
           <Bell />
-          <Link to="/next/settings" className="fl-iconbtn" aria-label={t("Settings")}><Icon name="settings" /></Link>
+          <Link to="/settings" className="fl-iconbtn" aria-label={t("Settings")}><Icon name="settings" /></Link>
         </header>
 
         <main className="fl-screen" id="fl-main" tabIndex={-1}>
@@ -294,7 +294,7 @@ function Bell() {
       : t("Notifications: nothing waiting");
   return (
     <>
-      <Link to="/next/notifications" className="fl-iconbtn" aria-label={label} title={label} data-testid="bell">
+      <Link to="/notifications" className="fl-iconbtn" aria-label={label} title={label} data-testid="bell">
         <Icon name="notifications" />
       </Link>
       {known && counted > 0 && (
@@ -420,7 +420,7 @@ function UserMenu({ name, roles, subject }: { name: string; roles: string[]; sub
             </div>
           </div>
 
-          <Link to="/next/profile" className="fl-menu-item" role="menuitem">
+          <Link to="/profile" className="fl-menu-item" role="menuitem">
             {t("All of my settings")}
           </Link>
           <button type="button" className="fl-quiet fl-menu-out" onClick={signOut} data-testid="sign-out">
@@ -476,7 +476,7 @@ function Rail({ group }: { group: Face["groups"][number] }) {
       {!folded && group.items.map((item) => {
         // /next alone is the dashboard, so the item that leads there is the
         // one the reader is standing on.
-        const here = location.pathname === "/next" ? "/next/dashboard" : location.pathname;
+        const here = location.pathname === "/" ? "/dashboard" : location.pathname;
         const on = here === item.to;
         if (item.unavailable) {
           return (
@@ -517,17 +517,17 @@ type TagCount = { tag: string; hosts: number };
  * new panel.
  *
  * The server's own `path` is the old panel's address, so it is not used:
- * every address here is written again under `/next`. A kind the new panel
+ * every address here is written again under `/`. A kind the new panel
  * has no screen for is left out rather than offered as a row that leads
  * to a page saying the screen is not written yet.
  */
 const FOUND: Record<string, { to: (one: Found) => string; icon: IconName; kind: string }> = {
-  host: { to: (one) => `/next/hosts/${encodeURIComponent(one.id)}`, icon: "server", kind: "host" },
-  job: { to: (one) => `/next/jobs/${encodeURIComponent(one.id)}`, icon: "jobs", kind: "job" },
-  campaign: { to: (one) => `/next/campaigns/${encodeURIComponent(one.id)}`, icon: "campaigns", kind: "campaign" },
+  host: { to: (one) => `/hosts/${encodeURIComponent(one.id)}`, icon: "server", kind: "host" },
+  job: { to: (one) => `/jobs/${encodeURIComponent(one.id)}`, icon: "jobs", kind: "job" },
+  campaign: { to: (one) => `/campaigns/${encodeURIComponent(one.id)}`, icon: "campaigns", kind: "campaign" },
   // A group has no screen of its own under /next; the list is where one
   // is read, so that is honestly where the row leads.
-  group: { to: () => "/next/groups", icon: "groups", kind: "group" },
+  group: { to: () => "/groups", icon: "groups", kind: "group" },
 };
 
 /** How many of one kind the finder shows before the rest wait on a narrower query. */
@@ -597,7 +597,7 @@ function Finder({ places, module, recent, setRecent, favourite, setFavourite, on
 
   /** A machine opens on the module the reader was already reading. */
   const hostAddress = (id: string) =>
-    `/next/hosts/${encodeURIComponent(id)}${module ? `/${module}` : ""}`;
+    `/hosts/${encodeURIComponent(id)}${module ? `/${module}` : ""}`;
 
   const remember = (one: Kept) =>
     setRecent((current) => [packed(one), ...current.filter((other) => keep([other])[0].id !== one.id)].slice(0, RECENT));
@@ -692,7 +692,7 @@ function Finder({ places, module, recent, setRecent, favourite, setFavourite, on
       .slice(0, FINDER_LIMIT)
       .map((one) => ({
         key: `tag:${one.tag}`,
-        to: "/next/tags",
+        to: "/tags",
         label: one.tag,
         kind: t("tag"),
         note: t("{n} hosts", { n: one.hosts }),
@@ -831,7 +831,7 @@ function HostSelect({ host, module, recent, setRecent, favourite, setFavourite }
     retry: false,
   });
 
-  const address = (id: string) => `/next/hosts/${encodeURIComponent(id)}${module ? `/${module}` : ""}`;
+  const address = (id: string) => `/hosts/${encodeURIComponent(id)}${module ? `/${module}` : ""}`;
   const kept = keep(favourite);
   const lately = keep(recent).filter((one) => !kept.some((other) => other.id === one.id));
   const asking = asked !== "";

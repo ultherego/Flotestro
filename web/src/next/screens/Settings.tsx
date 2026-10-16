@@ -92,7 +92,7 @@ export const TABS: Section[] = [
     icon: "access",
     note: "Who may sign in to this installation, and what each of them holds.",
     body: "Who may sign in, the identities the panel keeps records of, the roles each of them holds and the scope every role is held over. A role granted by a group of the identity provider cannot be taken away one person at a time: the mapping is where it is edited.",
-    to: "/next/access",
+    to: "/access",
   },
   {
     key: "roles",
@@ -101,7 +101,7 @@ export const TABS: Section[] = [
     icon: "access",
     note: "The roles of this installation and the permissions each one carries.",
     body: "A role is a set of permissions; a scope says where it applies - the whole fleet, a site, an environment or a team. The catalogue is read beside the people holding the roles, because a permission is only readable against who has it.",
-    to: "/next/access",
+    to: "/access",
   },
   {
     key: "mappings",
@@ -110,7 +110,7 @@ export const TABS: Section[] = [
     icon: "directory",
     note: "Which group of the identity provider grants which role.",
     body: "A mapping turns a group of the identity provider into a role at the next sign-in. It is the only place such a grant can be withdrawn: taken away from one person it would come back the next time they signed in.",
-    to: "/next/access",
+    to: "/access",
   },
   {
     key: "review",
@@ -128,7 +128,7 @@ export const TABS: Section[] = [
     icon: "certificates",
     note: "The authority the fleet's own certificates are signed by.",
     body: "Rotation is four deliberate stages, each an ordinary campaign: distribute the new authority, verify it reached every host, rotate the leaves, withdraw the old one. A withdrawal is refused while any host is unverified or still holds a certificate issued by it.",
-    to: "/next/certificates",
+    to: "/certificates",
   },
   {
     key: "channels",

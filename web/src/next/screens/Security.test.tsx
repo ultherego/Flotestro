@@ -184,7 +184,7 @@ describe("the hosts behind a check", () => {
     expect(asked.some((one) => one.includes("check=ssh_root_login"))).toBe(true);
 
     const row = screen.getByTestId("failing-h1");
-    expect(within(row).getByRole("link", { name: "web-1" })).toHaveAttribute("href", "/next/hosts/h1/security");
+    expect(within(row).getByRole("link", { name: "web-1" })).toHaveAttribute("href", "/hosts/h1/security");
     expect(row).toHaveTextContent("file.render");
     // An operation nobody named is an em dash, never an empty cell.
     expect(screen.getByTestId("failing-h2")).toHaveTextContent("—");
@@ -332,7 +332,7 @@ describe("the remediation", () => {
         manual_gate: false,
       },
     });
-    await waitFor(() => expect(navigated).toEqual(["/next/campaigns/c-7"]));
+    await waitFor(() => expect(navigated).toEqual(["/campaigns/c-7"]));
   });
 
   it("carries the rollout the operator set, not the one the form opened with", async () => {

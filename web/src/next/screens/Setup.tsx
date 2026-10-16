@@ -49,7 +49,7 @@ export const SETUP_REASON_MIN_LENGTH = 8;
  * screen, so the prefix is put on here rather than asked of the server.
  */
 export function stepLink(path: string): string {
-  return `/next${path}`;
+  return path;
 }
 
 export function Setup() {
@@ -254,7 +254,7 @@ function MappingForm({ open: initiallyOpen }: { open: boolean }) {
     onSuccess: (mapping) => {
       setGroup(""); setReason(""); setWarning(null); setOpen(false);
       toast.success(t("The group {group} now grants {role}.", { group: mapping.group_name, role: mapping.role }), {
-        link: { to: "/next/access?tab=mappings", label: t("Group mappings") },
+        link: { to: "/access?tab=mappings", label: t("Group mappings") },
       });
       void queryClient.invalidateQueries({ queryKey: ["setup"] });
       void queryClient.invalidateQueries({ queryKey: ["group-mappings"] });

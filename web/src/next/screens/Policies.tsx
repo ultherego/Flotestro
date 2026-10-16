@@ -9,7 +9,7 @@ import type {
 } from "../../lib/types";
 import { POLICY_MODES, POLICY_RULE_KINDS, POLICY_VERDICTS } from "../../lib/types";
 import { absoluteTime, relativeTime } from "../../lib/format";
-import { stateName } from "../../components/ui";
+import { stateName } from "../../lib/states";
 import { useToast } from "../../components/Toast";
 import { useT, type Translate } from "../../i18n";
 import { Board } from "../Board";
@@ -28,7 +28,7 @@ import {
  * against it.
  *
  * The screen holds the whole list and, under it, the one policy somebody
- * opened - which is what the address `/next/policies/<id>` names. A
+ * opened - which is what the address `/policies/<id>` names. A
  * policy nobody has evaluated has no verdicts rather than four noughts:
  * a fleet nobody has judged and a fleet that is wholly compliant are
  * different answers, and the second one is the dangerous one to invent.
@@ -317,7 +317,7 @@ export function Policies() {
       // The page is left behind, so the outcome is told where it can still
       // be seen.
       toast.success(t("Policy {name} is deleted; its campaigns stay.", { name: open.data?.data.name ?? "" }));
-      navigate("/next/policies");
+      navigate("/policies");
     },
     onError: (error) => {
       setSaid({ text: failure(error), error: true });
@@ -359,7 +359,7 @@ export function Policies() {
           onDone={(created) => {
             setCreating(false);
             void queryClient.invalidateQueries({ queryKey: ["policies"] });
-            navigate(`/next/policies/${created.id}`);
+            navigate(`/policies/${created.id}`);
           }}
           onCancel={() => setCreating(false)}
         />
@@ -439,7 +439,7 @@ export function Policies() {
                   head: t("Name"),
                   cell: (one) => (
                     <TwoLine sub={one.description || undefined}>
-                      <Link to={`/next/policies/${one.id}`}>{one.name}</Link>
+                      <Link to={`/policies/${one.id}`}>{one.name}</Link>
                     </TwoLine>
                   ),
                 },
@@ -1269,7 +1269,7 @@ function Results({ policyID }: { policyID: string }) {
               {
                 key: "host",
                 head: t("Host"),
-                cell: (one) => <Link to={`/next/hosts/${one.host_id}/policies`}>{one.hostname || one.host_id}</Link>,
+                cell: (one) => <Link to={`/hosts/${one.host_id}/policies`}>{one.hostname || one.host_id}</Link>,
               },
               { key: "rule", head: t("Rule"), tight: true, cell: (one) => <code>{one.rule ? ruleSummary(one.rule) : `#${one.rule_index}`}</code> },
               { key: "verdict", head: t("Verdict"), cell: (one) => <Pill tone={verdictTone(one.verdict)}>{verdictLabel(one.verdict, t)}</Pill> },
@@ -1372,7 +1372,7 @@ function PolicyCampaigns({ policyID }: { policyID: string }) {
         loading={!campaigns.data}
         empty={t("No campaign ordered: report mode, no drift, or a drift nothing can fix.")}
         columns={[
-          { key: "name", head: t("Campaign"), cell: (one) => <Link to={`/next/campaigns/${one.id}`}>{one.name}</Link> },
+          { key: "name", head: t("Campaign"), cell: (one) => <Link to={`/campaigns/${one.id}`}>{one.name}</Link> },
           { key: "state", head: t("State"), cell: (one) => <Pill tone={campaignTone(one.state)}>{t(stateName(one.state))}</Pill> },
           { key: "version", head: t("Version"), num: true, cell: (one) => `v${one.policy_version}` },
           {

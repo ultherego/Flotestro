@@ -205,7 +205,7 @@ export function patchAddress(
   const name = packages.length === 1
     ? `Patch ${packages[0]} on ${label}`
     : `Patch ${packages.length} packages on ${label}`;
-  return `/next${bulkPrefill("packages.upgrade", name, { package_upgrade: { packages: packages.sort() } }, undefined, [host.id])}`;
+  return bulkPrefill("packages.upgrade", name, { package_upgrade: { packages: packages.sort() } }, undefined, [host.id]);
 }
 
 /** The reasons an assessment is incomplete - in the operator's language, not codes. */
@@ -548,7 +548,7 @@ export function Vulnerabilities({ host }: { host: Host }) {
                         ? one.cve_ids.map((id, position) => (
                             <span key={id}>
                               {position > 0 && ", "}
-                              <Link to={`/next/vulnerabilities/${id}`}>{id}</Link>
+                              <Link to={`/vulnerabilities/${id}`}>{id}</Link>
                             </span>
                           ))
                         : undefined}
@@ -680,7 +680,7 @@ export function Vulnerabilities({ host }: { host: Host }) {
               </Fact>
             </Facts>
             <Actions>
-              <Link to={`/next/hosts/${host.id}/packages`}>{t("The packages on this host")}</Link>
+              <Link to={`/hosts/${host.id}/packages`}>{t("The packages on this host")}</Link>
             </Actions>
           </Card>
         ),

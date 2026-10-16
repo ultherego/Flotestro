@@ -215,8 +215,8 @@ const PAGE = 50;
 /**
  * The fleet's CVE picture, or one advisory in it.
  *
- * `/next/vulnerabilities` is the fleet and
- * `/next/vulnerabilities/<cve>` is one advisory across it, so the CVE
+ * `/vulnerabilities` is the fleet and
+ * `/vulnerabilities/<cve>` is one advisory across it, so the CVE
  * somebody is working through is a link they can hand to whoever will
  * patch it.
  */
@@ -483,7 +483,7 @@ function VulnerabilityList() {
             )
             : (
               <Bars items={worst.map((one) => ({
-                label: <Link to={`/next/hosts/${one.host_id}/vulnerabilities`}>{one.hostname || one.host_id.slice(0, 8)}</Link>,
+                label: <Link to={`/hosts/${one.host_id}/vulnerabilities`}>{one.hostname || one.host_id.slice(0, 8)}</Link>,
                 value: one.affected,
                 // A host with a fix waiting is work somebody can do today;
                 // one without is work on the vendor.
@@ -669,7 +669,7 @@ function VulnerabilityList() {
                 : narrowed ? t("No CVE matches this.") : t("No judged host has an open finding.")}
               columns={[
                 { key: "cve", head: t("CVE"), tight: true, cell: (one) => (
-                  <Link className="fl-mono" to={`/next/vulnerabilities/${one.cve}`}>{one.cve}</Link>
+                  <Link className="fl-mono" to={`/vulnerabilities/${one.cve}`}>{one.cve}</Link>
                 ) },
                 { key: "severity", head: t("Severity"), cell: (one) => (
                   <Pill tone={severityTone(one.severity)} title={one.vendor_severity}>{t(one.severity)}</Pill>
@@ -713,7 +713,7 @@ function VulnerabilityList() {
               columns={[
                 { key: "host", head: t("Host"), cell: (one) => (
                   <TwoLine sub={[one.distribution, one.release].filter(Boolean).join(" ") || t("system unknown")}>
-                    <Link to={`/next/hosts/${one.host_id}/vulnerabilities`}>{one.hostname || one.host_id.slice(0, 8)}</Link>
+                    <Link to={`/hosts/${one.host_id}/vulnerabilities`}>{one.hostname || one.host_id.slice(0, 8)}</Link>
                   </TwoLine>
                 ) },
                 { key: "open", head: t("Open"), num: true, cell: (one) => {
@@ -886,7 +886,7 @@ export function patchAddress(cve: string, packages: string[], hosts: string[]): 
     payload: JSON.stringify({ package_upgrade: { packages } }, null, 2),
   });
   for (const host of hosts) params.append("host_id", host);
-  return `/next/bulk?${params}`;
+  return `/bulk?${params}`;
 }
 
 /**
@@ -954,7 +954,7 @@ function OneAdvisory({ cve }: { cve: string }) {
         <Card>
           {missing
             ? (
-              <Empty icon="vulnerabilities" action={<Link to="/next/vulnerabilities">{t("All vulnerabilities")}</Link>}>
+              <Empty icon="vulnerabilities" action={<Link to="/vulnerabilities">{t("All vulnerabilities")}</Link>}>
                 {t("No host you can see carries {cve} and no feed the panel holds describes it.", { cve })}
               </Empty>
             )
@@ -1020,7 +1020,7 @@ function OneAdvisory({ cve }: { cve: string }) {
                   : t("Patch {n} hosts", { n: group.hosts.length })}
               </Button>
             ))}
-          <Button kind="quiet" onClick={() => navigate("/next/vulnerabilities")} testId="all-vulnerabilities">
+          <Button kind="quiet" onClick={() => navigate("/vulnerabilities")} testId="all-vulnerabilities">
             {t("All vulnerabilities")}
           </Button>
         </>
@@ -1187,7 +1187,7 @@ function OneAdvisory({ cve }: { cve: string }) {
             columns={[
               { key: "host", head: t("Host"), cell: (one) => (
                 <TwoLine sub={[one.site, one.environment].filter(Boolean).join(" / ") || undefined}>
-                  <Link to={`/next/hosts/${one.host_id}/vulnerabilities`}>
+                  <Link to={`/hosts/${one.host_id}/vulnerabilities`}>
                     {one.hostname || one.host_id.slice(0, 8)}
                   </Link>
                 </TwoLine>

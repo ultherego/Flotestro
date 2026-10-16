@@ -433,9 +433,9 @@ describe("what the overview reads", () => {
     expect(adapterSegment("packages.apt")).toBe("packages");
     expect(adapterSegment("nothing")).toBeUndefined();
     expect(timelineLink(host(), { kind: "job", ref: { type: "job", id: "j1" } } as never))
-      .toBe("/next/jobs/j1");
+      .toBe("/jobs/j1");
     expect(timelineLink(host(), { kind: "alert", ref: { type: "alert", id: "a1" } } as never))
-      .toBe("/next/hosts/h1/monitoring");
+      .toBe("/hosts/h1/monitoring");
   });
 
   it("lists the adapters with the reason each one is not there", async () => {
@@ -448,7 +448,7 @@ describe("what the overview reads", () => {
     }));
     await waitFor(() => expect(screen.getByTestId("adapter-registry")).toBeInTheDocument());
     const table = screen.getByTestId("adapter-registry");
-    expect(within(table).getByRole("link", { name: "systemd" })).toHaveAttribute("href", "/next/hosts/h1/services");
+    expect(within(table).getByRole("link", { name: "systemd" })).toHaveAttribute("href", "/hosts/h1/services");
     expect(within(table).getByText("no docker daemon")).toBeInTheDocument();
   });
 
@@ -466,7 +466,7 @@ describe("what the overview reads", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("host-timeline")).toBeInTheDocument());
     const table = screen.getByTestId("host-timeline");
-    expect(within(table).getByRole("link", { name: "quarantined" })).toHaveAttribute("href", "/next/hosts/h1/audit");
+    expect(within(table).getByRole("link", { name: "quarantined" })).toHaveAttribute("href", "/hosts/h1/audit");
     expect(screen.getByText(/Not shown, no permission: audit/)).toBeInTheDocument();
   });
 });

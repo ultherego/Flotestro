@@ -47,7 +47,7 @@ const campaign = (over: Record<string, unknown>) => ({
   ...over,
 });
 
-function draw(where = "/next/campaigns") {
+function draw(where = "/campaigns") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
@@ -68,7 +68,7 @@ describe("the campaign list", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("campaign-patch the lab")).toBeInTheDocument());
     const row = screen.getByTestId("campaign-patch the lab");
-    expect(within(row).getByRole("link", { name: "patch the lab" })).toHaveAttribute("href", "/next/campaigns/c1");
+    expect(within(row).getByRole("link", { name: "patch the lab" })).toHaveAttribute("href", "/campaigns/c1");
     expect(within(row).getByText("running")).toBeInTheDocument();
     // Done, failed and pending, in that order and labelled as such: the
     // column says which number is which so nobody has to guess.
@@ -122,7 +122,7 @@ describe("the campaign list", () => {
 
   it("takes the whole filter from the address and puts it back", async () => {
     Object.assign(answers, { "/api/v1/campaigns": { items: [], count: 0, total: 0, limit: 50, offset: 0 } });
-    draw("/next/campaigns?action=packages.upgrade&requester=tszymanski");
+    draw("/campaigns?action=packages.upgrade&requester=tszymanski");
     // What the reader narrowed the list to is what the link they copy
     // carries, so a link in and a link out are the same link.
     await waitFor(() => expect(

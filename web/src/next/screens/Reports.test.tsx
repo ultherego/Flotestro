@@ -116,7 +116,7 @@ const complianceReport = (over: Record<string, unknown> = {}) => ({
 const reader = { subject: "u", kind: "user", roles: [], bindings: [], permissions: ["host.read", "campaign.read"] };
 const noCampaigns = { subject: "u", kind: "user", roles: [], bindings: [], permissions: ["host.read"] };
 
-function draw(address = "/next/reports") {
+function draw(address = "/reports") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
@@ -185,7 +185,7 @@ describe("the reports", () => {
 
   it("asks for nothing until both ends of a custom period are set", async () => {
     Object.assign(answers, { "/api/v1/whoami": reader, "/api/v1/reports/patch-status": patchStatus() });
-    draw("/next/reports?preset=custom");
+    draw("/reports?preset=custom");
     await waitFor(() => expect(screen.getAllByText("Waiting for the period.").length).toBeGreaterThan(0));
     // Nothing is read with half a period: the server refuses it anyway.
     expect(asked.some((one) => one.startsWith("/api/v1/reports/"))).toBe(false);
@@ -262,7 +262,7 @@ describe("the reports", () => {
       "/api/v1/whoami": { ...reader, display_name: "Tomasz" },
       "/api/v1/reports/patch-status": patchStatus(),
     });
-    draw("/next/reports?preset=30d&site=lab");
+    draw("/reports?preset=30d&site=lab");
     await waitFor(() => expect(screen.getByTestId("patch-hosts")).toBeInTheDocument());
     const head = screen.getByText("This document").closest(".fl-card") as HTMLElement;
     expect(within(head).getByText("site lab")).toBeInTheDocument();
@@ -313,12 +313,12 @@ describe("the reports", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("patch-agent-arch")).toBeInTheDocument());
     expect(within(screen.getByTestId("patch-agent-arch")).getByRole("link", { name: "agent-arch" }))
-      .toHaveAttribute("href", "/next/hosts/h1");
+      .toHaveAttribute("href", "/hosts/h1");
     await waitFor(() => expect(screen.getByTestId("campaign-c1")).toBeInTheDocument());
     expect(within(screen.getByTestId("campaign-c1")).getByRole("link", { name: "September patches" }))
-      .toHaveAttribute("href", "/next/campaigns/c1");
+      .toHaveAttribute("href", "/campaigns/c1");
     expect(within(screen.getByTestId("drift-agent-arch")).getByRole("link", { name: "agent-arch" }))
-      .toHaveAttribute("href", "/next/hosts/h1/policies");
+      .toHaveAttribute("href", "/hosts/h1/policies");
   });
 });
 

@@ -5,7 +5,7 @@ import { api, type Collection } from "../../lib/api";
 import { absoluteTime, bytes, relativeTime } from "../../lib/format";
 import { useErrorGuides } from "../../lib/errors";
 import { OPERATIONS_INTERVAL, useProgress } from "../../lib/stream";
-import { stateName } from "../../components/ui";
+import { stateName } from "../../lib/states";
 import {
   ACTION_WORDS, changeAction, isHostPlan, isPackageChange, planWords,
   type HostPlan, type PackageChange, type PackagePlanFacts,
@@ -298,7 +298,7 @@ export function Job() {
             </>
           )}
           {data.wait_reason && !budget && <><Tag>{data.wait_reason}</Tag>{" "}</>}
-          <Tag to={`/next/hosts/${data.host_id}`}>{host}</Tag>{" "}
+          <Tag to={`/hosts/${data.host_id}`}>{host}</Tag>{" "}
           <Tag>{t("requested by {who}", { who: data.created_by })}</Tag>
         </>
       }
@@ -356,15 +356,15 @@ export function Job() {
         <Card span={6} title={t("The order")}>
           <Facts>
             <Fact label={t("Identifier")}><span className="fl-mono">{data.id}</span></Fact>
-            <Fact label={t("Host")}><Link to={`/next/hosts/${data.host_id}`}>{host}</Link></Fact>
+            <Fact label={t("Host")}><Link to={`/hosts/${data.host_id}`}>{host}</Link></Fact>
             <Fact label={t("Campaign")}>
               {data.campaign_id
-                ? <Link className="fl-mono" to={`/next/campaigns/${data.campaign_id}`}>{data.campaign_id}</Link>
+                ? <Link className="fl-mono" to={`/campaigns/${data.campaign_id}`}>{data.campaign_id}</Link>
                 : "—"}
             </Fact>
             <Fact label={t("Read fan-out")}>
               {data.fanout_id
-                ? <Link className="fl-mono" to={`/next/reads/${data.fanout_id}`}>{data.fanout_id}</Link>
+                ? <Link className="fl-mono" to={`/reads/${data.fanout_id}`}>{data.fanout_id}</Link>
                 : "—"}
             </Fact>
             <Fact label={t("Requested by")}>{data.created_by}</Fact>

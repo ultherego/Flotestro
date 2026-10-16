@@ -112,7 +112,7 @@ describe("the budgets", () => {
     expect(row).toHaveTextContent("warsaw");
     expect(row).toHaveTextContent("4 / 10");
     // A holder leads where the work is, inside the new panel.
-    expect(within(row).getByRole("link", { name: /campaign/ })).toHaveAttribute("href", "/next/campaigns/c1");
+    expect(within(row).getByRole("link", { name: /campaign/ })).toHaveAttribute("href", "/campaigns/c1");
   });
 
   it("leads the work waiting on a budget to where it waits", async () => {
@@ -123,8 +123,8 @@ describe("the budgets", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("budget-global:mutations")).toBeInTheDocument());
     const row = screen.getByTestId("budget-global:mutations");
-    expect(within(row).getByRole("link", { name: "3" })).toHaveAttribute("href", "/next/jobs?state=queued");
-    expect(within(row).getByRole("link", { name: "5" })).toHaveAttribute("href", "/next/campaigns");
+    expect(within(row).getByRole("link", { name: "3" })).toHaveAttribute("href", "/jobs?state=queued");
+    expect(within(row).getByRole("link", { name: "5" })).toHaveAttribute("href", "/campaigns");
   });
 
   it("says a fleet nobody has answered for is unknown, and never nought", async () => {
@@ -276,8 +276,8 @@ describe("the vocabulary of a key", () => {
   });
 
   it("leads a holder into the new panel, and a holder of an unknown shape nowhere", () => {
-    expect(holderLink({ owner: "job:j1", claimant: "jobs:ada" })?.to).toBe("/next/jobs?actor=ada");
-    expect(holderLink({ owner: "fanout:f1", claimant: "reads:ada" })?.to).toBe("/next/reads/f1");
+    expect(holderLink({ owner: "job:j1", claimant: "jobs:ada" })?.to).toBe("/jobs?actor=ada");
+    expect(holderLink({ owner: "fanout:f1", claimant: "reads:ada" })?.to).toBe("/reads/f1");
     expect(holderLink({ owner: "x", claimant: "y" })).toBeNull();
   });
 });

@@ -4,7 +4,7 @@ import { api, type Collection, type Page } from "../../lib/api";
 import { REFRESH_INTERVAL } from "../../lib/stream";
 import { relativeTime } from "../../lib/format";
 import type { AuditEvent, Campaign, FleetActivity, FleetSummary, Job } from "../../lib/types";
-import { stateName } from "../../components/ui";
+import { stateName } from "../../lib/states";
 import { useT } from "../../i18n";
 import type { Host } from "../../lib/types";
 import {
@@ -141,10 +141,10 @@ export function Dashboard() {
   const facet = (key: string) => (key === "" || key === "unknown" ? t("unknown") : key);
 
   const availability: Segment[] = [
-    { label: t("Online"), value: s?.online, tone: "ok", to: "/next/hosts?connection_state=online" },
-    { label: t("Stale"), value: a ? byConnection("stale") ?? 0 : undefined, tone: "warn", to: "/next/hosts?connection_state=stale" },
-    { label: t("Offline"), value: a ? byConnection("offline") ?? 0 : undefined, tone: "error", to: "/next/hosts?connection_state=offline" },
-    { label: t("Unknown"), value: a ? byConnection("unknown") ?? 0 : undefined, tone: "unknown", to: "/next/hosts?connection_state=unknown" },
+    { label: t("Online"), value: s?.online, tone: "ok", to: "/hosts?connection_state=online" },
+    { label: t("Stale"), value: a ? byConnection("stale") ?? 0 : undefined, tone: "warn", to: "/hosts?connection_state=stale" },
+    { label: t("Offline"), value: a ? byConnection("offline") ?? 0 : undefined, tone: "error", to: "/hosts?connection_state=offline" },
+    { label: t("Unknown"), value: a ? byConnection("unknown") ?? 0 : undefined, tone: "unknown", to: "/hosts?connection_state=unknown" },
     { label: t("Quarantined"), value: s?.quarantined_hosts, tone: "neutral" },
     { label: t("In maintenance"), value: s?.in_maintenance, tone: "neutral" },
   ];
@@ -214,7 +214,7 @@ export function Dashboard() {
               ? <Bones rows={5} />
               : open.length === 0
                 ? <Empty>{t("Nothing waits and nothing is wrong.")}</Empty>
-                : <Needs items={open.map((one) => ({ ...one, to: one.to ? `/next${one.to}` : undefined }))} />}
+                : <Needs items={open} />}
           </Card>
         ),
         answering: (
@@ -227,10 +227,10 @@ export function Dashboard() {
               total={s?.hosts ?? "—"}
               label={t("hosts")}
               slices={[
-                { label: t("Online"), value: s?.online ?? 0, tone: "ok", to: "/next/hosts?connection_state=online" },
-                { label: t("Stale"), value: byConnection("stale") ?? 0, tone: "warn", to: "/next/hosts?connection_state=stale" },
-                { label: t("Offline"), value: s?.offline ?? 0, tone: "error", to: "/next/hosts?connection_state=offline" },
-                { label: t("Unknown"), value: byConnection("unknown") ?? 0, tone: "unknown", to: "/next/hosts?connection_state=unknown" },
+                { label: t("Online"), value: s?.online ?? 0, tone: "ok", to: "/hosts?connection_state=online" },
+                { label: t("Stale"), value: byConnection("stale") ?? 0, tone: "warn", to: "/hosts?connection_state=stale" },
+                { label: t("Offline"), value: s?.offline ?? 0, tone: "error", to: "/hosts?connection_state=offline" },
+                { label: t("Unknown"), value: byConnection("unknown") ?? 0, tone: "unknown", to: "/hosts?connection_state=unknown" },
               ]}
             />
           </Card>
@@ -239,7 +239,7 @@ export function Dashboard() {
           <Card
             title={t("The fleet")}
             note={t("Every machine, how it is going and when it last spoke.")}
-            tools={<Link to="/next/hosts">{t("All hosts")}</Link>}
+            tools={<Link to="/hosts">{t("All hosts")}</Link>}
             foot={(fleet.data?.total ?? 0) > (fleet.data?.items.length ?? 0)
               ? t("The newest {n} of {total}.", { n: fleet.data?.items.length ?? 0, total: fleet.data?.total ?? 0 })
               : undefined}
@@ -254,7 +254,7 @@ export function Dashboard() {
                   <Tile
                     key={host.id}
                     testId={`fleet-tile-${host.id}`}
-                    to={`/next/hosts/${host.id}`}
+                    to={`/hosts/${host.id}`}
                     name={host.hostname || host.id.slice(0, 12)}
                     sub={[host.site, host.environment].filter(Boolean).join(" · ") || undefined}
                     state={
@@ -321,7 +321,7 @@ export function Dashboard() {
               keyOf={(one) => one.id}
               empty={t("No campaigns need attention.")}
               columns={[
-                { key: "name", head: t("Name"), cell: (one) => <Link to={`/next/campaigns/${one.id}`}>{one.name}</Link> },
+                { key: "name", head: t("Name"), cell: (one) => <Link to={`/campaigns/${one.id}`}>{one.name}</Link> },
                 { key: "state", head: t("State"), cell: (one) => <Pill tone={campaignTone(one.state)}>{t(stateName(one.state))}</Pill> },
                 { key: "action", head: t("Operation"), minor: true, tight: true, cell: (one) => <code title={one.action_type}>{one.action_type}</code> },
               ]}
@@ -331,7 +331,7 @@ export function Dashboard() {
         failures: (
           <Card
             title={t("Recent failures")}
-            tools={<Link to="/next/jobs?state=failed">{t("All jobs")}</Link>}
+            tools={<Link to="/jobs?state=failed">{t("All jobs")}</Link>}
             flush
           >
             {failures.isLoading ? <Bones rows={4} /> : (failures.data?.items ?? []).length === 0 ? (
@@ -343,7 +343,7 @@ export function Dashboard() {
                     key={one.id}
                     icon="jobs"
                     tone="error"
-                    to={`/next/jobs/${one.id}`}
+                    to={`/jobs/${one.id}`}
                     what={one.action_type}
                     who={one.hostname || one.host_id.slice(0, 8)}
                     when={relativeTime(one.finished_at ?? one.created_at)}
@@ -359,7 +359,7 @@ export function Dashboard() {
             tools={
               <>
                 {denied.length > 0 && <Pill tone="error">{denied.length}</Pill>}
-                <Link to="/next/audit?outcome=denied">{t("All denials")}</Link>
+                <Link to="/audit?outcome=denied">{t("All denials")}</Link>
               </>
             }
             flush
@@ -373,7 +373,7 @@ export function Dashboard() {
                     key={String(one.id)}
                     icon="access"
                     tone="warn"
-                    to={`/next/audit?actor=${encodeURIComponent(one.actor_id)}`}
+                    to={`/audit?actor=${encodeURIComponent(one.actor_id)}`}
                     what={one.action}
                     who={one.detail?.reason ? `${one.actor_id} · ${String(one.detail.reason)}` : one.actor_id}
                     when={relativeTime(one.occurred_at)}

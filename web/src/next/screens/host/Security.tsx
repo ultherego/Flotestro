@@ -6,7 +6,7 @@ import { useAllowed, useModuleAccess } from "../../../lib/actions";
 import { absoluteTime, relativeTime } from "../../../lib/format";
 import { capability } from "../../../lib/modules";
 import type { Host, InventoryFragment, Job } from "../../../lib/types";
-import { stateName } from "../../../components/ui";
+import { stateName } from "../../../lib/states";
 import { useT } from "../../../i18n";
 import { Board } from "../../Board";
 import type { BoardEntry } from "../../../components/board";
@@ -423,12 +423,12 @@ export function Security({ host }: { host: Host }) {
         // host's jobs: "waiting for approval" is a sentence to act on.
         <Banner
           tone="info"
-          actions={<Link to={`/next/hosts/${host.id}/jobs`}>{t("See all jobs")}</Link>}
+          actions={<Link to={`/hosts/${host.id}/jobs`}>{t("See all jobs")}</Link>}
         >
           {(ordered.requires_approval
             ? t("Job {id} is waiting for approval.")
             : t("Job {id} has been queued.")).split("{id}")[0]}
-          <Link to={`/next/jobs/${ordered.id}`}>{ordered.id.slice(0, 8)}</Link>
+          <Link to={`/jobs/${ordered.id}`}>{ordered.id.slice(0, 8)}</Link>
           {(ordered.requires_approval
             ? t("Job {id} is waiting for approval.")
             : t("Job {id} has been queued.")).split("{id}")[1] ?? ""}
@@ -780,7 +780,7 @@ export function Security({ host }: { host: Host }) {
                       // at once.
                       { key: "lock", head: t("Lock"), minor: true, cell: (step) => step.lock_class || <Note>—</Note> },
                       { key: "job", head: t("Job"), cell: (step) => step.job_id
-                        ? <Link to={`/next/jobs/${step.job_id}`}>{step.job_id.slice(0, 8)}</Link>
+                        ? <Link to={`/jobs/${step.job_id}`}>{step.job_id.slice(0, 8)}</Link>
                         : "—" },
                       { key: "state", head: t("State"), cell: (step) => (
                         <>

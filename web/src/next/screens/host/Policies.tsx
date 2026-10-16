@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, type Collection } from "../../../lib/api";
 import { absoluteTime, relativeTime } from "../../../lib/format";
@@ -115,7 +116,7 @@ export function Policies({ host }: { host: Host }) {
                 cell: (one) => (
                   // The policy's own record is not in the new panel yet, so
                   // the link leaves it rather than landing on nothing.
-                  <a href={`/policies/${one.policyID}`}>{one.name}</a>
+                  <Link to={`/policies/${one.policyID}`}>{one.name}</Link>
                 ),
               },
               {
@@ -159,7 +160,7 @@ export function Policies({ host }: { host: Host }) {
           {!results.isLoading && rows.length === 0 ? (
             <Empty
               icon="security"
-              action={<a href="/policies">{t("Open the policies")}</a>}
+              action={<Link className="fl-btn fl-quiet" to="/policies">{t("Open the policies")}</Link>}
             >
               {t("No policy selects this host, or none has been evaluated yet. A policy selects hosts by tag, site or environment and is evaluated on the next inventory.")}
             </Empty>
@@ -174,7 +175,7 @@ export function Policies({ host }: { host: Host }) {
                 {
                   key: "policy",
                   head: t("Policy"),
-                  cell: (one) => <a href={`/policies/${one.policy_id}`}>{one.policy_name || one.policy_id}</a>,
+                  cell: (one) => <Link to={`/policies/${one.policy_id}`}>{one.policy_name || one.policy_id}</Link>,
                 },
                 {
                   key: "rule",

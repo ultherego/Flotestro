@@ -71,7 +71,7 @@ const token = (over: Record<string, unknown> = {}) => ({
 /** Every path this render asked for or wrote to, reads and writes alike. */
 const everyPath = () => [...asked, ...sent.map((one) => one.path)];
 
-function draw(at = "/next/profile") {
+function draw(at = "/profile") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
@@ -115,7 +115,7 @@ describe("who the panel takes you for", () => {
     expect(screen.getByText("service")).toBeInTheDocument();
     expect(screen.getByText("p1")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Manage every identity/ }))
-      .toHaveAttribute("href", "/next/access");
+      .toHaveAttribute("href", "/access");
   });
 
   it("says a binding that narrows nothing is any, and one that narrows to nothing is nothing", async () => {
@@ -233,7 +233,7 @@ describe("your own password", () => {
 
   it("says so when the sign-in sent the person here because somebody else chose the password", async () => {
     ready();
-    draw("/next/profile?change_password=1");
+    draw("/profile?change_password=1");
     await waitFor(() => expect(screen.getByTestId("must-change-password")).toBeInTheDocument());
     // The card itself says it too, so the person who scrolls past the
     // banner still reads why they are being asked.

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Collection } from "../../lib/api";
 import { absoluteTime, relativeTime, toInstant } from "../../lib/format";
 import type { Campaign } from "../../lib/types";
-import { stateName } from "../../components/ui";
+import { stateName } from "../../lib/states";
 import { useT, type Translate } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
@@ -373,8 +373,8 @@ export function startsOn(entry: CalendarEntry, day: string): boolean {
 
 /** Where an entry of the calendar leads inside the new panel. */
 export function entryLink(entry: CalendarEntry): string | undefined {
-  if (entry.kind === "campaign_window") return `/next/campaigns/${entry.id}`;
-  if (entry.kind === "host_window") return `/next/hosts/${entry.id}`;
+  if (entry.kind === "campaign_window") return `/campaigns/${entry.id}`;
+  if (entry.kind === "host_window") return `/hosts/${entry.id}`;
   return undefined;
 }
 
@@ -537,7 +537,7 @@ export function Schedules() {
       {runOutcome && (
         <Banner tone="ok">
           {t("The order was placed:")}{" "}
-          <Link to={`/next/campaigns/${runOutcome.campaign.id}`}>{runOutcome.campaign.name}</Link>{" "}
+          <Link to={`/campaigns/${runOutcome.campaign.id}`}>{runOutcome.campaign.name}</Link>{" "}
           <Pill tone={campaignTone(runOutcome.campaign.state)}>{t(stateName(runOutcome.campaign.state))}</Pill>
         </Banner>
       )}
@@ -775,7 +775,7 @@ export function Schedules() {
             {items !== undefined && rows.length === 0 ? (
               <Empty
                 icon="schedules"
-                action={<Link to="/next/bulk">{t("Schedule one from the Bulk workspace")}</Link>}
+                action={<Link to="/bulk">{t("Schedule one from the Bulk workspace")}</Link>}
               >
                 {t("No campaign runs on a clock here yet.")}
               </Empty>
@@ -830,7 +830,7 @@ export function Schedules() {
                         ? <span title={absoluteTime(one.last_run_at)}>{relativeTime(one.last_run_at)}</span>
                         : <span className="fl-faint">—</span>}
                       {one.last_campaign_id && (
-                        <> · <Link to={`/next/campaigns/${one.last_campaign_id}`}>{t("campaign")}</Link></>
+                        <> · <Link to={`/campaigns/${one.last_campaign_id}`}>{t("campaign")}</Link></>
                       )}
                       {one.last_error && (
                         <> <Pill tone="error" title={one.last_error}>{t("refused")}</Pill></>

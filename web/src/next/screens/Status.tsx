@@ -602,29 +602,29 @@ function BlockDrawing({ name, facts }: { name: string; facts: Record<string, unk
   switch (name) {
     case "scheduler": {
       const segments: Segment[] = [
-        { label: t("for approval"), value: count("awaiting_approval"), tone: "info", to: "/next/jobs?state=awaiting_approval" },
-        { label: t("queued"), value: count("queued"), tone: "neutral", to: "/next/jobs?state=queued" },
+        { label: t("for approval"), value: count("awaiting_approval"), tone: "info", to: "/jobs?state=awaiting_approval" },
+        { label: t("queued"), value: count("queued"), tone: "neutral", to: "/jobs?state=queued" },
         { label: t("leased"), value: count("leased"), tone: "info" },
         { label: t("dispatched"), value: count("dispatched"), tone: "info" },
-        { label: t("running"), value: count("running"), tone: "ok", to: "/next/jobs?state=running" },
+        { label: t("running"), value: count("running"), tone: "ok", to: "/jobs?state=running" },
       ];
       return <Band segments={segments} testId="scheduler-band" />;
     }
     case "sessions": {
       const segments: Segment[] = [
         { label: t("agents on this gateway"), value: count("agents_on_this_gateway"), tone: "ok" },
-        { label: t("hosts online"), value: count("hosts_online"), tone: "ok", to: "/next/hosts?connection_state=online" },
-        { label: t("hosts stale"), value: count("hosts_stale"), tone: "warn", to: "/next/hosts?connection_state=stale" },
+        { label: t("hosts online"), value: count("hosts_online"), tone: "ok", to: "/hosts?connection_state=online" },
+        { label: t("hosts stale"), value: count("hosts_stale"), tone: "warn", to: "/hosts?connection_state=stale" },
         { label: t("browser sessions"), value: count("web_sessions"), tone: "info" },
       ];
       return <Band segments={segments} testId="sessions-band" />;
     }
     case "relays": {
       const segments: Segment[] = [
-        { label: t("active"), value: count("active"), tone: "ok", to: "/next/relays" },
-        { label: t("silent"), value: count("silent"), tone: "error", to: "/next/relays" },
-        { label: t("never seen"), value: count("never_seen"), tone: "unknown", to: "/next/relays" },
-        { label: t("revoked"), value: count("revoked"), tone: "neutral", to: "/next/relays" },
+        { label: t("active"), value: count("active"), tone: "ok", to: "/relays" },
+        { label: t("silent"), value: count("silent"), tone: "error", to: "/relays" },
+        { label: t("never seen"), value: count("never_seen"), tone: "unknown", to: "/relays" },
+        { label: t("revoked"), value: count("revoked"), tone: "neutral", to: "/relays" },
       ];
       return <Band segments={segments} testId="relays-band" />;
     }

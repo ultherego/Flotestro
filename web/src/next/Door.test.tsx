@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom/vitest";
-import { LoginScreen } from "./App";
+import { Door } from "./Door";
 
 /**
  * The doors of the login screen, and the rule that each one can be named.
@@ -27,7 +27,7 @@ afterEach(cleanup);
 
 describe("the login screen", () => {
   it("names every password box it shows", () => {
-    const { container } = draw(<LoginScreen provider={false} />);
+    const { container } = draw(<Door provider={false} />);
 
     const boxes = Array.from(container.querySelectorAll('input[type="password"]'));
     expect(boxes.length, "a password box was added or removed; the name below has to follow").toBe(2);
@@ -38,7 +38,7 @@ describe("the login screen", () => {
   });
 
   it("offers the password form where there is no identity provider", () => {
-    draw(<LoginScreen provider={false} />);
+    draw(<Door provider={false} />);
 
     expect(screen.getByTestId("signin-subject")).toBeInTheDocument();
     expect(screen.getByTestId("signin-submit")).toBeInTheDocument();
@@ -48,7 +48,7 @@ describe("the login screen", () => {
   });
 
   it("keeps the password form next to the provider where both exist", () => {
-    draw(<LoginScreen provider={true} />);
+    draw(<Door provider={true} />);
 
     expect(screen.getByTestId("signin-subject")).toBeInTheDocument();
     expect(screen.getByText("Sign in with identity provider")).toBeInTheDocument();

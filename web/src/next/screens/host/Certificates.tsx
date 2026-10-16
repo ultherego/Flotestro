@@ -315,7 +315,7 @@ function JobNotice({ job }: { job: Job }) {
   return (
     <Banner tone="info">
       {before}
-      <Link to={`/next/jobs/${job.id}`}>{job.id.slice(0, 8)}</Link>
+      <Link to={`/jobs/${job.id}`}>{job.id.slice(0, 8)}</Link>
       {after}
     </Banner>
   );

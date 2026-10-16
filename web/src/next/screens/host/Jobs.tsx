@@ -6,7 +6,7 @@ import { useDebounced } from "../../../lib/debounce";
 import { absoluteTime, relativeTime, toInstant } from "../../../lib/format";
 import { needsReason } from "../../../lib/actions";
 import { OPERATIONS_INTERVAL, useProgress } from "../../../lib/stream";
-import { stateName } from "../../../components/ui";
+import { stateName } from "../../../lib/states";
 import type { Attempt, Host, Job, OperationContract } from "../../../lib/types";
 import { contractWords, useOperations } from "../../../pages/Bulk";
 import { useT } from "../../../i18n";
@@ -287,9 +287,9 @@ export function Jobs({ host }: { host: Host }) {
                 <Stack>
                   <Attempts jobId={one.id} />
                   <Note>
-                    <Link to={`/next/jobs/${one.id}`}>{t("Open the job: full payload, plan and output")}</Link>
+                    <Link to={`/jobs/${one.id}`}>{t("Open the job: full payload, plan and output")}</Link>
                     {" · "}
-                    <Link to={`/next/hosts/${host.id}/logs?job=${one.id}`}>{t("Read the journal of this job")}</Link>
+                    <Link to={`/hosts/${host.id}/logs?job=${one.id}`}>{t("Read the journal of this job")}</Link>
                   </Note>
                 </Stack>
               )}
@@ -300,12 +300,12 @@ export function Jobs({ host }: { host: Host }) {
                 { key: "operation", head: t("Operation"), tight: true, cell: (one) => (
                   <TwoLine sub={one.campaign_id
                     ? (
-                      <Link to={`/next/campaigns/${one.campaign_id}`} title={`${t("Part of a campaign")} · ${one.campaign_id}`}>
+                      <Link to={`/campaigns/${one.campaign_id}`} title={`${t("Part of a campaign")} · ${one.campaign_id}`}>
                         {t("campaign {id}", { id: campaignLabel(one) })}
                       </Link>
                     )
                     : undefined}>
-                    <Link to={`/next/jobs/${one.id}`} title={one.id}>
+                    <Link to={`/jobs/${one.id}`} title={one.id}>
                       <code>{one.action_type}</code>
                     </Link>
                   </TwoLine>

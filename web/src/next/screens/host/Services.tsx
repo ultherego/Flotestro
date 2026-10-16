@@ -615,7 +615,7 @@ function UnitDetailCard({ hostID, unit, detail, loading, error, onLead, onRetry 
     { label: t("Triggers"), units: detail.triggers },
   ].filter((group) => group.units && group.units.length > 0);
   const lines = detail.journal_lines ?? [];
-  const logs = `/next/hosts/${hostID}/logs?unit=${encodeURIComponent(unit.name)}${
+  const logs = `/hosts/${hostID}/logs?unit=${encodeURIComponent(unit.name)}${
     detail.journal_cursor ? `&cursor=${encodeURIComponent(detail.journal_cursor)}` : ""}`;
 
   return (
@@ -651,7 +651,7 @@ function UnitDetailCard({ hostID, unit, detail, loading, error, onLead, onRetry 
           <Fact label={group.label}>
             <Tags>
               {(group.units ?? []).map((name) => (
-                <Tag key={name} to={`/next/hosts/${hostID}/services?unit=${encodeURIComponent(name)}`}>{name}</Tag>
+                <Tag key={name} to={`/hosts/${hostID}/services?unit=${encodeURIComponent(name)}`}>{name}</Tag>
               ))}
             </Tags>
           </Fact>
@@ -662,7 +662,7 @@ function UnitDetailCard({ hostID, unit, detail, loading, error, onLead, onRetry 
           <Fact label={group.label}>
             <Tags>
               {(group.units ?? []).map((name) => (
-                <Tag key={name} to={`/next/hosts/${hostID}/services?unit=${encodeURIComponent(name)}`}>{name}</Tag>
+                <Tag key={name} to={`/hosts/${hostID}/services?unit=${encodeURIComponent(name)}`}>{name}</Tag>
               ))}
             </Tags>
           </Fact>

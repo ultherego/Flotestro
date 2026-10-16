@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { api, type Collection } from "../../../lib/api";
 import { useModuleAccess, useAllowed } from "../../../lib/actions";
 import { absoluteTime, relativeTime } from "../../../lib/format";
-import { stateName } from "../../../components/ui";
+import { stateName } from "../../../lib/states";
 import type { Host, Job } from "../../../lib/types";
 import { useT } from "../../../i18n";
 import { Board } from "../../Board";
@@ -227,9 +227,9 @@ export function Compose({ host }: { host: Host }) {
               ? t("The deployment is waiting for approval.")
               : t("The deployment has been queued.")}
             {" "}
-            <Link to={`/next/jobs/${ordered.id}`}>{t("job {id}", { id: ordered.id.slice(0, 8) })}</Link>
+            <Link to={`/jobs/${ordered.id}`}>{t("job {id}", { id: ordered.id.slice(0, 8) })}</Link>
             {" · "}
-            <Link to={`/next/hosts/${host.id}/jobs`}>{t("See all jobs")}</Link>
+            <Link to={`/hosts/${host.id}/jobs`}>{t("See all jobs")}</Link>
           </Banner>
         ),
       )}

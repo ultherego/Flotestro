@@ -202,7 +202,7 @@ export function Security() {
     onSuccess: (made) => {
       setConfirming(false);
       setReason("");
-      navigate(`/next/campaigns/${made.campaign.id}`);
+      navigate(`/campaigns/${made.campaign.id}`);
     },
   });
 
@@ -299,7 +299,7 @@ export function Security() {
               ? (data ? <Empty>{t("No host carries a finding.")}</Empty> : <Bones rows={4} />)
               : (
                 <Bars items={worst.map(([id, one]) => ({
-                  label: <Link to={`/next/hosts/${id}/security`}>{one.hostname}</Link>,
+                  label: <Link to={`/hosts/${id}/security`}>{one.hostname}</Link>,
                   value: one.count,
                   tone: "error" as Tone,
                 }))} />
@@ -526,7 +526,7 @@ export function Security() {
                           <Tags>
                             {group.hosts.map((host) => (
                               <Pill key={host.host_id} dot={false}>
-                                <Link to={`/next/hosts/${host.host_id}/security`}>
+                                <Link to={`/hosts/${host.host_id}/security`}>
                                   {host.hostname || host.host_id.slice(0, 8)}
                                 </Link>
                               </Pill>
@@ -557,7 +557,7 @@ export function Security() {
                             key: "host",
                             head: t("Host"),
                             cell: (host) => (
-                              <Link to={`/next/hosts/${host.host_id}/security`}>
+                              <Link to={`/hosts/${host.host_id}/security`}>
                                 {host.hostname || host.host_id.slice(0, 8)}
                               </Link>
                             ),
@@ -709,7 +709,7 @@ function CheckHosts({ check }: { check: FleetCheck }) {
                 key: "host",
                 head: t("Host"),
                 cell: (one) => (
-                  <Link to={`/next/hosts/${one.host_id}/security`}>{one.hostname || one.host_id.slice(0, 8)}</Link>
+                  <Link to={`/hosts/${one.host_id}/security`}>{one.hostname || one.host_id.slice(0, 8)}</Link>
                 ),
               },
               {

@@ -308,12 +308,12 @@ export function Unresolved() {
               empty={empty}
               columns={[
                 { key: "host", head: t("Host"), cell: (one) => (
-                  <Link to={`/next/hosts/${one.host_id}`}>{one.hostname || one.host_id}</Link>
+                  <Link to={`/hosts/${one.host_id}`}>{one.hostname || one.host_id}</Link>
                 ) },
                 // Straight to the task and whatever evidence it holds: the
                 // operator's next move is to read it, not to search for it.
                 { key: "action", head: t("Operation"), tight: true, cell: (one) => (
-                  <Link to={`/next/jobs/${one.job_id}`}>{one.action}</Link>
+                  <Link to={`/jobs/${one.job_id}`}>{one.action}</Link>
                 ) },
                 { key: "question", head: t("Question"), cell: (one) => (
                   <Pill tone={kindTone(one.kind)} title={t(describeKind(one.kind).title)}>

@@ -102,7 +102,7 @@ export function errorText(error: unknown): string {
 
 /** Where a secret's own record is read, inside the new panel. */
 export function secretAddress(name: string): string {
-  return `/next/secrets/${encodeURIComponent(name)}`;
+  return `/secrets/${encodeURIComponent(name)}`;
 }
 
 export function usePermissions(): Set<string> {
@@ -212,7 +212,7 @@ type Aside =
 /**
  * The store, or one secret in it.
  *
- * `/next/secrets` is the store and `/next/secrets/<name>` is one record,
+ * `/secrets` is the store and `/secrets/<name>` is one record,
  * because the name is the identifier everywhere else - in a job payload,
  * in the trail, in a lease. The value is the identifier of nothing and
  * never appears in an address.
@@ -702,7 +702,7 @@ function OneSecret({ name }: { name: string }) {
       <Screen title={name} lead={t("Values go in and do not come out.")} icon="secrets" help={<HelpText />}>
         <Card>
           {missing ? (
-            <Empty icon="secrets" action={<Link to="/next/secrets">{t("All secrets")}</Link>}>
+            <Empty icon="secrets" action={<Link to="/secrets">{t("All secrets")}</Link>}>
               {t("No secret named {name} exists in this installation.", { name })}
             </Empty>
           ) : forbidden ? (

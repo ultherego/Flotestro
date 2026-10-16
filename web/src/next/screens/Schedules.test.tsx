@@ -196,7 +196,7 @@ describe("the schedules the fleet runs on a clock", () => {
     // The campaign the last moment placed is reachable from the row, in
     // the new panel rather than the one this replaces.
     expect(within(row).getByRole("link", { name: "campaign" }))
-      .toHaveAttribute("href", "/next/campaigns/c1");
+      .toHaveAttribute("href", "/campaigns/c1");
   });
 
   it("counts nothing before the list has arrived, and never a nought", () => {
@@ -232,7 +232,7 @@ describe("the schedules the fleet runs on a clock", () => {
     draw();
     await waitFor(() => expect(screen.getByText("No campaign runs on a clock here yet.")).toBeInTheDocument());
     expect(screen.getByRole("link", { name: "Schedule one from the Bulk workspace" }))
-      .toHaveAttribute("href", "/next/bulk");
+      .toHaveAttribute("href", "/bulk");
   });
 
   it("will not create a schedule the server would refuse, and says why", async () => {
@@ -353,7 +353,7 @@ describe("the schedules the fleet runs on a clock", () => {
     });
     await waitFor(() =>
       expect(screen.getByRole("link", { name: "nightly-restart" }))
-        .toHaveAttribute("href", "/next/campaigns/c9"));
+        .toHaveAttribute("href", "/campaigns/c9"));
   });
 });
 
@@ -402,7 +402,7 @@ describe("the maintenance calendar", () => {
     const fifth = screen.getByTestId("day-2026-10-05");
     expect(within(fifth).getByText("maintenance")).toBeInTheDocument();
     expect(within(fifth).getByRole("link", { name: "agent-arch" }))
-      .toHaveAttribute("href", "/next/hosts/h1");
+      .toHaveAttribute("href", "/hosts/h1");
     expect(fifth).toHaveTextContent("kernel · tszymanski");
     vi.useRealTimers();
   });
@@ -430,9 +430,9 @@ describe("the maintenance calendar", () => {
     // The window covers two days, so it is a row on each of them.
     expect(screen.getAllByRole("link", { name: "agent-arch" })).toHaveLength(2);
     expect(screen.getAllByRole("link", { name: "agent-arch" })[0])
-      .toHaveAttribute("href", "/next/hosts/h1");
+      .toHaveAttribute("href", "/hosts/h1");
     expect(screen.getAllByRole("link", { name: "october patching" })[0])
-      .toHaveAttribute("href", "/next/campaigns/c1");
+      .toHaveAttribute("href", "/campaigns/c1");
     // The window runs into the next day, and says so there rather than
     // repeating an hour that belongs to the day it opened on.
     const second = screen.getAllByTestId("day-2026-10-06");

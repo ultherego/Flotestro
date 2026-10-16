@@ -15,7 +15,7 @@ import {
 import type {
   Campaign, CampaignTarget, Host, OperationContract, ResourceClaim, SelectorExpression,
 } from "../../lib/types";
-import { stateName } from "../../components/ui";
+import { stateName } from "../../lib/states";
 import {
   changeAction, isPackageChange, planStatus, planWords, ACTION_WORDS,
   type HostPlan, type PackagePlanFacts, type PlanGroup,
@@ -376,7 +376,7 @@ function ScopeBar({ order, preview, campaign, targets, risk }: {
             its original in sight is a change like any other. */}
         {preview?.compensates && (
           <Fact label={t("Compensates")}>
-            <Link to={`/next/campaigns/${preview.compensates.id}`}>{preview.compensates.name}</Link>
+            <Link to={`/campaigns/${preview.compensates.id}`}>{preview.compensates.name}</Link>
           </Fact>
         )}
         {campaign && (
@@ -1585,7 +1585,7 @@ function RolloutStep({ order, change, targets, declaredPolicy, nav }: {
       span={12}
       title={`4. ${t("Rollout")}`}
       note={t("Decide how many hosts change at once and when the campaign stops itself; the defaults suit a first campaign. A canary goes first as wave zero, the rest follow in waves, and a host waiting for capacity says so instead of standing still.")}
-      tools={<Link to="/next/budgets" className="fl-quiet fl-small">{t("See the budgets.")}</Link>}
+      tools={<Link to="/budgets" className="fl-quiet fl-small">{t("See the budgets.")}</Link>}
       foot={
         <Stack>
           <Note>
@@ -1907,7 +1907,7 @@ function CreateStep({ order, change, targets, compensates, token, campaignID, on
           <Note>
             {t("Compensates campaign")}{" "}
             {compensates
-              ? <Link to={`/next/campaigns/${compensates.id}`}>{compensates.name}</Link>
+              ? <Link to={`/campaigns/${compensates.id}`}>{compensates.name}</Link>
               : <span className="fl-mono">{order.compensates}</span>}
             {" · "}
             {t("The original is linked, never rewritten; its hosts get a compensate step as the reverse change runs on them.")}
@@ -1957,7 +1957,7 @@ function CreateStep({ order, change, targets, compensates, token, campaignID, on
         {scheduled && (
           <Note>
             {t("The schedule is recorded; the campaign is created at its moment.")}{" "}
-            <Link to="/next/campaigns/schedules">{t("Open the schedules")}</Link>
+            <Link to="/campaigns/schedules">{t("Open the schedules")}</Link>
           </Note>
         )}
         {errorMessage && <Problem>{errorMessage}</Problem>}
@@ -2382,7 +2382,7 @@ function ApprovalStep({ campaignID, campaign, nav }: { campaignID: string; campa
             <Pill tone={campaignTone(campaign.state)}>{t(stateName(campaign.state))}</Pill>.{" "}
             {/* Pausing and cancelling belong to the campaign screen: the
                 consequences are described there. */}
-            <Link to={`/next/campaigns/${campaign.id}`}>{t("Pause, cancel or read the report")}</Link>.
+            <Link to={`/campaigns/${campaign.id}`}>{t("Pause, cancel or read the report")}</Link>.
           </Note>
         )}
         <TargetTable targets={targets} action={campaign.action_type} />
@@ -2411,7 +2411,7 @@ function TargetTable({ targets, action }: { targets: ReturnType<typeof useTarget
             key: "host",
             head: t("Host"),
             cell: (one) => (
-              <Link to={`/next/hosts/${one.host_id}/${moduleForAction(action)}?campaign=${one.campaign_id}`}>
+              <Link to={`/hosts/${one.host_id}/${moduleForAction(action)}?campaign=${one.campaign_id}`}>
                 {one.hostname || one.host_id.slice(0, 8)}
               </Link>
             ),

@@ -296,7 +296,7 @@ export function Hosts() {
   const setConnection = (value: Connection) =>
     setFilters((previous) => ({ ...previous, connection_state: value, connection_refusal: "" }));
   /** The address of this list narrowed to one tag. */
-  const tagAddress = (tag: string) => `/next/hosts?${new URLSearchParams([["tag", tag]])}`;
+  const tagAddress = (tag: string) => `/hosts?${new URLSearchParams([["tag", tag]])}`;
 
   // The active filters as chips: what the list is narrowed by, each with
   // its own way off.
@@ -340,7 +340,7 @@ export function Hosts() {
   const openInBulk = () => {
     const target = new URLSearchParams();
     for (const id of selected) target.append("host_id", id);
-    navigate(`/next/bulk?${target}`);
+    navigate(`/bulk?${target}`);
   };
 
   /* The checkbox column exists only for a reader who has somewhere to take
@@ -371,7 +371,7 @@ export function Hosts() {
       ? <span className="fl-faint">—</span>
       : value > 0 ? <Pill tone="warn">{value}</Pill> : <span>{value}</span>;
 
-  const addHost = <Link to="/next/hosts/new" className="fl-btn">{t("Add host")}</Link>;
+  const addHost = <Link to="/hosts/new" className="fl-btn">{t("Add host")}</Link>;
 
   return (
     <>
@@ -701,7 +701,7 @@ export function Hosts() {
                   head: t("Host"),
                   cell: (one) => (
                     <>
-                      <Link to={`/next/hosts/${one.id}`}>{one.hostname}</Link>
+                      <Link to={`/hosts/${one.id}`}>{one.hostname}</Link>
                       {/* A tag leads to every host that carries it, which is
                           what a tag is for. */}
                       {one.tags.length > 0 && (
@@ -1183,7 +1183,7 @@ function Metadata({ hosts, canTag, canMaintain, onClose }: {
             columns={[
               { key: "host", head: t("Host"), cell: (one) => {
                 const host = byID.get(one.host_id);
-                return host ? <Link to={`/next/hosts/${host.id}`}>{host.hostname}</Link> : one.host_id;
+                return host ? <Link to={`/hosts/${host.id}`}>{host.hostname}</Link> : one.host_id;
               } },
               { key: "outcome", head: t("Outcome"), cell: (one) => (
                 <Pill tone={one.ok ? "ok" : "error"}>{one.ok ? t("applied") : one.code}</Pill>

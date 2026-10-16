@@ -88,15 +88,15 @@ function Where() {
  * The screen under the two addresses it answers on: the fleet, and one
  * advisory across it.
  */
-function draw(at = "/next/vulnerabilities") {
+function draw(at = "/vulnerabilities") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[at]}>
         <ToastProvider>
           <Routes>
-            <Route path="/next/vulnerabilities" element={<Vulnerabilities />} />
-            <Route path="/next/vulnerabilities/:cve" element={<Vulnerabilities />} />
+            <Route path="/vulnerabilities" element={<Vulnerabilities />} />
+            <Route path="/vulnerabilities/:cve" element={<Vulnerabilities />} />
           </Routes>
           <Where />
         </ToastProvider>
@@ -122,7 +122,7 @@ describe("the host list", () => {
     const row = screen.getByTestId("host-web-01");
     // The way into a fix is the host's own vulnerability module.
     expect(within(row).getByRole("link", { name: "web-01" }))
-      .toHaveAttribute("href", "/next/hosts/h1/vulnerabilities");
+      .toHaveAttribute("href", "/hosts/h1/vulnerabilities");
     expect(row).toHaveTextContent("debian 12");
     expect(row).toHaveTextContent("11");
     // Rounding the coverage to a whole number turned 99.4 into 99 and read
@@ -218,7 +218,7 @@ describe("the CVE list", () => {
 
     const row = screen.getByTestId("cve-CVE-2026-1001");
     expect(within(row).getByRole("link", { name: "CVE-2026-1001" }))
-      .toHaveAttribute("href", "/next/vulnerabilities/CVE-2026-1001");
+      .toHaveAttribute("href", "/vulnerabilities/CVE-2026-1001");
     expect(within(row).getByText("critical")).toHaveClass("fl-error");
     expect(row).toHaveTextContent("9.8");
     // Four machines to move and a fix for three of them: the row says both.
@@ -338,12 +338,12 @@ describe("one advisory from the address", () => {
       "/api/v1/vulnerabilities": fleet(),
       "/api/v1/vulnerabilities/cves/CVE-2026-1001": report(),
     });
-    draw("/next/vulnerabilities/CVE-2026-1001");
+    draw("/vulnerabilities/CVE-2026-1001");
     await waitFor(() => expect(screen.getByTestId("finding-web-01-openssl")).toBeInTheDocument());
     const row = screen.getByTestId("finding-web-01-openssl");
     // The way to a fix is the host's own vulnerability module.
     expect(within(row).getByRole("link", { name: "web-01" }))
-      .toHaveAttribute("href", "/next/hosts/h1/vulnerabilities");
+      .toHaveAttribute("href", "/hosts/h1/vulnerabilities");
     expect(row).toHaveTextContent("3.0.11-1~deb12u2");
     // What the vendor published, with the advisory's own link.
     expect(within(screen.getByTestId("advisory-DSA-5600-1")).getByRole("link", { name: "DSA-5600-1" }))
@@ -360,11 +360,11 @@ describe("one advisory from the address", () => {
       "/api/v1/vulnerabilities": fleet(),
       "/api/v1/vulnerabilities/cves/CVE-2026-9999": new ApiError(404, "not_found", "no such CVE"),
     });
-    draw("/next/vulnerabilities/CVE-2026-9999");
+    draw("/vulnerabilities/CVE-2026-9999");
     await waitFor(() => expect(screen.getByText(/No host you can see carries CVE-2026-9999/)).toBeInTheDocument());
     expect(screen.queryByTestId("cve-hosts")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "All vulnerabilities" }))
-      .toHaveAttribute("href", "/next/vulnerabilities");
+      .toHaveAttribute("href", "/vulnerabilities");
   });
 
   it("puts the CVE picked from a row in the address", async () => {
@@ -373,10 +373,10 @@ describe("one advisory from the address", () => {
       "/api/v1/vulnerabilities/cves?": { items: [cve()], count: 1, total: 1, limit: 50, offset: 0 },
       "/api/v1/vulnerabilities/cves/CVE-2026-1001": report(),
     });
-    draw("/next/vulnerabilities?view=cves");
+    draw("/vulnerabilities?view=cves");
     await waitFor(() => expect(screen.getByTestId("cve-CVE-2026-1001")).toBeInTheDocument());
     fireEvent.click(within(screen.getByTestId("cve-CVE-2026-1001")).getByRole("link", { name: "CVE-2026-1001" }));
-    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/next/vulnerabilities/CVE-2026-1001"));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/vulnerabilities/CVE-2026-1001"));
     await waitFor(() => expect(screen.getByTestId("cve-hosts")).toBeInTheDocument());
   });
 
@@ -392,7 +392,7 @@ describe("one advisory from the address", () => {
         packages: ["openssl", "libssl3"],
       }),
     });
-    draw("/next/vulnerabilities/CVE-2026-1001");
+    draw("/vulnerabilities/CVE-2026-1001");
     // Two sets of packages, so two orders: a host sent names it does not
     // have is refused by its own package manager.
     await waitFor(() => expect(screen.getByTestId("patch-openssl")).toBeInTheDocument());
@@ -418,8 +418,8 @@ describe("one advisory from the address", () => {
 
   it("sends one order to the hosts it names, with the packages those hosts carry", () => {
     const address = patchAddress("CVE-2026-1001", ["openssl"], ["h1", "h2"]);
-    expect(address.startsWith("/next/bulk?")).toBe(true);
-    const params = new URLSearchParams(address.slice("/next/bulk?".length));
+    expect(address.startsWith("/bulk?")).toBe(true);
+    const params = new URLSearchParams(address.slice("/bulk?".length));
     expect(params.get("action")).toBe("packages.upgrade");
     expect(params.getAll("host_id")).toEqual(["h1", "h2"]);
     expect(JSON.parse(params.get("payload") ?? "{}")).toEqual({ package_upgrade: { packages: ["openssl"] } });

@@ -85,23 +85,23 @@ afterEach(() => {
   for (const key of Object.keys(held)) delete held[key];
 });
 
-const draw = (at = "/next") => {
+const draw = (at = "/") => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[at]}>
         <Routes>
-          <Route path="/next" element={<Shell trail={{ section: "Fleet" }}>board</Shell>} />
+          <Route path="/" element={<Shell trail={{ section: "Fleet" }}>board</Shell>} />
           {/* A machine's module, so the picker can be asked to keep it. */}
           <Route
-            path="/next/hosts/:id/:module"
+            path="/hosts/:id/:module"
             element={<Shell trail={{ section: "Hosts" }}>one module</Shell>}
           />
-          <Route path="/next/hosts/:id" element={<p>one host</p>} />
-          <Route path="/next/jobs/:id" element={<p>one job</p>} />
-          <Route path="/next/campaigns/:id" element={<p>one campaign</p>} />
-          <Route path="/next/groups" element={<p>the groups</p>} />
-          <Route path="/next/tags" element={<p>the tags</p>} />
+          <Route path="/hosts/:id" element={<p>one host</p>} />
+          <Route path="/jobs/:id" element={<p>one job</p>} />
+          <Route path="/campaigns/:id" element={<p>one campaign</p>} />
+          <Route path="/groups" element={<p>the groups</p>} />
+          <Route path="/tags" element={<p>the tags</p>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -185,7 +185,7 @@ describe("what the finder reaches", () => {
     draw();
     await look("9f2c1a44");
     const row = await screen.findByTestId("finder-job:9f2c1a44-0000-4000-8000-000000000001");
-    expect(row).toHaveAttribute("href", "/next/jobs/9f2c1a44-0000-4000-8000-000000000001");
+    expect(row).toHaveAttribute("href", "/jobs/9f2c1a44-0000-4000-8000-000000000001");
     expect(within(row).getByText("job")).toBeInTheDocument();
     fireEvent.keyDown(screen.getByTestId("finder-field"), { key: "Enter" });
     await waitFor(() => expect(screen.getByText("one job")).toBeInTheDocument());
@@ -201,7 +201,7 @@ describe("what the finder reaches", () => {
     draw();
     await look("octo");
     const row = await screen.findByTestId("finder-campaign:c7");
-    expect(row).toHaveAttribute("href", "/next/campaigns/c7");
+    expect(row).toHaveAttribute("href", "/campaigns/c7");
     expect(within(row).getByText("campaign")).toBeInTheDocument();
     fireEvent.keyDown(screen.getByTestId("finder-field"), { key: "Enter" });
     await waitFor(() => expect(screen.getByText("one campaign")).toBeInTheDocument());
@@ -343,16 +343,16 @@ describe("the finder as the host picker", () => {
     // An operator comparing the packages of two machines should not be
     // sent back to the overview of the second one.
     serve();
-    draw("/next/hosts/h1/packages");
+    draw("/hosts/h1/packages");
     fireEvent.keyDown(document, { key: "k", ctrlKey: true });
     fireEvent.change(await screen.findByTestId("finder-field"), { target: { value: "agent" } });
     const row = await screen.findByTestId("finder-host:h9");
-    expect(row).toHaveAttribute("href", "/next/hosts/h9/packages");
+    expect(row).toHaveAttribute("href", "/hosts/h9/packages");
   });
 
   it("offers what this browser opened lately before anything is typed", async () => {
     serve();
-    draw("/next/hosts/h1/packages");
+    draw("/hosts/h1/packages");
     fireEvent.keyDown(document, { key: "k", ctrlKey: true });
     fireEvent.change(await screen.findByTestId("finder-field"), { target: { value: "agent" } });
     fireEvent.click(await screen.findByTestId("finder-host:h9"));

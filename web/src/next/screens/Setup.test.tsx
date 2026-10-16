@@ -102,7 +102,7 @@ function draw() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/next/setup"]}><ToastProvider>{children}</ToastProvider></MemoryRouter>
+      <MemoryRouter initialEntries={["/setup"]}><ToastProvider>{children}</ToastProvider></MemoryRouter>
     </QueryClientProvider>
   );
   return render(<Setup />, { wrapper });
@@ -118,8 +118,8 @@ afterEach(() => {
 
 describe("where a step leads", () => {
   it("sends the reader into the new panel, never back into the one it replaces", () => {
-    expect(stepLink("/hosts/new")).toBe("/next/hosts/new");
-    expect(stepLink("/access?tab=mappings")).toBe("/next/access?tab=mappings");
+    expect(stepLink("/hosts/new")).toBe("/hosts/new");
+    expect(stepLink("/access?tab=mappings")).toBe("/access?tab=mappings");
   });
 });
 
@@ -181,8 +181,8 @@ describe("the first run", () => {
     Object.assign(answers, base());
     draw();
     await waitFor(() => expect(screen.getByTestId("go-hosts")).toBeInTheDocument());
-    expect(screen.getByTestId("go-hosts")).toHaveAttribute("href", "/next/hosts/new");
-    expect(screen.getByTestId("go-group_mapping")).toHaveAttribute("href", "/next/access?tab=mappings");
+    expect(screen.getByTestId("go-hosts")).toHaveAttribute("href", "/hosts/new");
+    expect(screen.getByTestId("go-group_mapping")).toHaveAttribute("href", "/access?tab=mappings");
     // The step whose work is done here leads nowhere else.
     expect(screen.queryByTestId("go-advertised_address")).toBeNull();
   });

@@ -303,7 +303,7 @@ function JobNotice({ job }: { job: Job }) {
   return (
     <Banner tone="info">
       {before}
-      <Link to={`/next/jobs/${job.id}`}>{job.id.slice(0, 8)}</Link>
+      <Link to={`/jobs/${job.id}`}>{job.id.slice(0, 8)}</Link>
       {after}
     </Banner>
   );
@@ -527,7 +527,7 @@ export function Backups({ host }: { host: Host }) {
       setProblem("");
       // The notice is at the top of the module and the copy list may be far
       // below it; the toast names the job wherever the page is.
-      toast.success(text, { link: { to: `/next/hosts/${host.id}/jobs`, label: t("Jobs") } });
+      toast.success(text, { link: { to: `/hosts/${host.id}/jobs`, label: t("Jobs") } });
       if ((variables as { action?: string }).action === "backup.plan") {
         setPlanJob(job.id);
         const asked = (variables as { payload?: { backup?: { id?: string } } }).payload?.backup?.id;

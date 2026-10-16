@@ -52,13 +52,13 @@ export function HostWorkspace() {
   const data = host.data;
   const entry = moduleOf(module);
   const face: Face = {
-    back: { to: "/next/hosts", label: "All hosts" },
+    back: { to: "/hosts", label: "All hosts" },
     groups: data
       ? groupedModules(modules(data, installation)).map((group) => ({
           key: group.key,
           label: group.title,
           items: group.items.map((one) => ({
-            to: `/next/hosts/${id}/${one.segment}`,
+            to: `/hosts/${id}/${one.segment}`,
             label: one.name,
             icon: one.icon,
             unavailable: one.available ? undefined : one.missingReason,
@@ -71,7 +71,7 @@ export function HostWorkspace() {
     <Shell
       trail={{
         section: "Hosts",
-        to: "/next/hosts",
+        to: "/hosts",
         host: data,
         module: data ? findModule(module)?.name : undefined,
       }}
@@ -86,8 +86,11 @@ export function HostWorkspace() {
                 title={t(entry?.name ?? module)}
                 lead={t("This module is still being rewritten.")}
               />
-              <Empty action={<a className="fl-btn fl-quiet" href={`/hosts/${id}/${module}`}>{t("Open it in the panel as it is")}</a>}>
-                {t("The new panel is being written screen by screen; this one has not been reached yet.")}
+              {/* Until 16.10 this offered the panel being replaced, because
+                  a module not yet rewritten was still there. There is no
+                  second panel now: an unknown module is an unknown module. */}
+              <Empty icon="search">
+                {t("This host reports no module of that name.")}
               </Empty>
             </>
           )}
@@ -130,7 +133,7 @@ function HostHead({ host, segment, campaign }: {
   return (
     <Head
       crumb={campaign
-        ? <Link to={`/next/campaigns/${encodeURIComponent(campaign)}`}>{t("Back to the campaign")}</Link>
+        ? <Link to={`/campaigns/${encodeURIComponent(campaign)}`}>{t("Back to the campaign")}</Link>
         : undefined}
       title={host.hostname}
       lead={
@@ -210,13 +213,12 @@ function HostHead({ host, segment, campaign }: {
             >
               {t("Refresh the whole inventory")}
             </MenuItem>
-            <MenuItem to={`/next/hosts/${host.id}/logs`} icon="logs">{t("Open the logs")}</MenuItem>
-            <MenuItem to={`/next/hosts/${host.id}/jobs`} icon="jobs">{t("Jobs of this host")}</MenuItem>
+            <MenuItem to={`/hosts/${host.id}/logs`} icon="logs">{t("Open the logs")}</MenuItem>
+            <MenuItem to={`/hosts/${host.id}/jobs`} icon="jobs">{t("Jobs of this host")}</MenuItem>
             {/* A way to the power module and not a button that reboots
                 from a menu: the order is confirmed where it is placed. */}
-            <MenuItem to={`/next/hosts/${host.id}/power`} icon="power">{t("Reboot (power module)")}</MenuItem>
+            <MenuItem to={`/hosts/${host.id}/power`} icon="power">{t("Reboot (power module)")}</MenuItem>
           </Menu>
-          <a className="fl-btn fl-quiet" href={`/hosts/${host.id}`}>{t("Open in the panel as it is")}</a>
         </>
       }
     />
@@ -341,7 +343,7 @@ function HostTags({ host }: { host: Host }) {
         ? host.tags.map((tag) => (
             <Tag
               key={tag}
-              to={`/next/hosts?tag=${encodeURIComponent(tag)}`}
+              to={`/hosts?tag=${encodeURIComponent(tag)}`}
               title={t("show every host tagged {tag}", { tag })}
             >
               {tag}

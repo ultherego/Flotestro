@@ -368,7 +368,7 @@ export function Monitoring() {
 
   /** A host as a cell: the name where there is one, else the head of its id. */
   const host = (id: string, hostname?: string) => (
-    <Link to={`/next/hosts/${id}/monitoring`}>{hostname || id.slice(0, 8)}</Link>
+    <Link to={`/hosts/${id}/monitoring`}>{hostname || id.slice(0, 8)}</Link>
   );
   /** A moment, said the way a reader asks for it, with the exact one on hover. */
   const when = (value?: string | null) =>

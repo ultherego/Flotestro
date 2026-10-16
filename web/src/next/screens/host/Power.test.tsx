@@ -173,7 +173,7 @@ describe("the power module of a host", () => {
     await waitFor(() => expect(screen.getByText("this boot")).toBeInTheDocument());
     const dashed = dashedBootID("4b1f8d2e9c7a4f1b8e3d5a6c7b8d9e01");
     expect(screen.getByRole("link", { name: dashed })).toHaveAttribute(
-      "href", "/next/hosts/h1/logs?boot=4b1f8d2e9c7a4f1b8e3d5a6c7b8d9e01");
+      "href", "/hosts/h1/logs?boot=4b1f8d2e9c7a4f1b8e3d5a6c7b8d9e01");
   });
 
   it("names a shutdown somebody else scheduled before anything is ordered here", async () => {
@@ -231,7 +231,7 @@ describe("what the power module reads out of a boot", () => {
 
   it("leads to the journal of a boot inside the new panel", () => {
     expect(bootLogsPath("h1", "4B1F8D2E-9C7A-4F1B-8E3D-5A6C7B8D9E01"))
-      .toBe("/next/hosts/h1/logs?boot=4b1f8d2e9c7a4f1b8e3d5a6c7b8d9e01");
+      .toBe("/hosts/h1/logs?boot=4b1f8d2e9c7a4f1b8e3d5a6c7b8d9e01");
   });
 
   it("reads an uptime without arithmetic in one's head", () => {

@@ -145,13 +145,13 @@ export function classTotals(budgets: Pick<BudgetState, "by_class">[]): { name: s
 /** Where a holder leads, inside the new panel. */
 export function holderLink(holder: Pick<BudgetHolder, "owner" | "claimant">): { to: string; label: string } | null {
   const campaign = holder.claimant.startsWith("campaign:") ? holder.claimant.slice("campaign:".length) : "";
-  if (campaign) return { to: `/next/campaigns/${encodeURIComponent(campaign)}`, label: "campaign" };
+  if (campaign) return { to: `/campaigns/${encodeURIComponent(campaign)}`, label: "campaign" };
   if (holder.owner.startsWith("job:")) {
     const author = holder.claimant.startsWith("jobs:") ? holder.claimant.slice("jobs:".length) : "";
-    return { to: author ? `/next/jobs?actor=${encodeURIComponent(author)}` : "/next/jobs", label: "job" };
+    return { to: author ? `/jobs?actor=${encodeURIComponent(author)}` : "/jobs", label: "job" };
   }
   if (holder.owner.startsWith("fanout:")) {
-    return { to: `/next/reads/${encodeURIComponent(holder.owner.slice("fanout:".length))}`, label: "read" };
+    return { to: `/reads/${encodeURIComponent(holder.owner.slice("fanout:".length))}`, label: "read" };
   }
   return null;
 }
@@ -244,7 +244,7 @@ export function Budgets() {
       label: t("With work waiting"),
       value: loaded ? waited.length : undefined,
       tone: "warn",
-      to: waitingJobs ? "/next/jobs?state=queued" : waitingTargets ? "/next/campaigns" : undefined,
+      to: waitingJobs ? "/jobs?state=queued" : waitingTargets ? "/campaigns" : undefined,
     },
     { label: t("With room"), value: loaded ? free.length : undefined, tone: "ok" },
   ];
@@ -297,7 +297,7 @@ export function Budgets() {
             value={waitingJobs ?? null}
             tone={waitingJobs ? "warn" : "ok"}
             note={t("queued until a token frees up")}
-            to={waitingJobs ? "/next/jobs?state=queued" : undefined}
+            to={waitingJobs ? "/jobs?state=queued" : undefined}
             testId="kpi-waiting-jobs"
           />
         ),
@@ -308,7 +308,7 @@ export function Budgets() {
             value={waitingTargets ?? null}
             tone={waitingTargets ? "warn" : "ok"}
             note={t("campaign hosts held before they start")}
-            to={waitingTargets ? "/next/campaigns" : undefined}
+            to={waitingTargets ? "/campaigns" : undefined}
             testId="kpi-waiting-hosts"
           />
         ),
@@ -404,7 +404,7 @@ export function Budgets() {
                   // A number with nowhere to go only raises the question it
                   // could answer, so a count above nought leads to the queue.
                   cell: (one) => (one.waiting_jobs > 0
-                    ? <Tag to="/next/jobs?state=queued">{one.waiting_jobs}</Tag>
+                    ? <Tag to="/jobs?state=queued">{one.waiting_jobs}</Tag>
                     : one.waiting_jobs),
                 },
                 {
@@ -412,7 +412,7 @@ export function Budgets() {
                   head: t("Waiting hosts"),
                   num: true,
                   cell: (one) => ((one.waiting_targets ?? 0) > 0
-                    ? <Tag to="/next/campaigns">{one.waiting_targets}</Tag>
+                    ? <Tag to="/campaigns">{one.waiting_targets}</Tag>
                     : one.waiting_targets ?? 0),
                 },
               ]}

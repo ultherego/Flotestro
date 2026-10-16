@@ -305,7 +305,7 @@ export function Certificates() {
               {
                 key: "host",
                 head: t("Host"),
-                cell: (one) => <Link to={`/next/hosts/${one.host_id}/certificates`}>{one.hostname}</Link>,
+                cell: (one) => <Link to={`/hosts/${one.host_id}/certificates`}>{one.hostname}</Link>,
               },
               {
                 key: "path",

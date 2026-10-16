@@ -83,7 +83,7 @@ const reads = {
   })),
 };
 
-function draw(at = "/next/hosts/h1/logs", on: Host = host()) {
+function draw(at = "/hosts/h1/logs", on: Host = host()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
@@ -167,7 +167,7 @@ describe("the logs module of a host", () => {
   it("will not send a boot filter the agent cannot apply", async () => {
     Object.assign(answers, { "/api/v1/settings/layout": layout, "/api/v1/hosts/h1/actions": reads });
     const old = host({ capabilities: [journald({ suppression_notice: true })] });
-    draw("/next/hosts/h1/logs?boot=" + "a".repeat(32), old);
+    draw("/hosts/h1/logs?boot=" + "a".repeat(32), old);
     await screen.findByTestId("read");
     expect(screen.getByTestId("boot-filter")).toBeInTheDocument();
     expect(screen.getByTestId("read")).toBeDisabled();

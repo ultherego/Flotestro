@@ -6,7 +6,7 @@ import { useDebounced } from "../../lib/debounce";
 import { usePageSize } from "../../components/SortableTable";
 import { relativeTime, absoluteTime, toInstant } from "../../lib/format";
 import type { Campaign } from "../../lib/types";
-import { stateName } from "../../components/ui";
+import { stateName } from "../../lib/states";
 import { useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
@@ -170,7 +170,7 @@ export function Campaigns() {
             rowTestId={(one) => `campaign-${one.name}`}
             loading={list.isLoading} empty={t("No campaign matches this.")}
             columns={[
-              { key: "name", head: t("Name"), cell: (one) => <Link to={`/next/campaigns/${one.id}`}>{one.name}</Link> },
+              { key: "name", head: t("Name"), cell: (one) => <Link to={`/campaigns/${one.id}`}>{one.name}</Link> },
               { key: "state", head: t("State"), cell: (one) => (
                 <Pill tone={campaignTone(one.state)}>{t(stateName(one.state))}</Pill>
               ) },

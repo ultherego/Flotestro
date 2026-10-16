@@ -82,9 +82,9 @@ function draw() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/next/jobs/j1"]}>
+      <MemoryRouter initialEntries={["/jobs/j1"]}>
         <ToastProvider>
-          <Routes><Route path="/next/jobs/:id" element={children} /></Routes>
+          <Routes><Route path="/jobs/:id" element={children} /></Routes>
         </ToastProvider>
       </MemoryRouter>
     </QueryClientProvider>
@@ -109,7 +109,7 @@ describe("one job", () => {
     });
     draw();
     await waitFor(() => expect(screen.getByRole("heading", { name: /unit\.restart/ })).toBeInTheDocument());
-    expect(screen.getAllByRole("link", { name: "agent-arch" })[0]).toHaveAttribute("href", "/next/hosts/h1");
+    expect(screen.getAllByRole("link", { name: "agent-arch" })[0]).toHaveAttribute("href", "/hosts/h1");
     expect(screen.getAllByText("succeeded").length).toBeGreaterThan(0);
     // The payload is the text the hash covers, so it stands verbatim.
     expect(screen.getByTestId("payload")).toHaveTextContent("sshd.service");
@@ -242,8 +242,8 @@ describe("one job", () => {
     });
     draw();
     await waitFor(() => expect(screen.getByRole("link", { name: "c9" })).toBeInTheDocument());
-    expect(screen.getByRole("link", { name: "c9" })).toHaveAttribute("href", "/next/campaigns/c9");
-    expect(screen.getByRole("link", { name: "f7" })).toHaveAttribute("href", "/next/reads/f7");
+    expect(screen.getByRole("link", { name: "c9" })).toHaveAttribute("href", "/campaigns/c9");
+    expect(screen.getByRole("link", { name: "f7" })).toHaveAttribute("href", "/reads/f7");
   });
 
   it("draws the plan the host computed, with the packages it names", async () => {

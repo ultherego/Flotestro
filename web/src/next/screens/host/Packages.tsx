@@ -7,7 +7,7 @@ import { absoluteTime, relativeTime } from "../../../lib/format";
 import {
   RELEASE_CHANNELS, type Attempt, type Host, type InventoryFragment, type Job, type ReleaseChannel,
 } from "../../../lib/types";
-import { stateName } from "../../../components/ui";
+import { stateName } from "../../../lib/states";
 import {
   agentUpgradeOrder, changePayload, filterRows, heldCount, operationBody, packageRows, packageVersion,
   planBinding, planExpired, planMode,
@@ -700,7 +700,7 @@ function PlanUpdates({ host, pacman, busy, onSay, onFail }: {
         <Button onClick={() => ask.mutate()} disabled={ask.isPending || busy} testId="plan-updates">
           {ask.isPending ? t("Requesting…") : t("Plan updates")}
         </Button>
-        <Tag to={`/next/hosts/${host.id}/jobs`}>{t("See all jobs")}</Tag>
+        <Tag to={`/hosts/${host.id}/jobs`}>{t("See all jobs")}</Tag>
       </Actions>
     </Card>
   );
@@ -1231,7 +1231,7 @@ function TransactionHistory({ hostId }: { hostId: string }) {
               { key: "by", head: t("By"), minor: true, cell: (job) => job.created_by },
               {
                 key: "job", head: t("Job"), tight: true,
-                cell: (job) => <Tag to={`/next/jobs/${job.id}`} title={job.id}>{job.id.slice(0, 8)}</Tag>,
+                cell: (job) => <Tag to={`/jobs/${job.id}`} title={job.id}>{job.id.slice(0, 8)}</Tag>,
               },
             ]}
           />

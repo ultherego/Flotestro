@@ -79,7 +79,7 @@ describe("the trail", () => {
     expect(row).toHaveTextContent("host.enrollment.replace");
     expect(within(row).getByText("success")).toBeInTheDocument();
     expect(within(row).getByRole("link", { name: "agent-arch" })).toHaveAttribute(
-      "href", "/next/hosts/377802f9-a0e9-4afa-ad68-293a0873bcf3",
+      "href", "/hosts/377802f9-a0e9-4afa-ad68-293a0873bcf3",
     );
   });
 
@@ -281,7 +281,7 @@ describe("the facts of an event", () => {
     expect(actorView({
       actor_type: "agent", actor_id: "relay-warsaw",
       actor: { subject: "relay-warsaw", kind: "relay", resource_type: "relay", resource_id: "r1", resource_name: "relay-warsaw" },
-    }, t).to).toBe("/next/relays/r1");
+    }, t).to).toBe("/relays/r1");
   });
 
   it("groups by the identifier, so a rename stays one actor", () => {
@@ -292,7 +292,7 @@ describe("the facts of an event", () => {
   });
 
   it("leads to the target where the new panel has a screen for it", () => {
-    expect(targetLink("host", hostID)).toBe(`/next/hosts/${hostID}`);
+    expect(targetLink("host", hostID)).toBe(`/hosts/${hostID}`);
     expect(targetLink("nothing", "x")).toBeNull();
     expect(targetLink("host", undefined)).toBeNull();
   });

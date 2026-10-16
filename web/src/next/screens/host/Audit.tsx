@@ -45,7 +45,7 @@ export function actorLabel(
       const campaign = id.slice("campaign:".length);
       return {
         text: t("campaign {id}", { id: campaign.slice(0, 8) }),
-        to: `/next/campaigns/${encodeURIComponent(campaign)}`,
+        to: `/campaigns/${encodeURIComponent(campaign)}`,
         title: id,
       };
     }

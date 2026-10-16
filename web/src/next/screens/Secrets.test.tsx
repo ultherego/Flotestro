@@ -82,15 +82,15 @@ function Where() {
  * secret. The name is the identifier in both, because the value is the
  * identifier of nothing and may never stand in an address.
  */
-function draw(at = "/next/secrets") {
+function draw(at = "/secrets") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[at]}>
         <ToastProvider>
           <Routes>
-            <Route path="/next/secrets" element={<Secrets />} />
-            <Route path="/next/secrets/:name" element={<Secrets />} />
+            <Route path="/secrets" element={<Secrets />} />
+            <Route path="/secrets/:name" element={<Secrets />} />
           </Routes>
           <Where />
         </ToastProvider>
@@ -141,7 +141,7 @@ describe("what the store says about itself", () => {
   });
 
   it("leads to the record inside the new panel", () => {
-    expect(secretAddress("repo.token")).toBe("/next/secrets/repo.token");
+    expect(secretAddress("repo.token")).toBe("/secrets/repo.token");
   });
 });
 
@@ -154,7 +154,7 @@ describe("the secret store", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("secret-repo.token")).toBeInTheDocument());
     const row = screen.getByTestId("secret-repo.token");
-    expect(within(row).getByRole("link", { name: "repo.token" })).toHaveAttribute("href", "/next/secrets/repo.token");
+    expect(within(row).getByRole("link", { name: "repo.token" })).toHaveAttribute("href", "/secrets/repo.token");
     expect(row).toHaveTextContent("package repository token");
     expect(row).toHaveTextContent("2");
     expect(within(row).getByText("issuable")).toBeInTheDocument();
@@ -228,7 +228,7 @@ describe("one secret from the address", () => {
       "/api/v1/secrets/repo.token": { ...history(), value: VALUE },
       "/api/v1/whoami": writer,
     });
-    draw("/next/secrets/repo.token");
+    draw("/secrets/repo.token");
     await waitFor(() => expect(screen.getByTestId("version-2")).toBeInTheDocument());
     expect(screen.getByTestId("version-1")).toBeInTheDocument();
     expect(within(screen.getByTestId("version-2")).getByText("current")).toBeInTheDocument();
@@ -239,7 +239,7 @@ describe("one secret from the address", () => {
     // The one rule of the whole screen: no value, on the page or in the
     // address.
     expect(document.body.textContent).not.toContain(VALUE);
-    expect(screen.getByTestId("where")).toHaveTextContent("/next/secrets/repo.token");
+    expect(screen.getByTestId("where")).toHaveTextContent("/secrets/repo.token");
     expect(screen.getByTestId("where").textContent).not.toContain(VALUE);
     // The store's own list is not drawn underneath it.
     expect(screen.queryByTestId("secrets-table")).not.toBeInTheDocument();
@@ -251,10 +251,10 @@ describe("one secret from the address", () => {
       "/api/v1/secrets/ghost.token": new ApiError(404, "not_found", "no such secret"),
       "/api/v1/whoami": writer,
     });
-    draw("/next/secrets/ghost.token");
+    draw("/secrets/ghost.token");
     await waitFor(() => expect(screen.getByText(/No secret named ghost.token/)).toBeInTheDocument());
     expect(screen.queryByTestId("secret-versions")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "All secrets" })).toHaveAttribute("href", "/next/secrets");
+    expect(screen.getByRole("link", { name: "All secrets" })).toHaveAttribute("href", "/secrets");
   });
 
   it("puts the secret picked from a row in the address", async () => {
@@ -265,9 +265,9 @@ describe("one secret from the address", () => {
     });
     draw();
     await waitFor(() => expect(screen.getByTestId("secret-repo.token")).toBeInTheDocument());
-    expect(screen.getByTestId("where")).toHaveTextContent("/next/secrets");
+    expect(screen.getByTestId("where")).toHaveTextContent("/secrets");
     fireEvent.click(within(screen.getByTestId("secret-repo.token")).getByRole("link", { name: "repo.token" }));
-    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/next/secrets/repo.token"));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/secrets/repo.token"));
     await waitFor(() => expect(screen.getByTestId("secret-versions")).toBeInTheDocument());
   });
 
@@ -278,7 +278,7 @@ describe("one secret from the address", () => {
       "/api/v1/whoami": writer,
     });
     Object.assign(writes, { "/api/v1/secrets/repo.token/versions/1": history() });
-    draw("/next/secrets/repo.token");
+    draw("/secrets/repo.token");
     await waitFor(() => expect(screen.getByTestId("destroy-1")).toBeInTheDocument());
     // The current version is not offered while the secret is still issuable.
     expect(screen.queryByTestId("destroy-2")).not.toBeInTheDocument();
@@ -304,7 +304,7 @@ describe("one secret from the address", () => {
       "/api/v1/secrets/repo.token": history(),
       "/api/v1/whoami": reader,
     });
-    draw("/next/secrets/repo.token");
+    draw("/secrets/repo.token");
     await waitFor(() => expect(screen.getByTestId("version-1")).toBeInTheDocument());
     expect(screen.queryByTestId("destroy-1")).not.toBeInTheDocument();
   });

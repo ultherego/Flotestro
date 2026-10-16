@@ -97,8 +97,8 @@ describe("the job list", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("job-j1")).toBeInTheDocument());
     const row = screen.getByTestId("job-j1");
-    expect(within(row).getByText("unit.restart").closest("a")).toHaveAttribute("href", "/next/jobs/j1");
-    expect(within(row).getByRole("link", { name: "agent-arch" })).toHaveAttribute("href", "/next/hosts/h1");
+    expect(within(row).getByText("unit.restart").closest("a")).toHaveAttribute("href", "/jobs/j1");
+    expect(within(row).getByRole("link", { name: "agent-arch" })).toHaveAttribute("href", "/hosts/h1");
     expect(within(row).getByText("succeeded")).toBeInTheDocument();
   });
 
@@ -330,7 +330,7 @@ describe("the attempts of a job, read on the list", () => {
     // And the list is still there: the attempts are read without leaving it.
     expect(screen.getByTestId("job-j1")).toBeInTheDocument();
     // The whole of it is one link away.
-    expect(screen.getByRole("link", { name: /Open the job/ })).toHaveAttribute("href", "/next/jobs/j1");
+    expect(screen.getByRole("link", { name: /Open the job/ })).toHaveAttribute("href", "/jobs/j1");
   });
 
   it("closes again, and reads nothing it was not asked to", async () => {

@@ -244,7 +244,7 @@ export function Profile() {
             </Facts>
             {managesAccess && (
               <Note>
-                <Link to="/next/access">{t("Manage every identity on the access screen")}</Link>
+                <Link to="/access">{t("Manage every identity on the access screen")}</Link>
               </Note>
             )}
           </Card>

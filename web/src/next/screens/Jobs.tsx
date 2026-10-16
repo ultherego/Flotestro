@@ -4,7 +4,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { api, fetchWithCredentials, loadedItems, type Collection, type Page } from "../../lib/api";
 import { exportAddress, exportFileName } from "../../components/ExportButton";
 import { useToast } from "../../components/Toast";
-import { stateName } from "../../components/ui";
+import { stateName } from "../../lib/states";
 import { useDebounced } from "../../lib/debounce";
 import { absoluteTime, bytes, relativeTime, toInstant } from "../../lib/format";
 import { needsReason } from "../../lib/actions";
@@ -79,7 +79,7 @@ export function readFilters(address: URLSearchParams): Filters {
   return out;
 }
 
-/** The address the filters make: only the ones that are set, so an unfiltered screen is a plain /next/jobs. */
+/** The address the filters make: only the ones that are set, so an unfiltered screen is a plain /jobs. */
 export function filterAddress(filters: Filters): URLSearchParams {
   const out = new URLSearchParams();
   for (const key of KEYS) if (filters[key]) out.set(key, filters[key]);
@@ -580,13 +580,13 @@ export function Jobs() {
                   tight: true,
                   cell: (job) => (
                     <TwoLine sub={job.campaign_id
-                      ? <Link to={`/next/campaigns/${job.campaign_id}`} title={t("Part of a campaign")}>
+                      ? <Link to={`/campaigns/${job.campaign_id}`} title={t("Part of a campaign")}>
                           {campaignName(job.campaign_id)
                             ? t("campaign {name}", { name: campaignName(job.campaign_id) ?? "" })
                             : t("campaign {id}", { id: job.campaign_id.slice(0, 8) })}
                         </Link>
                       : undefined}>
-                      <Link to={`/next/jobs/${job.id}`}><code title={job.action_type}>{job.action_type}</code></Link>
+                      <Link to={`/jobs/${job.id}`}><code title={job.action_type}>{job.action_type}</code></Link>
                     </TwoLine>
                   ),
                 },
@@ -596,7 +596,7 @@ export function Jobs() {
                   tight: true,
                   optional: true,
                   cell: (job) => (
-                    <Link to={`/next/hosts/${job.host_id}`} className="fl-nowrap">
+                    <Link to={`/hosts/${job.host_id}`} className="fl-nowrap">
                       {job.hostname || job.host_id.slice(0, 8)}
                     </Link>
                   ),
@@ -838,7 +838,7 @@ function Attempts({ job, onClose }: { job: Job; onClose: () => void }) {
       note={t("Every attempt the host made at this job, newest last.")}
       tools={
         <>
-          <Link to={`/next/jobs/${job.id}`} className="fl-quiet fl-small">
+          <Link to={`/jobs/${job.id}`} className="fl-quiet fl-small">
             {t("Open the job: full payload, plan and output")}
           </Link>
           <Button kind="quiet" onClick={onClose} testId="hide-attempts">{t("Hide")}</Button>

@@ -622,7 +622,7 @@ export function Logs({ host }: { host: Host }) {
                       <span className="fl-mono" title={boot} data-testid="boot-filter">{boot}</span>
                       {!bootFilter.supported && <Pill tone="warn">{t("not applied")}</Pill>}
                       <Button kind="quiet" onClick={clearBoot} testId="clear-boot">{t("Clear")}</Button>
-                      <Link to={`/next/hosts/${host.id}/power`}>{t("boots on the Power module")}</Link>
+                      <Link to={`/hosts/${host.id}/power`}>{t("boots on the Power module")}</Link>
                     </Row>
                   </Field>
                 )}
@@ -738,7 +738,7 @@ export function Logs({ host }: { host: Host }) {
             )}
             {boundJob && jobRecord.data && (
               <Note>
-                <Link to={`/next/hosts/${host.id}/jobs`}>{t("open the operations")}</Link>
+                <Link to={`/hosts/${host.id}/jobs`}>{t("open the operations")}</Link>
                 {" · "}
                 <Button kind="word" onClick={() => setJobId("")} testId="clear-job">{t("Clear")}</Button>
               </Note>

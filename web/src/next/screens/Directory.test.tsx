@@ -320,8 +320,8 @@ describe("the host entries and the groups", () => {
     open("Hosts");
     await waitFor(() => expect(screen.getByTestId("entry-web1.example.test")).toBeInTheDocument());
     const linked = screen.getByTestId("entry-web1.example.test");
-    expect(within(linked).getByRole("link", { name: "web1" })).toHaveAttribute("href", "/next/hosts/h1");
-    expect(within(linked).getByRole("link", { name: "Join" })).toHaveAttribute("href", "/next/hosts/h1/identity");
+    expect(within(linked).getByRole("link", { name: "web1" })).toHaveAttribute("href", "/hosts/h1");
+    expect(within(linked).getByRole("link", { name: "Join" })).toHaveAttribute("href", "/hosts/h1/identity");
     // A name the fleet does not carry is said plainly, and offers no join.
     const orphan = screen.getByTestId("entry-orphan.example.test");
     expect(orphan).toHaveTextContent("not in the fleet");
@@ -450,7 +450,7 @@ describe("the health of the integration", () => {
     const row = screen.getByTestId("offline-web1");
     expect(row).toHaveTextContent("no cached logins");
     expect(row).toHaveTextContent("SSSD caches nothing");
-    expect(within(row).getByRole("link", { name: "web1" })).toHaveAttribute("href", "/next/hosts/h1/identity");
+    expect(within(row).getByRole("link", { name: "web1" })).toHaveAttribute("href", "/hosts/h1/identity");
   });
 
   it("says plainly when no connector is configured rather than reading it as unreachable", async () => {

@@ -10,7 +10,7 @@ import {
   type HostTimelineItem, type HostTimelineKind, type HostTimelinePage,
   type InventoryFragment, type Job, type Whoami,
 } from "../../../lib/types";
-import { stateName } from "../../../components/ui";
+import { stateName } from "../../../lib/states";
 import { useT, type Translate } from "../../../i18n";
 import { Board } from "../../Board";
 import type { BoardEntry } from "../../../components/board";
@@ -161,11 +161,11 @@ export function Overview({ host }: { host: Host }) {
   /* What is wrong with this machine right now, counted apart from what it
      is made of: a reader asks "is it well" before "what is it". */
   const attention: { label: string; value?: number | boolean | null; tone: Tone; to?: string }[] = [
-    { label: t("Failed units"), value: host.failed_units, tone: "error", to: `/next/hosts/${host.id}/services` },
+    { label: t("Failed units"), value: host.failed_units, tone: "error", to: `/hosts/${host.id}/services` },
     { label: t("Reboot required"), value: host.reboot_required, tone: "warn" },
     { label: t("Package database broken"), value: host.package_database_broken, tone: "error" },
-    { label: t("Security updates"), value: host.pending_security_updates, tone: "warn", to: `/next/hosts/${host.id}/packages` },
-    { label: t("Updates waiting"), value: host.pending_updates, tone: "neutral", to: `/next/hosts/${host.id}/packages` },
+    { label: t("Security updates"), value: host.pending_security_updates, tone: "warn", to: `/hosts/${host.id}/packages` },
+    { label: t("Updates waiting"), value: host.pending_updates, tone: "neutral", to: `/hosts/${host.id}/packages` },
   ];
 
   return (
@@ -400,7 +400,7 @@ export function Overview({ host }: { host: Host }) {
       recent: (
         <Card
           title={t("Recent activity")}
-          tools={<Link to={`/next/hosts/${host.id}/jobs`}>{t("All jobs")}</Link>}
+          tools={<Link to={`/hosts/${host.id}/jobs`}>{t("All jobs")}</Link>}
           flush
         >
           <Table
@@ -409,7 +409,7 @@ export function Overview({ host }: { host: Host }) {
             loading={jobs.isLoading} empty={t("Nothing has been done to this host yet.")}
             columns={[
               { key: "when", head: t("Time"), cell: (one) => (
-                <Link to={`/next/jobs/${one.id}`} title={absoluteTime(one.created_at)}>
+                <Link to={`/jobs/${one.id}`} title={absoluteTime(one.created_at)}>
                   {relativeTime(one.finished_at ?? one.created_at)}
                 </Link>
               ) },
@@ -1328,7 +1328,7 @@ function RecoveryResult({ host, order }: { host: Host; order: RecoveryOrder }) {
         <Fact label={t("Expires")}>
           <span title={absoluteTime(order.expires_at)}>{relativeTime(order.expires_at)}</span>
         </Fact>
-        <Fact label={t("Order")}><Link to="/next/hosts/new">{order.id.slice(0, 8)}</Link></Fact>
+        <Fact label={t("Order")}><Link to="/hosts/new">{order.id.slice(0, 8)}</Link></Fact>
       </Facts>
     </div>
   );
@@ -1488,7 +1488,7 @@ function Adapters({ host }: { host: Host }) {
         { key: "name", head: t("Adapter"), tight: true, cell: (one) => {
           const segment = adapterSegment(one.name);
           return segment
-            ? <Link to={`/next/hosts/${host.id}/${segment}`}>{one.name}</Link>
+            ? <Link to={`/hosts/${host.id}/${segment}`}>{one.name}</Link>
             : one.name;
         } },
         { key: "state", head: t("State"), cell: (one) => (
@@ -1523,12 +1523,12 @@ export function timelineLink(host: Host, item: HostTimelineItem): string | undef
   switch (item.kind) {
     // The task has a screen of its own with its attempts and its result.
     case "job": return item.ref.type === "job" && item.ref.id
-      ? `/next/jobs/${item.ref.id}`
-      : `/next/hosts/${host.id}/jobs`;
+      ? `/jobs/${item.ref.id}`
+      : `/hosts/${host.id}/jobs`;
     case "audit":
-    case "lifecycle": return `/next/hosts/${host.id}/audit`;
-    case "alert": return `/next/hosts/${host.id}/monitoring`;
-    case "campaign": return `/next/campaigns/${item.ref.id}`;
+    case "lifecycle": return `/hosts/${host.id}/audit`;
+    case "alert": return `/hosts/${host.id}/monitoring`;
+    case "campaign": return `/campaigns/${item.ref.id}`;
     default: return undefined;
   }
 }

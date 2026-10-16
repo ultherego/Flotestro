@@ -359,7 +359,7 @@ export function Backups() {
               {
                 key: "host",
                 head: t("Host"),
-                cell: (one) => <Link to={`/next/hosts/${one.host_id}/backups`}>{one.hostname}</Link>,
+                cell: (one) => <Link to={`/hosts/${one.host_id}/backups`}>{one.hostname}</Link>,
               },
               { key: "definition", head: t("Definition"), cell: (one) => one.definition },
               {

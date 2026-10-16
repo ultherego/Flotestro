@@ -92,11 +92,20 @@ describe("a screen of the new panel", () => {
    * Nine of them were found by hand; this finds the tenth. A deliberate
    * way out is an <a href>, which says it is leaving.
    */
-  it("keeps its links inside the panel it belongs to", () => {
+  /**
+   * While the rewrite stood at /next this read "no link leaves /next",
+   * and it caught a screen sending the reader back into the panel being
+   * replaced every few days. The panel took the root on 16.10 and there
+   * is no second panel to fall into, so what is left to guard is the way
+   * out of the panel altogether: a bare <a href> to one of its own
+   * addresses reloads the whole application where a router link would
+   * not, and that is a page flash nobody asked for.
+   */
+  it("goes to its own addresses through the router, not through the browser", () => {
     const places = "hosts|jobs|campaigns|policies|groups|relays|secrets|vulnerabilities"
       + "|reads|bulk|audit|tags|teams|access|settings|security|backups|certificates"
       + "|monitoring|notifications|directory|status|support|reports|budgets|readiness|unresolved";
-    const out = new RegExp(`to=\\{?\`?/(?:${places})(?:[/?\`"]|$)`);
+    const out = new RegExp(`<a[^>]*href=\\{?["\`]/(?:${places})(?:[/?"\`]|$)`);
     const offenders: string[] = [];
     for (const screen of screens()) {
       for (const [index, line] of screen.text.split("\n").entries()) {
@@ -140,7 +149,7 @@ describe("a screen of the new panel", () => {
     const panel = readFileSync(join(__dirname, "Panel.tsx"), "utf8");
     const about = readFileSync(join(SCREENS, "about.tsx"), "utf8");
     const places = new Set(
-      [...panel.matchAll(/path="\/next\/?([a-z-]*)/g)]
+      [...panel.matchAll(/path="\/?([a-z-]*)/g)]
         .map((found) => (found[1] === "" ? "dashboard" : found[1])),
     );
     const files = new Map(screens().map((one) => [one.name, one.text]));
@@ -148,7 +157,7 @@ describe("a screen of the new panel", () => {
       if (new RegExp(`\\b${place}:`).test(about)) return true;
       // Or the screen carries its own frame, with both a name and the
       // paragraph behind the question mark.
-      const route = new RegExp(`path="/next/${place === "dashboard" ? "" : place}[^"]*" element=\\{<(\\w+)`);
+      const route = new RegExp(`path="/${place === "dashboard" ? "" : place}[^"]*" element=\\{<(\\w+)`);
       const found = panel.match(route);
       const text = found ? files.get(`${found[1]}.tsx`) : undefined;
       return text !== undefined && /<Screen\b/.test(text) && /\bhelp=/.test(text) && /\btitle=/.test(text);

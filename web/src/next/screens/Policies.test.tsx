@@ -13,7 +13,7 @@ import { ToastProvider } from "../../components/Toast";
  * fleet with nothing wrong: an unevaluated policy has no verdicts, never
  * four noughts.
  *
- * The screen is also the single policy - `/next/policies/<id>` opens one -
+ * The screen is also the single policy - `/policies/<id>` opens one -
  * so what is checked is what it reads, what it writes, on which version,
  * and what it refuses to do without being asked twice.
  */
@@ -94,7 +94,7 @@ const policy = (over: Record<string, unknown> = {}) => ({
 const everything = { permissions: ["policy.write", "policy.publish"] };
 const nothing = { permissions: [] as string[] };
 
-function draw(at = "/next/policies") {
+function draw(at = "/policies") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}><ToastProvider>{children}</ToastProvider></QueryClientProvider>
@@ -102,8 +102,8 @@ function draw(at = "/next/policies") {
   return render(
     <MemoryRouter initialEntries={[at]}>
       <Routes>
-        <Route path="/next/policies" element={<Policies />} />
-        <Route path="/next/policies/:id" element={<Policies />} />
+        <Route path="/policies" element={<Policies />} />
+        <Route path="/policies/:id" element={<Policies />} />
       </Routes>
     </MemoryRouter>,
     { wrapper },
@@ -142,7 +142,7 @@ describe("the policy list", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("policy-baseline-cron")).toBeInTheDocument());
     const row = screen.getByTestId("policy-baseline-cron");
-    expect(within(row).getByRole("link", { name: "baseline-cron" })).toHaveAttribute("href", "/next/policies/p1");
+    expect(within(row).getByRole("link", { name: "baseline-cron" })).toHaveAttribute("href", "/policies/p1");
     expect(row).toHaveTextContent("v1");
     const bar = within(row).getByTestId("compliance-p1");
     expect(within(bar).getByText("compliant")).toBeInTheDocument();
@@ -230,7 +230,7 @@ describe("the policy list", () => {
 describe("one policy", () => {
   it("opens the policy the address names", async () => {
     openOne();
-    draw("/next/policies/p1");
+    draw("/policies/p1");
     await waitFor(() => expect(screen.getByTestId("draft-name")).toHaveValue("baseline-cron"));
     expect(asked).toContain("/api/v1/policies/p1");
     expect(asked.some((one) => one.startsWith("/api/v1/policies/p1/versions"))).toBe(true);
@@ -242,7 +242,7 @@ describe("one policy", () => {
 
   it("holds an unevaluated policy's verdicts as uncounted rather than as noughts", async () => {
     openOne({ last_evaluated_at: undefined, counts: { compliant: 0, drift: 0, error: 0, not_applicable: 0 } });
-    draw("/next/policies/p1");
+    draw("/policies/p1");
     await waitFor(() => expect(screen.getByTestId("policy-compliance")).toBeInTheDocument());
     const band = screen.getByTestId("policy-compliance");
     expect(band).toHaveTextContent("not counted");
@@ -251,7 +251,7 @@ describe("one policy", () => {
 
   it("asks before publishing and sends the reason with the publication", async () => {
     openOne();
-    draw("/next/policies/p1");
+    draw("/policies/p1");
     await waitFor(() => expect(screen.getByTestId("publish")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("publish"));
     expect(posted).toHaveLength(0);
@@ -265,7 +265,7 @@ describe("one policy", () => {
 
   it("warns that automatic remediation is approved by the publication itself", async () => {
     openOne({ remediation_mode: "automatic" });
-    draw("/next/policies/p1");
+    draw("/policies/p1");
     await waitFor(() => expect(screen.getByTestId("publish")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("publish"));
     expect(screen.getByText(/start without a second look/)).toBeInTheDocument();
@@ -273,7 +273,7 @@ describe("one policy", () => {
 
   it("evaluates on demand and says what the evaluation found", async () => {
     openOne();
-    draw("/next/policies/p1");
+    draw("/policies/p1");
     await waitFor(() => expect(screen.getByTestId("evaluate")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("evaluate"));
     await waitFor(() => expect(posted[0].path).toBe("/api/v1/policies/p1/evaluate"));
@@ -283,7 +283,7 @@ describe("one policy", () => {
   it("asks before deleting, refuses a reason of under eight characters, and writes on the version it read", async () => {
     openOne();
     etag = 'W/"11"';
-    draw("/next/policies/p1");
+    draw("/policies/p1");
     await waitFor(() => expect(screen.getByTestId("delete-policy")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("delete-policy"));
     expect(deleted).toHaveLength(0);
@@ -299,7 +299,7 @@ describe("one policy", () => {
 
   it("offers nothing to change to somebody who may neither write nor publish", async () => {
     openOne({}, nothing);
-    draw("/next/policies/p1");
+    draw("/policies/p1");
     await waitFor(() => expect(screen.getByTestId("draft-name")).toBeInTheDocument());
     expect(screen.queryByTestId("new-policy")).toBeNull();
     expect(screen.queryByTestId("publish")).toBeNull();
@@ -312,7 +312,7 @@ describe("one policy", () => {
 
   it("lets somebody who may publish but not write do neither of the other two", async () => {
     openOne({}, { permissions: ["policy.publish"] });
-    draw("/next/policies/p1");
+    draw("/policies/p1");
     await waitFor(() => expect(screen.getByTestId("publish")).toBeInTheDocument());
     expect(screen.queryByTestId("evaluate")).toBeNull();
     expect(screen.queryByTestId("delete-policy")).toBeNull();
@@ -320,7 +320,7 @@ describe("one policy", () => {
 
   it("writes the draft on the tag it read, and carries no field of the kind a rule used to be", async () => {
     openOne();
-    draw("/next/policies/p1");
+    draw("/policies/p1");
     await waitFor(() => expect(screen.getByLabelText("Rule 1")).toBeInTheDocument());
     // A package name must not ride along into a sysctl rule: the server
     // would store whatever it was sent.
@@ -340,7 +340,7 @@ describe("one policy", () => {
 
   it("says a refusal of the write in the words the API used", async () => {
     openOne();
-    draw("/next/policies/p1");
+    draw("/policies/p1");
     await waitFor(() => expect(screen.getByTestId("save-draft")).toBeInTheDocument());
     const { ApiError } = await import("../../lib/api");
     refuse = new ApiError(412, "stale_etag", "the policy changed since it was read");
@@ -361,10 +361,10 @@ describe("one policy", () => {
         total: 1,
       },
     });
-    draw("/next/policies/p1");
+    draw("/policies/p1");
     await waitFor(() => expect(screen.getByTestId("result-h1-0")).toBeInTheDocument());
     const row = screen.getByTestId("result-h1-0");
-    expect(within(row).getByRole("link", { name: "agent-arch" })).toHaveAttribute("href", "/next/hosts/h1/policies");
+    expect(within(row).getByRole("link", { name: "agent-arch" })).toHaveAttribute("href", "/hosts/h1/policies");
     expect(row).toHaveTextContent("package cron installed");
     expect(row).toHaveTextContent("drift");
 

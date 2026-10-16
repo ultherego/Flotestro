@@ -96,7 +96,7 @@ describe("the fleet's certificates", () => {
     const row = screen.getByTestId(id);
     expect(within(row).getByText("7 d")).toBeInTheDocument();
     expect(within(row).getByRole("link", { name: "panel" }))
-      .toHaveAttribute("href", "/next/hosts/h1/certificates");
+      .toHaveAttribute("href", "/hosts/h1/certificates");
     expect(row).toHaveTextContent("/etc/pki/tls/certs/panel.crt");
     expect(row).toHaveTextContent("CN=Fleet CA 2026");
     // certmonger renews it: a finding, and not the same thing as nobody

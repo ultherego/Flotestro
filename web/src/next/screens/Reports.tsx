@@ -477,7 +477,7 @@ function PatchStatusCard({ report, hosts, more, loading, error, ready, params }:
                 {
                   key: "host",
                   head: t("Host"),
-                  cell: (one) => <Link to={`/next/hosts/${one.host_id}`}>{one.hostname}</Link>,
+                  cell: (one) => <Link to={`/hosts/${one.host_id}`}>{one.hostname}</Link>,
                 },
                 { key: "site", head: t("Site"), minor: true, cell: (one) => one.site || <Unknown /> },
                 { key: "environment", head: t("Environment"), minor: true, cell: (one) => one.environment || <Unknown /> },
@@ -662,7 +662,7 @@ function TwoLineCampaign({ row }: { row: CampaignRow }) {
         ? row.by_site.map((group) => `${group.key}: ${group.succeeded}/${group.targets}`).join(" · ")
         : undefined}
     >
-      <Link to={`/next/campaigns/${row.id}`}>{row.name}</Link>
+      <Link to={`/campaigns/${row.id}`}>{row.name}</Link>
     </TwoLine>
   );
 }
@@ -747,7 +747,7 @@ function ComplianceCard({ report, error, ready, params }: {
                       head: t("Policy"),
                       cell: (one) => (
                         <>
-                          <Link to={`/next/policies/${one.id}`}>{one.name}</Link>
+                          <Link to={`/policies/${one.id}`}>{one.name}</Link>
                           {!one.enabled && <Pill tone="unknown" dot={false}>{t("disabled")}</Pill>}
                         </>
                       ),
@@ -785,7 +785,7 @@ function ComplianceCard({ report, error, ready, params }: {
                         {
                           key: "host",
                           head: t("Host"),
-                          cell: (one) => <Link to={`/next/hosts/${one.host_id}/policies`}>{one.hostname}</Link>,
+                          cell: (one) => <Link to={`/hosts/${one.host_id}/policies`}>{one.hostname}</Link>,
                         },
                         { key: "site", head: t("Site"), minor: true, cell: (one) => one.site || <Unknown /> },
                         { key: "environment", head: t("Environment"), minor: true, cell: (one) => one.environment || <Unknown /> },

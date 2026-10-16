@@ -79,7 +79,7 @@ const unit = (over: Record<string, unknown> = {}) => ({
   unit_file_state: "enabled", ...over,
 });
 
-function draw(one: Host = host(), at = "/next/hosts/h1/services") {
+function draw(one: Host = host(), at = "/hosts/h1/services") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
@@ -223,7 +223,7 @@ describe("the units of one host", () => {
         units: [unit(), unit({ name: "sshd.service" })],
       }),
     });
-    draw(host(), "/next/hosts/h1/services?unit=sshd.service");
+    draw(host(), "/hosts/h1/services?unit=sshd.service");
     // The address narrows the list to that unit and asks the host for its
     // detail; the order that goes out is the detail read.
     await waitFor(() => expect(sent).toHaveLength(1));

@@ -45,8 +45,8 @@ describe("a headline number", () => {
   });
 
   it("is a link as a whole when it leads somewhere", () => {
-    draw(<Kpi label="Hosts" value={4} to="/next/hosts" />);
-    expect(screen.getByRole("link")).toHaveAttribute("href", "/next/hosts");
+    draw(<Kpi label="Hosts" value={4} to="/hosts" />);
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/hosts");
   });
 });
 
@@ -399,13 +399,13 @@ describe("the actions behind one word", () => {
   it("opens, leads somewhere, and closes on what was chosen", () => {
     draw(
       <Menu label="Actions" testId="acts">
-        <MenuItem to="/next/hosts/h1/logs">Open the logs</MenuItem>
+        <MenuItem to="/hosts/h1/logs">Open the logs</MenuItem>
         <MenuItem disabled onClick={() => undefined}>Refresh</MenuItem>
       </Menu>,
     );
     expect(screen.queryByTestId("acts-open")).toBeNull();
     fireEvent.click(screen.getByTestId("acts"));
-    expect(screen.getByRole("menuitem", { name: "Open the logs" })).toHaveAttribute("href", "/next/hosts/h1/logs");
+    expect(screen.getByRole("menuitem", { name: "Open the logs" })).toHaveAttribute("href", "/hosts/h1/logs");
     // A line that cannot be taken stays where it is and says so, rather
     // than disappearing and leaving the reader wondering what is missing.
     expect(screen.getByRole("menuitem", { name: "Refresh" })).toBeDisabled();
@@ -424,7 +424,7 @@ describe("the actions behind one word", () => {
 
 describe("the way back above a screen's name", () => {
   it("is drawn only where the reader came from somewhere", () => {
-    draw(<Head title="agent-arch" crumb={<a href="/next/campaigns/c1">Back to the campaign</a>} />);
+    draw(<Head title="agent-arch" crumb={<a href="/campaigns/c1">Back to the campaign</a>} />);
     expect(screen.getByRole("link", { name: "Back to the campaign" })).toBeInTheDocument();
     cleanup();
     draw(<Head title="agent-arch" />);

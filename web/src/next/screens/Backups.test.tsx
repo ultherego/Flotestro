@@ -84,7 +84,7 @@ describe("the fleet's backups", () => {
     await waitFor(() => expect(screen.getByTestId("backup-db-pgdata")).toBeInTheDocument());
     const row = screen.getByTestId("backup-db-pgdata");
     expect(within(row).getByText("6 h")).toBeInTheDocument();
-    expect(within(row).getByRole("link", { name: "db" })).toHaveAttribute("href", "/next/hosts/h1/backups");
+    expect(within(row).getByRole("link", { name: "db" })).toHaveAttribute("href", "/hosts/h1/backups");
     expect(row).toHaveTextContent("pgdata");
     expect(row).toHaveTextContent("restic");
     expect(row).toHaveTextContent("s3:https://minio.lab/flotestro");

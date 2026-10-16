@@ -93,8 +93,8 @@ function RelayHelp() {
 /**
  * The relays, with one of them open.
  *
- * The address says which: `/next/relays/<id>` opens that relay and
- * `/next/relays` opens on the first of the list, so the screen somebody
+ * The address says which: `/relays/<id>` opens that relay and
+ * `/relays` opens on the first of the list, so the screen somebody
  * is reading is a link they can send. Picking a row walks the address
  * rather than reloading the panel.
  */
@@ -181,7 +181,7 @@ export function Relays() {
     return (
       <Screen title={t("Relay")} icon="relays" help={<RelayHelp />}>
         <Card>
-          <Empty icon="relays" action={<Link to="/next/relays">{t("All relays")}</Link>}>
+          <Empty icon="relays" action={<Link to="/relays">{t("All relays")}</Link>}>
             {t("No relay with the identifier {id} is registered in this installation.", { id: fromAddress })}
           </Empty>
         </Card>
@@ -286,7 +286,7 @@ export function Relays() {
                   <TwoLine sub={one.advertised_names && one.advertised_names.length > 0
                     ? <code>{one.advertised_names.join(", ")}</code>
                     : undefined}>
-                    <Button kind="word" onClick={() => navigate(`/next/relays/${one.id}`)}
+                    <Button kind="word" onClick={() => navigate(`/relays/${one.id}`)}
                             testId={`pick-${one.name}`}>{one.name}</Button>
                   </TwoLine>
                 ) },
@@ -391,7 +391,7 @@ export function Relays() {
               columns={[
                 { key: "host", head: t("Host"), cell: (one) => (
                   <TwoLine sub={one.environment ? `${one.site} / ${one.environment}` : one.site}>
-                    <Link to={`/next/hosts/${one.host_id}`}>{one.hostname}</Link>
+                    <Link to={`/hosts/${one.host_id}`}>{one.hostname}</Link>
                   </TwoLine>
                 ) },
                 { key: "lifecycle", head: t("Lifecycle"), minor: true, cell: (one) => one.lifecycle_state },

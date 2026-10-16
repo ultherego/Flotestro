@@ -313,10 +313,10 @@ function JobNotice({ job, hostID }: { job: Job; hostID: string }) {
     <Note>
       <span data-testid="job-notice">
         {before}
-        <Link to={`/next/jobs/${job.id}`} className="fl-mono">{job.id.slice(0, 8)}</Link>
+        <Link to={`/jobs/${job.id}`} className="fl-mono">{job.id.slice(0, 8)}</Link>
         {after}
         {" "}
-        <Link to={`/next/hosts/${hostID}/jobs`}>{t("See all jobs")}</Link>
+        <Link to={`/hosts/${hostID}/jobs`}>{t("See all jobs")}</Link>
       </span>
     </Note>
   );

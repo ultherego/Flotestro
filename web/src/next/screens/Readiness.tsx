@@ -204,7 +204,7 @@ function Gaps({ gaps, opened, onOpen, testId }: {
             <Stack>
               <Tags>
                 {one.hosts.map((host) => (
-                  <Tag key={host.id}><Link to={`/next/hosts/${host.id}`}>{host.hostname}</Link></Tag>
+                  <Tag key={host.id}><Link to={`/hosts/${host.id}`}>{host.hostname}</Link></Tag>
                 ))}
               </Tags>
               {one.satisfied > 0 && (

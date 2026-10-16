@@ -124,7 +124,7 @@ describe("a firing alert", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("firing-a1")).toBeInTheDocument());
     const row = screen.getByTestId("firing-a1");
-    expect(within(row).getByRole("link", { name: "db-01" })).toHaveAttribute("href", "/next/hosts/h1/monitoring");
+    expect(within(row).getByRole("link", { name: "db-01" })).toHaveAttribute("href", "/hosts/h1/monitoring");
     expect(row).toHaveTextContent("root nearly full");
     expect(row).toHaveTextContent("filesystem_used_percent");
     // The reading carries its unit: a bare 94.2 is not a percentage.

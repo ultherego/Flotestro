@@ -176,8 +176,8 @@ export function namedBy(usage: GroupUsage | undefined, t: (key: string, vars?: R
 /**
  * The groups, or one of them.
  *
- * The address decides: `/next/groups` is the catalogue, and
- * `/next/groups/<id>` opens that group on its own, so a group somebody
+ * The address decides: `/groups` is the catalogue, and
+ * `/groups/<id>` opens that group on its own, so a group somebody
  * is looking at can be sent to somebody else and reloaded where it was.
  */
 export function Groups() {
@@ -197,7 +197,7 @@ export function campaignAddress(name: string, hostIDs: string[] = []): string {
   const params = new URLSearchParams({ name });
   if (hostIDs.length === 0) params.set("group", name);
   for (const one of hostIDs) params.append("host_id", one);
-  return `/next/bulk?${params}`;
+  return `/bulk?${params}`;
 }
 
 /** What the reader is allowed to do, as the server answers it. */
@@ -212,7 +212,7 @@ function usePermissions(): Set<string> {
 
 /** A new read with this group as its selector, inside the new panel. */
 export function readAddress(name: string): string {
-  return `/next/reads?${new URLSearchParams({ action: "journal.read", group: name })}`;
+  return `/reads?${new URLSearchParams({ action: "journal.read", group: name })}`;
 }
 
 /** How a host's connection reads as a tone; nobody's guess is unknown. */
@@ -274,7 +274,7 @@ function GroupList() {
               ? <Empty>{loaded ? t("No group has a size to show.") : t("Reading the groups…")}</Empty>
               : (
                 <Bars items={biggest.map((one) => ({
-                  label: <Link to={`/next/groups/${one.id}`}>{one.name}</Link>,
+                  label: <Link to={`/groups/${one.id}`}>{one.name}</Link>,
                   value: one.member_count ?? 0,
                 }))} />
               )}
@@ -287,7 +287,7 @@ function GroupList() {
               : (
                 <Facts>
                   {broken.map((one) => (
-                    <Fact key={one.id} label={<Link to={`/next/groups/${one.id}`}>{one.name}</Link>}>
+                    <Fact key={one.id} label={<Link to={`/groups/${one.id}`}>{one.name}</Link>}>
                       <span className="fl-error">{one.unresolvable}</span>
                     </Fact>
                   ))}
@@ -335,7 +335,7 @@ function GroupList() {
               columns={[
                 { key: "name", head: t("Group"), cell: (one) => (
                   <TwoLine sub={one.description}>
-                    <Link to={`/next/groups/${one.id}`}>{one.name}</Link>
+                    <Link to={`/groups/${one.id}`}>{one.name}</Link>
                   </TwoLine>
                 ) },
                 { key: "kind", head: t("Kind"), cell: (one) => (
@@ -1084,7 +1084,7 @@ function OneGroup({ id }: { id: string }) {
         <Card>
           {missing
             ? (
-              <Empty icon="groups" action={<Link to="/next/groups">{t("All groups")}</Link>}>
+              <Empty icon="groups" action={<Link to="/groups">{t("All groups")}</Link>}>
                 {t("No group with the identifier {id} exists in this installation.", { id })}
               </Empty>
             )
@@ -1110,7 +1110,7 @@ function OneGroup({ id }: { id: string }) {
   const named: NamedBy[] = [
     ...(usage?.campaigns ?? []).map((campaign) => ({
       key: `campaign-${campaign.id}`, kind: t("campaign"), name: campaign.name,
-      state: campaign.state, to: `/next/campaigns/${campaign.id}`,
+      state: campaign.state, to: `/campaigns/${campaign.id}`,
     })),
     ...(usage?.policies ?? []).map((policy) => ({
       key: `policy-${policy.id}`, kind: t("policy"), name: policy.name, state: policy.state,
@@ -1180,7 +1180,7 @@ function OneGroup({ id }: { id: string }) {
               {t("Delete")}
             </Button>
           )}
-          <Button kind="quiet" onClick={() => navigate("/next/groups")} testId="all-groups">
+          <Button kind="quiet" onClick={() => navigate("/groups")} testId="all-groups">
             {t("All groups")}
           </Button>
         </>
@@ -1214,7 +1214,7 @@ function OneGroup({ id }: { id: string }) {
           groups={[one]}
           chosen={one.id}
           onClose={() => setDeleting(false)}
-          onDeleted={() => navigate("/next/groups")}
+          onDeleted={() => navigate("/groups")}
         />
       )}
 
@@ -1377,7 +1377,7 @@ function OneGroup({ id }: { id: string }) {
                   }] : []),
                   { key: "host", head: t("Host"), cell: (host) => (
                     <TwoLine sub={host.environment ? `${host.site} / ${host.environment}` : host.site}>
-                      <Link to={`/next/hosts/${host.id}`}>{host.hostname}</Link>
+                      <Link to={`/hosts/${host.id}`}>{host.hostname}</Link>
                     </TwoLine>
                   ) },
                   { key: "state", head: t("State"), cell: (host) => (

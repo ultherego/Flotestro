@@ -265,7 +265,7 @@ describe("what the module does", () => {
       },
     });
     // The job the order became is named where the sentence stands.
-    await waitFor(() => expect(screen.getByRole("link", { name: "01234567" })).toHaveAttribute("href", "/next/jobs/0123456789abcdef"));
+    await waitFor(() => expect(screen.getByRole("link", { name: "01234567" })).toHaveAttribute("href", "/jobs/0123456789abcdef"));
   });
 
   it("scans the host with the paths the panel watches", async () => {

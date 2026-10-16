@@ -142,7 +142,7 @@ const admin = {
 };
 const reader = { subject: "t", kind: "user", roles: [], bindings: [], permissions: ["host.read"] };
 
-function draw(at = "/next/settings") {
+function draw(at = "/settings") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
@@ -207,9 +207,9 @@ describe("the tabs", () => {
 
   it("leads to the section's own screen inside the new panel", async () => {
     Object.assign(answers, base(), { "/api/v1/whoami": admin });
-    draw("/next/settings?tab=users");
+    draw("/settings?tab=users");
     await waitFor(() => expect(screen.getByTestId("settings-open-section")).toBeInTheDocument());
-    expect(screen.getByTestId("settings-open-section")).toHaveAttribute("href", "/next/access");
+    expect(screen.getByTestId("settings-open-section")).toHaveAttribute("href", "/access");
   });
 
   it("switches on a click and says what the section decides", async () => {
@@ -217,7 +217,7 @@ describe("the tabs", () => {
     draw();
     await waitFor(() => expect(screen.getByRole("tab", { name: "Fleet CA" })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("tab", { name: "Fleet CA" }));
-    await waitFor(() => expect(screen.getByTestId("settings-open-section")).toHaveAttribute("href", "/next/certificates"));
+    await waitFor(() => expect(screen.getByTestId("settings-open-section")).toHaveAttribute("href", "/certificates"));
     expect(screen.getByText(/Rotation is four deliberate stages/)).toBeInTheDocument();
   });
 });

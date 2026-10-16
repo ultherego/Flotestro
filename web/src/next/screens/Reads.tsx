@@ -4,7 +4,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { api, ApiError, LIST_PAGE, loadedItems, type Page } from "../../lib/api";
 import { OPERATIONS_INTERVAL } from "../../lib/stream";
 import { absoluteTime, bytes, relativeTime } from "../../lib/format";
-import { stateName } from "../../components/ui";
+import { stateName } from "../../lib/states";
 import { useToast } from "../../components/Toast";
 import type {
   Host, ReadFanOut, ReadFanOutCounts, ReadFanOutHost, ReadFanOutView, Whoami,
@@ -39,7 +39,7 @@ type FanOutOperation = Operation & { fanout_limit?: number; fanout_refusal?: str
 
 /** The address of the form with a read already filled in, for a host page. */
 export function readsPrefill(action: string, payload: unknown): string {
-  return `/next/reads?action=${encodeURIComponent(action)}&payload=${encodeURIComponent(JSON.stringify(payload, null, 2))}`;
+  return `/reads?action=${encodeURIComponent(action)}&payload=${encodeURIComponent(JSON.stringify(payload, null, 2))}`;
 }
 
 /**
@@ -151,7 +151,7 @@ function ReadList() {
                   tight: true,
                   cell: (one) => (
                     <TwoLine sub={one.created_by}>
-                      <Link to={`/next/reads/${one.id}`}><code>{one.action}</code></Link>
+                      <Link to={`/reads/${one.id}`}><code>{one.action}</code></Link>
                     </TwoLine>
                   ),
                 },
@@ -312,7 +312,7 @@ function NewRead({ onDone }: { onDone: () => void }) {
     onSuccess: (view) => {
       void queryClient.invalidateQueries({ queryKey: ["reads"] });
       onDone();
-      navigate(`/next/reads/${view.id}`);
+      navigate(`/reads/${view.id}`);
     },
     onError: (error) => setErrorMessage(refusalMessage(error, t)),
   });
@@ -665,7 +665,7 @@ function OneRead({ id }: { id: string }) {
                 key: "host",
                 head: t("Host"),
                 cell: (row) => (
-                  <Link to={`/next/hosts/${row.host.host_id}`}>{row.host.hostname || row.host.host_id}</Link>
+                  <Link to={`/hosts/${row.host.host_id}`}>{row.host.hostname || row.host.host_id}</Link>
                 ),
               },
               {
@@ -708,7 +708,7 @@ function OneRead({ id }: { id: string }) {
                 minor: true,
                 tight: true,
                 cell: (row) => (row.kind === "job"
-                  ? <Link to={`/next/jobs?fanout_id=${view.id}`}><code>{row.host.job_id.slice(0, 8)}</code></Link>
+                  ? <Link to={`/jobs?fanout_id=${view.id}`}><code>{row.host.job_id.slice(0, 8)}</code></Link>
                   : <span className="fl-faint">—</span>),
               },
             ]}

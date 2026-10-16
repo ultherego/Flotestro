@@ -561,9 +561,9 @@ const ACTOR_KINDS: Record<string, string> = {
 
 /** The resource types the new panel has a screen for. A machine identifier has none. */
 const LINKED_RESOURCES: Record<string, (id: string) => string> = {
-  host: (id) => `/next/hosts/${encodeURIComponent(id)}`,
-  relay: (id) => `/next/relays/${encodeURIComponent(id)}`,
-  campaign: (id) => `/next/campaigns/${encodeURIComponent(id)}`,
+  host: (id) => `/hosts/${encodeURIComponent(id)}`,
+  relay: (id) => `/relays/${encodeURIComponent(id)}`,
+  campaign: (id) => `/campaigns/${encodeURIComponent(id)}`,
 };
 
 /**
@@ -604,26 +604,26 @@ export function targetLink(targetType?: string, targetID?: string): string | nul
   if (!targetType || !targetID) return null;
   const id = encodeURIComponent(targetID);
   switch (targetType) {
-    case "host": return `/next/hosts/${id}`;
-    case "campaign": return `/next/campaigns/${id}`;
-    case "job": return `/next/jobs/${id}`;
-    case "principal": return `/next/access?tab=identities&q=${id}`;
-    case "host_group": return `/next/groups/${id}`;
-    case "relay": return `/next/relays/${id}`;
-    case "policy": return `/next/policies/${id}`;
-    case "read": return `/next/reads/${id}`;
+    case "host": return `/hosts/${id}`;
+    case "campaign": return `/campaigns/${id}`;
+    case "job": return `/jobs/${id}`;
+    case "principal": return `/access?tab=identities&q=${id}`;
+    case "host_group": return `/groups/${id}`;
+    case "relay": return `/relays/${id}`;
+    case "policy": return `/policies/${id}`;
+    case "read": return `/reads/${id}`;
     // The trail names a secret by its name, which is what its screen is
     // addressed by.
-    case "secret": return `/next/secrets/${id}`;
+    case "secret": return `/secrets/${id}`;
     // The rest have a list but no screen of their own; the list is where
     // the object is found.
-    case "alert_rule": return "/next/monitoring";
-    case "budget": return "/next/budgets";
-    case "notification_channel": return "/next/notifications";
-    case "tag": return "/next/tags";
+    case "alert_rule": return "/monitoring";
+    case "budget": return "/budgets";
+    case "notification_channel": return "/notifications";
+    case "tag": return "/tags";
     // The fleet authority is a section of the settings screen in this
     // panel; the old one's access tab for it does not exist here.
-    case "pki": return "/next/settings";
+    case "pki": return "/settings";
     default: return null;
   }
 }

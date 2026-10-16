@@ -217,7 +217,7 @@ describe("what the audit module knows on its own", () => {
       text.replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? ""))) as never;
     const who = actorLabel({ actor_type: "system", actor_id: "campaign:abcdef0123456789" }, host, t);
     expect(who.text).toBe("campaign abcdef01");
-    expect(who.to).toBe("/next/campaigns/abcdef0123456789");
+    expect(who.to).toBe("/campaigns/abcdef0123456789");
   });
 
   it("puts the keys an incident is read by first, and nothing where there are none", () => {

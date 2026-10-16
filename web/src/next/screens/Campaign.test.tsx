@@ -116,9 +116,9 @@ function draw() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/next/campaigns/c1"]}>
+      <MemoryRouter initialEntries={["/campaigns/c1"]}>
         <ToastProvider>
-          <Routes><Route path="/next/campaigns/:id" element={children} /></Routes>
+          <Routes><Route path="/campaigns/:id" element={children} /></Routes>
         </ToastProvider>
       </MemoryRouter>
     </QueryClientProvider>
@@ -319,7 +319,7 @@ describe("one campaign", () => {
     await waitFor(() => expect(feed()).not.toBeNull());
     expect(within(feed()).getByText("campaign.paused")).toBeInTheDocument();
     expect(within(feed()).getByRole("link", { name: /target\.succeeded/ }))
-      .toHaveAttribute("href", "/next/jobs/j9");
+      .toHaveAttribute("href", "/jobs/j9");
     fireEvent.change(screen.getByTestId("event-kind"), { target: { value: "campaign.paused" } });
     await waitFor(() => expect(within(feed()).queryByText("target.succeeded")).toBeNull());
   });

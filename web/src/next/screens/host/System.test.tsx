@@ -131,7 +131,7 @@ describe("the platform of one host", () => {
     }));
     await waitFor(() => expect(screen.getByTestId("adapters")).toBeInTheDocument());
     const table = screen.getByTestId("adapters");
-    expect(within(table).getByRole("link", { name: "systemd" })).toHaveAttribute("href", "/next/hosts/h1/services");
+    expect(within(table).getByRole("link", { name: "systemd" })).toHaveAttribute("href", "/hosts/h1/services");
     expect(table).toHaveTextContent("no docker socket");
     expect(table).toHaveTextContent("unavailable");
   });

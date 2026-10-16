@@ -58,7 +58,7 @@ const read = (over: Record<string, unknown>) => ({
   ...over,
 });
 
-function draw(path = "/next/reads") {
+function draw(path = "/reads") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
@@ -67,8 +67,8 @@ function draw(path = "/next/reads") {
   );
   return render(
     <Routes>
-      <Route path="/next/reads" element={<Reads />} />
-      <Route path="/next/reads/:id" element={<Reads />} />
+      <Route path="/reads" element={<Reads />} />
+      <Route path="/reads/:id" element={<Reads />} />
     </Routes>,
     { wrapper },
   );
@@ -137,7 +137,7 @@ describe("the state of one host of a fan-out", () => {
 
   it("carries a read back into the form it was ordered from", () => {
     const address = readsPrefill("journal.read", { journal: { lines: 10 } });
-    expect(address.startsWith("/next/reads?action=journal.read")).toBe(true);
+    expect(address.startsWith("/reads?action=journal.read")).toBe(true);
     expect(decodeURIComponent(address)).toContain('"lines": 10');
   });
 });
@@ -151,7 +151,7 @@ describe("the list of reads", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("read-f1")).toBeInTheDocument());
     const row = screen.getByTestId("read-f1");
-    expect(within(row).getByRole("link", { name: "journal.read" })).toHaveAttribute("href", "/next/reads/f1");
+    expect(within(row).getByRole("link", { name: "journal.read" })).toHaveAttribute("href", "/reads/f1");
     expect(row).toHaveTextContent("2 succeeded");
     expect(row).toHaveTextContent("1 failed");
     expect(row).toHaveTextContent("1 queued");
@@ -217,7 +217,7 @@ describe("one fan-out", () => {
       "/api/v1/reads/f1": view({}),
       "/api/v1/whoami": { subject: "tszymanski", permissions: [] },
     });
-    draw("/next/reads/f1");
+    draw("/reads/f1");
     await waitFor(() => expect(screen.getByTestId("read-timeline")).toBeInTheDocument());
     const timeline = screen.getByTestId("read-timeline");
     expect(timeline).toHaveTextContent("web-1");
@@ -231,7 +231,7 @@ describe("one fan-out", () => {
       }),
       "/api/v1/whoami": { subject: "tszymanski", permissions: [] },
     });
-    draw("/next/reads/f1");
+    draw("/reads/f1");
     await waitFor(() => expect(screen.getByTestId("fanout-db-1")).toBeInTheDocument());
     const row = screen.getByTestId("fanout-db-1");
     // Leaving it out would make the read look as though it covered the
@@ -251,7 +251,7 @@ describe("one fan-out", () => {
       }),
       "/api/v1/whoami": { subject: "tszymanski", permissions: ["job.cancel"] },
     });
-    draw("/next/reads/f1");
+    draw("/reads/f1");
     fireEvent.click(await screen.findByTestId("withdraw"));
     // The reason travels with every job into the trail, so there is no
     // withdrawing without one.
@@ -276,7 +276,7 @@ describe("one fan-out", () => {
       }),
       "/api/v1/whoami": { subject: "tszymanski", permissions: [] },
     });
-    draw("/next/reads/f1");
+    draw("/reads/f1");
     await waitFor(() => expect(screen.getByTestId("dns-queries")).toBeInTheDocument());
     expect(within(screen.getByTestId("dns-queries")).getByText("example.com")).toBeInTheDocument();
     expect(within(screen.getByTestId("dns-queries")).getByText("93.184.216.34")).toBeInTheDocument();

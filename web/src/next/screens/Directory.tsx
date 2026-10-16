@@ -1710,7 +1710,7 @@ function HostsTab() {
                 head: t("Fleet host"),
                 cell: (one) => {
                   const panelHost = linked(one.fqdn);
-                  if (panelHost) return <Link to={`/next/hosts/${panelHost.id}`}>{panelHost.hostname}</Link>;
+                  if (panelHost) return <Link to={`/hosts/${panelHost.id}`}>{panelHost.hostname}</Link>;
                   // A fleet still being read has not answered "no".
                   return fleet.isPending ? <Pill tone="unknown">{t("still reading the fleet")}</Pill> : <>{t("not in the fleet")}</>;
                 },
@@ -1722,7 +1722,7 @@ function HostsTab() {
                 cell: (one) => {
                   const panelHost = linked(one.fqdn);
                   return panelHost
-                    ? <Link className="fl-quiet fl-small" to={`/next/hosts/${panelHost.id}/identity`}>{t("Join")}</Link>
+                    ? <Link className="fl-quiet fl-small" to={`/hosts/${panelHost.id}/identity`}>{t("Join")}</Link>
                     : null;
                 },
               },
@@ -2434,7 +2434,7 @@ function HealthTab() {
             {
               key: "host",
               head: t("Host"),
-              cell: (one) => <Link to={`/next/hosts/${one.id}/identity`}>{one.hostname}</Link>,
+              cell: (one) => <Link to={`/hosts/${one.id}/identity`}>{one.hostname}</Link>,
             },
             {
               key: "where",
