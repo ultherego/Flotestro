@@ -116,7 +116,7 @@ export function HeadActions({ children }: { children: ReactNode }) {
  * forty. The test beside this file refuses a screen that reaches past
  * this frame for a layout of its own.
  */
-export function Screen({ title, lead, help, icon, actions, banner, measure = false, children }: {
+export function Screen({ title, lead, help, icon, actions, banner, children }: {
   title: ReactNode;
   lead?: ReactNode;
   /** The long answer to "what is this screen for", behind the mark. */
@@ -125,18 +125,6 @@ export function Screen({ title, lead, help, icon, actions, banner, measure = fal
   actions?: ReactNode;
   /** What has to be taken account of before the screen is read at all. */
   banner?: ReactNode;
-  /**
-   * The screen is read and filled in rather than scanned, so it keeps a
-   * measure instead of taking the window.
-   *
-   * A board of tiles is better the wider the screen is. A form is not: a
-   * field four thousand pixels wide, a label at one end of the room and
-   * its value at the other, and sections of different widths beside each
-   * other read as scattered - which is what the owner saw on a 4k screen
-   * and what he called it. Settings, a profile, a wizard: measured.
-   * Hosts, jobs, a board: not.
-   */
-  measure?: boolean;
   children: ReactNode;
 }) {
   const [slot, setSlot] = useState<HTMLElement | null>(null);
@@ -152,19 +140,27 @@ export function Screen({ title, lead, help, icon, actions, banner, measure = fal
         ? actions && <HeadActions>{actions}</HeadActions>
         : <Head title={title} lead={lead} help={help} icon={icon} actions={actions} />}
       {banner}
-      {measure ? <Measure>{children}</Measure> : children}
+      {children}
     </>
   );
 }
 
 /**
- * The measure a screen that is read and filled in keeps.
+ * As many cards across as the window has room for.
  *
- * `Screen` takes it as a flag; a screen whose heading the shell draws
- * reaches for this directly. Either way it is one number, in one place.
+ * A grid of twelfths says how wide a card is as a fraction, so on a 4k
+ * screen a half is nineteen hundred pixels of label-and-value pairs and
+ * on a laptop the same half is six hundred. This says how wide a card
+ * wants to be instead, and lets the window decide how many fit - three
+ * across at 1600, six at 3840, one on a phone. It is the answer to a
+ * wide screen: more columns, not a narrower column.
  */
-export function Measure({ children }: { children: ReactNode }) {
-  return <div className="fl-measure">{children}</div>;
+export function Flow({ children, min = 420 }: {
+  children: ReactNode;
+  /** The narrowest a card may get before one is dropped from the row. */
+  min?: 320 | 420 | 520;
+}) {
+  return <div className={`fl-flow fl-flow-${min}`}>{children}</div>;
 }
 
 /** The twelve columns everything stands on. */

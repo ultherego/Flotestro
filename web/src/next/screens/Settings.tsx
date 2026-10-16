@@ -10,8 +10,7 @@ import type { IconName } from "../../components/icons";
 import { useToast } from "../../components/Toast";
 import { useT } from "../../i18n";
 import {
-  Actions, Banner, Bones, C, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Grid, Note,
-  Pill, Problem, Screen, Tabs,
+  Actions, Banner, Bones, C, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Flow, Grid, Note, Pill, Problem, Screen, Tabs,
 } from "../kit";
 
 /**
@@ -191,7 +190,6 @@ export function Settings() {
       title={t("Settings")}
       lead={t("Everything this installation is configured with.")}
       icon="settings"
-      measure
       help={
         <>
           <p>{t("What the panel stores is set here and takes effect without a restart: who may sign in and what they hold, the retentions, the address the agents dial, the channels, the budgets and the policies.")}</p>
@@ -306,16 +304,21 @@ function General({ permissions }: { permissions: Set<string> }) {
         {!data && !error && <Bones rows={2} />}
       </Card>
 
-      {data && areas.map(({ area, facts }) => (
-        <Card
-          key={area.key}
-          span={6}
-          title={t(area.title)}
-          note={facts.length === 1 ? t("{n} value", { n: facts.length }) : t("{n} values", { n: facts.length })}
-        >
-          <AreaFacts area={area} facts={facts} />
-        </Card>
-      ))}
+      {data && areas.length > 0 && (
+        <C span={12}>
+          <Flow>
+            {areas.map(({ area, facts }) => (
+              <Card
+                key={area.key}
+                title={t(area.title)}
+                note={facts.length === 1 ? t("{n} value", { n: facts.length }) : t("{n} values", { n: facts.length })}
+              >
+                <AreaFacts area={area} facts={facts} />
+              </Card>
+            ))}
+          </Flow>
+        </C>
+      )}
 
       {data && areas.length === 0 && (
         <Card span={12}>

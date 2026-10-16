@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import type { ReactElement } from "react";
-import { Band, Bars, Card, Chart, Find, Kpi, Needs, Pie, Pill, Screen, Squares, Table, Tile, Toolbar, pageNumbers } from "./kit";
+import { Band, Bars, Card, Chart, Find, Kpi, Needs, Pie, Flow, Pill, Squares, Table, Tile, Toolbar, pageNumbers } from "./kit";
 
 /**
  * The kit decides what the panel looks like, so the rules a screen must
@@ -248,16 +248,14 @@ describe("a card holding a list", () => {
   });
 });
 
-describe("a screen that is filled in rather than scanned", () => {
-  it("keeps a measure, so a 4k window does not stretch a form across the room", () => {
-    draw(<Screen title="Settings" measure><p>fields</p></Screen>);
-    const measured = document.querySelector(".fl-measure");
-    expect(measured).not.toBeNull();
-    expect(measured).toHaveTextContent("fields");
-  });
-
-  it("takes the whole window where it is a board", () => {
-    draw(<Screen title="Hosts"><p>tiles</p></Screen>);
-    expect(document.querySelector(".fl-measure")).toBeNull();
+describe("cards that fill the window", () => {
+  it("says how narrow a card may get and lets the window count the columns", () => {
+    draw(<Flow min={520}><p>one</p><p>two</p></Flow>);
+    const flow = document.querySelector(".fl-flow");
+    // The answer to a wide screen is more columns, not a narrower
+    // column: a half of twelve is six hundred pixels on a laptop and
+    // nineteen hundred on a 4k screen, and the same card cannot be both.
+    expect(flow?.className).toContain("fl-flow-520");
+    expect(flow).toHaveTextContent("one");
   });
 });

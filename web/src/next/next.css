@@ -668,10 +668,13 @@
   gap: var(--fl-gutter);
 }
 
-/* A screen that is read and filled in keeps a measure; one that is
-   scanned takes the window. Beyond about this width a line of a form
-   stops being a line and becomes a hunt from the label to the field. */
-.fl-app .fl-measure { max-width: 1180px; min-width: 0; }
+/* As many cards across as there is room for. The window decides how
+   many, not the screen: the card says how narrow it may get and the
+   grid fits what it can. */
+.fl-app .fl-flow { display: grid; gap: var(--fl-gutter); align-items: stretch; }
+.fl-app .fl-flow-320 { grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
+.fl-app .fl-flow-420 { grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); }
+.fl-app .fl-flow-520 { grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr)); }
 
 .fl-app .fl-stack { display: flex; flex-direction: column; min-width: 0; }
 .fl-app .fl-stack-l { display: flex; flex-direction: column; min-width: 0; }
