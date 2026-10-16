@@ -36,7 +36,7 @@
   --hover: var(--bg-hover);
   --line: var(--border);
   --line-soft: color-mix(in srgb, var(--border) 55%, transparent);
-  --rail-bg: var(--bg-sidebar);
+  --rail-bg: var(--bg);
 
   --ink: var(--text);
   --ink-muted: var(--text-muted);
@@ -48,6 +48,10 @@
   --brand-soft: color-mix(in srgb, var(--accent) 14%, transparent);
 
   --gap: 20px;
+  /* What the page keeps from the window's edges and from the rail. It
+     grows with the width, because an inset that is right on a laptop is
+     a hairline on a 4k monitor - which is what it looked like. */
+  --pad: clamp(18px, 1.7vw, 56px);
   --x1: 4px;
   --x2: 8px;
   --x3: 12px;
@@ -249,7 +253,7 @@
 
 /* The page column: the bar, then whatever the screen draws, at one
    rhythm - the same step of air that separates the containers. */
-.fl-app .fl-page { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; padding: var(--gap) var(--gap) var(--x8); }
+.fl-app .fl-page { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; padding: var(--pad) var(--pad) var(--x8); }
 .fl-app .fl-screen { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
 
 /* The bar has no walls and no background: it is a row of the page, which
@@ -1001,7 +1005,10 @@
    takes a measure and the air between the containers grows with it. */
 @media (min-width: 1900px) {
   .fl-app { --gap: 24px; }
-  .fl-app .fl-page { max-width: 2560px; }
+  /* A line of text three thousand pixels wide is unreadable, so the page
+     takes a measure - and stands in the middle of what is left rather
+     than hugging the rail with a void to its right. */
+  .fl-app .fl-page { max-width: 2560px; margin: 0 auto; width: 100%; }
 }
 @media (min-width: 2600px) {
   .fl-app { --gap: 28px; font-size: 15px; --rail: 300px; }
