@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import type { ReactElement } from "react";
-import { Band, Bars, Card, Chart, Find, Flow, Kpi, Needs, Pie, Pill, Ring, Squares, Table, Tile, Toolbar, pageNumbers } from "./kit";
+import { Band, Bars, Card, Chart, Diff, Find, Flow, Kpi, Needs, Pie, Pill, Ring, Squares, Table, Tile, Toolbar, pageNumbers } from "./kit";
 
 /**
  * The kit decides what the panel looks like, so the rules a screen must
@@ -276,5 +276,53 @@ describe("a share drawn as a percentage", () => {
     // A whole share is still a whole number.
     draw(<Ring share={1} label="checked" />);
     expect(document.querySelector(".fl-ring-value")).toHaveTextContent("100%");
+  });
+});
+
+describe("what a table can do besides list", () => {
+  const rows = [{ id: "a", name: "one" }, { id: "b", name: "two" }];
+  const columns = [
+    { key: "name", head: "Name", cell: (row: { name: string }) => row.name },
+    { key: "extra", head: "Extra", optional: true, startFolded: true, cell: () => "x" },
+  ];
+
+  it("opens a row under itself rather than sending the reader elsewhere", () => {
+    draw(<Table
+      testId="t"
+      rows={rows}
+      keyOf={(row) => row.id}
+      opened={(row) => row.id === "a"}
+      detail={(row) => <p>all of {row.name}</p>}
+      columns={columns}
+    />);
+    // The panel being replaced put a unit's drop-ins and an attempt's
+    // output under the row they belong to; a card somewhere else is a
+    // hunt, not a reading.
+    expect(screen.getByText("all of one")).toBeInTheDocument();
+    expect(document.querySelectorAll(".fl-row-detail")).toHaveLength(1);
+  });
+
+  it("marks the row the cards beside it are about", () => {
+    draw(<Table testId="t" rows={rows} keyOf={(row) => row.id} marked={(row) => row.id === "b"} columns={columns} />);
+    expect(document.querySelectorAll(".fl-row-marked")).toHaveLength(1);
+  });
+
+  it("folds a column away and keeps it folded", () => {
+    draw(<Table testId="t" rows={rows} keyOf={(row) => row.id} remember="fl.test.columns" columns={columns} />);
+    // The column said it starts folded, so the head is not drawn.
+    expect(screen.queryByText("Extra")).toBeNull();
+    fireEvent.click(screen.getByTestId("t-columns"));
+    fireEvent.click(screen.getByText("Extra"));
+    expect(screen.getAllByText("Extra").length).toBeGreaterThan(0);
+  });
+});
+
+describe("a patch", () => {
+  it("colours what goes in and what comes out", () => {
+    draw(<Diff testId="patch" text={"@@ -1 +1 @@\n-old line\n+new line"} />);
+    const patch = screen.getByTestId("patch");
+    expect(patch.querySelector(".fl-diff-in")).toHaveTextContent("+new line");
+    expect(patch.querySelector(".fl-diff-out")).toHaveTextContent("-old line");
+    expect(patch.querySelector(".fl-diff-where")).toHaveTextContent("@@");
   });
 });

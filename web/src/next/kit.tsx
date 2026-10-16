@@ -1,5 +1,5 @@
 import {
-  Children, createContext, isValidElement, useContext, useEffect, useId, useRef, useState,
+  Children, Fragment, createContext, isValidElement, useContext, useEffect, useId, useRef, useState,
   type CSSProperties, type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent, type ReactNode,
 } from "react";
@@ -8,6 +8,7 @@ import { Link } from "react-router-dom";
 import { Icon, type IconName } from "../components/icons";
 import { exportAddress, exportFileName } from "../components/ExportButton";
 import { fetchWithCredentials } from "../lib/api";
+import { isStringList, useStoredState } from "../lib/storage";
 import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
 
@@ -434,6 +435,17 @@ export function Problem({ children }: { children: ReactNode }) {
 export type Column<Row> = {
   /** Distinguishes the column and keys its cells. */
   key: string;
+  /**
+   * A column the reader may fold away, and whether it starts folded.
+   *
+   * The panel being replaced let every long table be narrowed to the
+   * columns somebody actually reads, and remembered it. A table with
+   * one of these gains the control; what is folded is this browser's.
+   */
+  optional?: boolean;
+  startFolded?: boolean;
+  /** How deep this row sits under the one above: a tree in a table. */
+  indent?: (row: Row) => number;
   head?: ReactNode;
   cell: (row: Row) => ReactNode;
   /** Numbers are read down a column, so they line up on their digits. */
@@ -455,7 +467,10 @@ export type Column<Row> = {
  * than widening the page, its head stays in view while it does, and a row
  * shows data: whatever can be done to it lives where the row leads.
  */
-export function Table<Row>({ columns, rows, keyOf, empty, loading = false, rowTestId, testId }: {
+export function Table<Row>({
+  columns, rows, keyOf, empty, loading = false, rowTestId, testId,
+  detail, opened, marked, remember,
+}: {
   columns: Column<Row>[];
   rows: Row[];
   keyOf: (row: Row, index: number) => string;
@@ -468,11 +483,37 @@ export function Table<Row>({ columns, rows, keyOf, empty, loading = false, rowTe
    * jumps when the rows land. The shape of what is coming says both.
    */
   loading?: boolean;
+  /**
+   * What a row opens into, under itself, across the whole width.
+   *
+   * The panel being replaced put a unit's drop-ins, an account's keys
+   * and an attempt's output in a second row under the one they belong
+   * to, and keeping that is the difference between reading a table and
+   * hunting for the card it sent you to.
+   */
+  detail?: (row: Row) => ReactNode;
+  /** Which rows are open. */
+  opened?: (row: Row) => boolean;
+  /** The row the cards beside the table are about. */
+  marked?: (row: Row) => boolean;
+  /** The browser key under which the folded columns are kept. */
+  remember?: string;
   rowTestId?: (row: Row) => string;
   testId?: string;
 }) {
+  const t = useT();
+  const foldable = columns.filter((one) => one.optional);
+  const [folded, setFolded] = useStoredState<string[]>(
+    remember ?? "fl.columns.unnamed",
+    foldable.filter((one) => one.startFolded).map((one) => one.key),
+    isStringList,
+  );
+  const [choosing, setChoosing] = useState(false);
+  const shown = columns.filter((one) => !one.optional || !folded.includes(one.key));
+
   if (rows.length === 0 && loading) return <Bones rows={5} height={18} />;
   if (rows.length === 0 && empty !== undefined) return <Empty>{empty}</Empty>;
+
   const classOf = (column: Column<Row>) =>
     join(
       column.num && "fl-num",
@@ -480,24 +521,103 @@ export function Table<Row>({ columns, rows, keyOf, empty, loading = false, rowTe
       column.minor && "fl-minor",
       column.tight && "fl-tight",
     ) || undefined;
+
+  const fold = (key: string) =>
+    setFolded((current) => current.includes(key) ? current.filter((one) => one !== key) : [...current, key]);
+
   return (
     <div className="fl-tablewrap">
+      {foldable.length > 0 && (
+        <div className="fl-columns">
+          <button
+            type="button"
+            className="fl-plain"
+            onClick={() => setChoosing((on) => !on)}
+            aria-expanded={choosing}
+            data-testid={testId ? `${testId}-columns` : "columns"}
+          >
+            {t("Columns")}
+          </button>
+          {choosing && (
+            <div className="fl-columns-list">
+              {foldable.map((one) => (
+                <Check
+                  key={one.key}
+                  checked={!folded.includes(one.key)}
+                  onChange={() => fold(one.key)}
+                >
+                  {one.head}
+                </Check>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <table className="fl-table" data-testid={testId}>
         <thead>
-          <tr>{columns.map((column) => (
+          <tr>{shown.map((column) => (
             <th key={column.key} scope="col" className={classOf(column)}>{column.head}</th>
           ))}</tr>
         </thead>
         <tbody>
-          {rows.map((row, index) => (
-            <tr key={keyOf(row, index)} data-testid={rowTestId?.(row)}>
-              {columns.map((column) => (
-                <td key={column.key} className={classOf(column)}>{column.cell(row)}</td>
-              ))}
-            </tr>
-          ))}
+          {rows.map((row, index) => {
+            const open = detail !== undefined && opened?.(row) === true;
+            return (
+              <Fragment key={keyOf(row, index)}>
+                <tr data-testid={rowTestId?.(row)} className={join(marked?.(row) && "fl-row-marked", open && "fl-row-open")}>
+                  {shown.map((column) => (
+                    <td key={column.key} className={classOf(column)}>
+                      {column.indent && (
+                        <span className="fl-indent" data-depth={column.indent(row)} aria-hidden="true" />
+                      )}
+                      {column.cell(row)}
+                    </td>
+                  ))}
+                </tr>
+                {open && (
+                  <tr className="fl-row-detail">
+                    <td colSpan={shown.length}>{detail(row)}</td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------- the diff */
+
+/**
+ * What a change would do to a file, line by line.
+ *
+ * A patch read as plain text is a patch nobody reads: the whole point is
+ * that the eye finds the two or three lines that differ without reading
+ * the rest. The colours are the product's own, so the light theme gets
+ * them right too.
+ */
+export function Diff({ text, label, testId }: { text: string; label?: ReactNode; testId?: string }) {
+  const lines = text.split("\n");
+  return (
+    <div className="fl-diff" data-testid={testId}>
+      {label && <span className="fl-readout-label">{label}</span>}
+      <pre className="fl-diff-body">
+        {lines.map((line, index) => (
+          <span
+            key={index}
+            className={join(
+              "fl-diff-line",
+              line.startsWith("+") && !line.startsWith("+++") && "fl-diff-in",
+              line.startsWith("-") && !line.startsWith("---") && "fl-diff-out",
+              (line.startsWith("@@") || line.startsWith("+++") || line.startsWith("---")) && "fl-diff-where",
+            )}
+          >
+            {line === "" ? " " : line}
+          </span>
+        ))}
+      </pre>
     </div>
   );
 }

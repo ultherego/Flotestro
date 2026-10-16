@@ -2443,3 +2443,71 @@
   font-weight: 650;
   color: var(--tone-text, var(--warn-text));
 }
+
+/* ---------------------------------------------------------------------
+   23. What a table can do besides list
+
+   A row that opens under itself, a row the cards beside it are about,
+   a tree of rows, and the columns a reader folds away. All four are
+   things the panel being replaced could do, and a table that cannot do
+   them sends the reader somewhere else to read what belongs here.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-row-marked > td { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.fl-app .fl-row-open > td { border-bottom-color: transparent; }
+
+.fl-app .fl-row-detail > td {
+  padding: 0 var(--s5) var(--s4);
+  background: color-mix(in srgb, var(--bg-sunken) 60%, transparent);
+}
+
+/* A tree inside a table: the depth is a width, not an indentation
+   character, so a name still reads as a name when it is copied. */
+.fl-app .fl-indent { display: inline-block; vertical-align: middle; }
+.fl-app .fl-indent[data-depth="1"] { width: 16px; }
+.fl-app .fl-indent[data-depth="2"] { width: 32px; }
+.fl-app .fl-indent[data-depth="3"] { width: 48px; }
+.fl-app .fl-indent[data-depth="4"] { width: 64px; }
+.fl-app .fl-indent[data-depth="5"] { width: 80px; }
+.fl-app .fl-indent[data-depth="6"] { width: 96px; }
+.fl-app .fl-indent[data-depth="7"] { width: 112px; }
+.fl-app .fl-indent[data-depth="8"] { width: 128px; }
+
+.fl-app .fl-columns { position: relative; display: flex; justify-content: flex-end; padding: 0 var(--s5) var(--s2); }
+
+.fl-app .fl-columns-list {
+  position: absolute;
+  top: calc(100% + var(--s1));
+  right: var(--s5);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  box-shadow: var(--fl-lift-high);
+}
+
+/* What a change would do to a file: the eye finds the two lines that
+   differ without reading the rest. */
+.fl-app .fl-diff { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+
+.fl-app .fl-diff-body {
+  margin: 0;
+  padding: var(--s3) 0;
+  max-height: 24em;
+  overflow: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  font-family: var(--font-mono);
+  font-size: var(--t-small);
+  line-height: 1.6;
+}
+
+.fl-app .fl-diff-line { display: block; padding: 0 var(--s4); white-space: pre; color: var(--text-muted); }
+.fl-app .fl-diff-in { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok-text); }
+.fl-app .fl-diff-out { background: color-mix(in srgb, var(--error) 14%, transparent); color: var(--error-text); }
+.fl-app .fl-diff-where { color: var(--text-faint); }

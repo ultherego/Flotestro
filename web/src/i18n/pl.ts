@@ -1829,6 +1829,7 @@ export const pl: Record<string, string> = {
   "The host is kept out by its lifecycle state, a decision recorded on this screen, not by a fault of its own.": "Hosta trzyma poza flotą jego stan cyklu życia - decyzja zapisana na tym ekranie, a nie jego własna usterka.",
   "Agent session{version}": "Sesja agenta{version}",
   "Tagged {tags} · clear": "Tagi: {tags} · wyczysc",
+  "Columns": "Kolumny",
   "{n}%": "{n}%",
   "Point at the chart for a reading": "Najedz kursorem na wykres, zeby odczytac wartosc",
   "Export CSV": "Eksportuj CSV",
