@@ -2,6 +2,11 @@ import { Route, Routes, useLocation } from "react-router-dom";
 import { Shell } from "./Shell";
 import { Dashboard } from "./screens/Dashboard";
 import { Hosts } from "./screens/Hosts";
+import { Teams } from "./screens/Teams";
+import { Tags } from "./screens/Tags";
+import { Groups } from "./screens/Groups";
+import { Relays } from "./screens/Relays";
+import { Audit } from "./screens/Audit";
 import { Profile } from "./screens/Profile";
 import { Reads } from "./screens/Reads";
 import { Readiness } from "./screens/Readiness";
@@ -74,6 +79,11 @@ export function NextPanel() {
         <Route path="/next/readiness" element={<Readiness />} />
         <Route path="/next/reads" element={<Reads />} />
         <Route path="/next/profile" element={<Profile />} />
+        <Route path="/next/audit" element={<Audit />} />
+        <Route path="/next/relays" element={<Relays />} />
+        <Route path="/next/groups" element={<Groups />} />
+        <Route path="/next/tags" element={<Tags />} />
+        <Route path="/next/teams" element={<Teams />} />
         <Route path="*" element={<NotYet />} />
       </Routes>
     </Shell>
