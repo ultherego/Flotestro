@@ -737,9 +737,20 @@
 .fl-app .fl-card-body {
   flex: 1 1 auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   padding: var(--s4) var(--s5) var(--s5);
   overflow: auto;
 }
+
+/* A drawing fills the card it was put in: a chart stands on its floor,
+   and a ring sits in the middle of the room rather than at the ceiling
+   with a hole under it. */
+.fl-app .fl-card-body > .fl-chart { flex: 1 1 auto; min-height: 0; }
+
+.fl-app .fl-card-body > .fl-pie,
+.fl-app .fl-card-body > .fl-ring,
+.fl-app .fl-card-body > .fl-arcs { flex: 1 1 auto; min-height: 0; }
 
 .fl-app .fl-flush .fl-card-body { padding: var(--s3) 0 0; }
 .fl-app .fl-flush .fl-card-head { padding-bottom: var(--s1); }
@@ -1152,7 +1163,7 @@
 
 .fl-app .fl-chart-read b { color: var(--text); font-weight: 650; }
 .fl-app .fl-chart-read em { font-style: normal; color: var(--tone-text, var(--text-muted)); font-weight: 650; }
-.fl-app .fl-chart-plot { position: relative; width: 100%; min-width: 0; }
+.fl-app .fl-chart-plot { position: relative; flex: 1 1 auto; width: 100%; min-width: 0; min-height: 120px; }
 .fl-app .fl-chart-plot svg { width: 100%; display: block; }
 .fl-app .fl-chart-rule { stroke: var(--border); stroke-dasharray: 2 4; }
 .fl-app .fl-chart-axis { fill: var(--text-faint); font-size: 9px; }

@@ -1,5 +1,5 @@
 import {
-  Children, isValidElement, useEffect, useId, useState,
+  Children, isValidElement, useEffect, useId, useRef, useState,
   type CSSProperties, type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent, type ReactNode,
 } from "react";
@@ -695,6 +695,7 @@ export function Chart({ labels, series, everyLabel = 3, height = 160, shape = "b
   series: Series[];
   /** Draw one label in every n, so they do not run together. */
   everyLabel?: number;
+  /** What it draws at where its container cannot be measured. */
   height?: number;
   /**
    * Counts in a period are columns; a level over time is a line, filled
@@ -706,6 +707,23 @@ export function Chart({ labels, series, everyLabel = 3, height = 160, shape = "b
   const t = useT();
   const mine = useId().replace(/:/g, "");
   const [at, setAt] = useState<number | null>(null);
+  /* The drawing fills the container it was given and stands on its
+     floor. Drawn at a fixed height it hung from the top of a card twice
+     as tall and left a hole under it - which is what the owner means by
+     a chart drawn from the top rather than from the bottom. The height
+     passed in is what it falls back to where nothing can be measured. */
+  const box = useRef<HTMLDivElement | null>(null);
+  const [tall, setTall] = useState(height);
+  useEffect(() => {
+    const where = box.current;
+    if (!where || typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(() => {
+      const measured = where.clientHeight;
+      if (measured > 60) setTall(measured);
+    });
+    watch.observe(where);
+    return () => watch.disconnect();
+  }, []);
   const columns = Math.max(1, labels.length);
   const totals = labels.map((_, i) => series.reduce((sum, one) => sum + (one.values[i] ?? 0), 0));
   const top = Math.max(1, ...totals);
@@ -713,7 +731,7 @@ export function Chart({ labels, series, everyLabel = 3, height = 160, shape = "b
   const padLeft = 26;
   const padBottom = 16;
   const plotW = W - padLeft;
-  const plotH = height - padBottom;
+  const plotH = tall - padBottom;
   const step = plotW / columns;
   const y = (value: number) => plotH - (value / top) * (plotH - 4);
   const x = (i: number) => padLeft + step * (i + 0.5);
@@ -753,8 +771,8 @@ export function Chart({ labels, series, everyLabel = 3, height = 160, shape = "b
         </div>
       </div>
 
-      <div className="fl-chart-plot">
-        <svg viewBox={`0 0 ${W} ${height}`} preserveAspectRatio="none" style={{ height }} role="img"
+      <div className="fl-chart-plot" ref={box}>
+        <svg viewBox={`0 0 ${W} ${tall}`} preserveAspectRatio="none" style={{ height: tall }} role="img"
              onPointerLeave={() => setAt(null)}>
           {[0, 0.5, 1].map((share) => (
             <g key={share}>
@@ -828,7 +846,7 @@ export function Chart({ labels, series, everyLabel = 3, height = 160, shape = "b
 
           {labels.map((label, i) => (
             i % everyLabel === 0
-              ? <text key={i} className="fl-chart-axis" x={x(i)} y={height - 3} textAnchor="middle">{label}</text>
+              ? <text key={i} className="fl-chart-axis" x={x(i)} y={tall - 3} textAnchor="middle">{label}</text>
               : null
           ))}
 
