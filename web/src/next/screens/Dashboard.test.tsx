@@ -73,7 +73,7 @@ describe("the arrangement of the fleet dashboard", () => {
 
   it("names every container the screen draws, and no other", () => {
     expect(DASHBOARD.map((one) => one.key)).toEqual([
-      "hosts", "online", "waiting", "found", "needs", "answering",
+      "hosts", "online", "waiting", "found", "needs", "answering", "fleet",
       "availability", "operations", "composition", "campaigns", "failures", "denials",
     ]);
     // Every one of them has a shape to ship with, or the first arrangement

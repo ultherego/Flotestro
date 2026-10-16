@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import type { ReactElement } from "react";
-import { Band, Bars, Kpi, Pill, Table, pageNumbers } from "./kit";
+import { Band, Bars, Chart, Kpi, Needs, Pie, Pill, Squares, Table, Tile, pageNumbers } from "./kit";
 
 /**
  * The kit decides what the panel looks like, so the rules a screen must
@@ -141,5 +141,86 @@ describe("the pager", () => {
   it("names the first, the last and the ones around, with a gap for the rest", () => {
     expect(pageNumbers(1, 3)).toEqual([1, 2, 3]);
     expect(pageNumbers(10, 40)).toEqual([1, "gap", 8, 9, 10, 11, 12, "gap", 40]);
+  });
+});
+
+describe("a whole divided", () => {
+  it("draws a slice for what nobody has heard from, and the total inside", () => {
+    draw(<Pie
+      testId="condition"
+      total={10}
+      label="hosts"
+      slices={[
+        { label: "Online", value: 6, tone: "ok" },
+        { label: "Offline", value: 1, tone: "error" },
+        { label: "Unknown", value: 3, tone: "unknown" },
+      ]}
+    />);
+    const pie = screen.getByTestId("condition");
+    // Three states were counted, so three arcs are drawn - the unknown
+    // among them. A ring that dropped it would read as a fleet of seven.
+    expect(pie.querySelectorAll(".fl-pie-slice")).toHaveLength(3);
+    expect(pie.querySelector(".fl-pie-total")).toHaveTextContent("10");
+    expect(within(pie).getByText("Unknown")).toBeInTheDocument();
+  });
+
+  it("leaves the ring empty rather than drawing a whole of nothing", () => {
+    draw(<Pie testId="empty" slices={[{ label: "Online", value: 0, tone: "ok" }]} />);
+    const pie = screen.getByTestId("empty");
+    expect(pie.querySelectorAll(".fl-pie-slice")).toHaveLength(0);
+    expect(pie.querySelector(".fl-pie-total")).toHaveTextContent("—");
+  });
+});
+
+describe("a chart", () => {
+  const labels = ["00", "01", "02"];
+  const series = [{ name: "Succeeded", tone: "ok" as const, values: [1, 5, 2] }];
+
+  it("answers the pointer with a reading, and keeps it out of the drawing", () => {
+    draw(<Chart testId="ops" labels={labels} series={series} everyLabel={1} />);
+    const hit = screen.getByTestId("chart-hit");
+    // jsdom draws nothing, so the pane has no width of its own; the
+    // reading is still asked for, which is what this guards.
+    hit.getBoundingClientRect = () => ({ left: 0, width: 600, top: 0, height: 160, right: 600, bottom: 160, x: 0, y: 0, toJSON: () => ({}) });
+    fireEvent(hit, new MouseEvent("mousemove", { bubbles: true, clientX: 300 }));
+    const read = screen.getByTestId("chart-read");
+    expect(read).toHaveTextContent("01");
+    expect(read).toHaveTextContent("5");
+    // The reading lives in the chart's header, never over the bars.
+    expect(screen.getByTestId("ops").querySelector(".fl-chart-plot .fl-chart-read")).toBeNull();
+  });
+});
+
+describe("a fleet", () => {
+  it("is one square per host, and the tally under it", () => {
+    draw(<Squares
+      testId="fleet"
+      items={[
+        { key: "a", tone: "ok" },
+        { key: "b", tone: "unknown" },
+      ]}
+      tally={[{ label: "online", value: 1, tone: "ok" }]}
+    />);
+    expect(screen.getByTestId("fleet").querySelectorAll(".fl-square")).toHaveLength(2);
+    expect(screen.getByTestId("fleet")).toHaveTextContent("online");
+  });
+
+  it("lets one tile say it has gone quiet while its neighbours work", () => {
+    draw(<Tile testId="host-a" name="web-01" silent="No answer since 09:12"
+               figures={[{ label: "CPU", value: null }]} />);
+    const tile = screen.getByTestId("host-a");
+    expect(tile.className).toContain("fl-tile-mute");
+    expect(tile).toHaveTextContent("No answer since 09:12");
+    // What it could not measure is a dash, never a nought.
+    expect(tile.querySelector(".fl-tile-fig-value")).toHaveTextContent("—");
+  });
+});
+
+describe("what needs somebody", () => {
+  it("says a count nobody could take was not counted", () => {
+    draw(<Needs items={[{ label: "Security findings", tone: "error" }]} />);
+    const row = screen.getByText("Security findings").closest(".fl-needs-row");
+    expect(row).toHaveTextContent("—");
+    expect(row).toHaveTextContent("not counted");
   });
 });

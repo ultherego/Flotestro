@@ -1269,6 +1269,7 @@ export function FeedRow({ icon, tone, what, who, when, to }: {
 export function Needs({ items }: {
   items: { label: ReactNode; value?: number; tone?: Tone; to?: string }[];
 }) {
+  const t = useT();
   return (
     <div className="fl-needs">
       {items.map((one, index) => {
@@ -1276,6 +1277,7 @@ export function Needs({ items }: {
         const body = (
           <>
             <span className="fl-needs-label">{one.label}</span>
+            {unknown && <span className="fl-faint fl-small">{t("not counted")}</span>}
             <span className="fl-needs-count">{unknown ? "—" : one.value}</span>
           </>
         );

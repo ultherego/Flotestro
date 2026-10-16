@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import { Link, NavLink, useLocation } from "react-router-dom";
+import {
+  useEffect, useRef, useState,
+  type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode,
+} from "react";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { api, BEARER_TOKEN_KEY } from "../lib/api";
+import { api, BEARER_TOKEN_KEY, type Collection } from "../lib/api";
+import { isBoolean, useStoredState } from "../lib/storage";
 import { usePreferences } from "../lib/preferences";
 import { SCALES } from "../lib/scale";
 import { THEMES } from "../lib/theme";
@@ -10,7 +14,7 @@ import { LOCALES, useLocale } from "../i18n";
 import { useCapabilities } from "../lib/capabilities";
 import { fleetNavigation, type NavGroup } from "../lib/navigation";
 import type { IconName } from "../components/icons";
-import type { Whoami } from "../lib/types";
+import type { Host, Whoami } from "../lib/types";
 import { Icon } from "../components/icons";
 import { LogoMark } from "../components/Logo";
 import { useT } from "../i18n";
@@ -80,6 +84,22 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
   };
   const shown = face ?? fleet;
   const name = me.data?.display_name || me.data?.subject || "";
+  const [finding, setFinding] = useState(false);
+  const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || "");
+  const keyHint = mac ? "\u2318 K" : "Ctrl K";
+
+  // One key opens the way to anywhere. Every panel in the look has it, and
+  // a fleet of a thousand hosts is unreachable by rail alone.
+  useEffect(() => {
+    const down = (event: globalThis.KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setFinding(true);
+      }
+    };
+    document.addEventListener("keydown", down);
+    return () => document.removeEventListener("keydown", down);
+  }, []);
 
   return (
     <div className="fl-app">
@@ -102,6 +122,19 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
             )}
             {shown.groups.map((group) => <Rail key={group.key} group={group} />)}
           </nav>
+          <div className="fl-whoami">
+            <UserMenu name={name} roles={me.data?.roles ?? []} subject={me.data?.subject ?? ""} />
+          </div>
+          <button
+            type="button"
+            className="fl-fold"
+            onClick={() => setFolded((on) => !on)}
+            aria-label={t("Show or hide the navigation")}
+            title={t("Show or hide the navigation")}
+            data-testid="fold-rail"
+          >
+            <Icon name={folded ? "expand" : "collapse"} />
+          </button>
         </aside>
         {drawer && <div className="fl-rail-backdrop" onClick={() => setDrawer(false)} />}
 
@@ -121,13 +154,21 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
             {trail.here && <><Icon name="chevron" /><span className="fl-crumbs-here">{trail.here}</span></>}
           </nav>
           <span className="fl-bar-spacer" />
-          <span className="fl-search">
+          <button
+            type="button"
+            className="fl-search"
+            onClick={() => setFinding(true)}
+            aria-label={t("Search the fleet…")}
+            data-testid="open-finder"
+          >
             <Icon name="search" />
-            <input placeholder={t("Search the fleet…")} aria-label={t("Search the fleet…")} />
-            <span className="fl-search-key">Ctrl K</span>
-          </span>
+            <span className="fl-search-text">{t("Search the fleet…")}</span>
+            <span className="fl-search-key">{keyHint}</span>
+          </button>
+          <Link to="/next/notifications" className="fl-iconbtn" aria-label={t("Notifications")}>
+            <Icon name="notifications" />
+          </Link>
           <Link to="/next/settings" className="fl-iconbtn" aria-label={t("Settings")}><Icon name="settings" /></Link>
-          <UserMenu name={name} roles={me.data?.roles ?? []} subject={me.data?.subject ?? ""} />
         </header>
 
         <main className="fl-screen" id="fl-main" tabIndex={-1}>
@@ -135,6 +176,7 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
         </main>
         </div>
       </div>
+      {finding && <Finder places={fleet.groups} onClose={() => setFinding(false)} />}
     </div>
   );
 }
@@ -174,7 +216,7 @@ function UserMenu({ name, roles, subject }: { name: string; roles: string[]; sub
   }, [open]);
 
   return (
-    <div className="fl-menu-anchor" ref={holder}>
+    <div className="fl-menu-anchor fl-menu-up" ref={holder}>
       <button
         type="button"
         className="fl-user"
@@ -184,7 +226,10 @@ function UserMenu({ name, roles, subject }: { name: string; roles: string[]; sub
         data-testid="user"
       >
         <span className="fl-avatar" aria-hidden="true">{(name || "?").slice(0, 1).toUpperCase()}</span>
-        <span className="fl-user-name">{name}</span>
+        <span className="fl-user-name">
+          {name}
+          <small>{roles[0] ?? t("no roles")}</small>
+        </span>
         <Icon name="chevron" />
       </button>
       {open && (
@@ -285,10 +330,26 @@ async function signOut(event: ReactMouseEvent) {
 function Rail({ group }: { group: Face["groups"][number] }) {
   const t = useT();
   const location = useLocation();
+  const [shut, setShut] = useStoredState<boolean>(`fl-group-${group.key}`, false, isBoolean);
+  const holding = group.items.some((item) => location.pathname.startsWith(item.to));
+  // A group the reader folded stays folded - except the one they are
+  // standing in, which would otherwise hide where they are.
+  const folded = shut && !holding;
   return (
-    <div className="fl-navgroup">
-      {group.label && <span className="fl-navgroup-label">{t(group.label)}</span>}
-      {group.items.map((item) => {
+    <div className={folded ? "fl-navgroup fl-navgroup-shut" : "fl-navgroup"}>
+      {group.label && (
+        <button
+          type="button"
+          className="fl-navgroup-label"
+          onClick={() => setShut(!shut)}
+          aria-expanded={!folded}
+          data-testid={`group-${group.key}`}
+        >
+          <span>{t(group.label)}</span>
+          <Icon name="chevron" />
+        </button>
+      )}
+      {!folded && group.items.map((item) => {
         // /next alone is the dashboard, so the item that leads there is the
         // one the reader is standing on.
         const here = location.pathname === "/next" ? "/next/dashboard" : location.pathname;
@@ -308,6 +369,104 @@ function Rail({ group }: { group: Face["groups"][number] }) {
           </NavLink>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * The way to anywhere, from the keyboard.
+ *
+ * A rail reaches the places of the panel; it cannot reach the thousandth
+ * host. This reaches both: the places are matched on their names, and
+ * anything longer than a letter or two is also asked of the fleet. What
+ * comes back is a list the arrow keys walk and Enter opens, which is the
+ * one interaction everybody already knows from every other panel.
+ */
+function Finder({ places, onClose }: {
+  places: Face["groups"];
+  onClose: () => void;
+}) {
+  const t = useT();
+  const navigate = useNavigate();
+  const [query, setQuery] = useState("");
+  const [at, setAt] = useState(0);
+  const field = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { field.current?.focus(); }, []);
+
+  const asked = query.trim();
+  const hosts = useQuery({
+    queryKey: ["finder-hosts", asked],
+    queryFn: () => api.get<Collection<Host>>(`/api/v1/hosts?limit=6&q=${encodeURIComponent(asked)}`),
+    enabled: asked.length >= 2,
+    retry: false,
+  });
+
+  const matched = places
+    .flatMap((group) => group.items.map((item) => ({ ...item, group: group.label })))
+    .filter((item) => !item.unavailable && t(item.label).toLowerCase().includes(asked.toLowerCase()))
+    .slice(0, 8);
+
+  const found: { to: string; label: string; note?: string; icon: IconName }[] = [
+    ...matched.map((item) => ({ to: item.to, label: t(item.label), note: item.group ? t(item.group) : undefined, icon: item.icon })),
+    ...(hosts.data?.items ?? []).map((host) => ({
+      to: `/next/hosts/${host.id}`,
+      label: host.hostname || host.id,
+      note: [host.site, host.environment].filter(Boolean).join(" · ") || undefined,
+      icon: "server" as IconName,
+    })),
+  ];
+  const here = Math.min(at, Math.max(0, found.length - 1));
+
+  const key = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") { onClose(); return; }
+    if (event.key === "ArrowDown") { event.preventDefault(); setAt((n) => Math.min(n + 1, found.length - 1)); return; }
+    if (event.key === "ArrowUp") { event.preventDefault(); setAt((n) => Math.max(n - 1, 0)); return; }
+    if (event.key === "Enter" && found[here]) { navigate(found[here].to); onClose(); }
+  };
+
+  return (
+    <div
+      className="fl-modal-backdrop fl-finder-backdrop"
+      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      data-testid="finder"
+    >
+      <div className="fl-finder" role="dialog" aria-modal="true" aria-label={t("Search the fleet…")}>
+        <div className="fl-finder-field">
+          <Icon name="search" />
+          <input
+            ref={field}
+            value={query}
+            onChange={(event) => { setQuery(event.target.value); setAt(0); }}
+            onKeyDown={key}
+            placeholder={t("A place in the panel, or a host by name…")}
+            aria-label={t("A place in the panel, or a host by name…")}
+            data-testid="finder-field"
+          />
+          <span className="fl-search-key">esc</span>
+        </div>
+        <div className="fl-finder-found" role="listbox">
+          {found.length === 0 ? (
+            <p className="fl-finder-none">
+              {asked.length === 0 ? t("Type to look for a place or a host.") : t("Nothing here answers to that.")}
+            </p>
+          ) : found.map((one, index) => (
+            <Link
+              key={one.to}
+              to={one.to}
+              role="option"
+              aria-selected={index === here}
+              className={index === here ? "fl-finder-row fl-on" : "fl-finder-row"}
+              onMouseEnter={() => setAt(index)}
+              onClick={onClose}
+            >
+              <Icon name={one.icon} />
+              <span className="fl-finder-name">{one.label}</span>
+              {one.note && <span className="fl-finder-note">{one.note}</span>}
+            </Link>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

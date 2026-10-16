@@ -1,13 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api, type Collection } from "../../lib/api";
+import { api, type Collection, type Page } from "../../lib/api";
 import { REFRESH_INTERVAL } from "../../lib/stream";
-import { relativeTime, absoluteTime } from "../../lib/format";
+import { relativeTime } from "../../lib/format";
 import type { AuditEvent, Campaign, FleetActivity, FleetSummary, Job } from "../../lib/types";
 import { stateName } from "../../components/ui";
 import { useT } from "../../i18n";
+import type { Host } from "../../lib/types";
 import {
-  Band, Bars, Card, Chart, Empty, HeadActions, Kpi, Pill, Problem, Ring, type Segment, Table, type Tone,
+  Band, Bars, Bones, Card, Chart, Empty, Feed, FeedRow, HeadActions, Kpi, Needs, Pie, Pill,
+  Problem, type Segment, Squares, Table, type Tone,
 } from "../kit";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
@@ -59,6 +61,14 @@ export function Dashboard() {
   const failures = useQuery({
     queryKey: ["jobs", "recent-failures"],
     queryFn: () => api.get<Collection<Job>>("/api/v1/jobs?state=failed&limit=8"),
+  });
+  // The fleet as squares: one per host, in the order the panel lists
+  // them. Two hundred is as many as a reader takes in at once, and the
+  // card says so rather than pretending it drew them all.
+  const fleet = useQuery({
+    queryKey: ["fleet-squares"],
+    queryFn: () => api.get<Page<Host>>("/api/v1/hosts?limit=200"),
+    refetchInterval: REFRESH_INTERVAL,
   });
   const denials = useQuery({
     queryKey: ["audit", "denied"],
@@ -200,24 +210,56 @@ export function Dashboard() {
             tools={open.length > 0 ? <Pill tone="warn">{open.length}</Pill> : undefined}
             foot={clear > 0 ? t("{n} other checks are clear.", { n: clear }) : undefined}
           >
-            {open.length === 0
-              ? <Empty>{t("Nothing waits and nothing is wrong.")}</Empty>
-              : <Needs items={open} />}
+            {summary.isLoading
+              ? <Bones rows={5} />
+              : open.length === 0
+                ? <Empty>{t("Nothing waits and nothing is wrong.")}</Empty>
+                : <Needs items={open.map((one) => ({ ...one, to: one.to ? `/next${one.to}` : undefined }))} />}
           </Card>
         ),
         answering: (
-          <Card title={t("Fleet answering")} note={t("The share of the fleet the panel has heard from.")}>
-            <Ring
-              share={s && s.hosts > 0 ? s.online / s.hosts : undefined}
-              label={t("online")}
-              tone={s && s.offline > 0 ? "warn" : "ok"}
-              legend={[
-                { label: t("Online"), value: s?.online ?? "—", tone: "ok" },
-                { label: t("Stale"), value: a ? byConnection("stale") ?? 0 : "—", tone: "warn" },
-                { label: t("Offline"), value: a ? byConnection("offline") ?? 0 : "—", tone: "error" },
-                { label: t("Unknown"), value: a ? byConnection("unknown") ?? 0 : "—", tone: "unknown" },
+          <Card title={t("Fleet condition")} note={t("Every host, by what the panel last heard from it.")}>
+            {/* What nobody has heard from is a slice like any other. A
+                fleet nobody asked and a fleet with nothing wrong are not
+                the same answer, and a ring that drops the unknown says
+                they are. */}
+            <Pie
+              total={s?.hosts ?? "—"}
+              label={t("hosts")}
+              slices={[
+                { label: t("Online"), value: s?.online ?? 0, tone: "ok", to: "/next/hosts?connection_state=online" },
+                { label: t("Stale"), value: byConnection("stale") ?? 0, tone: "warn", to: "/next/hosts?connection_state=stale" },
+                { label: t("Offline"), value: s?.offline ?? 0, tone: "error", to: "/next/hosts?connection_state=offline" },
+                { label: t("Unknown"), value: byConnection("unknown") ?? 0, tone: "unknown", to: "/next/hosts?connection_state=unknown" },
               ]}
             />
+          </Card>
+        ),
+        fleet: (
+          <Card
+            title={t("The fleet at a glance")}
+            note={t("One square is one host; point at it for its name.")}
+            foot={(fleet.data?.total ?? 0) > (fleet.data?.items.length ?? 0)
+              ? t("The newest {n} of {total}.", { n: fleet.data?.items.length ?? 0, total: fleet.data?.total ?? 0 })
+              : undefined}
+          >
+            {fleet.data ? (
+              <Squares
+                testId="fleet-squares"
+                items={fleet.data.items.map((host) => ({
+                  key: host.id,
+                  tone: connectionTone(host.connection_state),
+                  title: `${host.hostname || host.id} · ${t(stateName(host.connection_state ?? "unknown"))}`,
+                  to: `/next/hosts/${host.id}`,
+                }))}
+                tally={[
+                  { label: t("online"), value: s?.online ?? "—", tone: "ok" },
+                  { label: t("stale"), value: byConnection("stale") ?? "—", tone: "warn" },
+                  { label: t("offline"), value: s?.offline ?? "—", tone: "error" },
+                  { label: t("unknown"), value: byConnection("unknown") ?? "—", tone: "unknown" },
+                ]}
+              />
+            ) : <Bones rows={4} height={18} />}
           </Card>
         ),
         availability: (
@@ -229,6 +271,7 @@ export function Dashboard() {
           <Card title={t("Operations, last 24 h")} note={t("Finished per hour, by outcome.")}>
             {a ? (
               <Chart
+                testId="operations"
                 labels={a.hours.map(hour)}
                 series={[
                   { name: t("Succeeded"), tone: "ok", values: a.succeeded },
@@ -236,7 +279,7 @@ export function Dashboard() {
                   { name: t("Other"), tone: "unknown", values: a.other },
                 ]}
               />
-            ) : <Empty>{t("Loading…")}</Empty>}
+            ) : <Bones rows={3} height={28} />}
           </Card>
         ),
         composition: (
@@ -248,7 +291,7 @@ export function Dashboard() {
                 <Composition label={t("Sites")} items={a.by_site.map((f) => ({ label: facet(f.key), value: f.count, tone: "info" as Tone }))} />
                 <Composition label={t("Environments")} items={a.by_environment.map((f) => ({ label: facet(f.key), value: f.count, tone: "info" as Tone }))} />
               </div>
-            ) : <Empty>{t("Loading…")}</Empty>}
+            ) : <Bones rows={4} />}
           </Card>
         ),
         campaigns: (
@@ -275,23 +318,23 @@ export function Dashboard() {
             tools={<Link to="/next/jobs?state=failed">{t("All jobs")}</Link>}
             flush
           >
-            <Table
-              rows={failures.data?.items ?? []}
-              keyOf={(one) => one.id}
-              empty={t("No failed operations.")}
-              columns={[
-                { key: "when", head: t("Time"), cell: (one) => (
-                  <Link to={`/jobs/${one.id}`} title={absoluteTime(one.finished_at ?? one.created_at)}>
-                    {relativeTime(one.finished_at ?? one.created_at)}
-                  </Link>
-                ) },
-                { key: "host", head: t("Host"), cell: (one) => (
-                  <Link to={`/next/hosts/${one.host_id}`}>{one.hostname || one.host_id.slice(0, 8)}</Link>
-                ) },
-                { key: "what", head: t("Operation"), minor: true, tight: true, cell: (one) => <code title={one.action_type}>{one.action_type}</code> },
-                { key: "error", head: t("Error"), tight: true, cell: (one) => <code title={one.result_error_code || "failed"}>{one.result_error_code || "failed"}</code> },
-              ]}
-            />
+            {failures.isLoading ? <Bones rows={4} /> : (failures.data?.items ?? []).length === 0 ? (
+              <Empty>{t("No failed operations.")}</Empty>
+            ) : (
+              <Feed>
+                {(failures.data?.items ?? []).map((one) => (
+                  <FeedRow
+                    key={one.id}
+                    icon="jobs"
+                    tone="error"
+                    to={`/next/jobs/${one.id}`}
+                    what={one.action_type}
+                    who={one.hostname || one.host_id.slice(0, 8)}
+                    when={relativeTime(one.finished_at ?? one.created_at)}
+                  />
+                ))}
+              </Feed>
+            )}
           </Card>
         ),
         denials: (
@@ -305,25 +348,23 @@ export function Dashboard() {
             }
             flush
           >
-            <Table
-              rows={denied}
-              keyOf={(one) => String(one.id)}
-              empty={t("No denials in recent events.")}
-              columns={[
-                { key: "when", head: t("Time"), cell: (one) => (
-                  <span title={absoluteTime(one.occurred_at)}>{relativeTime(one.occurred_at)}</span>
-                ) },
-                { key: "actor", head: t("Actor"), tight: true, cell: (one) => (
-                  <Link to={`/next/audit?actor=${encodeURIComponent(one.actor_id)}`} className="fl-mono" title={one.actor_id}>
-                    {one.actor_id}
-                  </Link>
-                ) },
-                { key: "action", head: t("Operation"), tight: true, cell: (one) => <code title={one.action}>{one.action}</code> },
-                { key: "reason", head: t("Reason"), minor: true, tight: true, cell: (one) => (
-                  one.detail?.reason ? <code title={String(one.detail.reason)}>{String(one.detail.reason)}</code> : <>—</>
-                ) },
-              ]}
-            />
+            {denials.isLoading ? <Bones rows={4} /> : denied.length === 0 ? (
+              <Empty>{t("No denials in recent events.")}</Empty>
+            ) : (
+              <Feed>
+                {denied.map((one) => (
+                  <FeedRow
+                    key={String(one.id)}
+                    icon="access"
+                    tone="warn"
+                    to={`/next/audit?actor=${encodeURIComponent(one.actor_id)}`}
+                    what={one.action}
+                    who={one.detail?.reason ? `${one.actor_id} · ${String(one.detail.reason)}` : one.actor_id}
+                    when={relativeTime(one.occurred_at)}
+                  />
+                ))}
+              </Feed>
+            )}
           </Card>
         ),
       }} />
@@ -350,7 +391,8 @@ export const DASHBOARD: BoardEntry[] = [
   { key: "waiting", title: "Waiting on a person", width: 3, height: 2 },
   { key: "found", title: "Found on the hosts", width: 3, height: 2 },
   { key: "needs", title: "What needs you", width: 8, height: 5 },
-  { key: "answering", title: "Fleet answering", width: 4, height: 5 },
+  { key: "answering", title: "Fleet condition", width: 4, height: 5 },
+  { key: "fleet", title: "The fleet at a glance", width: 12, height: 3 },
   { key: "availability", title: "Host availability", width: 4, height: 3 },
   { key: "operations", title: "Operations, last 24 h", width: 8, height: 4 },
   { key: "composition", title: "Fleet composition", width: 4, height: 7 },
@@ -361,30 +403,12 @@ export const DASHBOARD: BoardEntry[] = [
 
 type Need = { label: string; value?: number; tone: Tone; to?: string };
 
-/**
- * The things that need somebody, as a list rather than a field of tiles:
- * the count, what it is, and the way to it. Read down in one pass.
- */
-function Needs({ items }: { items: Need[] }) {
-  const t = useT();
-  return (
-    <ul className="fl-needs">
-      {items.map((one) => {
-        const body = (
-          <>
-            <span className={`fl-needs-count fl-${one.tone}`}>{one.value === undefined ? "—" : one.value}</span>
-            <span className="fl-needs-label">{one.label}</span>
-            {one.value === undefined && <span className="fl-faint">{t("not counted")}</span>}
-          </>
-        );
-        return (
-          <li key={one.label}>
-            {one.to ? <Link to={`/next${one.to}`} className="fl-needs-row">{body}</Link> : <span className="fl-needs-row">{body}</span>}
-          </li>
-        );
-      })}
-    </ul>
-  );
+/** What the panel last heard from a host, as a tone. */
+function connectionTone(state?: string | null): Tone {
+  if (state === "online") return "ok";
+  if (state === "stale") return "warn";
+  if (state === "offline") return "error";
+  return "unknown";
 }
 
 /** One dimension of the fleet: a heading, then the bars under it. */
