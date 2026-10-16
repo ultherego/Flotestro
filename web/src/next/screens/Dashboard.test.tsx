@@ -122,21 +122,35 @@ describe("the fleet dashboard", () => {
     expect(row).toHaveTextContent("not counted");
   });
 
-  it("counts a state the fleet has none of as none, in the squares as in the ring", async () => {
+  it("names every machine on the board, rather than asking to be clicked", async () => {
     Object.assign(answers, {
       "/api/v1/fleet/summary": summary,
       "/api/v1/fleet/activity": activity,
-      "/api/v1/hosts": { items: [{ id: "h1", hostname: "agent-arch", connection_state: "online" }], count: 1 },
+      "/api/v1/hosts": {
+        items: [
+          { id: "h1", hostname: "agent-arch", site: "lab", environment: "test",
+            connection_state: "online", pending_updates: 18, failed_units: 0,
+            last_seen_at: "2026-10-16T09:59:00Z" },
+          { id: "h2", hostname: "agent-debian", site: "lab", environment: "test",
+            connection_state: "offline", pending_updates: null, failed_units: null },
+        ],
+        count: 2,
+      },
     });
     draw();
-    const squares = await screen.findByTestId("fleet-squares");
-    // The activity's facet list is complete, so a state missing from it
-    // has no hosts. Read as "nobody counted" here and as nought in the
-    // ring beside it, the two cards contradicted each other on the same
-    // screen - and one of them had to be lying.
-    const stale = within(squares).getByText("stale").closest(".fl-quiet-item");
-    expect(stale).toHaveTextContent("0");
-    expect(stale).not.toHaveTextContent("—");
+    // A square the reader has to click to find out what it is was not a
+    // view of a fleet. The name is on the tile.
+    const tile = await screen.findByTestId("fleet-tile-h1");
+    expect(tile).toHaveTextContent("agent-arch");
+    expect(tile).toHaveTextContent("18");
+    expect(tile).toHaveAttribute("href", "/next/hosts/h1");
+
+    // A machine that has gone quiet says so on itself, and what it never
+    // reported is a dash - not a nought.
+    const quiet = screen.getByTestId("fleet-tile-h2");
+    expect(quiet.className).toContain("fl-tile-mute");
+    expect(quiet).toHaveTextContent("—");
+    expect(within(quiet).queryByText("0")).toBeNull();
   });
 
   it("puts what is at zero under the availability band rather than in it", async () => {

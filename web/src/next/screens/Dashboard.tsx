@@ -8,7 +8,8 @@ import { stateName } from "../../components/ui";
 import { useT } from "../../i18n";
 import type { Host } from "../../lib/types";
 import {
-  Band, Bars, Bones, Card, Chart, Empty, Feed, FeedRow, HeadActions, Kpi, Needs, Pie, Pill, Problem, Squares, Stack, Table, type Segment, type Tone,
+  Band, Bars, Bones, Card, Chart, Empty, Feed, FeedRow, HeadActions, Kpi, Needs, Pie, Pill,
+  Problem, Stack, Table, Tile, Tiles, type Segment, type Tone,
 } from "../kit";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
@@ -236,29 +237,45 @@ export function Dashboard() {
         ),
         fleet: (
           <Card
-            title={t("The fleet at a glance")}
-            note={t("One square is one host; point at it for its name.")}
+            title={t("The fleet")}
+            note={t("Every machine, how it is going and when it last spoke.")}
+            tools={<Link to="/next/hosts">{t("All hosts")}</Link>}
             foot={(fleet.data?.total ?? 0) > (fleet.data?.items.length ?? 0)
               ? t("The newest {n} of {total}.", { n: fleet.data?.items.length ?? 0, total: fleet.data?.total ?? 0 })
               : undefined}
           >
+            {/* A square the reader has to click to find out what it is
+                is not a view of a fleet - the owner's words. Every tile
+                carries the machine's name, so the board answers "which
+                one" without being asked. */}
             {fleet.data ? (
-              <Squares
-                testId="fleet-squares"
-                items={fleet.data.items.map((host) => ({
-                  key: host.id,
-                  tone: connectionTone(host.connection_state),
-                  title: `${host.hostname || host.id} · ${t(stateName(host.connection_state ?? "unknown"))}`,
-                  to: `/next/hosts/${host.id}`,
-                }))}
-                tally={[
-                  { label: t("online"), value: s?.online ?? "—", tone: "ok" },
-                  { label: t("stale"), value: a ? byConnection("stale") ?? 0 : "—", tone: "warn" },
-                  { label: t("offline"), value: s?.offline ?? "—", tone: "error" },
-                  { label: t("unknown"), value: a ? byConnection("unknown") ?? 0 : "—", tone: "unknown" },
-                ]}
-              />
-            ) : <Bones rows={4} height={18} />}
+              <Tiles>
+                {fleet.data.items.map((host) => (
+                  <Tile
+                    key={host.id}
+                    testId={`fleet-tile-${host.id}`}
+                    to={`/next/hosts/${host.id}`}
+                    name={host.hostname || host.id.slice(0, 12)}
+                    sub={[host.site, host.environment].filter(Boolean).join(" · ") || undefined}
+                    state={
+                      <Pill tone={connectionTone(host.connection_state)}>
+                        {t(stateName(host.connection_state ?? "unknown"))}
+                      </Pill>
+                    }
+                    silent={host.connection_state === "offline" || host.connection_state === "stale"
+                      ? t("last heard from {when}", {
+                          when: host.last_seen_at ? relativeTime(host.last_seen_at) : t("never"),
+                        })
+                      : undefined}
+                    figures={[
+                      { label: t("Updates"), value: host.pending_updates, tone: (host.pending_updates ?? 0) > 0 ? "warn" : "neutral" },
+                      { label: t("Failed units"), value: host.failed_units, tone: (host.failed_units ?? 0) > 0 ? "error" : "neutral" },
+                      { label: t("Last seen"), value: host.last_seen_at ? relativeTime(host.last_seen_at) : null },
+                    ]}
+                  />
+                ))}
+              </Tiles>
+            ) : <Bones rows={3} height={74} />}
           </Card>
         ),
         availability: (
@@ -391,7 +408,7 @@ export const DASHBOARD: BoardEntry[] = [
   { key: "found", title: "Found on the hosts", width: 3, height: 1 },
   { key: "needs", title: "What needs you", width: 8, height: 4 },
   { key: "answering", title: "Fleet condition", width: 4, height: 2 },
-  { key: "fleet", title: "The fleet at a glance", width: 4, height: 1 },
+  { key: "fleet", title: "The fleet", width: 12, height: 2 },
   { key: "availability", title: "Host availability", width: 4, height: 1 },
   { key: "operations", title: "Operations, last 24 h", width: 8, height: 3 },
   { key: "composition", title: "Fleet composition", width: 4, height: 5 },
