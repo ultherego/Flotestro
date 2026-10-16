@@ -43,7 +43,7 @@
   --fl-bar: 60px;
   --fl-gutter: var(--s5);
   --fl-pad: var(--s7);
-  --fl-row: 152px;
+  --row: 152px;
 
   --fl-card: color-mix(in srgb, var(--bg-panel) 94%, var(--text) 6%);
   --fl-edge: color-mix(in srgb, var(--text) 9%, transparent);
@@ -629,6 +629,11 @@
 .fl-app .fl-stack { gap: var(--fl-gutter); }
 .fl-app .fl-stack-l { gap: var(--s6); }
 
+/* A block takes the number of columns it was given, and that number and
+   no other: the arranging mode measures the pointer in twelfths, so a
+   container sized to seven that drew as eight would make the grid lie
+   about itself. Below the breakpoint there is no room to divide and
+   everything takes the row. */
 .fl-app .fl-c1, .fl-app .fl-c2, .fl-app .fl-c3, .fl-app .fl-c4,
 .fl-app .fl-c5, .fl-app .fl-c6, .fl-app .fl-c7, .fl-app .fl-c8,
 .fl-app .fl-c9, .fl-app .fl-c10, .fl-app .fl-c11, .fl-app .fl-c12 {
@@ -637,24 +642,18 @@
 }
 
 @media (min-width: 1000px) {
-  .fl-app .fl-c1 { grid-column: span 3; }
-  .fl-app .fl-c2 { grid-column: span 3; }
-  .fl-app .fl-c3 { grid-column: span 4; }
+  .fl-app .fl-c1 { grid-column: span 1; }
+  .fl-app .fl-c2 { grid-column: span 2; }
+  .fl-app .fl-c3 { grid-column: span 3; }
   .fl-app .fl-c4 { grid-column: span 4; }
-  .fl-app .fl-c5 { grid-column: span 6; }
+  .fl-app .fl-c5 { grid-column: span 5; }
   .fl-app .fl-c6 { grid-column: span 6; }
-  .fl-app .fl-c7 { grid-column: span 8; }
+  .fl-app .fl-c7 { grid-column: span 7; }
   .fl-app .fl-c8 { grid-column: span 8; }
   .fl-app .fl-c9 { grid-column: span 9; }
   .fl-app .fl-c10 { grid-column: span 10; }
   .fl-app .fl-c11 { grid-column: span 11; }
-}
-
-@media (min-width: 1400px) {
-  .fl-app .fl-c1 { grid-column: span 2; }
-  .fl-app .fl-c2 { grid-column: span 3; }
-  .fl-app .fl-c3 { grid-column: span 3; }
-  .fl-app .fl-c4 { grid-column: span 4; }
+  .fl-app .fl-c12 { grid-column: span 12; }
 }
 
 /* A row of equal tiles that steps down on its own rather than by a
@@ -1842,9 +1841,9 @@
   box-shadow: var(--fl-lift);
 }
 
-.fl-app .fl-arrange-reason { flex: 1 1 260px; }
+.fl-app .fl-arrange-what { flex: 1 1 auto; min-width: 0; font-size: var(--t-small); color: var(--text-faint); }
 .fl-app .fl-arrange select { width: auto; }
-.fl-app .fl-placed { grid-auto-rows: var(--fl-row); align-items: stretch; }
+.fl-app .fl-placed { grid-auto-rows: var(--row); align-items: stretch; }
 .fl-app .fl-held { position: relative; min-width: 0; min-height: 0; }
 .fl-app .fl-held > * { height: 100%; }
 

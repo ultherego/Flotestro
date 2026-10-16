@@ -1334,6 +1334,7 @@ export const pl: Record<string, string> = {
   "The browser would not take it; copy it by hand.": "Przegladarka tego nie przyjela; skopiuj recznie.",
   "Every machine, how it is going and when it last spoke.": "Kazda maszyna, jak sie ma i kiedy ostatnio sie odezwala.",
   "last heard from {when}": "ostatnio slyszany {when}",
+  "Hold the bar to move a container, the corner to size it.": "Zlap pasek, zeby przesunac kontener; rog, zeby zmienic rozmiar.",
   "{n}%": "{n}%",
   "Point at the chart for a reading": "Najedz kursorem na wykres, zeby odczytac wartosc",
   "Export CSV": "Eksportuj CSV",

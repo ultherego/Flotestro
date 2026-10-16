@@ -63,7 +63,7 @@ export function settle(widgets: BoardWidget[], held: string): BoardWidget[] {
 /**
  * The height of one row of the board, in pixels.
  *
- * It is here and in `--fl-row` of the stylesheet, and the two must
+ * It is here and in `--row` of the stylesheet, and the two must
  * agree: the grid draws by the first and the corner measures by the
  * second, so a difference makes a container jump as it is sized. It is
  * the height of a headline tile, because that is the smallest thing
@@ -93,7 +93,6 @@ export function Board({ screen, catalogue, drawn }: {
   }));
 
   const [editing, setEditing] = useState<BoardWidget[] | null>(null);
-  const [reason, setReason] = useState("");
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [hold, setHold] = useState<
     { key: string; mode: "move" | "size"; fromX: number; fromY: number; start: BoardWidget } | null
@@ -107,11 +106,10 @@ export function Board({ screen, catalogue, drawn }: {
   const save = useMutation({
     mutationFn: (widgets: BoardWidget[]) =>
       api.put<StoredBoard>(`/api/v1/settings/layout/${screen}`, {
-        widgets, reason: reason.trim(), revision: layout.data?.revision ?? 0,
+        widgets, revision: layout.data?.revision ?? 0,
       }),
     onSuccess: () => {
       setEditing(null);
-      setReason("");
       void queryClient.invalidateQueries({ queryKey: ["screen-layout", screen] });
       toast.success(t("The screen is arranged this way for everybody who opens it."));
     },
@@ -126,10 +124,9 @@ export function Board({ screen, catalogue, drawn }: {
     },
   });
   const reset = useMutation({
-    mutationFn: () => api.del(`/api/v1/settings/layout/${screen}?reason=${encodeURIComponent(reason.trim())}`),
+    mutationFn: () => api.del(`/api/v1/settings/layout/${screen}`),
     onSuccess: () => {
       setEditing(null);
-      setReason("");
       void queryClient.invalidateQueries({ queryKey: ["screen-layout", screen] });
       toast.success(t("The screen is back to the arrangement the panel ships with."));
     },
@@ -203,8 +200,6 @@ export function Board({ screen, catalogue, drawn }: {
 
   const letGo = () => setHold(null);
 
-  const ready = reason.trim().length >= 8;
-
   return (
     <>
       {layout.error instanceof ApiError && layout.error.status >= 500 && (
@@ -224,22 +219,16 @@ export function Board({ screen, catalogue, drawn }: {
         <div className="fl-arrange">
           {(
             <>
-              <input
-                className="fl-arrange-reason"
-                placeholder={t("why this arrangement (for the trail)")}
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-                data-testid="board-reason"
-              />
+              <span className="fl-arrange-what">{t("Hold the bar to move a container, the corner to size it.")}</span>
               <button
                 type="button"
                 onClick={() => save.mutate(current)}
-                disabled={save.isPending || current.length === 0 || !ready}
+                disabled={save.isPending || current.length === 0}
                 data-testid="board-save"
               >
-                {save.isPending ? t("storing…") : t("Store this arrangement for everybody")}
+                {save.isPending ? t("storing…") : t("Save")}
               </button>
-              <button type="button" className="fl-quiet" onClick={() => { setEditing(null); setReason(""); }}>
+              <button type="button" className="fl-quiet" onClick={() => setEditing(null)}>
                 {t("Back")}
               </button>
               {absent.length > 0 && (
@@ -264,7 +253,7 @@ export function Board({ screen, catalogue, drawn }: {
                 <button
                   type="button"
                   className="fl-danger"
-                  disabled={reset.isPending || !ready}
+                  disabled={reset.isPending}
                   onClick={() => reset.mutate()}
                   data-testid="board-reset"
                   title={t("Everybody goes back to the arrangement the panel ships with.")}

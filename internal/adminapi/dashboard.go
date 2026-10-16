@@ -238,12 +238,17 @@ func (s *Server) handleSetDashboardLayout(w http.ResponseWriter, r *http.Request
 		problem(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	// A reason is kept where one is given and is not demanded.
+	//
+	// It was demanded, because the arrangement is everybody's. But a
+	// screen's arrangement is cosmetic and reversible by the same
+	// control that made it, which is not what the rule about reasons is
+	// for - that rule guards what changes a host or who may reach one.
+	// Made to type a sentence to move a container, an operator types
+	// "aaaaaaaa", and a trail of those is worse than a trail of none.
+	// Who did it, when, and which revision it was are recorded either
+	// way, and the history keeps every arrangement that came before.
 	reason := strings.TrimSpace(body.Reason)
-	if len([]rune(reason)) < minimalStepUpReason {
-		problem(w, http.StatusBadRequest, "reason_required",
-			"this operation requires a reason (field reason, min. 8 characters): it changes the screen of everybody who opens it")
-		return
-	}
 	if body.Revision == nil {
 		problem(w, http.StatusBadRequest, "revision_required",
 			"send the revision this arrangement was read at, so a change made in the meantime is not overwritten unseen")
@@ -335,13 +340,9 @@ func (s *Server) handleResetScreenLayout(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	// Kept where it is given, not demanded: see the note on the write.
 	reason, ok := requestReason(w, r, nil)
 	if !ok {
-		return
-	}
-	if len([]rune(strings.TrimSpace(reason))) < minimalStepUpReason {
-		problem(w, http.StatusBadRequest, "reason_required",
-			"this operation requires a reason (field reason, min. 8 characters)")
 		return
 	}
 	tx, err := s.pool.Begin(r.Context())

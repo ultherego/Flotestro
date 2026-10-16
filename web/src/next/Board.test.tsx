@@ -133,14 +133,15 @@ describe("arranging a screen", () => {
     expect(screen.getByTestId("held-first")).toHaveTextContent("8×3");
   });
 
-  it("will not store an arrangement without a reason for the trail", async () => {
+  it("stores an arrangement with one press and asks for nothing first", async () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("arrange")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("arrange"));
-    expect(screen.getByTestId("board-save")).toBeDisabled();
-    fireEvent.change(screen.getByTestId("board-reason"), { target: { value: "short" } });
-    expect(screen.getByTestId("board-save")).toBeDisabled();
-    fireEvent.change(screen.getByTestId("board-reason"), { target: { value: "the failures belong at the top" } });
+    // Moving a container is cosmetic and is undone by the same control
+    // that did it. Made to write a sentence first, an operator writes
+    // "aaaaaaaa", and a trail of those is worse than a trail of none -
+    // who arranged it, when, and the revision are recorded either way.
+    expect(screen.queryByTestId("board-reason")).toBeNull();
     expect(screen.getByTestId("board-save")).toBeEnabled();
   });
 
@@ -148,11 +149,9 @@ describe("arranging a screen", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("arrange")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("arrange"));
-    fireEvent.change(screen.getByTestId("board-reason"), { target: { value: "the failures belong at the top" } });
     fireEvent.click(screen.getByTestId("board-save"));
     await waitFor(() => expect(sent.body).toBeDefined());
     expect(sent.body?.revision).toBe(3);
-    expect(sent.body?.reason).toBe("the failures belong at the top");
   });
 
   it("remembers a container taken off the screen as taken off, not as forgotten", async () => {
@@ -161,7 +160,6 @@ describe("arranging a screen", () => {
     fireEvent.click(screen.getByTestId("arrange"));
     fireEvent.click(screen.getAllByTitle("Take this container off the screen")[0]);
     expect(screen.queryByTestId("held-first")).toBeNull();
-    fireEvent.change(screen.getByTestId("board-reason"), { target: { value: "the first one is not read here" } });
     fireEvent.click(screen.getByTestId("board-save"));
     await waitFor(() => expect(sent.body).toBeDefined());
     // Hidden, and still in the record: "somebody removed this" and "this
