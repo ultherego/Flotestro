@@ -453,13 +453,15 @@ export function Find({ value, onChange, placeholder, testId }: {
 }
 
 /** A choice of one from a few, as one control rather than a row of buttons. */
-export function Seg<T extends string>({ value, onChange, options }: {
+export function Seg<T extends string>({ value, onChange, options, label }: {
   value: T;
   onChange: (value: T) => void;
   options: { value: T; label: ReactNode }[];
+  /** What the group chooses between, for anybody who cannot see it. */
+  label?: string;
 }) {
   return (
-    <div className="fl-seg">
+    <div className="fl-seg" role="group" aria-label={label}>
       {options.map((option) => (
         <button
           key={option.value}

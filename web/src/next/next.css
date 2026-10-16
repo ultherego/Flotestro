@@ -383,6 +383,7 @@
 .fl-app .fl-c9 { grid-column: span 9; } .fl-app .fl-c10 { grid-column: span 10; }
 .fl-app .fl-c11 { grid-column: span 11; } .fl-app .fl-c12 { grid-column: span 12; }
 .fl-app .fl-stack { display: grid; gap: var(--x4); min-width: 0; }
+.fl-app .fl-stack-l { display: grid; gap: var(--gap); min-width: 0; }
 .fl-app .fl-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--x2); min-width: 0; }
 
 .fl-app .fl-card {
