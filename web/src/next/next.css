@@ -1337,8 +1337,8 @@
 
 .fl-app .fl-feed-mark svg { width: 14px; height: 14px; }
 .fl-app .fl-feed-text { flex: 1 1 auto; min-width: 0; }
-.fl-app .fl-feed-what { font-size: var(--t-body); overflow-wrap: anywhere; }
-.fl-app .fl-feed-who { font-size: var(--t-small); color: var(--text-faint); }
+.fl-app .fl-feed-what { display: block; font-size: var(--t-body); overflow-wrap: anywhere; }
+.fl-app .fl-feed-who { display: block; margin-top: 1px; font-size: var(--t-small); color: var(--text-faint); }
 .fl-app .fl-feed-when { flex: 0 0 auto; font-size: var(--t-small); color: var(--text-faint); white-space: nowrap; }
 
 /* A list of things that need somebody, inside a card. */

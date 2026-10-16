@@ -281,7 +281,7 @@ function General({ permissions }: { permissions: Set<string> }) {
 
       {mayReadAddress && (
         <Card
-          span={5}
+          span={6}
           title={t("Advertised address")}
           note={t("The address the agents dial to reach this panel.")}
         >
@@ -308,7 +308,7 @@ function General({ permissions }: { permissions: Set<string> }) {
       {data && areas.map(({ area, facts }) => (
         <Card
           key={area.key}
-          span={4}
+          span={6}
           title={t(area.title)}
           note={facts.length === 1 ? t("{n} value", { n: facts.length }) : t("{n} values", { n: facts.length })}
         >
@@ -588,7 +588,7 @@ function MonitoringRetention() {
   if (settings.error) return null;
   if (!settings.data) {
     return (
-      <Card span={7} title={t("Monitoring retention")} note={t("How long the panel keeps what the hosts send.")}>
+      <Card span={12} title={t("Monitoring retention")} note={t("How long the panel keeps what the hosts send.")}>
         <Bones rows={4} />
       </Card>
     );
@@ -602,7 +602,7 @@ function MonitoringRetention() {
 
   return (
     <Card
-      span={7}
+      span={12}
       title={t("Monitoring retention")}
       note={t("How long the panel keeps what the hosts send.")}
       foot={
