@@ -201,8 +201,8 @@ export function Profile() {
 export const PROFILE_SCREEN = "next_profile";
 
 export const PROFILE: BoardEntry[] = [
-  { key: "who", title: "Who you are signed in as", width: 5, height: 3 },
-  { key: "look", title: "How the panel looks", width: 7, height: 3 },
-  { key: "reading", title: "How the panel reads to you", width: 7, height: 4 },
-  { key: "sessions", title: "Your sessions", width: 5, height: 4 },
+  { key: "who", title: "Who you are signed in as", width: 5, height: 2 },
+  { key: "look", title: "How the panel looks", width: 7, height: 2 },
+  { key: "reading", title: "How the panel reads to you", width: 7, height: 2 },
+  { key: "sessions", title: "Your sessions", width: 5, height: 2 },
 ];

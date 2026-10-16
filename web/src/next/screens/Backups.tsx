@@ -437,14 +437,14 @@ export function lastDays(items: Item[], days: number): { labels: string[]; value
 export const BACKUPS_SCREEN = "next_backups";
 
 export const BACKUPS: BoardEntry[] = [
-  { key: "never", title: "Never ran", width: 3, height: 2 },
-  { key: "stale", title: "Stale", width: 3, height: 2 },
-  { key: "unverified", title: "Unverified", width: 3, height: 2 },
-  { key: "unrestored", title: "Never restored", width: 3, height: 2 },
-  { key: "age", title: "Age of the newest copy", width: 7, height: 3 },
-  { key: "coverage", title: "Hosts", width: 5, height: 3 },
-  { key: "calendar", title: "Last 14 days", width: 8, height: 4 },
-  { key: "tools", title: "Tools and verification", width: 4, height: 4 },
-  { key: "repositories", title: "Repositories", width: 12, height: 5 },
-  { key: "list", title: "Definitions", width: 12, height: 7 },
+  { key: "never", title: "Never ran", width: 3, height: 1 },
+  { key: "stale", title: "Stale", width: 3, height: 1 },
+  { key: "unverified", title: "Unverified", width: 3, height: 1 },
+  { key: "unrestored", title: "Never restored", width: 3, height: 1 },
+  { key: "age", title: "Age of the newest copy", width: 7, height: 2 },
+  { key: "coverage", title: "Hosts", width: 5, height: 2 },
+  { key: "calendar", title: "Last 14 days", width: 8, height: 3 },
+  { key: "tools", title: "Tools and verification", width: 4, height: 2 },
+  { key: "repositories", title: "Repositories", width: 12, height: 4 },
+  { key: "list", title: "Definitions", width: 12, height: 5 },
 ];

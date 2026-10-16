@@ -950,8 +950,8 @@ function Result({ action, host }: { action: string; host: ReadFanOutHost }) {
 export const READS_SCREEN = "next_reads";
 
 export const READS: BoardEntry[] = [
-  { key: "form", title: "New read", width: 12, height: 8 },
-  { key: "states", title: "Hosts by state", width: 12, height: 2 },
-  { key: "list", title: "Your reads", width: 9, height: 6 },
-  { key: "operations", title: "By operation", width: 3, height: 6 },
+  { key: "form", title: "New read", width: 12, height: 6 },
+  { key: "states", title: "Hosts by state", width: 12, height: 1 },
+  { key: "list", title: "Your reads", width: 9, height: 4 },
+  { key: "operations", title: "By operation", width: 3, height: 3 },
 ];

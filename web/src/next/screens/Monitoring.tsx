@@ -1201,16 +1201,16 @@ function RuleForm({ rule, catalogue, onDone }: {
 export const MONITORING_SCREEN = "next_monitoring";
 
 export const MONITORING: BoardEntry[] = [
-  { key: "waiting", title: "Waiting for somebody", width: 3, height: 2 },
-  { key: "reporting", title: "Hosts reporting", width: 3, height: 2 },
-  { key: "quiet", title: "Gone quiet", width: 3, height: 2 },
-  { key: "watching", title: "Rules enabled", width: 3, height: 2 },
+  { key: "waiting", title: "Waiting for somebody", width: 3, height: 1 },
+  { key: "reporting", title: "Hosts reporting", width: 3, height: 1 },
+  { key: "quiet", title: "Gone quiet", width: 3, height: 1 },
+  { key: "watching", title: "Rules enabled", width: 3, height: 1 },
   { key: "notice", title: "Notice", width: 12, height: 1 },
-  { key: "severity", title: "Firing now", width: 5, height: 4 },
-  { key: "footprint", title: "Agent footprint", width: 7, height: 4 },
-  { key: "firing", title: "Firing alerts", width: 12, height: 7 },
-  { key: "rule_form", title: "Rule", width: 12, height: 9 },
-  { key: "rules", title: "Rules", width: 12, height: 6 },
-  { key: "history", title: "Alerts", width: 8, height: 6 },
-  { key: "silences", title: "Silences in force", width: 4, height: 6 },
+  { key: "severity", title: "Firing now", width: 5, height: 2 },
+  { key: "footprint", title: "Agent footprint", width: 7, height: 2 },
+  { key: "firing", title: "Firing alerts", width: 12, height: 5 },
+  { key: "rule_form", title: "Rule", width: 12, height: 6 },
+  { key: "rules", title: "Rules", width: 12, height: 4 },
+  { key: "history", title: "Alerts", width: 8, height: 4 },
+  { key: "silences", title: "Silences in force", width: 4, height: 3 },
 ];

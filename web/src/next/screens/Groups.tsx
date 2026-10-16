@@ -685,9 +685,9 @@ function MemberChooser({ chosen, onChange }: { chosen: Set<string>; onChange: (n
 export const GROUPS_SCREEN = "next_groups";
 
 export const GROUPS: BoardEntry[] = [
-  { key: "kinds", title: "How the groups answer", width: 5, height: 3 },
-  { key: "biggest", title: "The biggest groups", width: 4, height: 3 },
-  { key: "broken", title: "Selectors that do not resolve", width: 3, height: 3 },
-  { key: "form", title: "New group", width: 12, height: 6 },
-  { key: "list", title: "Groups", width: 12, height: 7 },
+  { key: "kinds", title: "How the groups answer", width: 5, height: 2 },
+  { key: "biggest", title: "The biggest groups", width: 4, height: 2 },
+  { key: "broken", title: "Selectors that do not resolve", width: 3, height: 2 },
+  { key: "form", title: "New group", width: 12, height: 4 },
+  { key: "list", title: "Groups", width: 12, height: 5 },
 ];

@@ -522,14 +522,14 @@ function caption(t: Translate, one: Item): string {
 export const CERTIFICATES_SCREEN = "next_certificates";
 
 export const CERTIFICATES: BoardEntry[] = [
-  { key: "expired", title: "Past due", width: 3, height: 2 },
-  { key: "soon", title: "Due soon", width: 3, height: 2 },
-  { key: "unreadable", title: "Unreadable", width: 3, height: 2 },
-  { key: "silent", title: "Hosts reporting none", width: 3, height: 2 },
-  { key: "expiry", title: "Expiry", width: 7, height: 3 },
-  { key: "hosts", title: "Hosts", width: 5, height: 3 },
-  { key: "timeline", title: "When the deadlines come", width: 6, height: 3 },
-  { key: "renewal", title: "Renewal", width: 6, height: 3 },
-  { key: "list", title: "Certificates", width: 12, height: 7 },
-  { key: "trust", title: "Trusted authorities", width: 12, height: 6 },
+  { key: "expired", title: "Past due", width: 3, height: 1 },
+  { key: "soon", title: "Due soon", width: 3, height: 1 },
+  { key: "unreadable", title: "Unreadable", width: 3, height: 1 },
+  { key: "silent", title: "Hosts reporting none", width: 3, height: 1 },
+  { key: "expiry", title: "Expiry", width: 7, height: 2 },
+  { key: "hosts", title: "Hosts", width: 5, height: 2 },
+  { key: "timeline", title: "When the deadlines come", width: 6, height: 2 },
+  { key: "renewal", title: "Renewal", width: 6, height: 2 },
+  { key: "list", title: "Certificates", width: 12, height: 5 },
+  { key: "trust", title: "Trusted authorities", width: 12, height: 4 },
 ];

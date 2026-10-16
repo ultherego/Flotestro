@@ -446,10 +446,10 @@ function DeleteTeam({ teams, onDone, onRefused, onClose }: {
 export const TEAMS_SCREEN = "next_teams";
 
 export const TEAMS: BoardEntry[] = [
-  { key: "count", title: "Teams", width: 4, height: 2 },
-  { key: "placed", title: "Hosts in a team", width: 4, height: 2 },
-  { key: "unplaced", title: "Hosts in no team", width: 4, height: 2 },
-  { key: "doctrine", title: "A team is not a tag", width: 4, height: 4 },
-  { key: "form", title: "New team", width: 8, height: 4 },
-  { key: "list", title: "Teams", width: 12, height: 6 },
+  { key: "count", title: "Teams", width: 4, height: 1 },
+  { key: "placed", title: "Hosts in a team", width: 4, height: 1 },
+  { key: "unplaced", title: "Hosts in no team", width: 4, height: 1 },
+  { key: "doctrine", title: "A team is not a tag", width: 4, height: 2 },
+  { key: "form", title: "New team", width: 8, height: 3 },
+  { key: "list", title: "Teams", width: 12, height: 4 },
 ];

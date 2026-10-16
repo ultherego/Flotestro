@@ -602,9 +602,9 @@ function BatchRulingForm({ kind, reading, search, total, onClose, onRuled }: {
 export const UNRESOLVED_SCREEN = "next_unresolved";
 
 export const UNRESOLVED: BoardEntry[] = [
-  { key: "happen", title: "Did it happen?", width: 3, height: 2 },
-  { key: "hold", title: "Did it hold?", width: 3, height: 2 },
-  { key: "notheld", title: "Did not hold", width: 3, height: 2 },
-  { key: "unreadable", title: "Could not be read", width: 3, height: 2 },
-  { key: "list", title: "Unconfirmed operations", width: 12, height: 8 },
+  { key: "happen", title: "Did it happen?", width: 3, height: 1 },
+  { key: "hold", title: "Did it hold?", width: 3, height: 1 },
+  { key: "notheld", title: "Did not hold", width: 3, height: 1 },
+  { key: "unreadable", title: "Could not be read", width: 3, height: 1 },
+  { key: "list", title: "Unconfirmed operations", width: 12, height: 6 },
 ];

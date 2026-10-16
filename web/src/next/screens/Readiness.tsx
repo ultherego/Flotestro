@@ -257,11 +257,11 @@ export const READINESS_SCREEN = "next_readiness";
 
 export const READINESS: BoardEntry[] = [
   { key: "verdict", title: "Verdict", width: 12, height: 1 },
-  { key: "hosts", title: "Hosts", width: 3, height: 2 },
-  { key: "silent", title: "Silent about their adapters", width: 3, height: 2 },
-  { key: "operations", title: "Operations that need an adapter", width: 3, height: 2 },
-  { key: "unorderable", title: "Orderable nowhere", width: 3, height: 2 },
-  { key: "nowhere", title: "Nowhere in this fleet", width: 12, height: 4 },
-  { key: "somewhere", title: "On some hosts", width: 12, height: 4 },
-  { key: "blocked", title: "What it blocks", width: 12, height: 3 },
+  { key: "hosts", title: "Hosts", width: 3, height: 1 },
+  { key: "silent", title: "Silent about their adapters", width: 3, height: 1 },
+  { key: "operations", title: "Operations that need an adapter", width: 3, height: 1 },
+  { key: "unorderable", title: "Orderable nowhere", width: 3, height: 1 },
+  { key: "nowhere", title: "Nowhere in this fleet", width: 12, height: 3 },
+  { key: "somewhere", title: "On some hosts", width: 12, height: 3 },
+  { key: "blocked", title: "What it blocks", width: 12, height: 2 },
 ];

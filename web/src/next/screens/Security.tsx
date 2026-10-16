@@ -185,11 +185,11 @@ export function Security() {
 export const SECURITY_SCREEN = "next_security";
 
 export const SECURITY: BoardEntry[] = [
-  { key: "findings", title: "Findings", width: 4, height: 2 },
-  { key: "fixable", title: "Fixable from here", width: 4, height: 2 },
-  { key: "unjudged", title: "Not judged", width: 4, height: 2 },
-  { key: "outcome", title: "How the checks came out", width: 5, height: 3 },
-  { key: "severity", title: "By severity", width: 3, height: 3 },
-  { key: "worst", title: "Where to start", width: 4, height: 3 },
-  { key: "checks", title: "Checks", width: 12, height: 6 },
+  { key: "findings", title: "Findings", width: 4, height: 1 },
+  { key: "fixable", title: "Fixable from here", width: 4, height: 1 },
+  { key: "unjudged", title: "Not judged", width: 4, height: 1 },
+  { key: "outcome", title: "How the checks came out", width: 5, height: 2 },
+  { key: "severity", title: "By severity", width: 3, height: 2 },
+  { key: "worst", title: "Where to start", width: 4, height: 2 },
+  { key: "checks", title: "Checks", width: 12, height: 4 },
 ];

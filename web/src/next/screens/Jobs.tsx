@@ -790,8 +790,8 @@ function Export({ params }: { params: URLSearchParams }) {
 export const JOBS_SCREEN = "next_jobs";
 
 export const JOBS: BoardEntry[] = [
-  { key: "state", title: "State", width: 12, height: 3 },
-  { key: "activity", title: "Operations, last 24 h", width: 8, height: 4 },
-  { key: "operations", title: "By operation", width: 4, height: 4 },
-  { key: "jobs", title: "Jobs", width: 12, height: 9 },
+  { key: "state", title: "State", width: 12, height: 2 },
+  { key: "activity", title: "Operations, last 24 h", width: 8, height: 3 },
+  { key: "operations", title: "By operation", width: 4, height: 2 },
+  { key: "jobs", title: "Jobs", width: 12, height: 6 },
 ];

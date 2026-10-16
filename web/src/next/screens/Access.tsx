@@ -2082,13 +2082,13 @@ function Refusal({ error, close }: { error: ApiError; close: () => void }) {
 export const ACCESS_SCREEN = "next_access";
 
 export const ACCESS: BoardEntry[] = [
-  { key: "signin", title: "Who may sign in", width: 4, height: 2 },
-  { key: "identities", title: "Identities on record", width: 4, height: 2 },
-  { key: "norole", title: "Without a role of their own", width: 4, height: 2 },
-  { key: "filter", title: "Find somebody", width: 12, height: 3 },
-  { key: "create", title: "New identity", width: 12, height: 5 },
-  { key: "list", title: "The list", width: 12, height: 8 },
-  { key: "record", title: "The opened identity", width: 12, height: 7 },
-  { key: "kinds", title: "By kind and by role", width: 4, height: 4 },
-  { key: "mappings", title: "Group mappings", width: 8, height: 4 },
+  { key: "signin", title: "Who may sign in", width: 4, height: 1 },
+  { key: "identities", title: "Identities on record", width: 4, height: 1 },
+  { key: "norole", title: "Without a role of their own", width: 4, height: 1 },
+  { key: "filter", title: "Find somebody", width: 12, height: 2 },
+  { key: "create", title: "New identity", width: 12, height: 4 },
+  { key: "list", title: "The list", width: 12, height: 6 },
+  { key: "record", title: "The opened identity", width: 12, height: 5 },
+  { key: "kinds", title: "By kind and by role", width: 4, height: 2 },
+  { key: "mappings", title: "Group mappings", width: 8, height: 3 },
 ];

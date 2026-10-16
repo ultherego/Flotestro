@@ -257,15 +257,15 @@ function jobTone(state: string): Tone {
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const HOST_OVERVIEW: BoardEntry[] = [
-  { key: "disk", title: "Disk used", width: 4, height: 2 },
-  { key: "memory", title: "Memory", width: 4, height: 2 },
-  { key: "cores", title: "CPU cores", width: 4, height: 2 },
-  { key: "adapters", title: "What the panel can do here", width: 7, height: 3 },
-  { key: "attention", title: "Needs attention", width: 5, height: 3 },
-  { key: "system", title: "System", width: 7, height: 4 },
-  { key: "hardware", title: "Hardware", width: 5, height: 4 },
-  { key: "lifecycle", title: "Lifecycle", width: 5, height: 3 },
-  { key: "recent", title: "Recent activity", width: 7, height: 5 },
+  { key: "disk", title: "Disk used", width: 4, height: 1 },
+  { key: "memory", title: "Memory", width: 4, height: 1 },
+  { key: "cores", title: "CPU cores", width: 4, height: 1 },
+  { key: "adapters", title: "What the panel can do here", width: 7, height: 2 },
+  { key: "attention", title: "Needs attention", width: 5, height: 2 },
+  { key: "system", title: "System", width: 7, height: 2 },
+  { key: "hardware", title: "Hardware", width: 5, height: 2 },
+  { key: "lifecycle", title: "Lifecycle", width: 5, height: 2 },
+  { key: "recent", title: "Recent activity", width: 7, height: 3 },
 ];
 
 /** The name this screen's arrangement is stored under. */
