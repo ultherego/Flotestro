@@ -10,6 +10,7 @@ import { useScale } from "./lib/scale";
 import { isBoolean, useStoredState } from "./lib/storage";
 import { useT } from "./i18n";
 import { Sidebar } from "./components/Sidebar";
+import { NextPanel } from "./next/Panel";
 import { fleetNavigation, visibility, type NavFace, type NavGroup } from "./lib/navigation";
 import { Topbar, type Trail } from "./components/Topbar";
 import { Logo } from "./components/Logo";
@@ -142,6 +143,21 @@ export function App() {
       </div>
     );
   }
+  // The panel being written again lives under /next until it is finished;
+  // the shell below is the one it replaces, and the two share nothing but
+  // the navigation model and the API.
+  if (location.pathname.startsWith("/next")) {
+    return (
+      <ToastProvider>
+        <ModalProvider>
+          <PreferencesProvider applyTheme={setTheme}>
+            <NextPanel look={{ theme, setTheme, scale, setScale }} />
+          </PreferencesProvider>
+        </ModalProvider>
+      </ToastProvider>
+    );
+  }
+
   const v = visibility(permissions, capabilities);
   const groups = fleetNavigation(permissions, capabilities);
 

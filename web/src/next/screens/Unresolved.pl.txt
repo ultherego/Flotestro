@@ -1,0 +1,2 @@
+  "Unconfirmed operations": "Operacje niepotwierdzone",
+  "Any reading": "Dowolny odczyt",

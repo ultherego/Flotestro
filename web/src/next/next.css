@@ -1,0 +1,1829 @@
+/* =====================================================================
+   The panel's appearance.
+
+   Written 16.10 against what operations boards look like now rather than
+   against what this panel looked like before. Four things separate the
+   two, and each has a section here:
+
+   1. A ladder of type. A page title is nearly three times a label, so
+      the eye lands before it reads. The panel this replaces set almost
+      everything at 13px, which is why it read as a wall.
+   2. Depth. The page is the floor, a card is a step above it with a
+      light along its top edge, and what the pointer is on lifts. A flat
+      screen has no foreground, so there is nothing to look at first.
+   3. Movement. Anything that changes state crosses to it in 140ms, and
+      what has not arrived yet breathes instead of saying "Loading…".
+   4. Drawings rather than lists: a filled gradient under a line, a ring
+      with the number inside it, a reading under the pointer.
+
+   The rules of the house:
+
+   - Every colour is a token of the product. Not one hex is written here,
+     so peach, green and the light theme all come out right.
+   - Every rule is `.fl-app .fl-thing`, never `.fl-thing` alone. One
+     class loses to `.fl-app a`, and every kit element that is a link
+     then comes out in the link's colour. That cost an afternoon once.
+   - Spacing is a step of --s1..--s8 and nothing else.
+   - No screen carries an appearance of its own: a screen is a <Screen>
+     and cards from the kit, and the test beside this file refuses one
+     that reaches for a grid, a colour or a margin itself.
+   ===================================================================== */
+
+/* ---------------------------------------------------------------------
+   0. What this adds to the product's tokens
+
+   Surfaces, state and spacing come from the product. Depth, timing and
+   the two measurements of the frame are here, derived from the tokens so
+   that a theme which moves a surface moves these with it.
+   ------------------------------------------------------------------ */
+
+.fl-app {
+  --fl-rail: 260px;
+  --fl-rail-folded: 68px;
+  --fl-bar: 60px;
+  --fl-gutter: var(--s5);
+  --fl-pad: var(--s7);
+  --fl-row: 116px;
+
+  --fl-card: color-mix(in srgb, var(--bg-panel) 94%, var(--text) 6%);
+  --fl-edge: color-mix(in srgb, var(--text) 9%, transparent);
+  --fl-lift: 0 1px 2px rgba(0, 0, 0, 0.18), 0 8px 24px -12px rgba(0, 0, 0, 0.45);
+  --fl-lift-high: 0 2px 4px rgba(0, 0, 0, 0.2), 0 18px 40px -16px rgba(0, 0, 0, 0.55);
+  --fl-quick: 140ms cubic-bezier(0.2, 0, 0.1, 1);
+  --fl-slow: 600ms cubic-bezier(0.2, 0, 0.1, 1);
+
+  /* The type ladder. The product's scale stops at 22px because the old
+     panel never went above it; a board needs a title and a measurement
+     that carry across a 4k screen. */
+  --fl-title: 30px;
+  --fl-card-title: 15px;
+  --fl-metric: 40px;
+  --fl-metric-big: 54px;
+  --fl-metric-small: 26px;
+
+  font-family: var(--font);
+  font-size: var(--t-body);
+  color: var(--text);
+}
+
+/* How a thing is going, as one class that sets one pair of variables.
+   Everything below reads --tone for a fill and --tone-text for a word,
+   so no piece of the kit ever names a state colour itself. */
+.fl-app .fl-ok { --tone: var(--ok); --tone-text: var(--ok-text); }
+.fl-app .fl-warn { --tone: var(--warn); --tone-text: var(--warn-text); }
+.fl-app .fl-error { --tone: var(--error); --tone-text: var(--error-text); }
+.fl-app .fl-unknown { --tone: var(--unknown); --tone-text: var(--unknown-text); }
+.fl-app .fl-info { --tone: var(--blue); --tone-text: var(--blue); }
+.fl-app .fl-accent { --tone: var(--accent); --tone-text: var(--accent-text); }
+.fl-app .fl-neutral { --tone: var(--text-faint); --tone-text: var(--text-muted); }
+
+/* ---------------------------------------------------------------------
+   1. The frame
+
+   A rail against the window's edge and everything else to the right of
+   it. The rail is fixed: a board scrolls for a long time, and the way
+   out must not scroll away with it.
+   ------------------------------------------------------------------ */
+
+.fl-app { min-height: 100vh; background: var(--bg); }
+
+.fl-app .fl-shell { min-height: 100vh; }
+
+.fl-app .fl-skip {
+  position: absolute;
+  left: -9999px;
+  top: var(--s2);
+  z-index: 100;
+  padding: var(--s2) var(--s4);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 650;
+}
+
+.fl-app .fl-skip:focus { left: var(--s4); }
+
+.fl-app .fl-page {
+  margin-left: var(--fl-rail);
+  min-height: 100vh;
+  min-width: 0;
+  transition: margin-left var(--fl-quick);
+}
+
+.fl-app .fl-folded .fl-page { margin-left: var(--fl-rail-folded); }
+
+/* The screen keeps its distance from the rail and from the window. The
+   owner's words, and the first thing anybody sees. */
+.fl-app .fl-screen {
+  padding: var(--s6) var(--fl-pad) var(--s8);
+  min-width: 0;
+}
+
+/* ---------------------------------------------------------------------
+   2. The rail
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-rail {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: var(--fl-rail);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  z-index: 30;
+  transition: width var(--fl-quick), transform var(--fl-quick);
+}
+
+.fl-app .fl-folded .fl-rail { width: var(--fl-rail-folded); }
+
+.fl-app .fl-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  height: var(--fl-bar);
+  padding: 0 var(--s4);
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.fl-app .fl-brand:hover { text-decoration: none; }
+
+.fl-app .fl-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: var(--t-small);
+}
+
+.fl-app .fl-brand-name {
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.fl-app .fl-folded .fl-brand-name { display: none; }
+.fl-app .fl-folded .fl-brand { justify-content: center; padding-inline: 0; }
+
+.fl-app .fl-nav {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--s4) var(--s3) var(--s5);
+  scrollbar-width: thin;
+}
+
+.fl-app .fl-navgroup + .fl-navgroup { margin-top: var(--s4); }
+
+.fl-app .fl-navgroup-label {
+  display: block;
+  padding: var(--s1) var(--s3) var(--s2);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-folded .fl-navgroup-label {
+  font-size: 0;
+  padding: var(--s2) var(--s4);
+}
+
+.fl-app .fl-folded .fl-navgroup-label::after {
+  content: "";
+  display: block;
+  height: 1px;
+  background: var(--border);
+}
+
+.fl-app .fl-navitem {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 0 var(--s3);
+  height: 36px;
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: var(--t-body);
+  text-decoration: none;
+  transition: background var(--fl-quick), color var(--fl-quick);
+}
+
+.fl-app .fl-navitem:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
+.fl-app .fl-navitem svg { flex: 0 0 auto; width: 16px; height: 16px; }
+
+.fl-app .fl-navitem.fl-on {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+/* The bar on the left edge says "here" without colour, so it survives a
+   theme change and a reader who cannot tell the colours apart. */
+.fl-app .fl-navitem.fl-on::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+}
+
+.fl-app .fl-navitem.fl-off { opacity: 0.45; cursor: not-allowed; }
+.fl-app .fl-navitem.fl-back { color: var(--text-faint); }
+
+.fl-app .fl-navitem-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fl-app .fl-folded .fl-navitem { justify-content: center; padding-inline: 0; }
+.fl-app .fl-folded .fl-navitem-label { display: none; }
+
+.fl-app .fl-rail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  background: color-mix(in srgb, var(--bg-sunken) 60%, transparent);
+}
+
+/* ---------------------------------------------------------------------
+   3. The bar across the top
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  height: var(--fl-bar);
+  padding: 0 var(--fl-pad);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+
+.fl-app .fl-bar-spacer { flex: 1 1 auto; }
+
+.fl-app .fl-crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+  font-size: var(--t-small);
+  color: var(--text-faint);
+}
+
+.fl-app .fl-crumbs svg { width: 12px; height: 12px; opacity: 0.6; }
+.fl-app .fl-crumbs a { color: var(--text-faint); }
+.fl-app .fl-crumbs a:hover { color: var(--text); }
+.fl-app .fl-crumbs-here { color: var(--text); font-weight: 600; }
+
+.fl-app .fl-search {
+  position: relative;
+  flex: 0 1 300px;
+  display: flex;
+  align-items: center;
+}
+
+.fl-app .fl-search svg {
+  position: absolute;
+  left: var(--s3);
+  width: 14px;
+  height: 14px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.fl-app .fl-search input {
+  width: 100%;
+  height: 34px;
+  padding: 0 72px 0 var(--s7);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: var(--t-small);
+  transition: border-color var(--fl-quick);
+}
+
+.fl-app .fl-search input::placeholder { color: var(--text-faint); }
+.fl-app .fl-search input:focus { border-color: var(--accent); outline: none; }
+
+.fl-app .fl-search-key {
+  position: absolute;
+  right: var(--s2);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text-faint);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  pointer-events: none;
+}
+
+.fl-app .fl-iconbtn {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--fl-quick), color var(--fl-quick), border-color var(--fl-quick);
+}
+
+.fl-app .fl-iconbtn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border); text-decoration: none; }
+.fl-app .fl-iconbtn svg { width: 16px; height: 16px; }
+
+/* ---------------------------------------------------------------------
+   4. Who is signed in, and what they can set
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-menu-anchor { position: relative; flex: 0 0 auto; }
+
+.fl-app .fl-user {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s2) var(--s1) var(--s1);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  cursor: pointer;
+  transition: background var(--fl-quick), border-color var(--fl-quick);
+}
+
+.fl-app .fl-user:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+
+.fl-app .fl-avatar {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: var(--t-small);
+  font-weight: 700;
+}
+
+.fl-app .fl-user-name {
+  max-width: 160px;
+  font-size: var(--t-small);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fl-app .fl-menu {
+  position: absolute;
+  top: calc(100% + var(--s2));
+  right: 0;
+  z-index: 50;
+  min-width: 268px;
+  padding: var(--s2);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  box-shadow: var(--fl-lift-high);
+  animation: fl-rise 140ms cubic-bezier(0.2, 0, 0.1, 1);
+}
+
+.fl-app .fl-menu-who {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  padding: var(--s3);
+  margin-bottom: var(--s2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+}
+
+.fl-app .fl-menu-who .fl-name { font-weight: 650; }
+.fl-app .fl-menu-subject { font-size: var(--t-label); color: var(--text-faint); font-family: var(--font-mono); overflow-wrap: anywhere; }
+.fl-app .fl-menu-set { padding: var(--s2) var(--s1); }
+
+.fl-app .fl-menu-label {
+  display: block;
+  padding-bottom: var(--s2);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  padding: var(--s2) var(--s3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--t-small);
+  text-align: left;
+  text-decoration: none;
+  transition: background var(--fl-quick), color var(--fl-quick);
+}
+
+.fl-app .fl-menu-item:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
+.fl-app .fl-menu-item svg { width: 15px; height: 15px; }
+.fl-app .fl-menu-out { width: 100%; justify-content: center; margin-top: var(--s2); }
+
+/* ---------------------------------------------------------------------
+   5. The head of a screen
+
+   Its mark, its name, one sentence on what it answers, and a question
+   mark that opens the long version. A paragraph at the top of a screen
+   is read once and stepped over every day after that.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s4);
+  margin-bottom: var(--s5);
+}
+
+.fl-app .fl-head-mark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  margin-top: 2px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.fl-app .fl-head-mark svg { width: 18px; height: 18px; }
+.fl-app .fl-head-text { flex: 1 1 auto; min-width: 0; }
+
+.fl-app .fl-head-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  font-size: var(--fl-title);
+  line-height: 1.15;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.fl-app .fl-helpmark {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-faint);
+  font-size: var(--t-label);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--fl-quick), color var(--fl-quick), border-color var(--fl-quick);
+}
+
+.fl-app .fl-helpmark:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-strong); }
+
+.fl-app .fl-head-lead {
+  margin-top: var(--s2);
+  max-width: 80ch;
+  font-size: var(--t-body);
+  color: var(--text-muted);
+}
+
+.fl-app .fl-help {
+  margin-top: var(--s3);
+  padding: var(--s4);
+  max-width: 80ch;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  font-size: var(--t-small);
+  color: var(--text-muted);
+  animation: fl-rise 160ms cubic-bezier(0.2, 0, 0.1, 1);
+}
+
+.fl-app .fl-help p + p { margin-top: var(--s3); }
+
+.fl-app .fl-head-slot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.fl-app .fl-head-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  padding-top: var(--s1);
+}
+
+/* ---------------------------------------------------------------------
+   6. The grid every screen stands on
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--fl-gutter);
+  align-items: start;
+}
+
+.fl-app .fl-grid + .fl-grid { margin-top: var(--fl-gutter); }
+
+.fl-app .fl-c1, .fl-app .fl-c2, .fl-app .fl-c3, .fl-app .fl-c4,
+.fl-app .fl-c5, .fl-app .fl-c6, .fl-app .fl-c7, .fl-app .fl-c8,
+.fl-app .fl-c9, .fl-app .fl-c10, .fl-app .fl-c11, .fl-app .fl-c12 {
+  grid-column: span 12;
+  min-width: 0;
+}
+
+@media (min-width: 1000px) {
+  .fl-app .fl-c1 { grid-column: span 3; }
+  .fl-app .fl-c2 { grid-column: span 3; }
+  .fl-app .fl-c3 { grid-column: span 4; }
+  .fl-app .fl-c4 { grid-column: span 4; }
+  .fl-app .fl-c5 { grid-column: span 6; }
+  .fl-app .fl-c6 { grid-column: span 6; }
+  .fl-app .fl-c7 { grid-column: span 8; }
+  .fl-app .fl-c8 { grid-column: span 8; }
+  .fl-app .fl-c9 { grid-column: span 9; }
+  .fl-app .fl-c10 { grid-column: span 10; }
+  .fl-app .fl-c11 { grid-column: span 11; }
+}
+
+@media (min-width: 1400px) {
+  .fl-app .fl-c1 { grid-column: span 2; }
+  .fl-app .fl-c2 { grid-column: span 3; }
+  .fl-app .fl-c3 { grid-column: span 3; }
+  .fl-app .fl-c4 { grid-column: span 4; }
+}
+
+/* A row of equal tiles that steps down on its own rather than by a
+   breakpoint written on each screen. */
+.fl-app .fl-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--fl-gutter);
+}
+
+.fl-app .fl-stack { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
+.fl-app .fl-stack-l { display: flex; flex-direction: column; gap: var(--s6); min-width: 0; }
+.fl-app .fl-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); min-width: 0; }
+
+/* ---------------------------------------------------------------------
+   7. The card - the only container on any screen
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border);
+  background: var(--fl-card);
+  box-shadow: var(--fl-lift);
+  overflow: hidden;
+  transition: box-shadow var(--fl-quick), border-color var(--fl-quick);
+}
+
+/* One pixel of light along the top edge: the difference between a box
+   drawn on the page and a thing lying on it. */
+.fl-app .fl-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--fl-edge) 20%, var(--fl-edge) 80%, transparent);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.fl-app .fl-card:hover { box-shadow: var(--fl-lift-high); border-color: var(--border-strong); }
+
+.fl-app .fl-card-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--s1) var(--s3);
+  padding: var(--s4) var(--s5) 0;
+}
+
+.fl-app .fl-card-title {
+  grid-column: 1;
+  font-size: var(--fl-card-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  min-width: 0;
+}
+
+.fl-app .fl-card-tools {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: start;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--t-small);
+}
+
+.fl-app .fl-card-note {
+  grid-column: 1;
+  font-size: var(--t-small);
+  color: var(--text-faint);
+  min-width: 0;
+}
+
+.fl-app .fl-card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--s4) var(--s5) var(--s5);
+  overflow: auto;
+}
+
+.fl-app .fl-flush .fl-card-body { padding: var(--s3) 0 0; }
+.fl-app .fl-flush .fl-card-head { padding-bottom: var(--s1); }
+
+.fl-app .fl-card-foot {
+  flex: 0 0 auto;
+  padding: var(--s3) var(--s5);
+  border-top: 1px solid var(--border);
+  font-size: var(--t-small);
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------
+   8. One number as a widget
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-kpi {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  height: 100%;
+  padding: var(--s5);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border);
+  background: var(--fl-card);
+  box-shadow: var(--fl-lift);
+  color: inherit;
+  text-decoration: none;
+  overflow: hidden;
+  transition: transform var(--fl-quick), box-shadow var(--fl-quick), border-color var(--fl-quick);
+}
+
+.fl-app .fl-kpi::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--fl-edge) 20%, var(--fl-edge) 80%, transparent);
+  pointer-events: none;
+}
+
+.fl-app a.fl-kpi:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--fl-lift-high);
+  border-color: var(--border-strong);
+  text-decoration: none;
+}
+
+/* The one filled tile. It wears the accent, which carries no state. */
+.fl-app .fl-kpi.fl-hero {
+  background: linear-gradient(145deg,
+    color-mix(in srgb, var(--accent) 16%, var(--fl-card)),
+    var(--fl-card) 70%);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
+.fl-app .fl-kpi-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+
+.fl-app .fl-kpi-label {
+  font-size: var(--t-label);
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* The round tinted mark in the corner: what stops a tile reading as a
+   paragraph. */
+.fl-app .fl-kpi-mark {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--tone, var(--accent)) 16%, transparent);
+  color: var(--tone-text, var(--accent-text));
+}
+
+.fl-app .fl-kpi-mark svg { width: 16px; height: 16px; }
+
+.fl-app .fl-kpi-value {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  font-size: var(--fl-metric);
+  line-height: 1.05;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--tone-text, var(--text));
+}
+
+.fl-app .fl-hero .fl-kpi-value { font-size: var(--fl-metric-big); }
+.fl-app .fl-kpi-unit { font-size: var(--t-lead); font-weight: 500; color: var(--text-faint); letter-spacing: 0; }
+.fl-app .fl-kpi-dash { color: var(--unknown-text); }
+.fl-app .fl-kpi-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s2); }
+.fl-app .fl-kpi-note { font-size: var(--t-small); color: var(--text-faint); }
+
+.fl-app .fl-kpi-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  font-size: var(--t-small);
+  font-weight: 650;
+  color: var(--text-muted);
+}
+
+.fl-app .fl-kpi-delta.fl-up { color: var(--ok-text); }
+.fl-app .fl-kpi-delta.fl-down { color: var(--error-text); }
+
+/* The sparkline bleeds to the tile's bottom edge rather than sitting in
+   a box of its own. */
+.fl-app .fl-kpi-spark {
+  margin: var(--s2) calc(var(--s5) * -1) calc(var(--s5) * -1);
+  height: 46px;
+}
+
+.fl-app .fl-kpi-spark svg { width: 100%; height: 100%; display: block; }
+
+.fl-app .fl-figs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: var(--s3);
+}
+
+.fl-app .fl-fig {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  padding: var(--s3);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+}
+
+.fl-app .fl-fig-label {
+  font-size: var(--t-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-fig-value {
+  font-size: var(--fl-metric-small);
+  font-weight: 600;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--tone-text, var(--text));
+}
+
+/* ---------------------------------------------------------------------
+   9. Drawings
+
+   A ring with the number inside it, arcs for one measure across several
+   hosts, bars, a band, a grid of squares, and a series with a reading
+   under the pointer. Every one is an <svg> the kit draws: no charting
+   library is in the panel and none is wanted.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-ring { display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap; }
+.fl-app .fl-ring-plot { position: relative; flex: 0 0 auto; width: 150px; height: 150px; }
+.fl-app .fl-ring-plot svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.fl-app .fl-ring-track { fill: none; stroke: var(--bg-sunken); }
+
+.fl-app .fl-ring-arc {
+  fill: none;
+  stroke: var(--tone, var(--accent));
+  stroke-linecap: round;
+  transition: stroke-dasharray var(--fl-slow);
+}
+
+.fl-app .fl-ring-face { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+
+.fl-app .fl-ring-value {
+  display: block;
+  font-size: var(--fl-metric-small);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--tone-text, var(--text));
+}
+
+.fl-app .fl-ring-label {
+  display: block;
+  font-size: var(--t-label);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-ring-legend { flex: 1 1 170px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.fl-app .fl-ring-legend-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s2);
+  border-radius: var(--radius-sm);
+  font-size: var(--t-small);
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: background var(--fl-quick);
+}
+
+.fl-app .fl-ring-legend-row:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
+.fl-app .fl-ring-legend-row dt { flex: 1 1 auto; min-width: 0; }
+.fl-app .fl-ring-legend-row dd { flex: 0 0 auto; font-variant-numeric: tabular-nums; color: var(--text); }
+.fl-app .fl-ring-legend-row b { font-weight: 650; }
+
+.fl-app .fl-ring-key {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  background: var(--tone, var(--text-faint));
+}
+
+/* The pie: a whole divided, with the total inside it. The slices are one
+   circle dashed and turned, so the gaps are dashes and not shapes. */
+.fl-app .fl-pie { display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap; }
+.fl-app .fl-pie-plot { position: relative; flex: 0 0 auto; width: 170px; height: 170px; }
+.fl-app .fl-pie-plot svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.fl-app .fl-pie-track { fill: none; stroke: var(--bg-sunken); }
+
+.fl-app .fl-pie-slice {
+  fill: none;
+  stroke: var(--tone, var(--accent));
+  transition: stroke-dasharray var(--fl-slow), filter var(--fl-quick);
+}
+
+.fl-app .fl-pie-slice:hover { filter: brightness(1.2); }
+.fl-app .fl-pie-face { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+
+.fl-app .fl-pie-total {
+  display: block;
+  font-size: var(--fl-metric-small);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.fl-app .fl-pie-label {
+  display: block;
+  font-size: var(--t-label);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+
+/* Concentric arcs: one measure, one ring per host. */
+.fl-app .fl-arcs { display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap; }
+.fl-app .fl-arcs-plot { flex: 0 0 auto; width: 170px; height: 170px; }
+.fl-app .fl-arcs-plot svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.fl-app .fl-arcs-track { fill: none; stroke: var(--bg-sunken); }
+.fl-app .fl-arcs-arc { fill: none; stroke-linecap: round; stroke: var(--tone, var(--accent)); transition: stroke-dasharray var(--fl-slow); }
+
+/* A bar per row, the number at its end, the label never under the bar. */
+.fl-app .fl-bars { display: flex; flex-direction: column; gap: var(--s3); margin: 0; }
+
+.fl-app .fl-bars-row {
+  display: grid;
+  grid-template-columns: minmax(70px, 150px) 1fr auto;
+  gap: var(--s3);
+  align-items: center;
+  font-size: var(--t-small);
+}
+
+.fl-app .fl-bars-row dt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.fl-app .fl-bars-row dd { margin: 0; min-width: 0; }
+.fl-app .fl-bars-count { font-variant-numeric: tabular-nums; font-weight: 650; color: var(--text); }
+
+.fl-app .fl-bar-track {
+  display: block;
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+
+.fl-app .fl-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--tone, var(--accent)) 50%, transparent), var(--tone, var(--accent)));
+  transition: width var(--fl-slow);
+}
+
+.fl-app .fl-meter { display: flex; align-items: center; gap: var(--s3); font-size: var(--t-small); }
+.fl-app .fl-meter .fl-bar-track { flex: 1 1 auto; min-width: 60px; }
+.fl-app .fl-meter-value { flex: 0 0 auto; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+
+/* The band: one line that is the whole fleet, cut by condition. */
+.fl-app .fl-band {
+  display: flex;
+  gap: 3px;
+  height: 40px;
+  margin-bottom: var(--s3);
+}
+
+.fl-app .fl-band-seg {
+  flex: var(--fl-share, 1) 1 0;
+  min-width: 34px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 var(--s2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--tone, var(--accent)) 20%, transparent);
+  border-left: 3px solid var(--tone, var(--accent));
+  color: var(--text);
+  text-decoration: none;
+  overflow: hidden;
+  transition: background var(--fl-quick), flex-grow var(--fl-slow);
+}
+
+.fl-app a.fl-band-seg:hover { background: color-mix(in srgb, var(--tone, var(--accent)) 34%, transparent); text-decoration: none; }
+.fl-app .fl-band-value { font-size: var(--t-lead); font-weight: 650; line-height: 1.1; font-variant-numeric: tabular-nums; }
+
+.fl-app .fl-band-label {
+  font-size: var(--t-label);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* What is at zero, and what nobody counted, go under the band as words:
+   a sliver two pixels wide is not a reading. */
+.fl-app .fl-quiet-row { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); }
+
+.fl-app .fl-quiet-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s2);
+  font-size: var(--t-small);
+  color: var(--text-faint);
+}
+
+.fl-app .fl-quiet-item b { font-weight: 650; color: var(--tone-text, var(--text-muted)); font-variant-numeric: tabular-nums; }
+
+/* A square per host: the whole fleet's condition at one glance. */
+.fl-app .fl-squares { display: flex; flex-direction: column; gap: var(--s4); }
+.fl-app .fl-squares-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(16px, 1fr)); gap: 5px; }
+
+.fl-app .fl-square {
+  aspect-ratio: 1;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--tone, var(--unknown)) 85%, transparent);
+  transition: transform var(--fl-quick), box-shadow var(--fl-quick);
+}
+
+.fl-app a.fl-square:hover {
+  transform: scale(1.3);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--tone, var(--unknown));
+}
+
+/* The series chart. The reading sits in the chart's own header rather
+   than in a bubble over the drawing - the owner's complaint on 16.10
+   was that the bubble covered the numbers it was explaining. */
+.fl-app .fl-chart { display: flex; flex-direction: column; gap: var(--s3); margin: 0; }
+
+.fl-app .fl-chart-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s4);
+  flex-wrap: wrap;
+  min-height: 18px;
+}
+
+.fl-app .fl-chart-legend { display: flex; flex-wrap: wrap; gap: var(--s3); font-size: var(--t-small); }
+
+.fl-app .fl-chart-legend span,
+.fl-app .fl-chart-legend button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+}
+
+.fl-app .fl-chart-key { width: 9px; height: 9px; border-radius: 3px; background: var(--tone, var(--accent)); }
+
+.fl-app .fl-chart-read {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  font-size: var(--t-small);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.fl-app .fl-chart-read b { color: var(--text); font-weight: 650; }
+.fl-app .fl-chart-read em { font-style: normal; color: var(--tone-text, var(--text-muted)); font-weight: 650; }
+.fl-app .fl-chart-plot { position: relative; width: 100%; min-width: 0; }
+.fl-app .fl-chart-plot svg { width: 100%; display: block; }
+.fl-app .fl-chart-rule { stroke: var(--border); stroke-dasharray: 2 4; }
+.fl-app .fl-chart-axis { fill: var(--text-faint); font-size: 9px; }
+.fl-app .fl-chart-scale { fill: var(--text-faint); font-size: 9px; }
+.fl-app .fl-chart-line { fill: none; stroke: var(--tone, var(--accent)); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.fl-app .fl-chart-area { stroke: none; }
+.fl-app .fl-chart-bar { fill: var(--tone, var(--accent)); }
+.fl-app .fl-chart-cross { stroke: var(--border-strong); stroke-width: 1; }
+.fl-app .fl-chart-knot { fill: var(--bg); stroke: var(--tone, var(--accent)); stroke-width: 2; }
+.fl-app .fl-chart-hit { fill: transparent; cursor: crosshair; }
+
+/* ---------------------------------------------------------------------
+   10. The table
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-tablewrap { width: 100%; overflow-x: auto; }
+.fl-app .fl-table { width: 100%; border-collapse: collapse; font-size: var(--t-body); }
+
+.fl-app .fl-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--s2) var(--s5);
+  text-align: left;
+  font-size: var(--t-label);
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  background: var(--fl-card);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.fl-app .fl-table td {
+  padding: var(--s3) var(--s5);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  vertical-align: middle;
+  min-width: 0;
+}
+
+.fl-app .fl-table tbody tr { transition: background var(--fl-quick); }
+.fl-app .fl-table tbody tr:hover { background: var(--bg-hover); }
+.fl-app .fl-table tbody tr:last-child td { border-bottom: 0; }
+.fl-app .fl-table .fl-minor { color: var(--text-muted); }
+.fl-app .fl-table .fl-num { text-align: right; font-variant-numeric: tabular-nums; }
+.fl-app .fl-table .fl-cell-actions { text-align: right; white-space: nowrap; }
+
+.fl-app .fl-table .fl-tight {
+  white-space: nowrap;
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fl-app .fl-table code { font-family: var(--font-mono); font-size: var(--t-small); color: var(--text-muted); }
+.fl-app .fl-twoline { min-width: 0; }
+.fl-app .fl-twoline-sub { display: block; font-size: var(--t-small); color: var(--text-faint); }
+
+@media (max-width: 900px) {
+  .fl-app .fl-table .fl-minor { display: none; }
+}
+
+/* ---------------------------------------------------------------------
+   11. A fleet of things as a grid of identical tiles
+
+   One host is one tile: its name, its condition, three measurements and
+   a line of its recent past. They are all one size, so a wide screen is
+   a grid rather than the thrown-down blocks the owner threw the last
+   attempt out for. A tile that cannot answer says so on itself while
+   its neighbours carry on.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(276px, 1fr)); gap: var(--fl-gutter); }
+
+.fl-app .fl-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s4);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border);
+  background: var(--fl-card);
+  box-shadow: var(--fl-lift);
+  color: inherit;
+  text-decoration: none;
+  overflow: hidden;
+  transition: transform var(--fl-quick), box-shadow var(--fl-quick), border-color var(--fl-quick);
+}
+
+.fl-app a.fl-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--fl-lift-high);
+  border-color: var(--border-strong);
+  text-decoration: none;
+}
+
+.fl-app .fl-tile-top { display: flex; align-items: flex-start; gap: var(--s3); }
+.fl-app .fl-tile-names { flex: 1 1 auto; min-width: 0; }
+
+.fl-app .fl-tile-name {
+  display: block;
+  font-weight: 620;
+  font-size: var(--t-lead);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fl-app .fl-tile-sub {
+  display: block;
+  font-size: var(--t-small);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fl-app .fl-tile-figs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s3); }
+.fl-app .fl-tile-fig { min-width: 0; }
+
+.fl-app .fl-tile-fig-label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-tile-fig-value {
+  display: block;
+  font-size: var(--t-lead);
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+  color: var(--tone-text, var(--text));
+}
+
+.fl-app .fl-tile-spark { height: 34px; margin: 0 calc(var(--s4) * -1) calc(var(--s4) * -1); }
+.fl-app .fl-tile-spark svg { width: 100%; height: 100%; display: block; }
+.fl-app .fl-tile-mute .fl-tile-figs, .fl-app .fl-tile-mute .fl-tile-spark { opacity: 0.4; }
+
+.fl-app .fl-tile-veil {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--tone, var(--warn)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone, var(--warn)) 30%, transparent);
+  font-size: var(--t-small);
+  color: var(--tone-text, var(--warn-text));
+}
+
+/* ---------------------------------------------------------------------
+   12. A feed: what happened, newest first
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-feed { display: flex; flex-direction: column; }
+
+.fl-app .fl-feed-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  padding: var(--s3) var(--s5);
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  transition: background var(--fl-quick);
+}
+
+.fl-app .fl-feed-row:last-child { border-bottom: 0; }
+.fl-app .fl-feed-row:hover { background: var(--bg-hover); text-decoration: none; }
+
+.fl-app .fl-feed-mark {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--tone, var(--text-faint)) 16%, transparent);
+  color: var(--tone-text, var(--text-muted));
+}
+
+.fl-app .fl-feed-mark svg { width: 14px; height: 14px; }
+.fl-app .fl-feed-text { flex: 1 1 auto; min-width: 0; }
+.fl-app .fl-feed-what { font-size: var(--t-body); overflow-wrap: anywhere; }
+.fl-app .fl-feed-who { font-size: var(--t-small); color: var(--text-faint); }
+.fl-app .fl-feed-when { flex: 0 0 auto; font-size: var(--t-small); color: var(--text-faint); white-space: nowrap; }
+
+/* A list of things that need somebody, inside a card. */
+.fl-app .fl-needs { display: flex; flex-direction: column; }
+
+.fl-app .fl-needs-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s5);
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  transition: background var(--fl-quick);
+}
+
+.fl-app .fl-needs-row:last-child { border-bottom: 0; }
+.fl-app .fl-needs-row:hover { background: var(--bg-hover); text-decoration: none; }
+.fl-app .fl-needs-label { flex: 1 1 auto; min-width: 0; font-size: var(--t-body); }
+
+.fl-app .fl-needs-count {
+  flex: 0 0 auto;
+  min-width: 32px;
+  text-align: right;
+  font-size: var(--t-lead);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--tone-text, var(--text));
+}
+
+/* ---------------------------------------------------------------------
+   13. Small things that say a state
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  padding: 2px var(--s2);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tone, var(--text-faint)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone, var(--text-faint)) 26%, transparent);
+  color: var(--tone-text, var(--text-muted));
+  font-size: var(--t-label);
+  font-weight: 650;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.fl-app .fl-pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tone, var(--text-faint));
+}
+
+.fl-app .fl-pill.fl-nodot::before { display: none; }
+.fl-app .fl-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--tone, var(--unknown)); }
+.fl-app .fl-tags { display: flex; flex-wrap: wrap; gap: var(--s1); }
+
+.fl-app .fl-tag {
+  padding: 1px var(--s2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  font-size: var(--t-label);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+/* The words a screen may use, and the only ones. */
+.fl-app .fl-note { font-size: var(--t-small); color: var(--text-faint); }
+.fl-app .fl-faint { color: var(--text-faint); }
+.fl-app .fl-small { font-size: var(--t-small); }
+.fl-app .fl-mono { font-family: var(--font-mono); font-size: var(--t-small); overflow-wrap: anywhere; }
+.fl-app .fl-nowrap { white-space: nowrap; }
+.fl-app .fl-truncate { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.fl-app .fl-subhead {
+  display: block;
+  margin-bottom: var(--s2);
+  font-size: var(--t-label);
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------
+   14. Nothing here, something wrong, not yet arrived
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s7) var(--s5);
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--t-small);
+}
+
+.fl-app .fl-empty-mark {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+}
+
+.fl-app .fl-empty-mark svg { width: 18px; height: 18px; }
+.fl-app .fl-empty-actions { display: flex; gap: var(--s2); }
+
+.fl-app .fl-problem {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  padding: var(--s4);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--error) 34%, transparent);
+  color: var(--error-text);
+  font-size: var(--t-body);
+}
+
+.fl-app .fl-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  margin-bottom: var(--s4);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--tone, var(--warn)) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone, var(--warn)) 30%, transparent);
+  color: var(--tone-text, var(--warn-text));
+  font-size: var(--t-body);
+}
+
+.fl-app .fl-banner-text { flex: 1 1 auto; min-width: 0; }
+
+/* What has not arrived breathes. "Loading…" is a word where a shape is
+   wanted, and the shape is what tells the reader the page is the right
+   one before the numbers land. */
+.fl-app .fl-bone {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--bg-sunken) 25%, var(--bg-hover) 37%, var(--bg-sunken) 63%);
+  background-size: 400% 100%;
+  animation: fl-shimmer 1.4s ease-in-out infinite;
+}
+
+.fl-app .fl-bones { display: flex; flex-direction: column; gap: var(--s3); }
+
+@keyframes fl-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+@keyframes fl-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes fl-fade { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .fl-app *, .fl-app *::before, .fl-app *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   15. Things to press and things to fill in
+   ------------------------------------------------------------------ */
+
+.fl-app button { font: inherit; cursor: pointer; }
+.fl-app button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* The button that does the thing. Anything that is not one of the named
+   quieter kinds is this, so a screen cannot accidentally ship a button
+   with no appearance at all. */
+.fl-app .fl-screen button:not(.fl-quiet):not(.fl-plain):not(.fl-word):not(.fl-iconbtn):not(.fl-helpmark):not(.fl-tab):not(.fl-corner):not(.fl-seg button),
+.fl-app .fl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 34px;
+  padding: 0 var(--s4);
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: var(--t-small);
+  font-weight: 650;
+  text-decoration: none;
+  transition: filter var(--fl-quick);
+}
+
+.fl-app .fl-screen button:not(.fl-quiet):not(.fl-plain):not(.fl-word):not(.fl-iconbtn):not(.fl-helpmark):not(.fl-tab):not(.fl-corner):not(.fl-seg button):hover,
+.fl-app .fl-btn:hover { filter: brightness(1.08); text-decoration: none; }
+
+.fl-app .fl-quiet {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  height: 34px;
+  padding: 0 var(--s4);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: var(--t-small);
+  font-weight: 600;
+  text-decoration: none;
+  transition: background var(--fl-quick), border-color var(--fl-quick);
+}
+
+.fl-app .fl-quiet:hover { background: var(--bg-hover); border-color: var(--border-strong); text-decoration: none; }
+.fl-app .fl-quiet.fl-small { height: 28px; padding: 0 var(--s3); }
+
+.fl-app .fl-plain {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 30px;
+  padding: 0 var(--s3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--t-small);
+  transition: background var(--fl-quick), color var(--fl-quick);
+}
+
+.fl-app .fl-plain:hover { background: var(--bg-hover); color: var(--text); }
+
+.fl-app .fl-word {
+  height: auto;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--accent-text);
+  font-size: var(--t-small);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.fl-app .fl-danger { background: var(--error) !important; color: var(--error-contrast) !important; border-color: transparent !important; }
+
+.fl-app .fl-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); margin-bottom: var(--s4); }
+.fl-app .fl-flush .fl-toolbar { padding: 0 var(--s5); }
+.fl-app .fl-toolbar-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+
+.fl-app .fl-find { position: relative; flex: 0 1 280px; display: flex; align-items: center; }
+
+.fl-app .fl-find svg {
+  position: absolute;
+  left: var(--s3);
+  width: 14px;
+  height: 14px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.fl-app .fl-find input {
+  width: 100%;
+  height: 34px;
+  padding: 0 var(--s3) 0 var(--s7);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: var(--t-small);
+  transition: border-color var(--fl-quick);
+}
+
+.fl-app .fl-find input:focus { border-color: var(--accent); outline: none; }
+
+.fl-app .fl-seg { display: inline-flex; padding: 2px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-sunken); }
+
+.fl-app .fl-seg button {
+  height: 26px;
+  padding: 0 var(--s3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--t-small);
+  font-weight: 600;
+  transition: background var(--fl-quick), color var(--fl-quick);
+}
+
+.fl-app .fl-seg button:hover { color: var(--text); }
+.fl-app .fl-seg button.fl-on { background: var(--bg-raised); color: var(--text); box-shadow: var(--shadow-soft); }
+
+.fl-app .fl-tabs { display: flex; gap: var(--s1); border-bottom: 1px solid var(--border); margin-bottom: var(--s5); overflow-x: auto; }
+
+.fl-app .fl-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 38px;
+  padding: 0 var(--s4);
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--t-body);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: color var(--fl-quick);
+}
+
+.fl-app .fl-tab:hover { color: var(--text); }
+.fl-app .fl-tab.fl-on { color: var(--accent-text); }
+
+.fl-app .fl-tab.fl-on::after {
+  content: "";
+  position: absolute;
+  left: var(--s3);
+  right: var(--s3);
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+}
+
+.fl-app .fl-tab-count {
+  min-width: 18px;
+  padding: 0 5px;
+  height: 17px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.fl-app .fl-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--s4); }
+.fl-app .fl-field { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+.fl-app .fl-field.fl-wide { grid-column: 1 / -1; }
+
+.fl-app .fl-field-label {
+  font-size: var(--t-label);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-field-hint { font-size: var(--t-small); color: var(--text-faint); }
+
+.fl-app .fl-screen input:not([type="checkbox"]):not([type="radio"]),
+.fl-app .fl-screen select,
+.fl-app .fl-screen textarea {
+  width: 100%;
+  min-height: 34px;
+  padding: var(--s2) var(--s3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: var(--t-small);
+  transition: border-color var(--fl-quick);
+}
+
+.fl-app .fl-screen input:focus,
+.fl-app .fl-screen select:focus,
+.fl-app .fl-screen textarea:focus { border-color: var(--accent); outline: none; }
+
+.fl-app .fl-check { display: flex; align-items: center; gap: var(--s2); font-size: var(--t-small); cursor: pointer; }
+.fl-app .fl-check input { width: 15px; height: 15px; min-height: 0; accent-color: var(--accent); cursor: pointer; }
+
+.fl-app .fl-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.fl-app .fl-actions.fl-right { justify-content: flex-end; }
+
+.fl-app .fl-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--s4) var(--s5); margin: 0; }
+.fl-app .fl-fact { min-width: 0; }
+
+.fl-app .fl-fact dt {
+  font-size: var(--t-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-fact dd { margin: 2px 0 0; font-size: var(--t-body); overflow-wrap: anywhere; }
+
+.fl-app .fl-rows { display: inline-flex; align-items: center; gap: var(--s2); font-size: var(--t-small); color: var(--text-faint); }
+.fl-app .fl-rows select { width: auto; min-width: 70px; }
+
+.fl-app .fl-pager { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s1); }
+.fl-app .fl-pager button { min-width: 32px; height: 30px; padding: 0 var(--s2); font-variant-numeric: tabular-nums; }
+.fl-app .fl-pager button.fl-on { background: var(--accent-soft); color: var(--accent-text); border: 1px solid transparent; font-weight: 700; }
+.fl-app .fl-pager-gap { color: var(--text-faint); padding: 0 var(--s1); }
+
+/* ---------------------------------------------------------------------
+   16. A window over the page
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: var(--s5);
+  background: color-mix(in srgb, var(--bg-sunken) 72%, transparent);
+  backdrop-filter: blur(3px);
+  animation: fl-fade 160ms ease-out;
+}
+
+.fl-app .fl-modal {
+  width: min(620px, 100%);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  box-shadow: var(--fl-lift-high);
+  animation: fl-rise 180ms cubic-bezier(0.2, 0, 0.1, 1);
+}
+
+.fl-app .fl-modal-title {
+  padding: var(--s4) var(--s5);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fl-card-title);
+  font-weight: 650;
+}
+
+.fl-app .fl-modal-body { flex: 1 1 auto; overflow: auto; padding: var(--s5); }
+.fl-app .fl-modal > .fl-actions { padding: var(--s4) var(--s5); border-top: 1px solid var(--border); }
+
+/* ---------------------------------------------------------------------
+   17. Arranging the screen
+
+   The bar that turns it on, the handle a container is moved by and the
+   corner it is sized by. Nothing moves until the mode is on, so a board
+   is a board the rest of the time.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-arrange {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s4);
+  padding: var(--s2);
+  border-radius: var(--radius);
+  border: 1px dashed var(--border-strong);
+  background: var(--bg-sunken);
+}
+
+.fl-app .fl-arrange-reason { flex: 1 1 260px; }
+.fl-app .fl-arrange select { width: auto; }
+.fl-app .fl-placed { grid-auto-rows: var(--fl-row); align-items: stretch; }
+.fl-app .fl-held { position: relative; min-width: 0; min-height: 0; }
+.fl-app .fl-held > * { height: 100%; }
+
+.fl-app .fl-editing .fl-held {
+  outline: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent);
+  outline-offset: 2px;
+  border-radius: var(--radius-card);
+}
+
+.fl-app .fl-dragging { z-index: 5; }
+.fl-app .fl-dragging > * { box-shadow: var(--fl-lift-high); }
+.fl-app .fl-holding { user-select: none; cursor: grabbing; }
+
+.fl-app .fl-grip {
+  position: absolute;
+  inset: auto 0 100% 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s2);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-bottom: 0;
+  font-size: var(--t-label);
+  color: var(--text-muted);
+  cursor: grab;
+  z-index: 6;
+}
+
+.fl-app .fl-grip-dots { color: var(--text-faint); }
+.fl-app .fl-grip-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-app .fl-grip-size { font-variant-numeric: tabular-nums; color: var(--text-faint); }
+
+.fl-app .fl-corner {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 0 0 var(--radius-card) 0;
+  background: linear-gradient(135deg, transparent 50%, var(--accent) 50%);
+  opacity: 0.7;
+  cursor: nwse-resize;
+  z-index: 6;
+}
+
+.fl-app .fl-corner:hover { opacity: 1; }
+
+/* What a screen may group inside a card without inventing a layout. */
+.fl-app .fl-zones { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--s4); }
+
+/* ---------------------------------------------------------------------
+   18. Narrow screens
+
+   The rail leaves the flow and opens over the page. Everything else is
+   already told to reflow by the grid above, so nothing here names a
+   screen of the panel.
+   ------------------------------------------------------------------ */
+
+@media (max-width: 860px) {
+  .fl-app { --fl-pad: var(--s4); }
+  .fl-app .fl-page { margin-left: 0; }
+  .fl-app .fl-rail { transform: translateX(-100%); box-shadow: var(--fl-lift-high); }
+  .fl-app .fl-rail.fl-open { transform: none; }
+  .fl-app .fl-head-title { font-size: 24px; }
+  .fl-app .fl-search { flex: 1 1 auto; }
+  .fl-app .fl-search-key, .fl-app .fl-crumbs { display: none; }
+  .fl-app .fl-user-name { display: none; }
+}
+
+@media (min-width: 861px) {
+  .fl-app .fl-bar > .fl-iconbtn:first-child { display: none; }
+}
