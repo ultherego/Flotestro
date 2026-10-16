@@ -6,7 +6,6 @@ import { App } from "./App";
 import { ApiError } from "./lib/api";
 import { I18nProvider } from "./i18n";
 import "./styles.css";
-import "./next/next.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
