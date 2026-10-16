@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import type { ReactElement } from "react";
-import { Band, Bars, Card, Chart, Find, Kpi, Needs, Pie, Pill, Squares, Table, Tile, Toolbar, pageNumbers } from "./kit";
+import { Band, Bars, Card, Chart, Find, Kpi, Needs, Pie, Pill, Screen, Squares, Table, Tile, Toolbar, pageNumbers } from "./kit";
 
 /**
  * The kit decides what the panel looks like, so the rules a screen must
@@ -245,5 +245,19 @@ describe("a card holding a list", () => {
   it("draws a note even where there is no title above it", () => {
     draw(<Card note="Counted on the last report."><p>body</p></Card>);
     expect(document.querySelector(".fl-card-note")).toHaveTextContent("Counted on the last report.");
+  });
+});
+
+describe("a screen that is filled in rather than scanned", () => {
+  it("keeps a measure, so a 4k window does not stretch a form across the room", () => {
+    draw(<Screen title="Settings" measure><p>fields</p></Screen>);
+    const measured = document.querySelector(".fl-measure");
+    expect(measured).not.toBeNull();
+    expect(measured).toHaveTextContent("fields");
+  });
+
+  it("takes the whole window where it is a board", () => {
+    draw(<Screen title="Hosts"><p>tiles</p></Screen>);
+    expect(document.querySelector(".fl-measure")).toBeNull();
   });
 });

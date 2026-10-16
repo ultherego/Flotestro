@@ -156,6 +156,7 @@ export function Support() {
 
   return (
     <Screen
+      measure
       icon="logs"
       title={t("Support bundle")}
       lead={t("Readings of this panel for whoever is helping you.")}

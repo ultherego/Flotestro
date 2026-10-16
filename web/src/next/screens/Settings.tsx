@@ -191,6 +191,7 @@ export function Settings() {
       title={t("Settings")}
       lead={t("Everything this installation is configured with.")}
       icon="settings"
+      measure
       help={
         <>
           <p>{t("What the panel stores is set here and takes effect without a restart: who may sign in and what they hold, the retentions, the address the agents dial, the channels, the budgets and the policies.")}</p>
@@ -281,7 +282,7 @@ function General({ permissions }: { permissions: Set<string> }) {
 
       {mayReadAddress && (
         <Card
-          span={6}
+          span={12}
           title={t("Advertised address")}
           note={t("The address the agents dial to reach this panel.")}
         >

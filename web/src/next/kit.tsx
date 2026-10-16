@@ -116,7 +116,7 @@ export function HeadActions({ children }: { children: ReactNode }) {
  * forty. The test beside this file refuses a screen that reaches past
  * this frame for a layout of its own.
  */
-export function Screen({ title, lead, help, icon, actions, banner, children }: {
+export function Screen({ title, lead, help, icon, actions, banner, measure = false, children }: {
   title: ReactNode;
   lead?: ReactNode;
   /** The long answer to "what is this screen for", behind the mark. */
@@ -125,6 +125,18 @@ export function Screen({ title, lead, help, icon, actions, banner, children }: {
   actions?: ReactNode;
   /** What has to be taken account of before the screen is read at all. */
   banner?: ReactNode;
+  /**
+   * The screen is read and filled in rather than scanned, so it keeps a
+   * measure instead of taking the window.
+   *
+   * A board of tiles is better the wider the screen is. A form is not: a
+   * field four thousand pixels wide, a label at one end of the room and
+   * its value at the other, and sections of different widths beside each
+   * other read as scattered - which is what the owner saw on a 4k screen
+   * and what he called it. Settings, a profile, a wizard: measured.
+   * Hosts, jobs, a board: not.
+   */
+  measure?: boolean;
   children: ReactNode;
 }) {
   const [slot, setSlot] = useState<HTMLElement | null>(null);
@@ -140,9 +152,19 @@ export function Screen({ title, lead, help, icon, actions, banner, children }: {
         ? actions && <HeadActions>{actions}</HeadActions>
         : <Head title={title} lead={lead} help={help} icon={icon} actions={actions} />}
       {banner}
-      {children}
+      {measure ? <Measure>{children}</Measure> : children}
     </>
   );
+}
+
+/**
+ * The measure a screen that is read and filled in keeps.
+ *
+ * `Screen` takes it as a flag; a screen whose heading the shell draws
+ * reaches for this directly. Either way it is one number, in one place.
+ */
+export function Measure({ children }: { children: ReactNode }) {
+  return <div className="fl-measure">{children}</div>;
 }
 
 /** The twelve columns everything stands on. */

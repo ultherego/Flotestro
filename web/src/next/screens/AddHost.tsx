@@ -454,6 +454,7 @@ export function AddHost() {
 
   return (
     <Screen
+      measure
       icon="add-host"
       title={t("Add a host")}
       lead={t("How a host joins the fleet, and the token that lets it.")}
