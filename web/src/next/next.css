@@ -1109,7 +1109,12 @@
 
 /* A square per host: the whole fleet's condition at one glance. */
 .fl-app .fl-squares { display: flex; flex-direction: column; gap: var(--s4); }
-.fl-app .fl-squares-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(16px, 1fr)); gap: 5px; }
+.fl-app .fl-squares-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16px, 20px));
+  justify-content: start;
+  gap: 5px;
+}
 
 .fl-app .fl-square {
   aspect-ratio: 1;

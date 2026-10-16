@@ -122,6 +122,23 @@ describe("the fleet dashboard", () => {
     expect(row).toHaveTextContent("not counted");
   });
 
+  it("counts a state the fleet has none of as none, in the squares as in the ring", async () => {
+    Object.assign(answers, {
+      "/api/v1/fleet/summary": summary,
+      "/api/v1/fleet/activity": activity,
+      "/api/v1/hosts": { items: [{ id: "h1", hostname: "agent-arch", connection_state: "online" }], count: 1 },
+    });
+    draw();
+    const squares = await screen.findByTestId("fleet-squares");
+    // The activity's facet list is complete, so a state missing from it
+    // has no hosts. Read as "nobody counted" here and as nought in the
+    // ring beside it, the two cards contradicted each other on the same
+    // screen - and one of them had to be lying.
+    const stale = within(squares).getByText("stale").closest(".fl-quiet-item");
+    expect(stale).toHaveTextContent("0");
+    expect(stale).not.toHaveTextContent("—");
+  });
+
   it("puts what is at zero under the availability band rather than in it", async () => {
     Object.assign(answers, { "/api/v1/security": { checks: [], unknown_hosts: 0 } });
     draw();

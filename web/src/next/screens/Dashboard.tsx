@@ -253,9 +253,9 @@ export function Dashboard() {
                 }))}
                 tally={[
                   { label: t("online"), value: s?.online ?? "—", tone: "ok" },
-                  { label: t("stale"), value: byConnection("stale") ?? "—", tone: "warn" },
+                  { label: t("stale"), value: a ? byConnection("stale") ?? 0 : "—", tone: "warn" },
                   { label: t("offline"), value: s?.offline ?? "—", tone: "error" },
-                  { label: t("unknown"), value: byConnection("unknown") ?? "—", tone: "unknown" },
+                  { label: t("unknown"), value: a ? byConnection("unknown") ?? 0 : "—", tone: "unknown" },
                 ]}
               />
             ) : <Bones rows={4} height={18} />}
@@ -391,7 +391,7 @@ export const DASHBOARD: BoardEntry[] = [
   { key: "found", title: "Found on the hosts", width: 3, height: 1 },
   { key: "needs", title: "What needs you", width: 8, height: 4 },
   { key: "answering", title: "Fleet condition", width: 4, height: 2 },
-  { key: "fleet", title: "The fleet at a glance", width: 12, height: 1 },
+  { key: "fleet", title: "The fleet at a glance", width: 4, height: 1 },
   { key: "availability", title: "Host availability", width: 4, height: 1 },
   { key: "operations", title: "Operations, last 24 h", width: 8, height: 3 },
   { key: "composition", title: "Fleet composition", width: 4, height: 5 },
