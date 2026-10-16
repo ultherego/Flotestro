@@ -2105,13 +2105,28 @@
 .fl-app .fl-finder-row {
   display: flex;
   align-items: center;
-  gap: var(--s3);
-  padding: var(--s2) var(--s3);
+  gap: var(--s2);
+  padding-right: var(--s2);
   border-radius: var(--radius-sm);
   color: var(--text-muted);
-  text-decoration: none;
   transition: background var(--fl-quick), color var(--fl-quick);
 }
+
+.fl-app .fl-finder-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  color: inherit;
+  text-decoration: none;
+}
+
+.fl-app .fl-finder-keep { height: 26px; padding: 0 var(--s2); opacity: 0.55; }
+.fl-app .fl-finder-keep:hover { opacity: 1; }
+.fl-app .fl-finder-keep[aria-pressed="true"] { opacity: 1; color: var(--accent-text); }
+.fl-app .fl-finder-keep svg { width: 13px; height: 13px; }
 
 .fl-app .fl-finder-row svg { flex: 0 0 auto; width: 15px; height: 15px; }
 .fl-app .fl-finder-row.fl-on { background: var(--accent-soft); color: var(--accent-text); }

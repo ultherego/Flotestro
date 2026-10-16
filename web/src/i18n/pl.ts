@@ -1596,6 +1596,8 @@ export const pl: Record<string, string> = {
   "{n} advisories, read {when}": "biuletynów: {n}, odczyt {when}",
   "version rules: {rules}": "reguły wersji: {rules}",
   "The packages on this host": "Pakiety na tym hoście",
+  "lately": "ostatnio",
+  "Keep this machine at the top of the list": "Trzymaj te maszyne na gorze listy",
   "{n}%": "{n}%",
   "Point at the chart for a reading": "Najedz kursorem na wykres, zeby odczytac wartosc",
   "Export CSV": "Eksportuj CSV",

@@ -5,7 +5,7 @@ import {
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, BEARER_TOKEN_KEY, type Collection } from "../lib/api";
-import { isBoolean, useStoredState } from "../lib/storage";
+import { isBoolean, isStringList, useStoredState } from "../lib/storage";
 import { useDebounced } from "../lib/debounce";
 import { REFRESH_INTERVAL } from "../lib/stream";
 import { usePreferences } from "../lib/preferences";
@@ -88,6 +88,16 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
   const shown = face ?? fleet;
   const name = me.data?.display_name || me.data?.subject || "";
   const [finding, setFinding] = useState(false);
+  /* What this browser keeps and what it opened last live here rather
+     than in the finder: the finder is unmounted the instant a row is
+     opened, and a write made inside the state updater of a component
+     that is going away never runs. */
+  const [recent, setRecent] = useStoredState<string[]>(RECENT_KEY, [], isStringList);
+  const [favourite, setFavourite] = useStoredState<string[]>(FAVOURITE_KEY, [], isStringList);
+  // Which module of a machine is open, if one is: picking another host
+  // from the finder lands on the same one. An operator comparing the
+  // packages of two machines should not be sent back to the overview.
+  const onModule = /^\/next\/hosts\/(?!new$)([^/]+)\/([^/]+)/.exec(location.pathname);
   const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || "");
   const keyHint = mac ? "\u2318 K" : "Ctrl K";
 
@@ -179,7 +189,17 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
         </main>
         </div>
       </div>
-      {finding && <Finder places={fleet.groups} onClose={() => setFinding(false)} />}
+      {finding && (
+        <Finder
+          places={fleet.groups}
+          module={onModule?.[2]}
+          recent={recent}
+          setRecent={setRecent}
+          favourite={favourite}
+          setFavourite={setFavourite}
+          onClose={() => setFinding(false)}
+        />
+      )}
     </div>
   );
 }
@@ -463,6 +483,29 @@ const FINDER_LIMIT = 6;
 const FINDER_MINIMUM = 2;
 
 /**
+ * The machines this browser opened last, and the ones it was told to
+ * keep. They are this browser's, not the installation's: which hosts a
+ * person works on is theirs, and it follows nobody to another seat.
+ *
+ * A row is kept as "id\u0000name" so the list can be drawn without
+ * asking the server for eight names every time the finder opens.
+ */
+const RECENT_KEY = "flotestro.next.hosts.recent";
+const FAVOURITE_KEY = "flotestro.next.hosts.favourite";
+const RECENT = 8;
+
+type Kept = { id: string; name: string };
+
+function keep(list: string[]): Kept[] {
+  return list.map((one) => {
+    const cut = one.indexOf("\u0000");
+    return cut < 0 ? { id: one, name: one } : { id: one.slice(0, cut), name: one.slice(cut + 1) };
+  });
+}
+
+const packed = (one: Kept) => `${one.id}\u0000${one.name}`;
+
+/**
  * The way to anywhere, from the keyboard.
  *
  * A rail reaches the places of the panel; it cannot reach the thousandth
@@ -479,8 +522,14 @@ const FINDER_MINIMUM = 2;
  * beside the question it answered and the screen goes on drawing the
  * answer to the question that is actually in the box.
  */
-function Finder({ places, onClose }: {
+function Finder({ places, module, recent, setRecent, favourite, setFavourite, onClose }: {
   places: Face["groups"];
+  /** The module of a machine the reader is standing in, if any. */
+  module?: string;
+  recent: string[];
+  setRecent: (next: string[] | ((current: string[]) => string[])) => void;
+  favourite: string[];
+  setFavourite: (next: string[] | ((current: string[]) => string[])) => void;
   onClose: () => void;
 }) {
   const t = useT();
@@ -488,6 +537,18 @@ function Finder({ places, onClose }: {
   const [query, setQuery] = useState("");
   const [at, setAt] = useState(0);
   const field = useRef<HTMLInputElement>(null);
+
+  /** A machine opens on the module the reader was already reading. */
+  const hostAddress = (id: string) =>
+    `/next/hosts/${encodeURIComponent(id)}${module ? `/${module}` : ""}`;
+
+  const remember = (one: Kept) =>
+    setRecent((current) => [packed(one), ...current.filter((other) => keep([other])[0].id !== one.id)].slice(0, RECENT));
+
+  const star = (one: Kept) =>
+    setFavourite((current) => current.some((other) => keep([other])[0].id === one.id)
+      ? current.filter((other) => keep([other])[0].id !== one.id)
+      : [...current, packed(one)]);
 
   useEffect(() => { field.current?.focus(); }, []);
 
@@ -514,13 +575,40 @@ function Finder({ places, onClose }: {
     retry: false,
   });
 
+  // With nothing typed the finder is the host picker: what this browser
+  // keeps, then what it opened last.
+  const kept: { key: string; to: string; label: string; kind: string; note?: string; icon: IconName; host?: Kept }[] =
+    asked === ""
+      ? [
+          ...keep(favourite).map((one) => ({
+            key: `favourite:${one.id}`,
+            to: hostAddress(one.id),
+            label: one.name,
+            kind: t("kept"),
+            icon: "star" as IconName,
+            host: one,
+          })),
+          ...keep(recent)
+            .filter((one) => !favourite.some((other) => keep([other])[0].id === one.id))
+            .map((one) => ({
+              key: `recent:${one.id}`,
+              to: hostAddress(one.id),
+              label: one.name,
+              kind: t("lately"),
+              icon: "server" as IconName,
+              host: one,
+            })),
+        ]
+      : [];
+
   const matched = places
     .flatMap((group) => group.items.map((item) => ({ ...item, group: group.label })))
     .filter((item) => !item.unavailable && t(item.label).toLowerCase().includes(asked.toLowerCase()))
     .slice(0, 8);
 
   const lower = settled.toLowerCase();
-  const found: { key: string; to: string; label: string; kind: string; note?: string; icon: IconName }[] = [
+  const found: { key: string; to: string; label: string; kind: string; note?: string; icon: IconName; host?: Kept }[] = [
+    ...kept,
     ...matched.map((item) => ({
       key: `place:${item.to}`,
       to: item.to,
@@ -534,11 +622,12 @@ function Finder({ places, onClose }: {
       if (!where) return [];
       return [{
         key: `${one.kind}:${one.id}`,
-        to: where.to(one),
+        to: one.kind === "host" ? hostAddress(one.id) : where.to(one),
         label: one.title || one.id,
         kind: t(where.kind),
         note: one.subtitle || undefined,
         icon: where.icon,
+        host: one.kind === "host" ? { id: one.id, name: one.title || one.id } : undefined,
       }];
     }),
     ...(enough ? (tags.data?.items ?? []) : [])
@@ -559,7 +648,11 @@ function Finder({ places, onClose }: {
     if (event.key === "Escape") { onClose(); return; }
     if (event.key === "ArrowDown") { event.preventDefault(); setAt((n) => Math.min(n + 1, found.length - 1)); return; }
     if (event.key === "ArrowUp") { event.preventDefault(); setAt((n) => Math.max(n - 1, 0)); return; }
-    if (event.key === "Enter" && found[here]) { navigate(found[here].to); onClose(); }
+    if (event.key === "Enter" && found[here]) {
+      if (found[here].host) remember(found[here].host);
+      navigate(found[here].to);
+      onClose();
+    }
   };
 
   return (
@@ -590,23 +683,41 @@ function Finder({ places, onClose }: {
                 : t("Nothing here answers to that.")}
             </p>
           ) : found.map((one, index) => (
-            <Link
+            <div
               key={one.key}
-              to={one.to}
-              role="option"
-              aria-selected={index === here}
               className={index === here ? "fl-finder-row fl-on" : "fl-finder-row"}
               onMouseEnter={() => setAt(index)}
-              onClick={onClose}
-              data-testid={`finder-${one.key}`}
             >
-              <Icon name={one.icon} />
-              <span className="fl-finder-name">{one.label}</span>
-              {/* Every row says what kind of thing it is: a name alone
-                  does not tell a campaign from the group it runs over. */}
-              <Pill tone="neutral" dot={false}>{one.kind}</Pill>
-              {one.note && <span className="fl-finder-note">{one.note}</span>}
-            </Link>
+              <Link
+                to={one.to}
+                role="option"
+                aria-selected={index === here}
+                className="fl-finder-open"
+                onClick={() => { if (one.host) remember(one.host); onClose(); }}
+                data-testid={`finder-${one.key}`}
+              >
+                <Icon name={one.icon} />
+                <span className="fl-finder-name">{one.label}</span>
+                {/* Every row says what kind of thing it is: a name alone
+                    does not tell a campaign from the group it runs over. */}
+                <Pill tone="neutral" dot={false}>{one.kind}</Pill>
+                {one.note && <span className="fl-finder-note">{one.note}</span>}
+              </Link>
+              {/* A machine somebody keeps stays at the top of this list
+                  whether or not they opened it lately. */}
+              {one.host && (
+                <button
+                  type="button"
+                  className="fl-plain fl-finder-keep"
+                  aria-pressed={favourite.some((other) => keep([other])[0].id === one.host?.id)}
+                  title={t("Keep this machine at the top of the list")}
+                  onClick={() => star(one.host as Kept)}
+                  data-testid={`finder-keep-${one.host.id}`}
+                >
+                  <Icon name="star" />
+                </button>
+              )}
+            </div>
           ))}
         </div>
       </div>

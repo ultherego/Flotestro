@@ -85,13 +85,18 @@ afterEach(() => {
   for (const key of Object.keys(held)) delete held[key];
 });
 
-const draw = () => {
+const draw = (at = "/next") => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/next"]}>
+      <MemoryRouter initialEntries={[at]}>
         <Routes>
           <Route path="/next" element={<Shell trail={{ section: "Fleet" }}>board</Shell>} />
+          {/* A machine's module, so the picker can be asked to keep it. */}
+          <Route
+            path="/next/hosts/:id/:module"
+            element={<Shell trail={{ section: "Hosts" }}>one module</Shell>}
+          />
           <Route path="/next/hosts/:id" element={<p>one host</p>} />
           <Route path="/next/jobs/:id" element={<p>one job</p>} />
           <Route path="/next/campaigns/:id" element={<p>one campaign</p>} />
@@ -330,5 +335,30 @@ describe("the bell", () => {
     // A count nobody could take is not a count of none.
     expect(within(bar).queryByText("0")).toBeNull();
     expect(screen.getByTestId("bell")).not.toHaveTextContent("0");
+  });
+});
+
+describe("the finder as the host picker", () => {
+  it("opens another machine on the module the reader is standing in", async () => {
+    // An operator comparing the packages of two machines should not be
+    // sent back to the overview of the second one.
+    serve();
+    draw("/next/hosts/h1/packages");
+    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+    fireEvent.change(await screen.findByTestId("finder-field"), { target: { value: "agent" } });
+    const row = await screen.findByTestId("finder-host:h9");
+    expect(row).toHaveAttribute("href", "/next/hosts/h9/packages");
+  });
+
+  it("offers what this browser opened lately before anything is typed", async () => {
+    serve();
+    draw("/next/hosts/h1/packages");
+    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+    fireEvent.change(await screen.findByTestId("finder-field"), { target: { value: "agent" } });
+    fireEvent.click(await screen.findByTestId("finder-host:h9"));
+
+    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+    // Nothing typed: the finder is the host picker.
+    expect(await screen.findByTestId("finder-recent:h9")).toHaveTextContent("agent-arch");
   });
 });
