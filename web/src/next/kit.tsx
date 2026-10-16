@@ -1,5 +1,5 @@
 import {
-  useEffect, useId, useState,
+  Children, isValidElement, useEffect, useId, useState,
   type CSSProperties, type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent, type ReactNode,
 } from "react";
@@ -172,27 +172,47 @@ export function Row({ children }: { children: ReactNode }) {
  * `flush` is for a body that is a table or a toolbar: it reaches the
  * card's own edges instead of floating inside a margin.
  */
-export function Card({ title, note, tools, children, foot, flush = false, span }: {
+export function Card({ title, note, tools, bar, children, foot, flush = false, span }: {
   title?: ReactNode;
   note?: ReactNode;
   tools?: ReactNode;
+  /**
+   * What steers what is below it - a search, the filters, a time range.
+   *
+   * It stands outside the part that scrolls, so it stays put with the
+   * table's own head under it however far the rows are scrolled. A
+   * toolbar passed as a child instead scrolls away with them.
+   */
+  bar?: ReactNode;
   children?: ReactNode;
   foot?: ReactNode;
   /** For a body that is a table or a toolbar: it reaches the edges. */
   flush?: boolean;
   span?: Span;
 }) {
+  /* A toolbar among the children is lifted out of the part that scrolls.
+     It steers what is below it, so it stays put - and the table's head
+     then sticks to the top of the scroller rather than to a guess at how
+     tall the toolbar is. Wrapped onto three lines, that guess was wrong
+     and the first rows showed through the gap. */
+  const kids = Children.toArray(children);
+  const steering = kids.filter((one) => isValidElement(one) && one.type === Toolbar);
+  const rest = kids.filter((one) => !(isValidElement(one) && one.type === Toolbar));
+  const steer = bar ?? (steering.length > 0 ? steering : undefined);
+  const body = bar ? children : rest;
+
   const card = (
     <section className={join("fl-card", flush && "fl-flush")}>
-      {(title || tools) && (
+      {(title || tools || note) && (
         <div className="fl-card-head">
           {title && <h2 className="fl-card-title">{title}</h2>}
           {tools && <div className="fl-card-tools">{tools}</div>}
           {note && <p className="fl-card-note">{note}</p>}
         </div>
       )}
-      {children !== undefined && children !== null && children !== false && (
-        <div className="fl-card-body">{children}</div>
+      {steer && <div className="fl-card-bar">{steer}</div>}
+      {body !== undefined && body !== null && body !== false && (
+        <div className="fl-card-body">{body}</div>
       )}
       {foot && <div className="fl-card-foot">{foot}</div>}
     </section>
@@ -1042,13 +1062,15 @@ export function Modal({ title, children, onClose, actions }: {
  * page of everything. It goes through the panel's own fetch because a
  * bare <a download> drops the bearer token and comes back a refusal.
  */
-export function Download({ path, params, label, disabled = false }: {
+export function Download({ path, params, label, disabled = false, fileName }: {
   /** The address of the list, without a query: /api/v1/hosts. */
   path: string;
   /** The filter as the server reads it; the keys of a page are dropped. */
   params?: URLSearchParams;
   label?: string;
   disabled?: boolean;
+  /** When the server names no file of its own and it is not a CSV. */
+  fileName?: string;
 }) {
   const t = useT();
   const toast = useToast();
@@ -1066,7 +1088,9 @@ export function Download({ path, params, label, disabled = false }: {
       const href = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = href;
-      anchor.download = exportFileName(response.headers.get("Content-Disposition"));
+      anchor.download = response.headers.get("Content-Disposition")
+        ? exportFileName(response.headers.get("Content-Disposition"))
+        : fileName ?? exportFileName(null);
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
@@ -1456,6 +1480,124 @@ export function Presets({ options, label }: {
     <div className="fl-seg" role="group" aria-label={label}>
       {options.map((one, index) => (
         <button key={index} type="button" onClick={one.onPick}>{one.label}</button>
+      ))}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------- the button */
+
+/**
+ * A thing to press, and which kind it is.
+ *
+ * The stylesheet makes a bare button inside a screen the filled one,
+ * which is right for the one action a card is for and wrong for the
+ * three beside it. Every screen was reaching for a class to say so; this
+ * says it in the kit instead, and a screen that writes `kind` cannot get
+ * the appearance of a button wrong.
+ */
+export function Button({ kind = "do", onClick, disabled, title, icon, children, testId, type = "button" }: {
+  /** `do` is the one action; `quiet` stands beside it; `word` is a link
+      in a sentence; `danger` is the one that cannot be undone. */
+  kind?: "do" | "quiet" | "plain" | "word" | "danger";
+  onClick?: () => void;
+  disabled?: boolean;
+  title?: string;
+  icon?: IconName;
+  children: ReactNode;
+  testId?: string;
+  type?: "button" | "submit";
+}) {
+  const className = kind === "do" ? undefined
+    : kind === "danger" ? "fl-danger"
+    : `fl-${kind}`;
+  return (
+    <button type={type} className={className} onClick={onClick} disabled={disabled} title={title} data-testid={testId}>
+      {icon && <Icon name={icon} />}
+      {children}
+    </button>
+  );
+}
+
+/* -------------------------------------------------------- the readout */
+
+/**
+ * Something the reader is meant to copy: a command, a configuration, a
+ * fingerprint, a key.
+ *
+ * It is read-only, it keeps its own line breaks, it scrolls rather than
+ * wrapping a command across two lines, and the way to take it is beside
+ * it rather than somewhere else on the screen. A screen that put one of
+ * these in a text field gave its label two controls.
+ */
+export function Readout({ label, value, note, lines, testId }: {
+  label?: ReactNode;
+  value: string;
+  note?: ReactNode;
+  /** How tall before it scrolls; the default suits a command or two. */
+  lines?: number;
+  testId?: string;
+}) {
+  const t = useT();
+  const toast = useToast();
+  const take = async () => {
+    const { copyToClipboard } = await import("../lib/clipboard");
+    const done = await copyToClipboard(value);
+    if (done) toast.success(t("Copied."));
+    else toast.error(t("The browser would not take it; copy it by hand."));
+  };
+  return (
+    <div className="fl-readout" data-testid={testId}>
+      {(label || note) && (
+        <div className="fl-readout-head">
+          {label && <span className="fl-readout-label">{label}</span>}
+          <button type="button" className="fl-plain" onClick={take} data-testid={testId ? `${testId}-copy` : undefined}>
+            <Icon name="copy" />
+            {t("Copy")}
+          </button>
+        </div>
+      )}
+      <pre className="fl-readout-body" style={lines ? { maxHeight: `${lines * 1.5}em` } : undefined}>{value}</pre>
+      {note && <span className="fl-field-hint">{note}</span>}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------- the choice */
+
+/**
+ * One of several, each with its own sentence underneath.
+ *
+ * A Seg is for a choice the reader makes often and changes back; this is
+ * for one they make once and have to understand first - which address
+ * the fleet reaches the panel on, which route an agent takes.
+ */
+export function Choice<T extends string>({ value, onChange, options, label, name }: {
+  value: T;
+  onChange: (value: T) => void;
+  options: { value: T; label: ReactNode; hint?: ReactNode; disabled?: boolean }[];
+  label?: ReactNode;
+  /** What groups these for the browser; one per screen is enough. */
+  name: string;
+}) {
+  return (
+    <div className="fl-choice" role="radiogroup" aria-label={typeof label === "string" ? label : undefined}>
+      {label && <span className="fl-field-label">{label}</span>}
+      {options.map((one) => (
+        <label className={join("fl-choice-one", one.disabled && "fl-off")} key={one.value}>
+          <input
+            type="radio"
+            name={name}
+            value={one.value}
+            checked={one.value === value}
+            disabled={one.disabled}
+            onChange={() => onChange(one.value)}
+          />
+          <span className="fl-choice-text">
+            <span className="fl-choice-name">{one.label}</span>
+            {one.hint && <span className="fl-field-hint">{one.hint}</span>}
+          </span>
+        </label>
       ))}
     </div>
   );

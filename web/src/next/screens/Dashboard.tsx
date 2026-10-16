@@ -391,7 +391,7 @@ export const DASHBOARD: BoardEntry[] = [
   { key: "found", title: "Found on the hosts", width: 3, height: 2 },
   { key: "needs", title: "What needs you", width: 8, height: 5 },
   { key: "answering", title: "Fleet condition", width: 4, height: 5 },
-  { key: "fleet", title: "The fleet at a glance", width: 12, height: 3 },
+  { key: "fleet", title: "The fleet at a glance", width: 12, height: 2 },
   { key: "availability", title: "Host availability", width: 4, height: 3 },
   { key: "operations", title: "Operations, last 24 h", width: 8, height: 4 },
   { key: "composition", title: "Fleet composition", width: 4, height: 7 },

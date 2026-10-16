@@ -755,6 +755,7 @@
   position: relative;
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
   gap: var(--s2);
   height: 100%;
   padding: var(--s5);
@@ -1595,30 +1596,17 @@
 
 .fl-app .fl-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); margin-bottom: var(--s4); }
 
-/* The card's body is what scrolls, so a toolbar inside it would scroll
-   away with the rows it filters. It sticks to the top of the body, and
-   the table's head sticks under it. The offset is the toolbar's own
-   height - one control, 34px, in padding of --s3 - which is a constant
-   because every control in the kit is that height. */
-.fl-app .fl-card-body > .fl-toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  margin: calc(var(--s3) * -1) 0 var(--s3);
+/* The bar that steers a list stands between the card's head and the part
+   that scrolls, so neither it nor the table's head can scroll away -
+   however many lines it wraps onto. */
+.fl-app .fl-card-bar {
+  flex: 0 0 auto;
   padding: var(--s3) var(--s5);
-  background: var(--fl-card);
   border-bottom: 1px solid var(--border);
+  background: var(--fl-card);
 }
 
-.fl-app .fl-flush .fl-card-body > .fl-toolbar { margin-top: 0; }
-.fl-app .fl-card-body:has(> .fl-toolbar) .fl-table th { top: 59px; }
-
-/* Wrapped onto two lines the offset would be wrong, and a head that
-   covers the first row is worse than one that scrolls. */
-@media (max-width: 900px) {
-  .fl-app .fl-card-body > .fl-toolbar { position: static; margin-top: 0; }
-  .fl-app .fl-table th { position: static; }
-}
+.fl-app .fl-card-bar .fl-toolbar { margin-bottom: 0; }
 .fl-app .fl-toolbar-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
 
 .fl-app .fl-find { position: relative; flex: 0 1 280px; display: flex; align-items: center; }
@@ -1632,9 +1620,14 @@
   pointer-events: none;
 }
 
-.fl-app .fl-find input {
+.fl-app .fl-toolbar select,
+.fl-app .fl-card-bar select { width: auto; min-width: 140px; max-width: 320px; }
+
+.fl-app .fl-find input,
+.fl-app .fl-toolbar .fl-find input {
   width: 100%;
   height: 34px;
+  min-height: 34px;
   padding: 0 var(--s3) 0 var(--s7);
   border-radius: var(--radius);
   border: 1px solid var(--border);
@@ -1723,7 +1716,7 @@
 
 .fl-app .fl-field-hint { font-size: var(--t-small); color: var(--text-faint); }
 
-.fl-app .fl-screen input:not([type="checkbox"]):not([type="radio"]),
+.fl-app .fl-screen input:not([type="checkbox"]):not([type="radio"]):not(.fl-find input):not(.fl-finder-field input),
 .fl-app .fl-screen select,
 .fl-app .fl-screen textarea {
   width: 100%;

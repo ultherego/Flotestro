@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import type { ReactElement } from "react";
-import { Band, Bars, Chart, Kpi, Needs, Pie, Pill, Squares, Table, Tile, pageNumbers } from "./kit";
+import { Band, Bars, Card, Chart, Find, Kpi, Needs, Pie, Pill, Squares, Table, Tile, Toolbar, pageNumbers } from "./kit";
 
 /**
  * The kit decides what the panel looks like, so the rules a screen must
@@ -222,5 +222,28 @@ describe("what needs somebody", () => {
     const row = screen.getByText("Security findings").closest(".fl-needs-row");
     expect(row).toHaveTextContent("—");
     expect(row).toHaveTextContent("not counted");
+  });
+});
+
+describe("a card holding a list", () => {
+  it("takes the toolbar out of the part that scrolls", () => {
+    draw(
+      <Card title="Campaigns" flush>
+        <Toolbar><Find value="" onChange={() => {}} placeholder="Requested by" /></Toolbar>
+        <p>rows</p>
+      </Card>,
+    );
+    const card = document.querySelector(".fl-card") as HTMLElement;
+    // The bar that steers the list stands outside the body. Inside it,
+    // the search and the filters scrolled away with the rows they
+    // govern, and the table's head stuck at the wrong height.
+    expect(card.querySelector(".fl-card-bar .fl-toolbar")).not.toBeNull();
+    expect(card.querySelector(".fl-card-body .fl-toolbar")).toBeNull();
+    expect(card.querySelector(".fl-card-body")).toHaveTextContent("rows");
+  });
+
+  it("draws a note even where there is no title above it", () => {
+    draw(<Card note="Counted on the last report."><p>body</p></Card>);
+    expect(document.querySelector(".fl-card-note")).toHaveTextContent("Counted on the last report.");
   });
 });
