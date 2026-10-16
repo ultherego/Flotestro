@@ -157,3 +157,24 @@ describe("a screen of the new panel", () => {
     expect(missing).toEqual([]);
   });
 });
+
+/**
+ * A notice is not a container somebody arranges.
+ *
+ * A cell of the board is a whole row tall whatever it holds, so one line
+ * of warning in a cell opens the screen with a hand's width of empty
+ * floor under it - and an arrangement that hid that container would have
+ * hidden the warning. Twelve screens did this. The board takes notices
+ * above the grid instead, through its own `notices`.
+ */
+describe("what is never a container", () => {
+  it("keeps notices off the board", () => {
+    const offenders: string[] = [];
+    for (const { name, text } of screens()) {
+      for (const one of text.matchAll(/\{ key: "(notices?|problem|banner|warning)",[^}]*\bheight:/g)) {
+        offenders.push(`${name}: ${one[1]}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});

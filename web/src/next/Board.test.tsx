@@ -44,7 +44,7 @@ const CATALOGUE = [
   { key: "second", title: "Second", width: 6, height: 2 },
 ];
 
-function draw() {
+function draw(notices?: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
@@ -53,6 +53,7 @@ function draw() {
     <Board
       screen="test"
       catalogue={CATALOGUE}
+      notices={notices}
       drawn={{ first: <Card title="First">a</Card>, second: <Card title="Second">b</Card> }}
     />,
     { wrapper },
@@ -177,5 +178,23 @@ describe("arranging a screen", () => {
     expect(add).toBeInTheDocument();
     fireEvent.change(add, { target: { value: "first" } });
     expect(screen.getByTestId("held-first")).toBeInTheDocument();
+  });
+});
+
+describe("what has to be read first", () => {
+  it("stands above the grid and is no part of it", async () => {
+    draw(<p>the host returned no configuration</p>);
+    const said = await screen.findByText("the host returned no configuration");
+    expect(said).toBeInTheDocument();
+    // A cell is a whole row tall whatever it holds, so a notice in one
+    // opens the screen with a band of empty floor under it - and an
+    // arrangement that hid that container would hide the warning.
+    expect(screen.getByTestId("board").contains(said)).toBe(false);
+  });
+
+  it("draws nothing of its own where there is no notice", async () => {
+    draw();
+    await screen.findByTestId("board");
+    expect(screen.queryByText("the host returned no configuration")).toBeNull();
   });
 });
