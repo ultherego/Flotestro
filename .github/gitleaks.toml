@@ -58,4 +58,13 @@ regexes = [
   # which is a name and not a secret - no real key is drawn from that alphabet
   # without a digit, a capital or a symbol in it.
   '''key: "[a-z][a-z0-9_]{7,39}"''',
+  # web/src/next/screens/Profile.test.tsx: the value the server hands back
+  # when a personal API token is minted, in the three tests that prove the
+  # panel shows it once, never puts it in a path and never writes it to the
+  # console. A fixture shaped like the real thing is the point of those
+  # tests - one shaped unlike it would prove nothing about a real token.
+  #
+  # Safe as a literal: a token the server really mints carries far more
+  # than nine characters after the prefix, so this string is no real one.
+  '''flt_9XQ2vmS1aZ''',
 ]
