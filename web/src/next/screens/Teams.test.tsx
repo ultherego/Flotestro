@@ -5,7 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import {
-  Teams, UNPLACED_HOSTS_ADDRESS, reasonGiven, refusalText, teamHostsAddress,
+  HOST_TEAM_PERMISSION, TEAM_WRITE_PERMISSION, Teams, UNPLACED_HOSTS_ADDRESS, reasonGiven,
+  refusalText, teamHostsAddress,
 } from "./Teams";
 import { ToastProvider } from "../../components/Toast";
 
@@ -54,6 +55,14 @@ const team = (over: Record<string, unknown>) => ({
 
 const admin = { subject: "t", kind: "user", roles: [], bindings: [], permissions: ["team.binding.write"] };
 const reader = { subject: "t", kind: "user", roles: [], bindings: [], permissions: ["host.read"] };
+/** Whoever may move a machine between boundaries, and nothing else. */
+const placer = { subject: "t", kind: "user", roles: [], bindings: [], permissions: ["host.scope.write"] };
+
+const host = (over: Record<string, unknown> = {}) => ({
+  id: "h1", hostname: "db-01", machine_id: "m1", site: "waw", environment: "prod",
+  tags: [], release_channel: "stable", lifecycle_state: "active", connection_state: "online",
+  ...over,
+});
 
 function draw() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -203,6 +212,120 @@ describe("deleting a team", () => {
     await waitFor(() => expect(screen.getByTestId("teams-refusal")).toBeInTheDocument());
     expect(screen.getByTestId("teams-refusal")).toHaveTextContent(/keeps the names unique/);
     del.mockRestore();
+  });
+});
+
+describe("placing a host in a team", () => {
+  const ready = (over: Record<string, unknown> = {}) => {
+    Object.assign(answers, {
+      "/api/v1/teams": { items: [team({})], count: 1 },
+      "/api/v1/hosts?team=none": { items: [], count: 0, total: 3 },
+      "/api/v1/hosts?limit=": { items: [host({ team_id: "", team_name: "" })], count: 1, total: 1 },
+      "/api/v1/whoami": { ...admin, permissions: [TEAM_WRITE_PERMISSION, HOST_TEAM_PERMISSION] },
+      ...over,
+    });
+  };
+
+  it("asks for the host, the team and a reason, then writes the placement on the host", async () => {
+    ready();
+    draw();
+    await waitFor(() => expect(screen.getByTestId("place-a-host")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("place-a-host"));
+    await waitFor(() => expect(screen.getByTestId("host-to-place")).toBeInTheDocument());
+    // Nothing is written by opening the question.
+    expect(sent).toHaveLength(0);
+
+    fireEvent.change(screen.getByTestId("host-to-place"), { target: { value: "h1" } });
+    fireEvent.change(screen.getByTestId("host-team"), { target: { value: "t1" } });
+    expect(screen.getByTestId("host-place")).toBeDisabled();
+    fireEvent.change(screen.getByTestId("host-place-reason"), { target: { value: "short" } });
+    expect(screen.getByTestId("host-place")).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId("host-place-reason"), { target: { value: "the payments group took the host over" } });
+    expect(screen.getByTestId("host-place")).toBeEnabled();
+    fireEvent.click(screen.getByTestId("host-place"));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toEqual({
+      method: "PUT",
+      path: "/api/v1/hosts/h1/team",
+      body: { team: "t1", reason: "the payments group took the host over" },
+    });
+  });
+
+  it("says what moving a host costs the people who had it, before it is moved", async () => {
+    ready();
+    draw();
+    await waitFor(() => expect(screen.getByTestId("place-a-host")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("place-a-host"));
+    expect(screen.getByText(/the operators of the old team may not/)).toBeInTheDocument();
+  });
+
+  it("will not write a move to the team the host is already in", async () => {
+    ready({
+      "/api/v1/hosts?limit=": {
+        items: [host({ team_id: "t1", team_name: "payments platform" })], count: 1, total: 1,
+      },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("place-a-host")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("place-a-host"));
+    await waitFor(() => expect(screen.getByTestId("host-to-place")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByTestId("host-to-place"), { target: { value: "h1" } });
+    // The destination starts where the host is, so nothing is a move yet.
+    expect(screen.getByTestId("host-team")).toHaveValue("t1");
+    fireEvent.change(screen.getByTestId("host-place-reason"), { target: { value: "the payments group took the host over" } });
+    expect(screen.getByTestId("host-place")).toBeDisabled();
+    expect(screen.getByTestId("host-place-nothing")).toHaveTextContent("already in payments platform");
+
+    // Out of the team is a move like any other.
+    fireEvent.change(screen.getByTestId("host-team"), { target: { value: "" } });
+    expect(screen.getByTestId("host-place")).toBeEnabled();
+    fireEvent.click(screen.getByTestId("host-place"));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toMatchObject({ method: "PUT", path: "/api/v1/hosts/h1/team", body: { team: "" } });
+  });
+
+  it("says what the server refused in words of its own", async () => {
+    ready();
+    const failing = await import("../../lib/api");
+    const put = vi.spyOn(failing.api, "put").mockRejectedValueOnce(
+      new failing.ApiError(404, "team_not_found", "no such team"));
+    draw();
+    await waitFor(() => expect(screen.getByTestId("place-a-host")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("place-a-host"));
+    await waitFor(() => expect(screen.getByTestId("host-to-place")).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId("host-to-place"), { target: { value: "h1" } });
+    fireEvent.change(screen.getByTestId("host-team"), { target: { value: "t1" } });
+    fireEvent.change(screen.getByTestId("host-place-reason"), { target: { value: "the payments group took the host over" } });
+    fireEvent.click(screen.getByTestId("host-place"));
+    await waitFor(() => expect(screen.getByTestId("teams-refusal")).toBeInTheDocument());
+    expect(screen.getByTestId("teams-refusal")).toHaveTextContent(/Read the register again/);
+    put.mockRestore();
+  });
+
+  it("is a permission of its own: the register's write does not carry it", async () => {
+    Object.assign(answers, {
+      "/api/v1/teams": { items: [team({})], count: 1 },
+      "/api/v1/whoami": admin,
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("new-team")).toBeEnabled());
+    expect(screen.getByTestId("place-a-host")).toBeDisabled();
+    expect(screen.getByText(/This needs the permission host.scope.write/)).toBeInTheDocument();
+    expect(sent).toHaveLength(0);
+  });
+
+  it("offers the placement to whoever holds it even where the register is read-only", async () => {
+    Object.assign(answers, {
+      "/api/v1/teams": { items: [team({})], count: 1 },
+      "/api/v1/hosts?limit=": { items: [host({})], count: 1, total: 1 },
+      "/api/v1/whoami": placer,
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("place-a-host")).toBeEnabled());
+    expect(screen.getByTestId("new-team")).toBeDisabled();
+    expect(screen.getByText(/This needs the permission team.binding.write/)).toBeInTheDocument();
   });
 });
 

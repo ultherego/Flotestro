@@ -84,6 +84,28 @@ describe("a screen of the new panel", () => {
     expect(offenders).toEqual([]);
   });
 
+  /**
+   * A link inside the new panel stays inside it.
+   *
+   * One that does not throws the reader into the panel being replaced,
+   * losing the shell, the rail and whatever they were in the middle of.
+   * Nine of them were found by hand; this finds the tenth. A deliberate
+   * way out is an <a href>, which says it is leaving.
+   */
+  it("keeps its links inside the panel it belongs to", () => {
+    const places = "hosts|jobs|campaigns|policies|groups|relays|secrets|vulnerabilities"
+      + "|reads|bulk|audit|tags|teams|access|settings|security|backups|certificates"
+      + "|monitoring|notifications|directory|status|support|reports|budgets|readiness|unresolved";
+    const out = new RegExp(`to=\\{?\`?/(?:${places})(?:[/?\`"]|$)`);
+    const offenders: string[] = [];
+    for (const screen of screens()) {
+      for (const [index, line] of screen.text.split("\n").entries()) {
+        if (out.test(line)) offenders.push(`${screen.name}:${index + 1}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it("never carries an inline style, which no theme can follow", () => {
     const offenders: string[] = [];
     for (const screen of screens()) {

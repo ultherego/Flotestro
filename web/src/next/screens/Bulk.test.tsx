@@ -166,6 +166,44 @@ describe("the bulk workspace", () => {
     await waitFor(() => expect(screen.getByTestId("step-next")).toBeEnabled());
   });
 
+  it("offers exactly what the registry opens to the fleet, and names what it refuses", async () => {
+    base();
+    draw();
+    await waitFor(() => expect(screen.getByTestId("order-action")).toBeInTheDocument());
+    // The catalogue is read: a wizard that cannot list the operations the
+    // registry opens to the fleet cannot be trusted to say what is missing.
+    expect(asked.some((one) => one.startsWith("/api/v1/actions"))).toBe(true);
+    const operations = screen.getByTestId("order-action") as HTMLSelectElement;
+    expect([...operations.options].map((one) => one.value))
+      .toEqual(["", "unit.restart"]);
+    // What changes hosts but is refused in bulk is not silently absent:
+    // it is behind one press, with the registry's own reason beside it.
+    fireEvent.click(screen.getByTestId("show-refusals"));
+    const refused = await screen.findByTestId("bulk-refusals");
+    expect(refused).toHaveTextContent("agent.upgrade");
+    expect(refused).toHaveTextContent("the agent upgrades itself through its channel");
+  });
+
+  it("offers the sites, environments and OS families the fleet really has", async () => {
+    base();
+    draw(ORDER);
+    await waitFor(() => expect(screen.getByTestId("step-next")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("step-next"));
+    await waitFor(() => expect(screen.getByTestId("target-site")).toBeInTheDocument());
+    expect(asked.some((one) => one.startsWith("/api/v1/fleet/activity"))).toBe(true);
+    // A hint, not a boundary: the field still takes anything typed into it.
+    await waitFor(() => expect(
+      (document.getElementById("next-bulk-sites") as HTMLDataListElement).options,
+    ).toHaveLength(1));
+    const sites = document.getElementById("next-bulk-sites") as HTMLDataListElement;
+    expect([...sites.options].map((one) => one.value)).toEqual(["lab"]);
+    const environments = document.getElementById("next-bulk-environments") as HTMLDataListElement;
+    expect([...environments.options].map((one) => one.value)).toEqual(["test"]);
+    const families = document.getElementById("next-bulk-os-families") as HTMLDataListElement;
+    expect([...families.options].map((one) => one.value)).toEqual(["arch"]);
+    expect(screen.getByTestId("target-site")).toHaveAttribute("list", "next-bulk-sites");
+  });
+
   it("reads the catalogue's refusal of an operation in bulk before the form is filled in", async () => {
     base();
     draw("/next/bulk?action=agent.upgrade&name=Upgrade");

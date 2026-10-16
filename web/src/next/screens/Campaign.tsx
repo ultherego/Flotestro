@@ -734,7 +734,7 @@ export function Campaign() {
                 key: "host",
                 head: t("Host"),
                 cell: (target) => (
-                  <Link to={`/hosts/${target.host_id}/${moduleForAction(data.action_type)}?campaign=${id}`}>
+                  <Link to={`/next/hosts/${target.host_id}/${moduleForAction(data.action_type)}?campaign=${id}`}>
                     {target.hostname || target.host_id.slice(0, 8)}
                   </Link>
                 ),
@@ -1027,7 +1027,7 @@ export function Campaign() {
               // The host opens on the module of the change, with the way
               // back to this campaign in the address.
               cell: (target) => (
-                <Link to={`/hosts/${target.host_id}/${moduleForAction(data.action_type)}?campaign=${id}`}>
+                <Link to={`/next/hosts/${target.host_id}/${moduleForAction(data.action_type)}?campaign=${id}`}>
                   {target.hostname || target.host_id.slice(0, 8)}
                 </Link>
               ),
@@ -1484,7 +1484,7 @@ function Order({ campaign, operation }: { campaign: CampaignRecord; operation: O
             )}
             {campaign.policy_id && (
               <Fact label={t("Ordered by policy")}>
-                <Link to={`/policies/${campaign.policy_id}`}>{campaign.policy_id.slice(0, 8)}</Link>
+                <Link to={`/next/policies/${campaign.policy_id}`}>{campaign.policy_id.slice(0, 8)}</Link>
                 {campaign.policy_version ? ` · v${campaign.policy_version}` : ""}
               </Fact>
             )}

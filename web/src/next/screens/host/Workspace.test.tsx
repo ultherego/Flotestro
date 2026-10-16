@@ -80,6 +80,11 @@ describe("the host workspace", () => {
       "/api/v1/capabilities": { directory: true, local_users: true, campaign_v2: true },
       "/api/v1/whoami": { subject: "tester", permissions: ["host.read"] },
       "/api/v1/jobs": { items: [] },
+      // The overview asks what may be done to this host and what has been
+      // done to it; without both, the longest-prefix answer above hands it
+      // the host record where a preview and a timeline go.
+      "/api/v1/hosts/h1/actions": { version: 1, items: [] },
+      "/api/v1/hosts/h1/timeline": { items: [], count: 0, sources: [] },
       "/api/v1/settings/layout": { widgets: [], present: false, revision: 0 },
     });
     draw("/next/hosts/h1");

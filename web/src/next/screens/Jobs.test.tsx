@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
+import { ApiError } from "../../lib/api";
 import { Jobs, jobTone, orderAgainAddress, prettyJSON, reasonAccepted } from "./Jobs";
 import { ToastProvider } from "../../components/Toast";
 
@@ -33,7 +34,11 @@ vi.mock("../../lib/api", async (importOriginal) => {
           .filter((one) => path.startsWith(one))
           .sort((a, b) => b.length - a.length)[0];
         if (!key) return Promise.reject(new actual.ApiError(404, "not_found", "no"));
-        return Promise.resolve(answers[key]);
+        // An Error standing in the table is a refusal, so a test can ask
+        // what the screen does when a read comes back as one.
+        const value = answers[key];
+        if (value instanceof Error) return Promise.reject(value);
+        return Promise.resolve(value);
       },
       post: (path: string, body: unknown) => {
         posted.push({ path, body });
@@ -90,7 +95,7 @@ describe("the job list", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("job-j1")).toBeInTheDocument());
     const row = screen.getByTestId("job-j1");
-    expect(within(row).getByText("unit.restart").closest("a")).toHaveAttribute("href", "/jobs/j1");
+    expect(within(row).getByText("unit.restart").closest("a")).toHaveAttribute("href", "/next/jobs/j1");
     expect(within(row).getByRole("link", { name: "agent-arch" })).toHaveAttribute("href", "/next/hosts/h1");
     expect(within(row).getByText("succeeded")).toBeInTheDocument();
   });
@@ -235,6 +240,83 @@ describe("deciding on a job", () => {
     const again = within(screen.getByTestId("job-j11")).getByRole("link", { name: "Order again" });
     expect(again.getAttribute("href")).toContain("action=unit.restart");
     expect(again.getAttribute("href")).toContain("host_id=h1");
+  });
+});
+
+describe("the attempts of a job, read on the list", () => {
+  const attempt = (over: Record<string, unknown> = {}) => ({
+    id: "a1", attempt_number: 1, status: "failed", exit_code: 1, replayed: false,
+    message: "the unit would not start", stdout: "", stderr: "Job for nginx.service failed.",
+    ...over,
+  });
+
+  function listing(over: Record<string, unknown> = {}) {
+    Object.assign(answers, {
+      "/api/v1/jobs": { items: [job({ state: "failed", result_status: undefined })], count: 1 },
+      "/api/v1/settings/layout": layout,
+      "/api/v1/fleet/activity": noActivity,
+      ...over,
+    });
+  }
+
+  it("reads the attempts of the row that was opened, and says what the host came back with", async () => {
+    listing({ "/api/v1/jobs/j1/attempts": { items: [attempt()], count: 1 } });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("job-j1")).toBeInTheDocument());
+    // Nothing is read until somebody asks for it.
+    expect(asked.some((one) => one.includes("/attempts"))).toBe(false);
+
+    fireEvent.click(screen.getByTestId("attempts-j1"));
+    await waitFor(() => expect(asked).toContain("/api/v1/jobs/j1/attempts"));
+    await waitFor(() => expect(screen.getByTestId("attempt-stderr")).toBeInTheDocument());
+    expect(screen.getByTestId("attempt-stderr")).toHaveTextContent("Job for nginx.service failed.");
+    expect(screen.getByText("the unit would not start")).toBeInTheDocument();
+    expect(screen.getByText("attempt 1")).toBeInTheDocument();
+    // And the list is still there: the attempts are read without leaving it.
+    expect(screen.getByTestId("job-j1")).toBeInTheDocument();
+    // The whole of it is one link away.
+    expect(screen.getByRole("link", { name: /Open the job/ })).toHaveAttribute("href", "/next/jobs/j1");
+  });
+
+  it("closes again, and reads nothing it was not asked to", async () => {
+    listing({ "/api/v1/jobs/j1/attempts": { items: [attempt()], count: 1 } });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("attempts-j1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("attempts-j1"));
+    await waitFor(() => expect(screen.getByTestId("attempt-stderr")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("hide-attempts"));
+    await waitFor(() => expect(screen.queryByTestId("attempt-stderr")).not.toBeInTheDocument());
+  });
+
+  it("says a job nobody has attempted has no attempts, rather than drawing an empty card", async () => {
+    listing({ "/api/v1/jobs/j1/attempts": { items: [], count: 0 } });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("attempts-j1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("attempts-j1"));
+    await waitFor(() => expect(screen.getByText("No execution attempts.")).toBeInTheDocument());
+  });
+
+  it("shows the refusal of the read instead of an empty card that looks like a job that did nothing", async () => {
+    listing({ "/api/v1/jobs/j1/attempts": new ApiError(403, "forbidden", "you may not read this job's output") });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("attempts-j1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("attempts-j1"));
+    await waitFor(() => expect(screen.getByText(/you may not read this job's output/)).toBeInTheDocument());
+    expect(screen.queryByText("No execution attempts.")).not.toBeInTheDocument();
+  });
+
+  it("keeps an exit code nobody reported an em dash, never a clean nought", async () => {
+    listing({
+      "/api/v1/jobs/j1/attempts": {
+        items: [attempt({ exit_code: undefined, status: undefined, stderr: "" })], count: 1,
+      },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("attempts-j1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("attempts-j1"));
+    const code = await screen.findByText("Exit code");
+    expect(code.closest(".fl-fact")).toHaveTextContent("—");
+    expect(code.closest(".fl-fact")).not.toHaveTextContent("0");
   });
 });
 

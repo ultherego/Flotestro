@@ -20,8 +20,12 @@ import { ToastProvider } from "../../components/Toast";
  */
 
 const asked: string[] = [];
-const sent: { method: string; path: string; body?: unknown }[] = [];
+const sent: { method: string; path: string; body?: unknown; headers?: Record<string, string> }[] = [];
 const answers: Record<string, unknown> = {};
+/** The version a record is read at, so a write can be checked for carrying it. */
+const etags: Record<string, string> = {};
+/** What a write is refused with, by the address it goes to. */
+const refusals: Record<string, unknown> = {};
 
 vi.mock("../../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/api")>();
@@ -46,8 +50,18 @@ vi.mock("../../lib/api", async (importOriginal) => {
     api: {
       ...actual.api,
       get: answer,
+      // The group's own screen reads the record with its tag, because the
+      // edit writes back on exactly the version it was built from.
+      getWithMeta: async (path: string) => ({ data: await answer(path), etag: etags[path] ?? "" }),
       post: (path: string, body?: unknown) => { sent.push({ method: "POST", path, body }); return Promise.resolve({ id: "new", name: "databases-gold" }); },
-      put: (path: string, body?: unknown) => { sent.push({ method: "PUT", path, body }); return Promise.resolve({}); },
+      put: (path: string, body?: unknown, options?: { headers?: Record<string, string> }) => {
+        sent.push({ method: "PUT", path, body, headers: options?.headers });
+        const refusal = Object.keys(refusals)
+          .filter((one) => path.startsWith(one))
+          .sort((a, b) => b.length - a.length)[0];
+        if (refusal) return Promise.reject(refusals[refusal]);
+        return Promise.resolve({});
+      },
       del: (path: string, body?: unknown) => { sent.push({ method: "DELETE", path, body }); return Promise.resolve(undefined); },
     },
   };
@@ -80,6 +94,9 @@ function draw(at = "/next/groups") {
           <Routes>
             <Route path="/next/groups" element={<Groups />} />
             <Route path="/next/groups/:id" element={<Groups />} />
+            {/* Where a button leads out of this screen. The address is
+                what is being checked; the screen there is not drawn. */}
+            <Route path="*" element={<span />} />
           </Routes>
           <Where />
         </ToastProvider>
@@ -93,6 +110,8 @@ afterEach(() => {
   asked.length = 0;
   sent.length = 0;
   for (const key of Object.keys(answers)) delete answers[key];
+  for (const key of Object.keys(etags)) delete etags[key];
+  for (const key of Object.keys(refusals)) delete refusals[key];
 });
 
 describe("the list of groups", () => {
@@ -246,6 +265,185 @@ describe("one group from the address", () => {
     expect(connectionTone("offline")).toBe("error");
     expect(connectionTone("stale")).toBe("warn");
     expect(connectionTone(undefined)).toBe("unknown");
+  });
+});
+
+describe("changing a group", () => {
+  const host = (over: Record<string, unknown> = {}) => ({
+    id: "h1", hostname: "db-1", machine_id: "m1", site: "waw", environment: "prod",
+    tags: ["role=db"], release_channel: "stable", lifecycle_state: "active",
+    os_distribution: "debian", os_version: "12", connection_state: "online",
+    last_seen_at: "2026-10-16T07:00:00Z", enrolled_at: "2026-09-01T08:00:00Z",
+    reboot_required: null, failed_units: null, pending_updates: null, pending_security_updates: null,
+    package_database_broken: false, capabilities: {}, identity: {},
+    ...over,
+  });
+
+  /** A group's own screen, read by somebody who may write groups. */
+  function writable(over: Record<string, unknown> = {}) {
+    Object.assign(answers, {
+      "/api/v1/host-groups": { items: [group({})], count: 1 },
+      "/api/v1/host-groups/g1": group(over),
+      "/api/v1/host-groups/g1/hosts": { items: [host()], count: 1, total: 1 },
+      "/api/v1/host-groups/preview": { count: 2, sample: ["db-1", "db-2"], selector: "" },
+      "/api/v1/hosts": { items: [host(), host({ id: "h2", hostname: "db-2" })], count: 2, total: 2 },
+      "/api/v1/whoami": {
+        subject: "t", kind: "user", roles: [], bindings: [],
+        permissions: ["host.group.write", "campaign.read"],
+      },
+    });
+    etags["/api/v1/host-groups/g1"] = 'W/"2026-10-15T08:00:00Z"';
+  }
+
+  it("writes the name, the description and the selector back on the version it was read at", async () => {
+    writable();
+    draw("/next/groups/g1");
+    await waitFor(() => expect(screen.getByTestId("edit-group")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("edit-group"));
+
+    // The form opens on what is saved: the rows hold the selector that
+    // was read, not an empty one.
+    await waitFor(() => expect(screen.getByTestId("edit-name")).toHaveValue("databases"));
+    expect(screen.getByTestId("rule-value-tag")).toHaveValue("role=db");
+
+    fireEvent.change(screen.getByTestId("edit-name"), { target: { value: "databases-gold" } });
+    fireEvent.change(screen.getByTestId("edit-description"), { target: { value: "the gold tier" } });
+    fireEvent.change(screen.getByTestId("rule-value-tag"), { target: { value: "role=db-gold" } });
+    fireEvent.click(screen.getByTestId("save-group"));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0].method).toBe("PUT");
+    expect(sent[0].path).toBe("/api/v1/host-groups/g1");
+    expect(sent[0].body).toEqual({
+      name: "databases-gold", description: "the gold tier", selector: { tag: "role=db-gold" },
+    });
+    // The write names the version it was decided on, so a group somebody
+    // else moved in the meantime is refused rather than overwritten.
+    expect(sent[0].headers).toMatchObject({ "If-Match": 'W/"2026-10-15T08:00:00Z"' });
+  });
+
+  it("edits a selector too deep for the rows as it was written, and never flattens it", async () => {
+    writable({ selector: { all: [{ tag: "role=db" }, { any: [{ site: "waw" }, { site: "kra" }] }] } });
+    draw("/next/groups/g1");
+    await waitFor(() => expect(screen.getByTestId("edit-group")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("edit-group"));
+    // The rows cannot hold it, so the form opens on the written selector
+    // and says why.
+    await waitFor(() => expect(screen.getByTestId("edit-selector-json")).toBeInTheDocument());
+    expect(screen.getByText(/deeper than the builder's rows can say/)).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("save-group"));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect((sent[0].body as { selector: unknown }).selector)
+      .toEqual({ all: [{ tag: "role=db" }, { any: [{ site: "waw" }, { site: "kra" }] }] });
+  });
+
+  it("shows the server's refusal of the change instead of closing on it", async () => {
+    writable();
+    refusals["/api/v1/host-groups/g1"] = new ApiError(400, "invalid_group", "a group that names itself");
+    draw("/next/groups/g1");
+    await waitFor(() => expect(screen.getByTestId("edit-group")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("edit-group"));
+    await waitFor(() => expect(screen.getByTestId("save-group")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("save-group"));
+    await waitFor(() => expect(screen.getByText(/a group that names itself/)).toBeInTheDocument());
+    // The form is still there, with what was typed in it.
+    expect(screen.getByTestId("edit-name")).toBeInTheDocument();
+  });
+
+  it("replaces the member list whole, with the hosts that are ticked", async () => {
+    writable({ kind: "static", selector: null });
+    draw("/next/groups/g1");
+    // The whole list has to be in hand before it can be replaced whole, so
+    // the button waits for the members to arrive.
+    await waitFor(() => expect(screen.getByTestId("edit-members")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("edit-members"));
+    // It opens on what the group holds now, so a save without a change
+    // changes nothing.
+    await waitFor(() => expect(screen.getByTestId("save-members")).toHaveTextContent("Save members (1)"));
+
+    const chooser = await screen.findByTestId("member-db-2");
+    fireEvent.click(within(chooser).getByRole("checkbox"));
+    await waitFor(() => expect(screen.getByTestId("save-members")).toHaveTextContent("Save members (2)"));
+    fireEvent.click(screen.getByTestId("save-members"));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0].method).toBe("PUT");
+    expect(sent[0].path).toBe("/api/v1/host-groups/g1/members");
+    expect(sent[0].body).toEqual({ host_ids: ["h1", "h2"] });
+  });
+
+  it("offers a reader who may not write groups nothing to write with", async () => {
+    writable();
+    answers["/api/v1/whoami"] = {
+      subject: "t", kind: "user", roles: [], bindings: [], permissions: ["host.read", "campaign.read"],
+    };
+    draw("/next/groups/g1");
+    await waitFor(() => expect(screen.getByTestId("member-db-1")).toBeInTheDocument());
+    expect(screen.queryByTestId("edit-group")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("edit-members")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("delete-group")).not.toBeInTheDocument();
+  });
+
+  it("asks before deleting the group it is open on, and names what stops resolving", async () => {
+    writable({
+      used_by: { campaigns: [{ id: "c1", name: "patch the lab", state: "running" }], policies: [] },
+    });
+    draw("/next/groups/g1");
+    await waitFor(() => expect(screen.getByTestId("delete-group")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("delete-group"));
+    // Nothing has gone yet: the dialog names the group and what stops
+    // resolving with it.
+    expect(sent).toHaveLength(0);
+    expect(screen.getByText(/The group databases goes/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/campaign patch the lab/)).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("group-delete"));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toMatchObject({ method: "DELETE", path: "/api/v1/host-groups/g1" });
+    // And the reader is put back where the group used to be listed.
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/next/groups"));
+  });
+});
+
+describe("the members a campaign is ordered on", () => {
+  const host = (over: Record<string, unknown> = {}) => ({
+    id: "h1", hostname: "db-1", machine_id: "m1", site: "waw", environment: "prod",
+    tags: [], release_channel: "stable", lifecycle_state: "active",
+    os_distribution: "debian", os_version: "12", connection_state: "online",
+    last_seen_at: "2026-10-16T07:00:00Z", enrolled_at: "2026-09-01T08:00:00Z",
+    reboot_required: null, failed_units: null, pending_updates: null, pending_security_updates: null,
+    package_database_broken: false, capabilities: {}, identity: {},
+    ...over,
+  });
+
+  function withPermissions(permissions: string[]) {
+    Object.assign(answers, {
+      "/api/v1/host-groups": { items: [group({})], count: 1 },
+      "/api/v1/host-groups/g1": group({}),
+      "/api/v1/host-groups/g1/hosts": { items: [host(), host({ id: "h2", hostname: "db-2" })], count: 2, total: 2 },
+      "/api/v1/whoami": { subject: "t", kind: "user", roles: [], bindings: [], permissions },
+    });
+  }
+
+  it("hands the hosts picked out of the group by identifier, and leaves the group out of it", async () => {
+    withPermissions(["campaign.read"]);
+    draw("/next/groups/g1");
+    await waitFor(() => expect(screen.getByTestId("member-db-1")).toBeInTheDocument());
+    fireEvent.click(within(screen.getByTestId("member-db-1")).getByLabelText("Pick db-1"));
+    await waitFor(() => expect(screen.getByTestId("members-picked")).toHaveTextContent("1 picked"));
+    fireEvent.click(screen.getByTestId("campaign-on-picked"));
+    // The hosts go by identifier; naming the group beside them would widen
+    // the order back to the whole group.
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/next/bulk"));
+    expect(campaignAddress("databases", ["h1"])).toBe("/next/bulk?name=databases&host_id=h1");
+  });
+
+  it("offers nothing of the sort to a reader who may not see campaigns", async () => {
+    withPermissions(["host.read"]);
+    draw("/next/groups/g1");
+    await waitFor(() => expect(screen.getByTestId("member-db-1")).toBeInTheDocument());
+    expect(screen.queryByTestId("pick-all-members")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Pick db-1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("campaign-on-group")).not.toBeInTheDocument();
   });
 });
 

@@ -6,7 +6,8 @@ import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import type { Translate } from "../../i18n";
 import {
-  Access, grantRequest, narrowRows, previewScope, readScope, statusOf, expired, expiresSoon,
+  Access, grantRequest, narrowRows, permissionsLost, previewScope, readScope, statusOf,
+  expired, expiresSoon,
   type BindingScope, type Filter, type GrantFields,
 } from "./Access";
 import { ToastProvider } from "../../components/Toast";
@@ -24,6 +25,8 @@ import { ToastProvider } from "../../components/Toast";
 const asked: string[] = [];
 const sent: { method: string; path: string; body?: unknown }[] = [];
 const answers: Record<string, unknown> = {};
+/** What the next write comes back with, where the server refuses it. */
+let refuse: unknown = null;
 
 vi.mock("../../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/api")>();
@@ -42,9 +45,18 @@ vi.mock("../../lib/api", async (importOriginal) => {
     api: {
       ...actual.api,
       get: (path: string) => { asked.push(path); return answer(path); },
-      post: (path: string, body?: unknown) => { sent.push({ method: "POST", path, body }); return Promise.resolve({}); },
-      put: (path: string, body?: unknown) => { sent.push({ method: "PUT", path, body }); return Promise.resolve({}); },
-      del: (path: string, body?: unknown) => { sent.push({ method: "DELETE", path, body }); return Promise.resolve(undefined); },
+      post: (path: string, body?: unknown) => {
+        sent.push({ method: "POST", path, body });
+        return refuse ? Promise.reject(refuse) : Promise.resolve({});
+      },
+      put: (path: string, body?: unknown) => {
+        sent.push({ method: "PUT", path, body });
+        return refuse ? Promise.reject(refuse) : Promise.resolve({});
+      },
+      del: (path: string, body?: unknown) => {
+        sent.push({ method: "DELETE", path, body });
+        return refuse ? Promise.reject(refuse) : Promise.resolve(undefined);
+      },
     },
   };
 });
@@ -81,12 +93,59 @@ const principal = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/** The role catalogue: the product's own, and one this installation wrote. */
+const roles = {
+  items: [
+    { role: "viewer", built_in: true, permissions: ["host.read"] },
+    { role: "operator", built_in: true, permissions: ["host.read", "unit.restart"] },
+    {
+      role: "shift_lead",
+      description: "restarts services on the night shift",
+      permissions: ["unit.restart", "job.create"],
+      bindings: 2, mappings: 0, created_by: "admin",
+    },
+  ],
+  count: 3,
+};
+
+/** The vocabulary a role is written in, with one permission nobody holds. */
+const vocabulary = {
+  items: [
+    { permission: "host.read", group: "host" },
+    { permission: "job.create", group: "job" },
+    { permission: "unit.restart", group: "unit" },
+    { permission: "secret.write", group: "secret" },
+  ],
+  count: 4,
+};
+
+const review = {
+  items: [
+    {
+      id: "p1", subject: "tszymanski", display_name: "Tomasz Szymanski", kind: "user",
+      created_at: "2026-01-01T08:00:00Z", last_seen_at: "2026-07-01T08:00:00Z",
+      bindings: [{ role: "operator", scope: labScope, expired: false, created_by: "admin", created_at: "2026-01-01T08:00:00Z" }],
+      tokens: [{ id: "t1ab2cd3e4", description: "backup runner", created_at: "2026-01-01T08:00:00Z" }],
+      flags: ["unused_90_days"],
+    },
+    {
+      id: "p2", subject: "backup-runner", kind: "service", created_at: "2026-02-01T08:00:00Z",
+      bindings: [], tokens: [], flags: [],
+    },
+  ],
+  count: 2, flagged: 1, reviewed_at: "2026-10-16T08:00:00Z",
+  thresholds: { unused_days: 90, expires_soon_days: 7, token_max_days: 365 },
+};
+
 /** The answers every drawing of this screen needs before it can say anything. */
 function given(over: Record<string, unknown> = {}) {
   Object.assign(answers, {
-    "/api/v1/roles": { items: [{ role: "viewer", permissions: [] }, { role: "operator", permissions: [] }], count: 2 },
+    "/api/v1/roles": roles,
+    "/api/v1/permissions": vocabulary,
     "/api/v1/teams": { items: [{ id: "team-1", name: "Night rota" }], count: 1 },
     "/api/v1/group-mappings": { items: [], count: 0 },
+    "/api/v1/whoami": { permissions: ["principal.manage"] },
+    "/api/v1/access/review": review,
     "/api/v1/access/holders": {
       items: [holder()], count: 1,
       directory: { configured: true, read: true },
@@ -116,6 +175,7 @@ afterEach(() => {
   cleanup();
   asked.length = 0;
   sent.length = 0;
+  refuse = null;
   for (const key of Object.keys(answers)) delete answers[key];
 });
 
@@ -433,5 +493,80 @@ describe("the state of a subject", () => {
     expect(expiresSoon({ expires_at: "2026-10-20T00:00:00Z" }, now)).toBe(true);
     expect(expiresSoon({ expires_at: "2026-12-20T00:00:00Z" }, now)).toBe(false);
     expect(expiresSoon({}, now)).toBe(false);
+  });
+});
+
+describe("editing a role of this installation", () => {
+  it("names what everybody holding it loses before anything is sent", async () => {
+    given();
+    draw();
+    fireEvent.click(await screen.findByTestId("edit-role-shift_lead"));
+    await waitFor(() => expect(screen.getByTestId("role-save")).toBeInTheDocument());
+    expect(screen.queryByTestId("role-losing")).not.toBeInTheDocument();
+    // The checkbox of a permission the role holds; unticking it takes the
+    // permission away from everybody bound to the role.
+    fireEvent.click(screen.getByRole("checkbox", { name: "job.create" }));
+    expect(screen.getByTestId("role-losing")).toHaveTextContent("Everybody holding this role loses: job.create");
+    expect(sent).toHaveLength(0);
+  });
+
+  it("writes the role whole, after a dialog and a reason of its own", async () => {
+    given();
+    draw();
+    fireEvent.click(await screen.findByTestId("edit-role-shift_lead"));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "host.read" }));
+    fireEvent.change(screen.getByTestId("role-description"), { target: { value: "the night rota" } });
+    fireEvent.click(screen.getByTestId("role-save"));
+
+    const confirm = await screen.findByTestId("role-confirm");
+    expect(confirm).toBeDisabled();
+    expect(sent).toHaveLength(0);
+    fireEvent.change(screen.getByTestId("role-reason"), { target: { value: "short" } });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByTestId("role-reason"), { target: { value: "the night rota reads the hosts too" } });
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0].method).toBe("PUT");
+    expect(sent[0].path).toBe("/api/v1/roles/shift_lead");
+    expect(sent[0].body).toEqual({
+      description: "the night rota",
+      // Whole, and sorted: the server reads the list as the role, not as
+      // what to add to it.
+      permissions: ["host.read", "job.create", "unit.restart"],
+      reason: "the night rota reads the hosts too",
+    });
+  });
+
+  it("refuses to save a role carrying nothing, which the server would refuse too", async () => {
+    given();
+    draw();
+    fireEvent.click(await screen.findByTestId("edit-role-shift_lead"));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "job.create" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "unit.restart" }));
+    expect(screen.getByTestId("role-save")).toBeDisabled();
+    expect(screen.getByText("A role carries at least one permission.")).toBeInTheDocument();
+  });
+
+  it("puts a refusal of the save in front of the reader", async () => {
+    given();
+    const { ApiError } = await import("../../lib/api");
+    refuse = new ApiError(403, "escalation", "the role would carry secret.write, which you do not hold everywhere");
+    draw();
+    fireEvent.click(await screen.findByTestId("edit-role-shift_lead"));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "secret.write" }));
+    fireEvent.click(screen.getByTestId("role-save"));
+    fireEvent.change(await screen.findByTestId("role-reason"), { target: { value: "the night rota needs the secrets" } });
+    fireEvent.click(screen.getByTestId("role-confirm"));
+    await waitFor(() =>
+      expect(screen.getByText(/which you do not hold everywhere/)).toBeInTheDocument());
+  });
+});
+
+describe("what a save takes away", () => {
+  it("names only the permissions the role had and the save does not", () => {
+    expect(permissionsLost(["a", "b", "c"], ["a", "c"])).toEqual(["b"]);
+    expect(permissionsLost(["a"], ["a", "b"])).toEqual([]);
   });
 });

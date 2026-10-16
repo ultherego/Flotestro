@@ -98,7 +98,7 @@ describe("the screen of unconfirmed operations", () => {
     await waitFor(() => expect(screen.getByTestId("unresolved-a1")).toBeInTheDocument());
     const row = screen.getByTestId("unresolved-a1");
     expect(within(row).getByRole("link", { name: "agent-debian" })).toHaveAttribute("href", "/next/hosts/h1");
-    expect(within(row).getByRole("link", { name: "sysctl.ensure" })).toHaveAttribute("href", "/jobs/j1");
+    expect(within(row).getByRole("link", { name: "sysctl.ensure" })).toHaveAttribute("href", "/next/jobs/j1");
     // The conclusion in the operator's language, and the two values it was
     // drawn from underneath it.
     expect(within(row).getByTestId("reading-a1")).toHaveTextContent("The change did not hold.");

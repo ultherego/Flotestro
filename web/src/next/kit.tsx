@@ -611,14 +611,22 @@ export function Facts({ children }: { children: ReactNode }) {
 
 export function Fact({ label, children, mono = false }: {
   label: ReactNode;
-  children: ReactNode;
+  /**
+   * null and undefined are both "nobody knows", drawn as the em dash the
+   * rest of the panel draws. Every screen wrote that dash by hand, which
+   * is exactly where somebody eventually writes a nought instead.
+   */
+  children: ReactNode | null | undefined;
   /** A serial, a uuid, a boot id, a path: read as one word, not as prose. */
   mono?: boolean;
 }) {
+  const unknown = children === null || children === undefined || children === "";
   return (
     <div className="fl-fact">
       <dt>{label}</dt>
-      <dd className={mono ? "fl-mono" : undefined}>{children}</dd>
+      <dd className={join(mono && !unknown && "fl-mono", unknown && "fl-faint")}>
+        {unknown ? "—" : children}
+      </dd>
     </div>
   );
 }
@@ -1750,6 +1758,78 @@ export function Choice<T extends string>({ value, onChange, options, label, name
           </span>
         </label>
       ))}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------- the guard */
+
+/**
+ * A control that exists only where the order would be taken.
+ *
+ * Every screen that can change something wrote this for itself - eight
+ * copies by the time anybody counted - and each one made the same three
+ * decisions slightly differently. They are the product's, not a screen's:
+ *
+ * - While the answer is on its way, nothing is drawn. A control that
+ *   appears and then goes is worse than one that arrives late.
+ * - Refused with a reason the reader can act on - a permission they
+ *   could be given, a state the host is in - the control stays, shut,
+ *   and the reason stands beside it. Hiding it teaches nobody anything.
+ * - Refused with nothing to say, it is not drawn. An operator should not
+ *   be shown a door that will never open.
+ */
+export function Guard({ verdict, children, testId }: {
+  verdict: { allowed: boolean; known: boolean; pending: boolean; reason?: string; missing_permission?: string };
+  /** Drawn where the order would be taken; `shut` where it would not. */
+  children: (shut: boolean) => ReactNode;
+  testId?: string;
+}) {
+  const t = useT();
+  if (verdict.pending) return null;
+  if (verdict.allowed) return <>{children(false)}</>;
+  const why = verdict.reason
+    || (verdict.missing_permission ? t("needs {permission}", { permission: verdict.missing_permission }) : "");
+  if (!why) return null;
+  return (
+    <div className="fl-guard" data-testid={testId}>
+      {children(true)}
+      <span className="fl-note">{why}</span>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------- shown once */
+
+/**
+ * A value the server will not say twice: a token, a password it chose, a
+ * one-time secret.
+ *
+ * It is the thing worst to get wrong, so it is one piece rather than one
+ * per screen: it says plainly that this is the only showing, it offers
+ * the one way to take it, and closing it is the reader saying they have.
+ * The value never goes into an address and never into a log.
+ */
+export function ShownOnce({ label, value, note, onClose, testId }: {
+  label: ReactNode;
+  value: string;
+  note?: ReactNode;
+  onClose: () => void;
+  testId?: string;
+}) {
+  const t = useT();
+  return (
+    <div className={join("fl-shownonce", toneClass("warn"))} role="status" data-testid={testId}>
+      <div className="fl-shownonce-head">
+        <span className="fl-shownonce-label">{label}</span>
+        <button type="button" className="fl-plain" onClick={onClose} data-testid={testId ? `${testId}-close` : undefined}>
+          {t("I have it")}
+        </button>
+      </div>
+      <Readout value={value} label={t("The value")} testId={testId ? `${testId}-value` : undefined} />
+      <span className="fl-note">
+        {note ?? t("This is the only time the panel shows it: it keeps a digest and nothing else.")}
+      </span>
     </div>
   );
 }

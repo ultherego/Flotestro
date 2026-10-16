@@ -66,7 +66,7 @@ describe("the campaign list", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("campaign-patch the lab")).toBeInTheDocument());
     const row = screen.getByTestId("campaign-patch the lab");
-    expect(within(row).getByRole("link", { name: "patch the lab" })).toHaveAttribute("href", "/campaigns/c1");
+    expect(within(row).getByRole("link", { name: "patch the lab" })).toHaveAttribute("href", "/next/campaigns/c1");
     expect(within(row).getByText("running")).toBeInTheDocument();
     // Done, failed and pending, in that order and labelled as such: the
     // column says which number is which so nobody has to guess.

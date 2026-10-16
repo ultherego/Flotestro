@@ -9,12 +9,12 @@ import { useDebounced } from "../../lib/debounce";
 import { absoluteTime, relativeTime, toInstant } from "../../lib/format";
 import { needsReason } from "../../lib/actions";
 import { OPERATIONS_INTERVAL, REFRESH_INTERVAL, useProgress } from "../../lib/stream";
-import type { Campaign, FleetActivity, Job } from "../../lib/types";
+import type { Attempt, Campaign, FleetActivity, Job } from "../../lib/types";
 import { useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Band, Bars, Bones, Card, Chart, Empty, Field, Fields, Meter, Modal, Note, Pill, Presets, Problem, RowsPerPage, Table, Tag, Tags, Toolbar, TwoLine, type Segment, type Tone,
+  Band, Bars, Bones, Button, Card, Chart, Empty, Fact, Facts, Field, Fields, Meter, Modal, Note, Pill, Presets, Problem, RowsPerPage, Stack, Table, Tag, Tags, Toolbar, TwoLine, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -174,6 +174,9 @@ export function Jobs() {
 
   const [size, setSize] = useState(50);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  // The job whose attempts are open under the list. One at a time: a list
+  // of fifty with fifty sets of output under it is not a list any more.
+  const [opened, setOpened] = useState("");
   const [asking, setAsking] = useState<Asking | null>(null);
   const [reason, setReason] = useState("");
   const queryClient = useQueryClient();
@@ -322,6 +325,10 @@ export function Jobs() {
   const wantsReason = asking !== null
     && (asking.verdict === "cancel" || asking.jobs.some((job) => needsReason(job.action_type)));
   const ready = !wantsReason || reasonAccepted(reason);
+
+  // A row that has scrolled off the list, or that a refetch has dropped,
+  // takes its attempts with it rather than leaving a card over nothing.
+  const openedJob = jobs.find((job) => job.id === opened);
 
   return (
     <>
@@ -550,13 +557,13 @@ export function Jobs() {
                   tight: true,
                   cell: (job) => (
                     <TwoLine sub={job.campaign_id
-                      ? <Link to={`/campaigns/${job.campaign_id}`} title={t("Part of a campaign")}>
+                      ? <Link to={`/next/campaigns/${job.campaign_id}`} title={t("Part of a campaign")}>
                           {campaignName(job.campaign_id)
                             ? t("campaign {name}", { name: campaignName(job.campaign_id) ?? "" })
                             : t("campaign {id}", { id: job.campaign_id.slice(0, 8) })}
                         </Link>
                       : undefined}>
-                      <Link to={`/jobs/${job.id}`}><code title={job.action_type}>{job.action_type}</code></Link>
+                      <Link to={`/next/jobs/${job.id}`}><code title={job.action_type}>{job.action_type}</code></Link>
                     </TwoLine>
                   ),
                 },
@@ -656,31 +663,50 @@ export function Jobs() {
                 {
                   key: "do",
                   actions: true,
-                  cell: (job) => job.state === "awaiting_approval" ? (
+                  cell: (job) => (
                     <>
-                      <button type="button" className="fl-small" onClick={() => ask("approve", [job])}
-                              data-testid={`approve-${job.id}`}>
-                        {t("Approve")}
-                      </button>
-                      <button type="button" className="fl-danger fl-small" onClick={() => ask("cancel", [job])}
-                              data-testid={`cancel-${job.id}`}>
-                        {t("Cancel")}
-                      </button>
+                      {/* What the host actually did, under the list rather
+                          than one screen away: the attempt, its exit code
+                          and its output are what a failed row is opened
+                          for, and walking to the job's own page to read
+                          them loses the list that was being worked. */}
+                      <Button
+                        kind="quiet"
+                        onClick={() => setOpened(opened === job.id ? "" : job.id)}
+                        testId={`attempts-${job.id}`}
+                        title={t("What the host did, and what it came back with.")}
+                      >
+                        {opened === job.id ? t("Hide attempts") : t("Attempts")}
+                      </Button>
+                      {job.state === "awaiting_approval" && (
+                        <>
+                          <button type="button" className="fl-small" onClick={() => ask("approve", [job])}
+                                  data-testid={`approve-${job.id}`}>
+                            {t("Approve")}
+                          </button>
+                          <button type="button" className="fl-danger fl-small" onClick={() => ask("cancel", [job])}
+                                  data-testid={`cancel-${job.id}`}>
+                            {t("Cancel")}
+                          </button>
+                        </>
+                      )}
+                      {job.state !== "awaiting_approval" && REORDERABLE.includes(job.state) && (
+                        <Link
+                          className="fl-btn fl-quiet fl-small"
+                          to={orderAgainAddress(job)}
+                          title={t("Opens the Bulk workspace with the same operation, payload and host written in.")}
+                        >
+                          {t("Order again")}
+                        </Link>
+                      )}
                     </>
-                  ) : REORDERABLE.includes(job.state) ? (
-                    <Link
-                      className="fl-btn fl-quiet fl-small"
-                      to={orderAgainAddress(job)}
-                      title={t("Opens the Bulk workspace with the same operation, payload and host written in.")}
-                    >
-                      {t("Order again")}
-                    </Link>
-                  ) : null,
+                  ),
                 },
               ]}
             />
           </Card>
         ),
+        attempts: openedJob && <Attempts job={openedJob} onClose={() => setOpened("")} />,
       }} />
 
       {asking && (
@@ -752,6 +778,118 @@ export function Jobs() {
   );
 }
 
+/** How much of a stream is read on the list before the job's own screen. */
+const OUTPUT_ON_THE_LIST = 2000;
+
+/**
+ * What the host did with one job, read without leaving the list.
+ *
+ * A row says a job failed; this says what the host tried, what it came
+ * back with and what it wrote while doing it, which is the next question
+ * every single time. The whole of an attempt - every byte of output, the
+ * plan, the payload - is on the job's own screen, and the way there is at
+ * the top of this card.
+ */
+function Attempts({ job, onClose }: { job: Job; onClose: () => void }) {
+  const t = useT();
+  const attempts = useQuery({
+    queryKey: ["attempts", job.id],
+    queryFn: () => api.get<Collection<Attempt>>(`/api/v1/jobs/${job.id}/attempts`),
+  });
+  const items = attempts.data?.items ?? [];
+  return (
+    <Card
+      title={t("Attempts: {operation} on {host}", {
+        operation: job.action_type, host: job.hostname || job.host_id.slice(0, 8),
+      })}
+      note={t("Every attempt the host made at this job, newest last.")}
+      tools={
+        <>
+          <Link to={`/next/jobs/${job.id}`} className="fl-quiet fl-small">
+            {t("Open the job: full payload, plan and output")}
+          </Link>
+          <Button kind="quiet" onClick={onClose} testId="hide-attempts">{t("Hide")}</Button>
+        </>
+      }
+    >
+      {attempts.error
+        ? <Problem>{String(attempts.error)}</Problem>
+        : !attempts.data
+          ? <Bones rows={3} />
+          : items.length === 0
+            ? <Empty>{t("No execution attempts.")}</Empty>
+            : (
+              <Stack wide>
+                {items.map((attempt) => <OneAttempt key={attempt.id} attempt={attempt} />)}
+              </Stack>
+            )}
+    </Card>
+  );
+}
+
+/** One attempt: what it came back with, and what it wrote while trying. */
+function OneAttempt({ attempt }: { attempt: Attempt }) {
+  const t = useT();
+  const before = attempt.unit_state_before;
+  const after = attempt.unit_state_after;
+  return (
+    <Stack>
+      <Tags>
+        <Tag>{t("attempt {n}", { n: attempt.attempt_number })}</Tag>
+        <Pill tone={attempt.status ? jobTone(attempt.status) : "unknown"}>
+          {attempt.status ? t(stateName(attempt.status)) : t("unknown")}
+        </Pill>
+        {attempt.replayed && <Pill tone="info">{t("replayed from journal")}</Pill>}
+        {attempt.error_code && <Pill tone="error">{attempt.error_code}</Pill>}
+      </Tags>
+      <Facts>
+        {/* An exit code nobody reported is an em dash: a job that never
+            ran did not exit cleanly. */}
+        <Fact label={t("Exit code")}>{attempt.exit_code ?? "—"}</Fact>
+        {attempt.message && <Fact label={t("Message")}>{attempt.message}</Fact>}
+        {before && after && (
+          <Fact label={t("Unit")} mono>
+            {`${before.active_state}/${before.sub_state} pid ${before.main_pid}`}
+            {" → "}
+            {`${after.active_state}/${after.sub_state} pid ${after.main_pid}`}
+          </Fact>
+        )}
+      </Facts>
+      {/* The typed result as the host answered it. A sentence per known
+          kind leaves a kind nobody wrote one for unreadable; the whole of
+          it is readable whatever the host grew since. */}
+      {attempt.detail && Object.keys(attempt.detail).length > 0 && (
+        <>
+          <Note>{t("What the host returned")}</Note>
+          <pre className="fl-mono" data-testid={`attempt-detail-${attempt.attempt_number}`}>
+            {prettyJSON(attempt.detail)}
+          </pre>
+        </>
+      )}
+      {attempt.stdout && <Output label="stdout" text={attempt.stdout} />}
+      {attempt.stderr && <Output label="stderr" text={attempt.stderr} />}
+    </Stack>
+  );
+}
+
+/** One stream of an attempt, cut to what a list can hold. */
+function Output({ label, text }: { label: string; text: string }) {
+  const t = useT();
+  const long = text.length > OUTPUT_ON_THE_LIST;
+  return (
+    <Stack>
+      <Tags>
+        <Tag>{label}</Tag>
+        <Tag>{t("{n} characters", { n: text.length })}</Tag>
+        {long && <Tag title={t("The whole of it is on the job's own screen.")}>{t("cut here")}</Tag>}
+      </Tags>
+      <pre className="fl-mono" data-testid={`attempt-${label}`}>
+        {long ? `${text.slice(0, OUTPUT_ON_THE_LIST)}\n…` : text}
+      </pre>
+    </Stack>
+  );
+}
+
 /**
  * The list as a file: the same filter the screen is showing, every page of
  * it, counted by the server rather than by what happens to be loaded.
@@ -794,4 +932,5 @@ export const JOBS: BoardEntry[] = [
   { key: "activity", title: "Operations, last 24 h", width: 8, height: 3 },
   { key: "operations", title: "By operation", width: 4, height: 2 },
   { key: "jobs", title: "Jobs", width: 12, height: 6 },
+  { key: "attempts", title: "Attempts", width: 12, height: 4 },
 ];

@@ -321,7 +321,7 @@ export function Dashboard() {
               keyOf={(one) => one.id}
               empty={t("No campaigns need attention.")}
               columns={[
-                { key: "name", head: t("Name"), cell: (one) => <Link to={`/campaigns/${one.id}`}>{one.name}</Link> },
+                { key: "name", head: t("Name"), cell: (one) => <Link to={`/next/campaigns/${one.id}`}>{one.name}</Link> },
                 { key: "state", head: t("State"), cell: (one) => <Pill tone={campaignTone(one.state)}>{t(stateName(one.state))}</Pill> },
                 { key: "action", head: t("Operation"), minor: true, tight: true, cell: (one) => <code title={one.action_type}>{one.action_type}</code> },
               ]}

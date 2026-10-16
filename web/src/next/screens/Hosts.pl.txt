@@ -1,0 +1,4 @@
+  "Nothing is set yet, so there is nothing to apply.": "Nic jeszcze nie ustawiono, więc nie ma czego zastosować.",
+  "Apply to {n} hosts…": "Zastosuj na {n} hostach…",
+  "{n} hosts are changed, each in its own scope: a host whose change is refused is answered on its own and the others are still applied.": "Zmiana obejmuje {n} hostów, każdego w jego własnym zakresie: host, któremu zmianę odrzucono, dostaje własną odpowiedź, a pozostałe i tak zostają zastosowane.",
+  "Tagged {tags} · clear": "Tagi: {tags} · wyczyść",

@@ -4,12 +4,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../../lib/api";
 import { copyToClipboard } from "../../lib/clipboard";
 import { absoluteTime, relativeTime, toInstant } from "../../lib/format";
-import type { ApiToken, GroupMapping, Principal, RoleBinding, Whoami } from "../../lib/types";
+import type {
+  AccessReview, ApiToken, GroupMapping, Principal, ReviewedPrincipal, ReviewFlag, RoleBinding, Whoami,
+} from "../../lib/types";
 import { useT, type Translate } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Bars, Bones, Card, Check, Empty, Fact, Facts, Field, Fields, HeadActions, Kpi, Modal, Note, Pager, Pill, Problem, Seg, Stack, Table, Tabs, Tags, Toolbar, type Tone,
+  Actions, Banner, Bars, Bones, Card, Check, Download, Empty, Fact, Facts, Fig, Field, Fields, Figs, Find, HeadActions, Kpi, Modal, Note, Pager, Pill, Problem, Seg, Stack, Table, Tabs, Tags, Toolbar, TwoLine, type Column, type Tone,
 } from "../kit";
 
 /**
@@ -96,8 +98,26 @@ type Holders = {
 /** A team, as a grant has to name one: only what this screen prints. */
 type TeamChoice = { id: string; name: string };
 
-/** One role of the installation, as the catalogue lists it. */
-type RoleInfo = { role: string; built_in?: boolean; description?: string; permissions: string[] };
+/**
+ * One role of the installation, as the catalogue lists it.
+ *
+ * How much a role is used is counted by the server, and a count that never
+ * arrived is not a nought: the panel refuses nothing on it, and an older
+ * server that does not send it says "not known" rather than "nobody".
+ */
+export type RoleInfo = {
+  role: string;
+  built_in?: boolean;
+  description?: string;
+  permissions: string[];
+  bindings?: number;
+  mappings?: number;
+  created_by?: string;
+  created_at?: string;
+};
+
+/** One permission this product defines, as the vocabulary lists it. */
+export type PermissionInfo = { permission: string; group: string };
 
 /**
  * The scope of a binding as the server keeps it. Every category is
@@ -319,6 +339,36 @@ export function expired(validUntil: string | undefined, now = Date.now()): boole
   return !Number.isNaN(at) && at <= now;
 }
 
+/* --------------------------------------------------------- the review */
+
+/** The English word for each flag of the review; the catalogue translates it. */
+export const FLAG_WORDS: Record<ReviewFlag, string> = {
+  unused_90_days: "unused for 90 days",
+  expires_soon: "expires soon",
+  admin_without_expiry: "admin without expiry",
+  token_older_than_year: "token older than a year",
+};
+
+/** What the review is narrowed to: everybody, everybody flagged, or one flag. */
+export type ReviewChoice = ReviewFlag | "flagged" | "all";
+
+/** The reviewed identities one choice leaves. */
+export function reviewedBy(items: ReviewedPrincipal[], only: ReviewChoice): ReviewedPrincipal[] {
+  if (only === "all") return items;
+  if (only === "flagged") return items.filter((one) => one.flags.length > 0);
+  return items.filter((one) => one.flags.includes(only));
+}
+
+/**
+ * What everybody bound to a role loses when it is saved with these
+ * permissions. A role is written whole on every save rather than added to,
+ * so the only way to see what an edit takes away is to say it here before
+ * it is sent.
+ */
+export function permissionsLost(held: string[], chosen: string[]): string[] {
+  return held.filter((one) => !chosen.includes(one));
+}
+
 /* ------------------------------------------------------- the two scopes */
 
 /** The identities the panel keeps records of, as rows of the one table. */
@@ -466,6 +516,8 @@ export function Access() {
   const [issued, setIssued] = useState<IssuedToken | null>(null);
   const [copied, setCopied] = useState(false);
   const [refusal, setRefusal] = useState<ApiError | null>(null);
+  // The role of the installation's own that is open for editing.
+  const [editingRole, setEditingRole] = useState<RoleInfo | null>(null);
 
   const onError = (error: unknown) => setRefusal(error instanceof ApiError ? error : null);
   const refresh = () => {
@@ -490,6 +542,28 @@ export function Access() {
   });
   const teamName = (id: string) => teams.data?.items.find((team) => team.id === id)?.name ?? id;
   const roleNames = (catalogue.data?.items ?? []).map((one) => one.role);
+
+  /* Who the reader is, and therefore what they are offered. Managing the
+     identities is one right: without it the review is refused by the
+     server and a role cannot be written, so neither is put on the screen
+     at all rather than offered and then refused. */
+  const me = useQuery({
+    queryKey: ["whoami"],
+    queryFn: () => api.get<Whoami>("/api/v1/whoami"),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const manages = (me.data?.permissions ?? []).includes("principal.manage");
+
+  // The vocabulary a role is written in: every permission the product
+  // defines, read from the server so the form cannot offer a list that has
+  // drifted from it.
+  const vocabulary = useQuery({
+    queryKey: ["permissions"],
+    queryFn: () => api.get<Collection<PermissionInfo>>("/api/v1/permissions"),
+    retry: false,
+    staleTime: 60 * 60 * 1000,
+  });
 
   // The identities narrow on the server: an installation whose suites had
   // been running for a month had 1805 of them, and the person looking for
@@ -991,6 +1065,45 @@ export function Access() {
         ),
 
         mappings: <Mappings roles={roleNames} onAsk={setAsk} onError={onError} />,
+
+        /* The review is a read the server guards with the same right that
+           writes an identity, so it is drawn for the people who hold it
+           and left off the screen for everybody else. */
+        review: manages && <Review teamName={teamName} />,
+
+        roles: (
+          <RolesOfInstallation
+            roles={catalogue.data?.items ?? []}
+            loading={catalogue.isLoading}
+            manages={manages}
+            editing={editingRole?.role}
+            onEdit={setEditingRole}
+          />
+        ),
+
+        roleeditor: editingRole !== null && (
+          <RoleEditor
+            key={editingRole.role}
+            role={editingRole}
+            vocabulary={vocabulary.data?.items}
+            onDone={() => {
+              setEditingRole(null);
+              void queryClient.invalidateQueries({ queryKey: ["roles"] });
+              void queryClient.invalidateQueries({ queryKey: ["whoami"] });
+            }}
+            onCancel={() => setEditingRole(null)}
+            onError={onError}
+          />
+        ),
+
+        permissions: (
+          <RoleCatalogue
+            roles={catalogue.data?.items ?? []}
+            vocabulary={vocabulary.data?.items}
+            loading={vocabulary.isLoading || catalogue.isLoading}
+            problem={vocabulary.error}
+          />
+        ),
       }} />
 
       {ask && (
@@ -1868,6 +1981,500 @@ function Mappings({ roles, onAsk, onError }: {
   );
 }
 
+/* ---------------------------------------------------------- the review */
+
+/**
+ * Every enabled identity with what it may do, when it was last used and
+ * what the reviewer should look at.
+ *
+ * It answers one question the list cannot: who has been checked and who
+ * has not. A count the server did not take is an em dash rather than a
+ * nought, because an installation nobody has reviewed and one with nothing
+ * to review are opposite answers.
+ */
+function Review({ teamName }: { teamName: (id: string) => string }) {
+  const t = useT();
+  const [only, setOnly] = useState<ReviewChoice>("all");
+  const review = useQuery({
+    queryKey: ["access-review"],
+    queryFn: () => api.get<AccessReview>("/api/v1/access/review"),
+    retry: false,
+  });
+
+  const data = review.data;
+  const items = data?.items ?? [];
+  const count = (flag: ReviewFlag) =>
+    data === undefined ? undefined : items.filter((one) => one.flags.includes(flag)).length;
+  const unusedDays = data?.thresholds.unused_days;
+  const soonDays = data?.thresholds.expires_soon_days;
+  const shown = reviewedBy(items, only);
+
+  if (review.error instanceof ApiError && review.error.forbidden) {
+    return (
+      <Card title={t("Access review")}>
+        <Empty>{t("You do not have permission to review access.")}</Empty>
+      </Card>
+    );
+  }
+
+  return (
+    <Card
+      title={t("Access review")}
+      note={data
+        ? t("Reviewed {when}. Every enabled identity with its roles, tokens and last use; the flags say what to look at.", { when: absoluteTime(data.reviewed_at) })
+        : t("Every enabled identity with its roles, tokens and last use; the flags say what to look at.")}
+      flush
+      bar={
+        <Toolbar
+          end={
+            // A plain link would drop the bearer token and come back a
+            // refusal, so the file goes through the panel's own fetch.
+            <Download path="/api/v1/access/review" label={t("Export CSV")} disabled={data === undefined} />
+          }
+        >
+          <select
+            value={only}
+            onChange={(event) => setOnly(event.target.value as ReviewChoice)}
+            aria-label={t("Which identities to review")}
+            data-testid="review-only"
+          >
+            <option value="all">{t("All identities")}</option>
+            <option value="flagged">{t("Flagged only")}</option>
+            <option value="unused_90_days">
+              {unusedDays === undefined ? t("Unused for a long time") : t("Unused {n} days", { n: unusedDays })}
+            </option>
+            <option value="expires_soon">
+              {soonDays === undefined ? t("Expiring soon") : t("Expiring within {n} days", { n: soonDays })}
+            </option>
+            <option value="admin_without_expiry">{t("Admins without expiry")}</option>
+            <option value="token_older_than_year">{t("Tokens older than a year")}</option>
+          </select>
+        </Toolbar>
+      }
+      foot={
+        <Figs>
+          <Fig label={t("Identities")} value={data?.count} />
+          <Fig label={t("Flagged")} value={data?.flagged} tone={data?.flagged ? "warn" : "ok"} />
+          <Fig
+            label={unusedDays === undefined ? t("Unused for a long time") : t("Unused {n} days", { n: unusedDays })}
+            value={count("unused_90_days")}
+            tone={count("unused_90_days") ? "warn" : "ok"}
+          />
+          <Fig
+            label={t("Admins without expiry")}
+            value={count("admin_without_expiry")}
+            tone={count("admin_without_expiry") ? "warn" : "ok"}
+          />
+          <Fig
+            label={soonDays === undefined ? t("Expiring soon") : t("Expiring within {n} days", { n: soonDays })}
+            value={count("expires_soon")}
+            tone={count("expires_soon") ? "warn" : "ok"}
+          />
+          <Fig
+            label={t("Tokens older than a year")}
+            value={count("token_older_than_year")}
+            tone={count("token_older_than_year") ? "warn" : "ok"}
+          />
+        </Figs>
+      }
+    >
+      {review.error && !(review.error instanceof ApiError && review.error.forbidden) && (
+        <Problem>{String(review.error)}</Problem>
+      )}
+      <Table
+        rows={shown}
+        keyOf={(one) => one.id}
+        rowTestId={(one) => `review-${one.subject}`}
+        testId="access-review"
+        loading={review.isLoading}
+        empty={t("No identity matches this.")}
+        columns={[
+          {
+            key: "subject",
+            head: t("Subject"),
+            tight: true,
+            cell: (one) => (
+              <TwoLine sub={one.display_name}>
+                <Link to={{ search: `?who=${encodeURIComponent(one.subject)}` }}>{one.subject}</Link>
+              </TwoLine>
+            ),
+          },
+          { key: "kind", head: t("Kind"), minor: true, cell: (one) => <Pill dot={false}>{one.kind}</Pill> },
+          {
+            key: "roles",
+            head: t("Roles and scopes"),
+            cell: (one) => one.bindings.length === 0
+              ? <span className="fl-faint">{t("no role of their own; one may come from a group")}</span>
+              : (
+                <Tags>
+                  {one.bindings.map((binding, index) => {
+                    const scope = binding.scope as BindingScope;
+                    const team = scopeTeam(scope);
+                    const reading = readScope(t, scope, team ? teamName(team) : undefined);
+                    return (
+                      <Pill
+                        key={index}
+                        tone={binding.expired ? "unknown" : reachTone(reading.reach)}
+                        title={`${binding.role} · ${reading.words}`}
+                      >
+                        {binding.role} · {reading.words}
+                        {binding.expired && <> · {t("expired")}</>}
+                      </Pill>
+                    );
+                  })}
+                </Tags>
+              ),
+          },
+          {
+            key: "used",
+            head: t("Last use"),
+            cell: (one) => one.last_seen_at
+              ? <span title={absoluteTime(one.last_seen_at)}>{relativeTime(one.last_seen_at)}</span>
+              : <Pill tone="unknown">{t("never")}</Pill>,
+          },
+          {
+            key: "tokens",
+            head: t("Tokens"),
+            num: true,
+            minor: true,
+            cell: (one) => one.tokens.length === 0
+              ? <span className="fl-faint">{t("none")}</span>
+              : (
+                <span title={one.tokens.map((token) => token.description || token.id.slice(0, 8)).join(", ")}>
+                  {one.tokens.length}
+                  {one.tokens.some((token) => expiresSoon(token)) && <> <Pill tone="warn">{t("expires soon")}</Pill></>}
+                </span>
+              ),
+          },
+          {
+            key: "flags",
+            head: t("What to look at"),
+            cell: (one) => one.flags.length === 0
+              ? <Pill tone="ok">{t("nothing to review")}</Pill>
+              : (
+                <Tags>
+                  {one.flags.map((flag) => <Pill key={flag} tone="warn">{t(FLAG_WORDS[flag])}</Pill>)}
+                </Tags>
+              ),
+          },
+        ]}
+      />
+    </Card>
+  );
+}
+
+/* ----------------------------------------------------------- the roles */
+
+/**
+ * The roles somebody here wrote, and the way to change one.
+ *
+ * The product's own roles are not listed as something to edit: their
+ * permissions are in the code, where they are read in review, and a copy
+ * in the database would be a second answer to the same question.
+ */
+function RolesOfInstallation({ roles, loading, manages, editing, onEdit }: {
+  roles: RoleInfo[];
+  loading: boolean;
+  manages: boolean;
+  /** Which of them is open in the editor, so the row says so. */
+  editing?: string;
+  onEdit: (role: RoleInfo) => void;
+}) {
+  const t = useT();
+  const own = roles.filter((one) => !one.built_in);
+  return (
+    <Card
+      title={t("Roles of this installation")}
+      note={t("A role defined here carries exactly the permissions it was given; the product's own roles cannot be changed.")}
+      flush
+    >
+      <Table
+        rows={own}
+        keyOf={(one) => one.role}
+        rowTestId={(one) => `role-${one.role}`}
+        testId="own-roles"
+        loading={loading}
+        empty={t("No role of this installation's own. The product's roles are listed under what a role may be given.")}
+        columns={[
+          { key: "role", head: t("Role"), tight: true, cell: (one) => <span className="fl-mono">{one.role}</span> },
+          {
+            key: "what",
+            head: t("What it is for"),
+            minor: true,
+            cell: (one) => one.description || <span className="fl-faint" title={t("unknown")}>—</span>,
+          },
+          { key: "n", head: t("Permissions"), num: true, cell: (one) => one.permissions.length },
+          { key: "use", head: t("In use"), cell: (one) => <RoleUsage role={one} /> },
+          {
+            key: "by",
+            head: t("Defined by"),
+            minor: true,
+            tight: true,
+            cell: (one) => one.created_by || <span className="fl-faint" title={t("unknown")}>—</span>,
+          },
+          {
+            key: "act",
+            actions: true,
+            cell: (one) => manages
+              ? (
+                <button
+                  type="button"
+                  className="fl-quiet fl-small"
+                  disabled={editing === one.role}
+                  onClick={() => onEdit(one)}
+                  data-testid={`edit-role-${one.role}`}
+                >
+                  {t("Edit")}
+                </button>
+              )
+              // Somebody who may not write a role is offered nothing here
+              // rather than a button that comes back a refusal.
+              : <span className="fl-faint">{t("read only")}</span>,
+          },
+        ]}
+      />
+    </Card>
+  );
+}
+
+/**
+ * How much a role is used.
+ *
+ * A count that was never read is not a nought, and the difference decides
+ * whether the next click is refused: the server will not delete a role
+ * somebody is bound to.
+ */
+function RoleUsage({ role }: { role: RoleInfo }) {
+  const t = useT();
+  if (role.bindings === undefined || role.mappings === undefined) {
+    return <Pill tone="unknown">{t("not known")}</Pill>;
+  }
+  const total = role.bindings + role.mappings;
+  if (total === 0) return <span className="fl-faint">{t("nobody")}</span>;
+  return (
+    <span title={t("{bindings} direct, {mappings} through a group", { bindings: role.bindings, mappings: role.mappings })}>
+      {t("{n} grants", { n: total })}
+    </span>
+  );
+}
+
+/**
+ * What a role may be given: every permission this product defines, and
+ * which roles carry it.
+ *
+ * It is read down a column to learn what a role may do and along a row to
+ * learn who may do a thing. The rows come from the server's own vocabulary
+ * rather than from the roles, so a permission nobody has been given is on
+ * the list too - which is the one a reader is usually looking for.
+ */
+function RoleCatalogue({ roles, vocabulary, loading, problem }: {
+  roles: RoleInfo[];
+  vocabulary: PermissionInfo[] | undefined;
+  loading: boolean;
+  problem: unknown;
+}) {
+  const t = useT();
+  const [search, setSearch] = useState("");
+  const needle = search.trim().toLowerCase();
+  const rows = (vocabulary ?? []).filter((one) => !needle || one.permission.toLowerCase().includes(needle));
+  const held = new Set(roles.flatMap((role) => role.permissions.map((one) => `${role.role} ${one}`)));
+
+  const columns: Column<PermissionInfo>[] = [
+    {
+      key: "permission",
+      head: t("Permission"),
+      tight: true,
+      cell: (one) => <span className="fl-mono">{one.permission}</span>,
+    },
+    { key: "group", head: t("Group"), minor: true, cell: (one) => one.group },
+    ...roles.map((role) => ({
+      key: `role-${role.role}`,
+      head: role.built_in ? role.role : <>{role.role} <Pill dot={false}>{t("own")}</Pill></>,
+      cell: (one: PermissionInfo) => held.has(`${role.role} ${one.permission}`)
+        ? <Pill tone="ok">{t("yes")}</Pill>
+        : <span className="fl-faint" title={`${role.role}: ${one.permission}`}>—</span>,
+    })),
+  ];
+
+  return (
+    <Card
+      title={t("What a role may be given")}
+      note={t("Read down a column to learn what a role may do, along a row to learn who may do a thing.")}
+      flush
+    >
+      <Toolbar end={vocabulary === undefined ? undefined : <Note>{t("{n} permissions", { n: rows.length })}</Note>}>
+        <Find value={search} onChange={setSearch} placeholder={t("permission, e.g. job.create")} testId="permission-search" />
+      </Toolbar>
+      {problem !== null && problem !== undefined && <Problem>{String(problem)}</Problem>}
+      <Table
+        rows={rows}
+        keyOf={(one) => one.permission}
+        rowTestId={(one) => `permission-row-${one.permission}`}
+        testId="permission-catalogue"
+        loading={loading && vocabulary === undefined}
+        empty={t("No permission matches this.")}
+        columns={columns}
+      />
+    </Card>
+  );
+}
+
+/**
+ * Writing a role: what it is for, and which permissions it carries.
+ *
+ * The permissions are written whole on every save rather than added to. An
+ * edit that could only widen a role would be a strange thing to offer on a
+ * screen about access - and what is taken away is what everybody bound to
+ * the role loses, so the dialog says so by name before it is sent.
+ */
+function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
+  role: RoleInfo;
+  vocabulary: PermissionInfo[] | undefined;
+  onDone: () => void;
+  onCancel: () => void;
+  onError: (error: unknown) => void;
+}) {
+  const t = useT();
+  const [description, setDescription] = useState(role.description ?? "");
+  const [chosen, setChosen] = useState<string[]>([...role.permissions]);
+  const [search, setSearch] = useState("");
+  const [asking, setAsking] = useState(false);
+  const [reason, setReason] = useState("");
+
+  const save = useMutation({
+    mutationFn: (given: string) => api.put(`/api/v1/roles/${encodeURIComponent(role.role)}`, {
+      description: description.trim(),
+      permissions: [...chosen].sort(),
+      reason: given,
+    }),
+    onSuccess: () => { setAsking(false); setReason(""); onDone(); },
+    onError: (error) => { setAsking(false); onError(error); },
+  });
+
+  const toggle = (permission: string) =>
+    setChosen((current) => current.includes(permission)
+      ? current.filter((one) => one !== permission)
+      : [...current, permission]);
+
+  const needle = search.trim().toLowerCase();
+  const offered = (vocabulary ?? []).filter((one) => !needle || one.permission.toLowerCase().includes(needle));
+  const groups = [...new Set(offered.map((one) => one.group))];
+  const losing = permissionsLost(role.permissions, chosen);
+
+  return (
+    <Card
+      title={t("Edit the role {role}", { role: role.role })}
+      note={t("A role carries at least one permission, and every save writes the whole list.")}
+      tools={
+        <button type="button" className="fl-quiet fl-small" onClick={onCancel} data-testid="role-close">
+          {t("Close")}
+        </button>
+      }
+    >
+      <Stack>
+        <Fields>
+          <Field label={t("What it is for")} wide>
+            <input value={description} onChange={(event) => setDescription(event.target.value)}
+                   data-testid="role-description" />
+          </Field>
+        </Fields>
+
+        {vocabulary === undefined
+          ? <Bones rows={6} />
+          : (
+            <>
+              <Toolbar end={<Note>{t("{n} chosen", { n: chosen.length })}</Note>}>
+                <Find value={search} onChange={setSearch}
+                      placeholder={t("permission, e.g. unit.restart")} testId="role-permission-search" />
+              </Toolbar>
+              {offered.length === 0
+                ? <Empty>{t("No permission matches this.")}</Empty>
+                : (
+                  <Stack>
+                    {groups.map((group) => (
+                      <Stack key={group}>
+                        <h3 className="fl-subhead">{group}</h3>
+                        {offered.filter((one) => one.group === group).map((one) => (
+                          <Check
+                            key={one.permission}
+                            checked={chosen.includes(one.permission)}
+                            onChange={() => toggle(one.permission)}
+                          >
+                            <span className="fl-mono">{one.permission}</span>
+                          </Check>
+                        ))}
+                      </Stack>
+                    ))}
+                  </Stack>
+                )}
+            </>
+          )}
+
+        {losing.length > 0 && (
+          <Banner tone="warn">
+            <span data-testid="role-losing">
+              {t("Everybody holding this role loses: {permissions}", { permissions: losing.join(", ") })}
+            </span>
+          </Banner>
+        )}
+
+        <Actions>
+          <button
+            type="button"
+            disabled={chosen.length === 0 || vocabulary === undefined || save.isPending}
+            onClick={() => { setReason(""); setAsking(true); }}
+            data-testid="role-save"
+          >
+            {t("Save the role")}
+          </button>
+          <button type="button" className="fl-quiet" onClick={onCancel} disabled={save.isPending}>
+            {t("Cancel")}
+          </button>
+          {chosen.length === 0 && <Note>{t("A role carries at least one permission.")}</Note>}
+        </Actions>
+      </Stack>
+
+      {asking && (
+        <Modal
+          title={t("Save the role {role}", { role: role.role })}
+          onClose={() => setAsking(false)}
+          actions={
+            <>
+              <button
+                type="button"
+                className={losing.length > 0 ? "fl-danger" : undefined}
+                disabled={!reasonGiven(reason) || save.isPending}
+                onClick={() => save.mutate(reason.trim())}
+                data-testid="role-confirm"
+              >
+                {save.isPending ? t("Working…") : t("Save the role")}
+              </button>
+              <button type="button" className="fl-quiet" onClick={() => setAsking(false)} disabled={save.isPending}>
+                {t("Cancel")}
+              </button>
+            </>
+          }
+        >
+          <Note>
+            {losing.length > 0
+              ? t("The role is written whole: everybody holding it loses {permissions} on their next request.", { permissions: losing.join(", ") })
+              : t("The role is written whole with the {n} permissions chosen. Nobody loses anything by this.", { n: chosen.length })}
+          </Note>
+          <Fields>
+            <Field
+              label={t("Reason (kept in the audit trail)")}
+              hint={t("At least {n} characters; the button opens when they are there.", { n: REASON_MIN_LENGTH })}
+              wide
+            >
+              <input value={reason} onChange={(event) => setReason(event.target.value)} data-testid="role-reason" />
+            </Field>
+          </Fields>
+        </Modal>
+      )}
+    </Card>
+  );
+}
+
 /* ---------------------------------------------------------- the dialog */
 
 /** What one ask is about, said in the words of what will happen. */
@@ -2092,4 +2699,8 @@ export const ACCESS: BoardEntry[] = [
   { key: "record", title: "The opened identity", width: 12, height: 5 },
   { key: "kinds", title: "By kind and by role", width: 4, height: 2 },
   { key: "mappings", title: "Group mappings", width: 8, height: 3 },
+  { key: "review", title: "Access review", width: 12, height: 5 },
+  { key: "roles", title: "Roles of this installation", width: 6, height: 3 },
+  { key: "roleeditor", title: "The role being written", width: 6, height: 5 },
+  { key: "permissions", title: "What a role may be given", width: 12, height: 5 },
 ];

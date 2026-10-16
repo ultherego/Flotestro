@@ -2,13 +2,14 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection, type Page } from "../../lib/api";
+import { useDebounced } from "../../lib/debounce";
 import type { Host, Whoami } from "../../lib/types";
 import { absoluteTime, relativeTime } from "../../lib/format";
 import { t, useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Card, Empty, Field, Fields, Kpi, Modal, Note, Pill, Problem, Table, TwoLine,
+  Actions, Banner, Bones, Card, Empty, Field, Fields, Kpi, Modal, Note, Pill, Problem, Table, TwoLine,
 } from "../kit";
 
 /**
@@ -33,8 +34,31 @@ export type Team = {
   updated_at: string;
 };
 
+/**
+ * The team a host carries. The host listing does not declare it, because
+ * it is a placement rather than a fact the agent reports.
+ */
+export type HostTeamFields = { team_id?: string; team_name?: string };
+
+/** A host as the register reads it: the machine, and where it is placed. */
+export type PlacedHost = Host & HostTeamFields;
+
 /** The permission every write in the register takes. */
 export const TEAM_WRITE_PERMISSION = "team.binding.write";
+
+/**
+ * The permission moving a host between teams takes.
+ *
+ * It is not the register's own: drawing a boundary and deciding which
+ * machine falls inside it are two decisions, and the second one hands
+ * the machine to different people. The server asks for it twice - once
+ * over the team the host is in and once over the team it is going to -
+ * so holding it over one of the two is not enough.
+ */
+export const HOST_TEAM_PERMISSION = "host.scope.write";
+
+/** How many hosts the placement's finder offers at once. */
+export const HOSTS_OFFERED = 25;
 
 /** The reason every change of the register is recorded with. */
 export const TEAM_REASON_MIN_LENGTH = 8;
@@ -66,6 +90,8 @@ export function refusalText(code: string, message: string): string {
       return message || t("The register does not accept that name or description.");
     case "scope_conflict":
       return t("A binding names a team or a site, never both.");
+    case "host_not_found":
+      return t("That host is gone — somebody removed it while this screen was open. Look for it again.");
     case "reason_required":
       return t("The change needs a reason of at least {n} characters; it is kept in the audit trail.", { n: TEAM_REASON_MIN_LENGTH });
     default:
@@ -74,7 +100,7 @@ export function refusalText(code: string, message: string): string {
 }
 
 /** What the register is doing beside the list; one thing at a time. */
-type Aside = { kind: "create" } | { kind: "rename" } | { kind: "delete" };
+type Aside = { kind: "create" } | { kind: "rename" } | { kind: "delete" } | { kind: "place" };
 
 export function Teams() {
   const t = useT();
@@ -87,7 +113,9 @@ export function Teams() {
     queryFn: () => api.get<Whoami>("/api/v1/whoami"),
     staleTime: 5 * 60 * 1000,
   });
-  const canManage = (whoami.data?.permissions ?? []).includes(TEAM_WRITE_PERMISSION);
+  const held = whoami.data?.permissions ?? [];
+  const canManage = held.includes(TEAM_WRITE_PERMISSION);
+  const canPlace = held.includes(HOST_TEAM_PERMISSION);
 
   const list = useQuery({
     queryKey: ["teams"],
@@ -125,11 +153,15 @@ export function Teams() {
   // rather than claiming every host has been placed.
   const unplacedCount = unplaced.error ? null : unplaced.data?.total ?? null;
   const denied = t("This needs the permission {permission}, which the platform administrator holds.", { permission: TEAM_WRITE_PERMISSION });
+  const deniedPlacement = t("This needs the permission {permission}, which the platform administrator holds.", { permission: HOST_TEAM_PERMISSION });
 
   return (
     <>
       {aside?.kind === "delete" && (
         <DeleteTeam teams={teams} onDone={settled} onRefused={refused} onClose={() => setAside(null)} />
+      )}
+      {aside?.kind === "place" && (
+        <PlaceHost teams={teams} onDone={settled} onRefused={refused} onClose={() => setAside(null)} />
       )}
       {/* A refusal is not a container: an arrangement that took it off the
           screen would hide the one thing the operator has to read. */}
@@ -196,6 +228,14 @@ export function Teams() {
                         title={canManage ? undefined : denied} data-testid="rename-a-team">
                   {t("Rename a team…")}
                 </button>
+                {/* Placing a machine is not the register's write: it hands
+                    the machine to other people, and it has a permission and
+                    a line in the trail of its own. */}
+                <button type="button" className="fl-quiet" onClick={() => setAside({ kind: "place" })}
+                        disabled={!canPlace || aside !== null}
+                        title={canPlace ? undefined : deniedPlacement} data-testid="place-a-host">
+                  {t("Place a host…")}
+                </button>
                 <button type="button" className="fl-danger" onClick={() => setAside({ kind: "delete" })}
                         disabled={!canManage || teams.length === 0}
                         title={canManage ? undefined : denied} data-testid="delete-a-team">
@@ -203,7 +243,12 @@ export function Teams() {
                 </button>
               </>
             }
-            foot={canManage ? undefined : <Note>{denied}</Note>}
+            foot={canManage && canPlace ? undefined : (
+              <>
+                {!canManage && <Note>{denied}</Note>}
+                {!canPlace && <Note>{deniedPlacement}</Note>}
+              </>
+            )}
             flush
           >
             <Table
@@ -438,6 +483,133 @@ function DeleteTeam({ teams, onDone, onRefused, onClose }: {
       {chosen && (
         <Note>
           {t("Every role binding that named this team goes with it: whoever held a role here and nowhere else loses it on their next request.")}
+        </Note>
+      )}
+    </Modal>
+  );
+}
+
+/**
+ * Placing a host in a team, or taking it out of one.
+ *
+ * This is the other half of the register and the half that moves
+ * authority: a team with no machines in it grants nothing, and a machine
+ * moved into one is a machine other people may now act on. So it is a
+ * decision - it names the machine, it names where the machine goes, it
+ * says what that costs the people who had it, and it does not go through
+ * without a reason the trail will keep.
+ *
+ * Nothing is sent when the team chosen is the team the host is already
+ * in: the server answers such a write with the host unchanged, and a
+ * trail of writes that changed nothing hides the ones that did.
+ */
+function PlaceHost({ teams, onDone, onRefused, onClose }: {
+  teams: Team[];
+  onDone: () => void;
+  onRefused: (error: unknown) => void;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const [search, setSearch] = useState("");
+  const [hostID, setHostID] = useState("");
+  const [team, setTeam] = useState("");
+  const [reason, setReason] = useState("");
+  const asked = useDebounced(search.trim());
+
+  const fleet = useQuery({
+    queryKey: ["teams", "place", asked],
+    queryFn: () => api.get<Page<PlacedHost>>(
+      `/api/v1/hosts?limit=${HOSTS_OFFERED}${asked ? `&q=${encodeURIComponent(asked)}` : ""}`),
+    retry: false,
+  });
+  const hosts = fleet.data?.items ?? [];
+  const chosen = hosts.find((one) => one.id === hostID);
+
+  const move = useMutation({
+    mutationFn: () => api.put<Host>(`/api/v1/hosts/${hostID}/team`, { team, reason: reason.trim() }),
+    onSuccess: onDone,
+    onError: onRefused,
+  });
+
+  // A host goes where it already is is not a move, so the button stays
+  // shut rather than placing a write the server answers with no change.
+  const moving = chosen !== undefined && team !== (chosen.team_id ?? "");
+  const ready = moving && reasonGiven(reason) && !move.isPending;
+
+  return (
+    <Modal
+      title={t("Place a host in a team")}
+      onClose={onClose}
+      actions={
+        <>
+          <button type="button" className="fl-quiet" onClick={onClose} disabled={move.isPending}>{t("Cancel")}</button>
+          <button type="button" disabled={!ready} onClick={() => move.mutate()} data-testid="host-place">
+            {move.isPending ? t("Working…") : t("Move the host")}
+          </button>
+        </>
+      }
+    >
+      <Fields>
+        <Field label={t("Look for a host")} hint={t("By name or by address; the first {n} that match are offered.", { n: HOSTS_OFFERED })} wide>
+          <input value={search} onChange={(event) => setSearch(event.target.value)}
+                 placeholder={t("name or address")} data-testid="host-search" />
+        </Field>
+        <Field label={t("Host")} wide>
+          {fleet.isLoading
+            ? <Bones rows={1} />
+            : (
+              <select
+                value={hostID}
+                onChange={(event) => {
+                  const next = hosts.find((one) => one.id === event.target.value);
+                  setHostID(event.target.value);
+                  // The destination starts where the host is, so the move
+                  // that is chosen is the move that is meant.
+                  setTeam(next?.team_id ?? "");
+                }}
+                data-testid="host-to-place"
+              >
+                <option value="">{t("choose a host…")}</option>
+                {hosts.map((one) => (
+                  <option key={one.id} value={one.id}>
+                    {one.team_name ? `${one.hostname} · ${one.team_name}` : one.hostname}
+                  </option>
+                ))}
+              </select>
+            )}
+        </Field>
+        <Field
+          label={t("Team")}
+          wide
+          hint={t("The group of people this host belongs to. A team is a boundary of authority, not a label: the hosts of a team are named by the role bindings that name the team.")}
+        >
+          <select value={team} onChange={(event) => setTeam(event.target.value)} data-testid="host-team">
+            <option value="">{t("no team")}</option>
+            {teams.map((one) => <option key={one.id} value={one.id}>{one.name}</option>)}
+          </select>
+        </Field>
+        <Field
+          label={t("Reason (kept in the audit trail)")}
+          wide
+          hint={t("At least {n} characters; the button opens when they are there.", { n: TEAM_REASON_MIN_LENGTH })}
+        >
+          <input value={reason} onChange={(event) => setReason(event.target.value)}
+                 placeholder={t("the payments group took the host over")} data-testid="host-place-reason" />
+        </Field>
+      </Fields>
+      {!fleet.isLoading && hosts.length === 0 && (
+        <Empty icon="server">{t("No host answers to that. Look for another name.")}</Empty>
+      )}
+      <Note>
+        {t("Moving a host between teams changes who may act on it: from the next request, the operators of the new team may see and change it, and the operators of the old team may not. Work already under way keeps the targets it was planned with.")}
+      </Note>
+      {chosen && !moving && (
+        <Note>
+          <span data-testid="host-place-nothing">
+            {chosen.team_name
+              ? t("{host} is already in {team}, so there is nothing to move.", { host: chosen.hostname, team: chosen.team_name })
+              : t("{host} is in no team, so there is nothing to move.", { host: chosen.hostname })}
+          </span>
         </Note>
       )}
     </Modal>

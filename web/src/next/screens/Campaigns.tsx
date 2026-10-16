@@ -130,7 +130,7 @@ export function Campaigns() {
             rowTestId={(one) => `campaign-${one.name}`}
             loading={list.isLoading} empty={t("No campaign matches this.")}
             columns={[
-              { key: "name", head: t("Name"), cell: (one) => <Link to={`/campaigns/${one.id}`}>{one.name}</Link> },
+              { key: "name", head: t("Name"), cell: (one) => <Link to={`/next/campaigns/${one.id}`}>{one.name}</Link> },
               { key: "state", head: t("State"), cell: (one) => (
                 <Pill tone={campaignTone(one.state)}>{t(stateName(one.state))}</Pill>
               ) },
