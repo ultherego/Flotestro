@@ -128,7 +128,7 @@ export function Campaigns() {
             rows={rows}
             keyOf={(one) => one.id}
             rowTestId={(one) => `campaign-${one.name}`}
-            empty={list.isLoading ? t("Loading…") : t("No campaign matches this.")}
+            loading={list.isLoading} empty={t("No campaign matches this.")}
             columns={[
               { key: "name", head: t("Name"), cell: (one) => <Link to={`/campaigns/${one.id}`}>{one.name}</Link> },
               { key: "state", head: t("State"), cell: (one) => (

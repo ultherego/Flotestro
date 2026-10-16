@@ -439,7 +439,7 @@ function PatchStatusCard({ report, hosts, more, loading, error, ready, params }:
               {more && (
                 <button type="button" className="fl-quiet fl-small" onClick={more} disabled={loading}
                         data-testid="patch-more">
-                  {loading ? t("Loading…") : t("Load more")}
+                  {loading ? t("loading…") : t("Load more")}
                 </button>
               )}
             </>

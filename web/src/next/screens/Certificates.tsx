@@ -277,7 +277,7 @@ export function Certificates() {
                 data-testid="more-certificates"
               >
                 {list.isFetchingNextPage
-                  ? t("Loading…")
+                  ? t("loading…")
                   : t("Load more ({n} left)", { n: (head?.total ?? 0) - rows.length })}
               </button>
             ) : head ? t("{shown} of {total}, nearest deadline first", { shown: rows.length, total: head.total })

@@ -16,7 +16,7 @@ import { useT, type Translate } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Band, Bars, Card, Check, Dot, Empty, Field, Fields, Find, Grid, HeadActions, Modal, Note, Pill, Problem, Seg, type Segment, Stack, Table, Tabs, Tag, Tags, type Tone, Toolbar, TwoLine,
+  Actions, Band, Bars, Bones, Card, Check, Dot, Empty, Field, Fields, Find, Grid, HeadActions, Modal, Note, Pill, Problem, Seg, Stack, Table, Tabs, Tag, Tags, Toolbar, TwoLine, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -132,7 +132,7 @@ function ReadList() {
                 ? (
                   <button type="button" className="fl-quiet fl-small"
                           onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
-                    {list.isFetchingNextPage ? t("Loading…") : t("Load more")}
+                    {list.isFetchingNextPage ? t("loading…") : t("Load more")}
                   </button>
                 )
                 : t("{n} reads listed", { n: reads.length })
@@ -143,7 +143,7 @@ function ReadList() {
               keyOf={(one) => one.id}
               rowTestId={(one) => `read-${one.id}`}
               testId="reads"
-              empty={list.isLoading ? t("Loading…") : t("No reads yet.")}
+              loading={list.isLoading} empty={t("No reads yet.")}
               columns={[
                 {
                   key: "action",
@@ -176,7 +176,7 @@ function ReadList() {
         operations: (
           <Card title={t("By operation")} note={t("among the {n} listed", { n: reads.length })}>
             {!list.data
-              ? <Empty>{t("Loading…")}</Empty>
+              ? <Bones rows={4} />
               : byOperation.length === 0
                 ? <Empty>{t("No reads yet.")}</Empty>
                 : <Bars items={byOperation.map(([action, n]) => ({ label: <code>{action}</code>, value: n }))} />}
@@ -564,7 +564,7 @@ function HostPicker({ chosen, onChange }: { chosen: Set<string>; onChange: (next
             keyOf={(one) => one.id}
             rowTestId={(one) => `pick-${one.hostname}`}
             testId="read-hosts"
-            empty={hosts.isLoading ? t("Loading…") : t("No host matches this.")}
+            loading={hosts.isLoading} empty={t("No host matches this.")}
             columns={[
               {
                 key: "chosen",
@@ -622,7 +622,7 @@ function OneRead({ id }: { id: string }) {
 
   if (read.error) return <Problem>{String(read.error)}</Problem>;
   const view = read.data;
-  if (!view) return <Empty>{t("Loading…")}</Empty>;
+  if (!view) return <Bones rows={4} />;
 
   const open = view.counts.queued + view.counts.running;
   const answered = view.hosts.filter((one) => one.state === "succeeded");

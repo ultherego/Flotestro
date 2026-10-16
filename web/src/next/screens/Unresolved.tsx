@@ -206,9 +206,7 @@ export function Unresolved() {
      narrowed list that happens to be empty is not a fleet with nothing
      open, and saying so would be the one lie this screen exists to
      prevent. */
-  const empty = list.isLoading
-    ? t("Loading…")
-    : search !== ""
+  const empty = search !== ""
       ? t("No unconfirmed operation matches what you typed.")
       : counts && anythingOpen(counts)
         ? t("Nothing of this kind is open.")
@@ -306,6 +304,7 @@ export function Unresolved() {
               rows={items}
               keyOf={(one) => one.attempt_id}
               rowTestId={(one) => `unresolved-${one.attempt_id}`}
+              loading={list.isLoading}
               empty={empty}
               columns={[
                 { key: "host", head: t("Host"), cell: (one) => (

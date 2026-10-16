@@ -9,7 +9,7 @@ import { useT, type Translate } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Bars, Card, Check, Empty, Fact, Facts, Field, Fields, HeadActions, Kpi, Modal, Note, Pager, Pill, Problem, Seg, Stack, Table, Tabs, Tags, type Tone, Toolbar,
+  Actions, Banner, Bars, Bones, Card, Check, Empty, Fact, Facts, Field, Fields, HeadActions, Kpi, Modal, Note, Pager, Pill, Problem, Seg, Stack, Table, Tabs, Tags, Toolbar, type Tone,
 } from "../kit";
 
 /**
@@ -860,7 +860,7 @@ export function Access() {
               keyOf={(row) => row.subject}
               rowTestId={(row) => `row-${row.subject}`}
               testId="access-rows"
-              empty={loading ? t("Loading…") : t("Nobody matches this.")}
+              loading={loading} empty={t("Nobody matches this.")}
               columns={[
                 {
                   key: "pick",
@@ -969,7 +969,7 @@ export function Access() {
               : t("Counted over the {n} listed.", { n: narrowed.length })}
           >
             {kinds.length === 0 && byRole.length === 0
-              ? <Empty>{loading ? t("Loading…") : t("Nothing to count here.")}</Empty>
+              ? (loading ? <Bones rows={3} /> : <Empty>{t("Nothing to count here.")}</Empty>)
               : (
                 <Stack>
                   <Bars items={kinds.map(([kind, n]) => ({ label: kind, value: n, tone: "info" as Tone }))} />
@@ -1482,7 +1482,7 @@ function TokensTab({ row, busy, onAsk }: { row: Row; busy: boolean; onAsk: (ask:
             rows={sessions.data?.items ?? []}
             keyOf={(session) => session.id}
             rowTestId={(session) => `session-${session.id}`}
-            empty={sessions.isLoading ? t("Loading…") : t("No live browser session. A token is not a session.")}
+            loading={sessions.isLoading} empty={t("No live browser session. A token is not a session.")}
             columns={[
               {
                 key: "id",
@@ -1781,9 +1781,8 @@ function Mappings({ roles, onAsk, onError }: {
           rows={mappings}
           keyOf={(mapping) => mapping.id}
           rowTestId={(mapping) => `mapping-${mapping.group_name}`}
-          empty={list.isLoading
-            ? t("Loading…")
-            : t("No mapping. Without one nobody gets a role from the identity provider.")}
+          loading={list.isLoading}
+          empty={t("No mapping. Without one nobody gets a role from the identity provider.")}
           columns={[
             {
               key: "group",

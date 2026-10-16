@@ -329,7 +329,7 @@ export function Backups() {
                 data-testid="more-backups"
               >
                 {list.isFetchingNextPage
-                  ? t("Loading…")
+                  ? t("loading…")
                   : t("Load more ({n} left)", { n: (head?.total ?? 0) - rows.length })}
               </button>
             ) : head ? t("{shown} of {total}, the worst first", { shown: rows.length, total: head.total })

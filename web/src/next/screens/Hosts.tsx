@@ -96,7 +96,7 @@ export function Hosts() {
             hosts.hasNextPage ? (
               <button type="button" className="fl-quiet fl-small"
                       onClick={() => hosts.fetchNextPage()} disabled={hosts.isFetchingNextPage}>
-                {hosts.isFetchingNextPage ? t("Loading…") : t("Load more")}
+                {hosts.isFetchingNextPage ? t("loading…") : t("Load more")}
               </button>
             ) : t("{n} hosts", { n: rows.length })
           }
@@ -106,7 +106,7 @@ export function Hosts() {
             keyOf={(one) => one.id}
             rowTestId={(one) => `host-${one.hostname}`}
             testId="hosts"
-            empty={hosts.isLoading ? t("Loading…") : t("No host matches this.")}
+            loading={hosts.isLoading} empty={t("No host matches this.")}
             columns={[
               {
                 key: "host",

@@ -10,7 +10,7 @@ import type { Host } from "../../../lib/types";
 import { useT } from "../../../i18n";
 import { Shell, type Face } from "../../Shell";
 import {
-  Empty, Head, Pill, Problem, Tag, Tags, type Tone,
+  Bones, Empty, Head, Pill, Problem, Tag, Tags, type Tone,
 } from "../../kit";
 import { HOST_MODULES } from "./modules";
 
@@ -62,7 +62,7 @@ export function HostWorkspace() {
 
   return (
     <Shell trail={{ section: "Hosts", to: "/next/hosts", here: data?.hostname }} face={face}>
-      {host.error ? <Problem>{String(host.error)}</Problem> : !data ? <Empty>{t("Loading…")}</Empty> : (
+      {host.error ? <Problem>{String(host.error)}</Problem> : !data ? <Bones rows={4} /> : (
         <>
           <HostHead host={data} />
           {HOST_MODULES[module] ? <Module module={module} host={data} /> : (

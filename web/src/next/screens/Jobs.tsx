@@ -14,7 +14,7 @@ import { useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Band, Bars, Card, Chart, Empty, Field, Fields, Meter, Modal, Note, Pill, Presets, Problem, RowsPerPage, Table, Tag, Tags, Toolbar, TwoLine, type Segment, type Tone,
+  Band, Bars, Bones, Card, Chart, Empty, Field, Fields, Meter, Modal, Note, Pill, Presets, Problem, RowsPerPage, Table, Tag, Tags, Toolbar, TwoLine, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -344,7 +344,7 @@ export function Jobs() {
                 ]}
               />
             ) : (
-              <Empty>{activity.isError ? t("The last day could not be counted.") : t("Loading…")}</Empty>
+              activity.isError ? <Empty>{t("The last day could not be counted.")}</Empty> : <Bones rows={3} height={28} />
             )}
           </Card>
         ),
@@ -357,7 +357,7 @@ export function Jobs() {
               : undefined}
           >
             {shownOperations.length === 0
-              ? <Empty>{loaded ? t("No jobs.") : t("Loading…")}</Empty>
+              ? (loaded ? <Empty>{t("No jobs.")}</Empty> : <Bones rows={4} />)
               : <Bars items={shownOperations.map(([one, n]) => ({
                   label: <code title={one}>{one}</code>, value: n,
                 }))} />}
@@ -380,7 +380,7 @@ export function Jobs() {
                     disabled={list.isFetchingNextPage}
                     data-testid="more"
                   >
-                    {list.isFetchingNextPage ? t("Loading…") : t("Load more")}
+                    {list.isFetchingNextPage ? t("loading…") : t("Load more")}
                   </button>
                 )}
               </>
@@ -522,7 +522,7 @@ export function Jobs() {
               keyOf={(job) => job.id}
               rowTestId={(job) => `job-${job.id}`}
               testId="jobs"
-              empty={list.isLoading ? t("Loading…") : t("No job matches this.")}
+              loading={list.isLoading} empty={t("No job matches this.")}
               columns={[
                 {
                   key: "pick",

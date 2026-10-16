@@ -15,8 +15,7 @@ import { t as translate, useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Band, Banner, Card, Check, Empty, Field, Fields, Fig, Figs, Kpi, Modal,
-  Pill, Problem, Row, Table, Toolbar, TwoLine, type Segment, type Tone,
+  Actions, Band, Banner, Bones, Card, Check, Empty, Field, Fields, Fig, Figs, Kpi, Modal, Pill, Problem, Row, Table, Toolbar, TwoLine, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -536,9 +535,8 @@ export function Monitoring() {
                   keyOf={(one) => one.id}
                   rowTestId={(one) => `rule-${one.name}`}
                   testId="rules"
-                  empty={rules.data === undefined
-                    ? t("Loading…")
-                    : t("No rules yet: the agents sample, but nothing turns the samples into alerts.")}
+                  loading={rules.data === undefined}
+                  empty={t("No rules yet: the agents sample, but nothing turns the samples into alerts.")}
                   columns={[
                     { key: "name", head: t("Rule"), cell: (one) => (
                       <TwoLine sub={metricLabel(one.metric)}>{one.name}</TwoLine>
@@ -633,7 +631,7 @@ export function Monitoring() {
                   keyOf={(one) => one.id}
                   rowTestId={(one) => `alert-${one.id}`}
                   testId="alerts"
-                  empty={history.data === undefined ? t("Loading…") : t("No alert is recorded in this state.")}
+                  loading={history.data === undefined} empty={t("No alert is recorded in this state.")}
                   columns={[
                     { key: "host", head: t("Host"), tight: true, cell: (one) => host(one.host_id, one.hostname) },
                     { key: "rule", head: t("Rule"), cell: (one) => one.rule_name },
@@ -671,7 +669,7 @@ export function Monitoring() {
                   keyOf={(one) => one.id}
                   rowTestId={(one) => `silence-${one.id}`}
                   testId="silences"
-                  empty={silences.data === undefined ? t("Loading…") : t("No silence is in force.")}
+                  loading={silences.data === undefined} empty={t("No silence is in force.")}
                   columns={[
                     { key: "host", head: t("Host"), tight: true, cell: (one) => (
                       one.host_id ? host(one.host_id, one.hostname) : <span className="fl-faint">{t("every host")}</span>
@@ -811,7 +809,7 @@ function Footprint({ footprint, loaded, host }: {
         <Fig label={t("Helper RSS, max")} value={size(footprint?.helper_rss_bytes_max)} />
       </Figs>
       {!loaded ? (
-        <Empty>{t("Loading…")}</Empty>
+        <Bones rows={4} />
       ) : !footprint || measured === 0 ? (
         <Empty>{t("No agent has sent its footprint yet; an older agent does not.")}</Empty>
       ) : over.length === 0 ? (

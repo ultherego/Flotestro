@@ -420,14 +420,23 @@ export type Column<Row> = {
  * than widening the page, its head stays in view while it does, and a row
  * shows data: whatever can be done to it lives where the row leads.
  */
-export function Table<Row>({ columns, rows, keyOf, empty, rowTestId, testId }: {
+export function Table<Row>({ columns, rows, keyOf, empty, loading = false, rowTestId, testId }: {
   columns: Column<Row>[];
   rows: Row[];
   keyOf: (row: Row, index: number) => string;
   empty?: ReactNode;
+  /**
+   * The rows have been asked for and have not arrived.
+   *
+   * A list that says "Loading…" where its rows will be tells the reader
+   * nothing about whether they are in the right place, and the page
+   * jumps when the rows land. The shape of what is coming says both.
+   */
+  loading?: boolean;
   rowTestId?: (row: Row) => string;
   testId?: string;
 }) {
+  if (rows.length === 0 && loading) return <Bones rows={5} height={18} />;
   if (rows.length === 0 && empty !== undefined) return <Empty>{empty}</Empty>;
   const classOf = (column: Column<Row>) =>
     join(

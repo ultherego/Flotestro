@@ -1018,7 +1018,7 @@ export function Campaign() {
           rows={loaded}
           keyOf={(target) => target.host_id}
           rowTestId={(target) => `target-${target.hostname || target.host_id}`}
-          empty={targets.isLoading ? t("Loading…") : t("No targets.")}
+          loading={targets.isLoading} empty={t("No targets.")}
           columns={[
             {
               key: "host",

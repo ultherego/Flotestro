@@ -223,7 +223,7 @@ export function Overview({ host }: { host: Host }) {
           <Table
             rows={jobs.data?.items ?? []}
             keyOf={(one) => one.id}
-            empty={jobs.isLoading ? t("Loading…") : t("Nothing has been done to this host yet.")}
+            loading={jobs.isLoading} empty={t("Nothing has been done to this host yet.")}
             columns={[
               { key: "when", head: t("Time"), cell: (one) => (
                 <Link to={`/jobs/${one.id}`} title={absoluteTime(one.created_at)}>

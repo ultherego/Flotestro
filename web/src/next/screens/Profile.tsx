@@ -173,7 +173,7 @@ export function Profile() {
           <Table
             rows={sessions.data?.items ?? []}
             keyOf={(one) => one.id}
-            empty={sessions.isLoading ? t("Loading…") : t("No session is recorded.")}
+            loading={sessions.isLoading} empty={t("No session is recorded.")}
             columns={[
               { key: "where", head: t("From"), cell: (one) => (
                 <span className="fl-mono">{one.address || <span className="fl-faint">—</span>}</span>

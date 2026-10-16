@@ -46,6 +46,13 @@
   --row: 152px;
 
   --fl-card: color-mix(in srgb, var(--bg-panel) 94%, var(--text) 6%);
+  /* The light falls from the top left, as it does on the headline tile
+     the owner pointed at. It is three parts in a hundred: enough that a
+     card has a face, little enough that twenty of them on a screen do
+     not shimmer. */
+  --fl-face: linear-gradient(152deg,
+    color-mix(in srgb, var(--text) 4%, var(--fl-card)),
+    var(--fl-card) 58%);
   --fl-edge: color-mix(in srgb, var(--text) 9%, transparent);
   --fl-lift: 0 1px 2px rgba(0, 0, 0, 0.18), 0 8px 24px -12px rgba(0, 0, 0, 0.45);
   --fl-lift-high: 0 2px 4px rgba(0, 0, 0, 0.2), 0 18px 40px -16px rgba(0, 0, 0, 0.55);
@@ -692,7 +699,7 @@
   height: 100%;
   border-radius: var(--radius-card);
   border: 1px solid var(--border);
-  background: var(--fl-card);
+  background: var(--fl-face);
   box-shadow: var(--fl-lift);
   overflow: hidden;
   transition: box-shadow var(--fl-quick), border-color var(--fl-quick);
@@ -751,7 +758,17 @@
   display: flex;
   flex-direction: column;
   padding: var(--s4) var(--s5) var(--s5);
+}
+
+/* Only a card whose height was fixed for it scrolls inside itself. Every
+   card scrolling meant the wheel moved whatever happened to be under the
+   pointer instead of the page, which reads as a panel that cannot decide
+   what the wheel is for. Where one does scroll, it keeps the gesture:
+   reaching its end does not throw the page. */
+.fl-app .fl-placed .fl-card-body,
+.fl-app .fl-card-body > .fl-tablewrap {
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 /* A drawing fills the card it was put in: a chart stands on its floor,
@@ -787,7 +804,7 @@
   padding: var(--s5);
   border-radius: var(--radius-card);
   border: 1px solid var(--border);
-  background: var(--fl-card);
+  background: var(--fl-face);
   box-shadow: var(--fl-lift);
   color: inherit;
   text-decoration: none;
@@ -1263,7 +1280,7 @@
   padding: var(--s4);
   border-radius: var(--radius-card);
   border: 1px solid var(--border);
-  background: var(--fl-card);
+  background: var(--fl-face);
   box-shadow: var(--fl-lift);
   color: inherit;
   text-decoration: none;
@@ -1446,6 +1463,29 @@
 .fl-app .fl-faint { color: var(--text-faint); }
 .fl-app .fl-small { font-size: var(--t-small); }
 .fl-app .fl-mono { font-family: var(--font-mono); font-size: var(--t-small); overflow-wrap: anywhere; }
+
+/* A block of verbatim text looks the same wherever it is written, so a
+   screen that reached for a bare <pre> rather than a Readout still
+   inherits the appearance rather than drawing unstyled text on the
+   page. */
+.fl-app pre.fl-mono,
+.fl-app .fl-card-body > pre {
+  margin: 0;
+  padding: var(--s3) var(--s4);
+  max-height: 24em;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--t-small);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
 .fl-app .fl-nowrap { white-space: nowrap; }
 .fl-app .fl-truncate { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -1686,7 +1726,23 @@
 .fl-app .fl-seg button:hover { color: var(--text); }
 .fl-app .fl-seg button.fl-on { background: var(--bg-raised); color: var(--text); box-shadow: var(--shadow-soft); }
 
-.fl-app .fl-tabs { display: flex; gap: var(--s1); border-bottom: 1px solid var(--border); margin-bottom: var(--s5); overflow-x: auto; }
+/* The tabs wrap where there is no room; they do not scroll. A row of
+   nine that fits in a third of the window still drew a scrollbar under
+   itself on a desktop that shows them always. Below the breakpoint,
+   where wrapping would take four lines, they scroll - without the bar,
+   because the row is plainly cut off and the bar says nothing. */
+.fl-app .fl-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--s5);
+}
+
+@media (max-width: 860px) {
+  .fl-app .fl-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .fl-app .fl-tabs::-webkit-scrollbar { display: none; }
+}
 
 .fl-app .fl-tab {
   position: relative;

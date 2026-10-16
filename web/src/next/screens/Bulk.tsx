@@ -1401,7 +1401,7 @@ function HostPicker({ chosen, onChange, title, testId }: {
           keyOf={(one) => one.id}
           rowTestId={(one) => `${testId}-${one.hostname}`}
           testId={`${testId}-hosts`}
-          empty={hosts.isLoading ? t("Loading…") : t("No host matches this.")}
+          loading={hosts.isLoading} empty={t("No host matches this.")}
           columns={[
             {
               key: "chosen",
