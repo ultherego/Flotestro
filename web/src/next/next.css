@@ -1969,3 +1969,72 @@
 .fl-app .fl-finder-row:hover { text-decoration: none; }
 .fl-app .fl-finder-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-body); }
 .fl-app .fl-finder-note { flex: 0 0 auto; font-size: var(--t-small); color: var(--text-faint); }
+
+/* ---------------------------------------------------------------------
+   20. Something to copy, and one of several
+
+   A command, a configuration, a fingerprint: read-only, keeping its own
+   line breaks, scrolling rather than wrapping - a command broken across
+   two lines reads as two commands - and carrying the way to take it.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-readout { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+.fl-app .fl-readout-head { display: flex; align-items: center; gap: var(--s3); }
+
+.fl-app .fl-readout-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--t-label);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-readout-body {
+  margin: 0;
+  padding: var(--s3) var(--s4);
+  max-height: 18em;
+  overflow: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--t-small);
+  line-height: 1.6;
+  white-space: pre;
+  tab-size: 2;
+}
+
+/* One of several, each with its own sentence: a choice made once and
+   understood first, where a Seg is one changed back and forth. */
+.fl-app .fl-choice { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+
+.fl-app .fl-choice-one {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  padding: var(--s3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  cursor: pointer;
+  transition: border-color var(--fl-quick), background var(--fl-quick);
+}
+
+.fl-app .fl-choice-one:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+.fl-app .fl-choice-one:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.fl-app .fl-choice-one.fl-off { opacity: 0.5; cursor: not-allowed; }
+
+.fl-app .fl-choice-one input {
+  width: 15px;
+  height: 15px;
+  min-height: 0;
+  margin-top: 2px;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.fl-app .fl-choice-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fl-app .fl-choice-name { font-size: var(--t-body); font-weight: 600; }

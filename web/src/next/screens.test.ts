@@ -101,7 +101,17 @@ describe("a screen of the new panel", () => {
       [...panel.matchAll(/path="\/next\/?([a-z-]*)/g)]
         .map((found) => (found[1] === "" ? "dashboard" : found[1])),
     );
-    const missing = [...places].filter((place) => !new RegExp(`\\b${place}:`).test(about));
+    const files = new Map(screens().map((one) => [one.name, one.text]));
+    const named = (place: string) => {
+      if (new RegExp(`\\b${place}:`).test(about)) return true;
+      // Or the screen carries its own frame, with both a name and the
+      // paragraph behind the question mark.
+      const route = new RegExp(`path="/next/${place === "dashboard" ? "" : place}[^"]*" element=\\{<(\\w+)`);
+      const found = panel.match(route);
+      const text = found ? files.get(`${found[1]}.tsx`) : undefined;
+      return text !== undefined && /<Screen\b/.test(text) && /\bhelp=/.test(text) && /\btitle=/.test(text);
+    };
+    const missing = [...places].filter((place) => !named(place));
     expect(missing).toEqual([]);
   });
 });

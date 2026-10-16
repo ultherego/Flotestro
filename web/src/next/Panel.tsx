@@ -20,6 +20,16 @@ import { Jobs } from "./screens/Jobs";
 import { HostWorkspace } from "./screens/host/Workspace";
 import { Campaigns } from "./screens/Campaigns";
 import { Security } from "./screens/Security";
+import { AddHost } from "./screens/AddHost";
+import { Bulk } from "./screens/Bulk";
+import { Campaign } from "./screens/Campaign";
+import { Directory } from "./screens/Directory";
+import { Job } from "./screens/Job";
+import { Reports } from "./screens/Reports";
+import { Secrets } from "./screens/Secrets";
+import { Settings } from "./screens/Settings";
+import { Status } from "./screens/Status";
+import { Support } from "./screens/Support";
 import { Empty, Head } from "./kit";
 import { ABOUT } from "./screens/about";
 import { LookProvider, type Look } from "./look";
@@ -56,7 +66,7 @@ export function NextPanel({ look }: { look: Look }) {
   // One machine brings its own shell, because its rail is its modules and
   // not the fleet's places. Wrapped in the fleet's shell as well it drew
   // two of everything - two rails, two bars, two brands.
-  if (/^\/next\/hosts\/[^/]+/.test(location.pathname)) {
+  if (/^\/next\/hosts\/(?!new$)[^/]+/.test(location.pathname)) {
     return (
       <LookProvider look={look}>
       <Routes>
@@ -87,6 +97,16 @@ export function NextPanel({ look }: { look: Look }) {
         <Route path="/next" element={<Dashboard />} />
         <Route path="/next/dashboard" element={<Dashboard />} />
         <Route path="/next/hosts" element={<Hosts />} />
+        <Route path="/next/hosts/new" element={<AddHost />} />
+        <Route path="/next/bulk" element={<Bulk />} />
+        <Route path="/next/reports" element={<Reports />} />
+        <Route path="/next/directory" element={<Directory />} />
+        <Route path="/next/settings" element={<Settings />} />
+        <Route path="/next/secrets" element={<Secrets />} />
+        <Route path="/next/status" element={<Status />} />
+        <Route path="/next/support" element={<Support />} />
+        <Route path="/next/jobs/:id" element={<Job />} />
+        <Route path="/next/campaigns/:id" element={<Campaign />} />
         <Route path="/next/campaigns" element={<Campaigns />} />
         <Route path="/next/security" element={<Security />} />
         <Route path="/next/jobs" element={<Jobs />} />
