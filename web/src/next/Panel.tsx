@@ -30,7 +30,7 @@ import { Secrets } from "./screens/Secrets";
 import { Settings } from "./screens/Settings";
 import { Status } from "./screens/Status";
 import { Support } from "./screens/Support";
-import { Empty, Head } from "./kit";
+import { Empty, Head, HeadSlot } from "./kit";
 import { ABOUT } from "./screens/about";
 import { LookProvider, type Look } from "./look";
 import { useT } from "../i18n";
@@ -77,9 +77,21 @@ export function NextPanel({ look }: { look: Look }) {
     );
   }
 
-  // The heading is the shell's, from one table, so no screen can write
-  // its own shape of one and none can leave it out.
-  const about = ABOUT[section === "" ? "dashboard" : section];
+  /*
+   * The heading is the shell's, out of one table, so no screen can write
+   * its own shape of one and none can leave it out.
+   *
+   * Except where the screen names a thing rather than a section. One job
+   * is not "Jobs"; one campaign is not "Campaigns"; the wizard that adds
+   * a machine is not "Hosts". Those carry their own frame, so the shell
+   * draws none and the screen's own name stands. The test beside the
+   * screens holds every one of them to a title and an explanation.
+   */
+  const ownHeading = [
+    /^\/next\/jobs\/[^/]+$/, /^\/next\/campaigns\/[^/]+$/, /^\/next\/hosts\/new$/,
+    /^\/next\/(bulk|reports|settings|secrets|directory|status|support)$/,
+  ].some((one) => one.test(location.pathname));
+  const about = ownHeading ? undefined : ABOUT[section === "" ? "dashboard" : section];
 
   return (
     <LookProvider look={look}>
@@ -90,7 +102,7 @@ export function NextPanel({ look }: { look: Look }) {
           lead={t(about.lead)}
           icon={about.icon}
           help={typeof about.help === "string" ? <p>{t(about.help)}</p> : about.help}
-          actions={<span id="fl-head-slot" className="fl-head-slot" />}
+          actions={<HeadSlot />}
         />
       )}
       <Routes>

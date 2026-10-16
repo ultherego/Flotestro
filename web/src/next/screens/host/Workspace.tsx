@@ -10,7 +10,7 @@ import type { Host } from "../../../lib/types";
 import { useT } from "../../../i18n";
 import { Shell, type Face } from "../../Shell";
 import {
-  Bones, Empty, Head, Pill, Problem, Tag, Tags, type Tone,
+  Bones, Empty, Head, HeadSlot, Pill, Problem, Tag, Tags, type Tone,
 } from "../../kit";
 import { HOST_MODULES } from "./modules";
 
@@ -117,7 +117,15 @@ function HostHead({ host }: { host: Host }) {
             : <Tag>{t("no tags")}</Tag>}
         </Tags>
       }
-      actions={<a className="fl-btn fl-quiet" href={`/hosts/${host.id}`}>{t("Open in the panel as it is")}</a>}
+      actions={
+        <>
+          {/* The slot the screens under this one put their own actions
+              in, so "Arrange this screen" stands beside the machine's
+              name like every other screen's does. */}
+          <HeadSlot />
+          <a className="fl-btn fl-quiet" href={`/hosts/${host.id}`}>{t("Open in the panel as it is")}</a>
+        </>
+      }
     />
   );
 }

@@ -163,6 +163,16 @@ export function Flow({ children, min = 420 }: {
   return <div className={`fl-flow fl-flow-${min}`}>{children}</div>;
 }
 
+/**
+ * Where a screen's own actions land in the heading above it.
+ *
+ * Whoever draws the heading puts one of these in its actions, and
+ * `HeadActions` finds it. Exactly one may stand on a page.
+ */
+export function HeadSlot() {
+  return <span id="fl-head-slot" className="fl-head-slot" />;
+}
+
 /** The twelve columns everything stands on. */
 export function Grid({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={join("fl-grid", className)}>{children}</div>;
