@@ -7,8 +7,7 @@ import type { AuditEvent, Campaign, FleetActivity, FleetSummary, Job } from "../
 import { stateName } from "../../components/ui";
 import { useT } from "../../i18n";
 import {
-  Band, Bars, Card, Chart, Empty, Head, Kpi, Pill, Problem, Ring, Table,
-  type Segment, type Tone,
+  Band, Bars, Card, Chart, Empty, HeadActions, Kpi, Pill, Problem, Ring, type Segment, Table, type Tone,
 } from "../kit";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
@@ -142,11 +141,7 @@ export function Dashboard() {
 
   return (
     <>
-      <Head
-        title={t("Fleet dashboard")}
-        lead={t("Only what needs a decision.")}
-        actions={
-          <>
+      <HeadActions><>
             <span className="fl-note" data-testid="refreshed">
               {summary.dataUpdatedAt > 0
                 ? t("refreshed {when}", { when: relativeTime(new Date(summary.dataUpdatedAt).toISOString()) })
@@ -155,9 +150,7 @@ export function Dashboard() {
             <button type="button" className="fl-quiet" onClick={() => summary.refetch()} disabled={summary.isFetching}>
               {summary.isFetching ? t("refreshing…") : t("Refresh")}
             </button>
-          </>
-        }
-      />
+          </></HeadActions>
 
       <Board screen={DASHBOARD_SCREEN} catalogue={DASHBOARD} drawn={{
         hosts: (

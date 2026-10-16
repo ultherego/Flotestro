@@ -8,7 +8,7 @@ import { useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Banner, Card, Empty, Head, Kpi, Pill, Problem, Stack, Table, Tag, Tags, TwoLine, type Tone,
+  Banner, Card, Empty, Kpi, Pill, Problem, Stack, Table, Tag, Tags, type Tone, TwoLine,
 } from "../kit";
 
 /**
@@ -55,10 +55,7 @@ export function Readiness() {
 
   return (
     <>
-      <Head
-        title={t("Readiness")}
-        lead={t("What has been measured against the criteria for production, and what has not. A criterion with no measurement behind it is shown as unmeasured rather than as met.")}
-      />
+      
       <Board screen={READINESS_SCREEN} catalogue={READINESS} drawn={{
         verdict: (
           <Banner tone={verdict ? verdictTone(verdict) : "unknown"}>

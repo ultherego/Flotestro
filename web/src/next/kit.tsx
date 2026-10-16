@@ -1,4 +1,5 @@
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { Icon, type IconName } from "../components/icons";
 import { exportAddress, exportFileName } from "../components/ExportButton";
@@ -39,20 +40,66 @@ export function toneClass(name?: string | null): string | undefined {
  * The head of a screen: what it is, one line on what it answers, and the
  * actions that belong to the whole of it.
  */
-export function Head({ title, lead, actions }: {
+export function Head({ title, lead, actions, icon, help }: {
   title: ReactNode;
   lead?: ReactNode;
   actions?: ReactNode;
+  /** The mark of the screen, the same one the rail gives its place. */
+  icon?: IconName;
+  /**
+   * What this screen is for, at length, behind a mark beside the title.
+   *
+   * A paragraph at the top of a screen is read once and then stepped over
+   * every day after that, so it waits here until somebody asks. It is not
+   * optional in the sense of "nice to have": a screen whose purpose
+   * cannot be asked is a screen somebody has to be told about.
+   */
+  help?: ReactNode;
 }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
   return (
     <header className="fl-head">
+      {icon && <span className="fl-head-mark" aria-hidden="true"><Icon name={icon} /></span>}
       <div className="fl-head-text">
-        <h1 className="fl-head-title">{title}</h1>
+        <h1 className="fl-head-title">
+          {title}
+          {help && (
+            <button
+              type="button"
+              className="fl-helpmark"
+              aria-expanded={open}
+              title={t("What this screen is for")}
+              onClick={() => setOpen(!open)}
+              data-testid="screen-help-toggle"
+            >
+              ?
+            </button>
+          )}
+        </h1>
         {lead && <p className="fl-head-lead">{lead}</p>}
+        {help && open && <div className="fl-help" data-testid="screen-help">{help}</div>}
       </div>
       {actions && <div className="fl-head-actions">{actions}</div>}
     </header>
   );
+}
+
+/**
+ * What this screen offers at the top right of the heading the shell drew.
+ *
+ * The heading belongs to the shell so that every screen has the same one;
+ * the one thing a screen knows that the shell does not is what can be
+ * done from it, so that arrives here and lands in the heading's own slot.
+ */
+export function HeadActions({ children }: { children: ReactNode }) {
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => { setSlot(document.getElementById("fl-head-slot")); }, []);
+  // Until the heading's slot is there - the first render, and any screen
+  // drawn on its own, as a test draws it - they stand where they are
+  // written. Rendering nothing would make a screen's only way to act on
+  // it disappear whenever it is not inside the shell.
+  return slot ? createPortal(children, slot) : <>{children}</>;
 }
 
 /** The twelve columns everything stands on. */

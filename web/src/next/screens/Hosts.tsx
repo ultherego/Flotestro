@@ -7,8 +7,7 @@ import { relativeTime, absoluteTime } from "../../lib/format";
 import type { FleetActivity, Host } from "../../lib/types";
 import { useT } from "../../i18n";
 import {
-  Bars, Card, Dot, Empty, Find, Grid, Head, Meter, Pill, Problem, Seg, Table, Tag, Tags,
-  TwoLine, type Tone,
+  Bars, Card, Dot, Empty, Find, Grid, HeadActions, Meter, Pill, Problem, Seg, Table, Tag, Tags, type Tone, TwoLine,
 } from "../kit";
 
 /**
@@ -73,11 +72,7 @@ export function Hosts() {
 
   return (
     <>
-      <Head
-        title={t("Hosts")}
-        lead={t("Every machine this installation manages, as the agents last reported them.")}
-        actions={<Link to="/next/hosts/new" className="fl-btn">{t("Add host")}</Link>}
-      />
+      <HeadActions><Link to="/next/hosts/new" className="fl-btn">{t("Add host")}</Link></HeadActions>
 
       <Grid>
         <Card span={9} flush

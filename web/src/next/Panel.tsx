@@ -21,6 +21,7 @@ import { HostWorkspace } from "./screens/host/Workspace";
 import { Campaigns } from "./screens/Campaigns";
 import { Security } from "./screens/Security";
 import { Empty, Head } from "./kit";
+import { ABOUT } from "./screens/about";
 import { useT } from "../i18n";
 
 /**
@@ -46,6 +47,7 @@ const TITLES: Record<string, string> = {
 };
 
 export function NextPanel() {
+  const t = useT();
   const location = useLocation();
   const section = location.pathname.replace(/^\/next\/?/, "").split("/")[0] ?? "";
   const title = TITLES[section] ?? section.charAt(0).toUpperCase() + section.slice(1);
@@ -62,8 +64,21 @@ export function NextPanel() {
     );
   }
 
+  // The heading is the shell's, from one table, so no screen can write
+  // its own shape of one and none can leave it out.
+  const about = ABOUT[section === "" ? "dashboard" : section];
+
   return (
-    <Shell trail={{ section: title }}>
+    <Shell trail={{ section: about ? about.title : title }}>
+      {about && (
+        <Head
+          title={t(about.title)}
+          lead={t(about.lead)}
+          icon={about.icon}
+          help={typeof about.help === "string" ? <p>{t(about.help)}</p> : about.help}
+          actions={<span id="fl-head-slot" className="fl-head-slot" />}
+        />
+      )}
       <Routes>
         <Route path="/next" element={<Dashboard />} />
         <Route path="/next/dashboard" element={<Dashboard />} />

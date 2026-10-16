@@ -10,8 +10,7 @@ import { useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Band, Bars, Card, Chart, Empty, Fact, Facts, Field, Fields, Fig, Figs, Find, Head, Kpi, Meter,
-  Modal, Note, Pill, Problem, Seg, Stack, Table, TwoLine, type Segment, type Series, type Tone,
+  Band, Bars, Card, Chart, Empty, Fact, Facts, Field, Fields, Fig, Figs, Find, Kpi, Meter, Modal, Note, Pill, Problem, Seg, type Segment, type Series, Stack, Table, type Tone, TwoLine,
 } from "../kit";
 
 /**
@@ -193,10 +192,7 @@ export function Relays() {
 
   return (
     <>
-      <Head
-        title={t("Relays")}
-        lead={t("One connection upwards per site, a spool for the results while the link is down, and the route a host in an isolated site installs through.")}
-      />
+      
 
       <Board screen={RELAYS_SCREEN} catalogue={RELAYS} drawn={{
         count: (

@@ -361,11 +361,52 @@
 .fl-app .fl-rail-backdrop { position: fixed; inset: 0; z-index: 19; background: rgba(0, 0, 0, 0.55); }
 
 /* The head of a screen. */
-.fl-app .fl-head { display: flex; align-items: flex-start; gap: var(--gap); min-width: 0; }
+.fl-app .fl-head { display: flex; align-items: flex-start; gap: var(--x4); min-width: 0; }
+/* The mark of the screen, the same one the rail gives its place: a reader
+   who followed an item should meet it again at the top of what opened. */
+.fl-app .fl-head-mark {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r);
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+.fl-app .fl-head-mark svg { width: 20px; height: 20px; }
+.fl-app .fl-helpmark {
+  width: 20px;
+  height: 20px;
+  margin-left: var(--x2);
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: none;
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+.fl-app .fl-helpmark:hover { color: var(--ink); background: var(--hover); filter: none; }
+.fl-app .fl-help {
+  margin-top: var(--x3);
+  padding: var(--x4);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--card);
+  color: var(--ink-muted);
+  font-size: 13px;
+  max-width: 100ch;
+}
+.fl-app .fl-help p + p { margin-top: var(--x2); }
 .fl-app .fl-head-text { flex: 1 1 auto; min-width: 0; }
 .fl-app .fl-head-title { font-size: 24px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.15; }
 .fl-app .fl-head-lead { margin-top: 5px; color: var(--ink-muted); font-size: 13px; max-width: 86ch; }
 .fl-app .fl-head-actions { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--x2); }
+.fl-app .fl-head-slot { display: contents; }
 
 /* =====================================================================
    The grid and the container.

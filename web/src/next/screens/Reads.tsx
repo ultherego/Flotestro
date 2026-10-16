@@ -16,8 +16,7 @@ import { useT, type Translate } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Band, Bars, Card, Check, Dot, Empty, Field, Fields, Find, Grid, Head, Modal, Note,
-  Pill, Problem, Seg, Stack, Table, Tabs, Tag, Tags, Toolbar, TwoLine, type Segment, type Tone,
+  Actions, Band, Bars, Card, Check, Dot, Empty, Field, Fields, Find, Grid, HeadActions, Modal, Note, Pill, Problem, Seg, type Segment, Stack, Table, Tabs, Tag, Tags, type Tone, Toolbar, TwoLine,
 } from "../kit";
 
 /**
@@ -104,20 +103,14 @@ function ReadList() {
 
   return (
     <>
-      <Head
-        title={t("Reads")}
-        lead={t("The same read on a handful of hosts at once: a diagnostic, not a change. Nothing is approved and nothing changes on the hosts.")}
-        actions={
-          <button
+      <HeadActions><button
             type="button"
             className={building ? "fl-quiet" : undefined}
             onClick={() => setBuilding(!building)}
             data-testid="new-read"
           >
             {building ? t("Hide the form") : t("New read")}
-          </button>
-        }
-      />
+          </button></HeadActions>
       <Board screen={READS_SCREEN} catalogue={READS} drawn={{
         // A container with nothing to draw is left off the grid, so the
         // form takes its place only while it is open.
@@ -643,28 +636,12 @@ function OneRead({ id }: { id: string }) {
 
   return (
     <>
-      <Head
-        title={<code>{view.action}</code>}
-        lead={
-          <>
-            <Link to="/next/reads">{t("Reads")}</Link>
-            {" · "}
-            {t("Ordered by {who}", { who: view.created_by })}
-            {" · "}
-            <span title={absoluteTime(view.created_at)}>{relativeTime(view.created_at)}</span>
-            {view.reason && ` · ${view.reason}`}
-            {` · ${open > 0 ? t("{n} hosts still to answer", { n: open }) : t("every host answered")}`}
-          </>
-        }
-        actions={
-          <>
+      <HeadActions><>
             {canCancel && open > 0 && <Withdraw view={view} />}
             <Link className="fl-btn fl-quiet" to={readsPrefill(view.action, view.payload)}>
               {t("Order the same again")}
             </Link>
-          </>
-        }
-      />
+          </></HeadActions>
       <Grid>
         <Card span={12} title={t("Hosts by state")}>
           <Band segments={states} testId="read-host-states" />

@@ -9,8 +9,7 @@ import { useT, type Translate } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Bars, Card, Check, Empty, Fact, Facts, Field, Fields, Head, Kpi,
-  Modal, Note, Pager, Pill, Problem, Seg, Stack, Table, Tabs, Tags, Toolbar, type Tone,
+  Actions, Banner, Bars, Card, Check, Empty, Fact, Facts, Field, Fields, HeadActions, Kpi, Modal, Note, Pager, Pill, Problem, Seg, Stack, Table, Tabs, Tags, type Tone, Toolbar,
 } from "../kit";
 
 /**
@@ -653,15 +652,9 @@ export function Access() {
 
   return (
     <>
-      <Head
-        title={t("Users and access")}
-        lead={t("Who may sign in to this installation, and what each of them may do with it.")}
-        actions={
-          <button type="button" onClick={() => { setCreating(true); close(); }} data-testid="create-identity">
+      <HeadActions><button type="button" onClick={() => { setCreating(true); close(); }} data-testid="create-identity">
             {t("Create identity")}
-          </button>
-        }
-      />
+          </button></HeadActions>
 
       {refusal && <Refusal error={refusal} close={() => setRefusal(null)} />}
 

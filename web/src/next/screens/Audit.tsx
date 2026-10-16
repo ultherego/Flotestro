@@ -9,8 +9,7 @@ import { useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Band, Banner, Bars, Card, Chart, Empty, Fact, Facts, Field, Fields, Head, Note, Pill, Problem,
-  Row, Seg, Stack, Table, TwoLine, type Segment, type Series, type Tone,
+  Band, Banner, Bars, Card, Chart, Empty, Fact, Facts, Field, Fields, HeadActions, Note, Pill, Problem, Row, Seg, type Segment, type Series, Stack, Table, type Tone, TwoLine,
 } from "../kit";
 
 /**
@@ -150,7 +149,7 @@ export function Audit() {
   if (trail.error instanceof ApiError && trail.error.forbidden) {
     return (
       <>
-        <Head title={t("Audit")} lead={t("Every success, every failure and every refusal.")} />
+        
         <Empty>
           {t("You may not read the fleet-wide trail. The trail of a single host is on that host's own screen.")}
         </Empty>
@@ -212,15 +211,9 @@ export function Audit() {
 
   return (
     <>
-      <Head
-        title={t("Audit")}
-        lead={t("Every success, every failure and every refusal, with who asked and when.")}
-        actions={
-          <button type="button" className="fl-quiet" onClick={exportTrail} disabled={exporting} data-testid="export">
+      <HeadActions><button type="button" className="fl-quiet" onClick={exportTrail} disabled={exporting} data-testid="export">
             {exporting ? t("Exporting…") : t("Export the trail")}
-          </button>
-        }
-      />
+          </button></HeadActions>
 
       <Board screen={AUDIT_SCREEN} catalogue={AUDIT} drawn={{
         filter: (
