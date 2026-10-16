@@ -10,7 +10,7 @@ import type { Host } from "../../../lib/types";
 import { useT } from "../../../i18n";
 import { Shell, type Face } from "../../Shell";
 import { Empty, Head, Pill, Problem, Tag, Tags, type Tone } from "../../kit";
-import { Overview } from "./Overview";
+import { HOST_MODULES } from "./modules";
 
 /**
  * One machine, and everything the panel can say or do about it.
@@ -20,6 +20,12 @@ import { Overview } from "./Overview";
  * A module this host has no backing for stays listed and says why: left
  * out, it reads as a panel that forgot it exists.
  */
+
+/** The module named in the address, drawn with the host it is about. */
+function Module({ module, host }: { module: string; host: Host }) {
+  const Drawn = HOST_MODULES[module];
+  return Drawn ? <Drawn host={host} /> : null;
+}
 
 export function HostWorkspace() {
   const t = useT();
@@ -57,7 +63,7 @@ export function HostWorkspace() {
       {host.error ? <Problem>{String(host.error)}</Problem> : !data ? <Empty>{t("Loading…")}</Empty> : (
         <>
           <HostHead host={data} />
-          {module === "overview" ? <Overview host={data} /> : (
+          {HOST_MODULES[module] ? <Module module={module} host={data} /> : (
             <>
               <Head
                 title={t(entry?.name ?? module)}

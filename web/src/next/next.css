@@ -107,8 +107,6 @@
 .fl-app .fl-shell {
   display: grid;
   grid-template-columns: var(--rail) minmax(0, 1fr);
-  gap: var(--gap);
-  padding: var(--gap);
   min-height: 100vh;
   align-items: start;
 }
@@ -127,17 +125,18 @@
 
 /* The rail is a container like every other: the same radius, the same
    edge, the same air inside. It is not a wall the page is glued to. */
+/* It holds the left edge of the window and the whole of its height: a
+   rail that floats near the edge leaves a strip of page behind it that
+   belongs to nothing. */
 .fl-app .fl-rail {
   position: sticky;
-  top: var(--gap);
-  height: calc(100vh - var(--gap) * 2);
+  top: 0;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   min-width: 0;
   background: var(--rail-bg);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow);
+  border-right: 1px solid var(--line);
   overflow: hidden;
 }
 .fl-app .fl-brand {
@@ -250,7 +249,7 @@
 
 /* The page column: the bar, then whatever the screen draws, at one
    rhythm - the same step of air that separates the containers. */
-.fl-app .fl-page { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
+.fl-app .fl-page { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; padding: var(--gap) var(--gap) var(--x8); }
 .fl-app .fl-screen { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
 
 /* The bar has no walls and no background: it is a row of the page, which
@@ -927,16 +926,16 @@
   .fl-app .fl-c5, .fl-app .fl-c7, .fl-app .fl-c8, .fl-app .fl-c9, .fl-app .fl-c10, .fl-app .fl-c11 { grid-column: span 12; }
 }
 @media (max-width: 1024px) {
-  .fl-app .fl-shell { grid-template-columns: minmax(0, 1fr); padding: var(--gap); }
+  .fl-app .fl-shell { grid-template-columns: minmax(0, 1fr); }
   .fl-app .fl-rail {
     position: fixed;
-    left: var(--gap);
-    top: var(--gap);
-    bottom: var(--gap);
-    width: 264px;
-    height: auto;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 272px;
+    height: 100vh;
     z-index: 20;
-    transform: translateX(calc(-100% - var(--gap) * 2));
+    transform: translateX(-100%);
     transition: transform 0.18s ease;
   }
   .fl-app .fl-rail.fl-open { transform: translateX(0); box-shadow: var(--shadow-lg); }
@@ -961,7 +960,7 @@
    takes a measure and the air between the containers grows with it. */
 @media (min-width: 1900px) {
   .fl-app { --gap: 24px; }
-  .fl-app .fl-shell { max-width: 2560px; margin: 0 auto; }
+  .fl-app .fl-page { max-width: 2560px; }
 }
 @media (min-width: 2600px) {
   .fl-app { --gap: 28px; font-size: 15px; --rail: 300px; }

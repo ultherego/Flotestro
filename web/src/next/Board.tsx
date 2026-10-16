@@ -126,6 +126,13 @@ export function Board({ screen, catalogue, drawn }: {
 
   const current = editing ?? boardToDraw(layout.data, catalogue, known);
   const shown = current.filter((one) => !one.hidden);
+  /* Every screen stands on the grid from the first time it is opened,
+     with the shape each container ships with. Left to flow, the row of
+     containers took whatever height its contents happened to want, and a
+     wide screen then read as blocks thrown down rather than as a panel -
+     the owner's words, and he is right. A container is as tall as its
+     cell and its content scrolls inside it; the corner is there to
+     change that. */
   const placed = placeAll(shown);
   const titleOf = (key: string) => catalogue.find((one) => one.key === key)?.title ?? key;
   const absent = catalogue.filter((one) => known.has(one.key) && !shown.some((on) => on.key === one.key));
@@ -257,7 +264,7 @@ export function Board({ screen, catalogue, drawn }: {
         ref={gridRef}
         className={[
           "fl-grid",
-          isPlaced(current) ? "fl-placed" : "",
+          "fl-placed",
           editing !== null ? "fl-editing" : "",
           hold ? "fl-holding" : "",
         ].join(" ").trim()}
@@ -267,12 +274,10 @@ export function Board({ screen, catalogue, drawn }: {
         data-testid="board"
       >
         {placed.map((one) => {
-          const style = isPlaced(current)
-            ? {
-                gridColumn: `${(one.x ?? 0) + 1} / span ${one.width}`,
-                gridRow: `${(one.y ?? 0) + 1} / span ${one.height ?? 2}`,
-              }
-            : { gridColumn: `span ${one.width}` };
+          const style = {
+            gridColumn: `${(one.x ?? 0) + 1} / span ${one.width}`,
+            gridRow: `${(one.y ?? 0) + 1} / span ${one.height ?? 2}`,
+          };
           return (
             <div
               key={one.key}
