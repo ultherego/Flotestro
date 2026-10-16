@@ -2318,3 +2318,104 @@
 
 .fl-app .fl-door-more summary:hover { color: var(--text); }
 .fl-app .fl-door-more[open] summary { margin-bottom: var(--s1); }
+
+/* ---------------------------------------------------------------------
+   22. The selector of machines
+
+   The box in the bar that lists hosts and nothing else. The finder
+   reaches anything and is opened from the keyboard; this is for the hand
+   and for the question an operator asks twenty times a day - the same
+   thing, on that other machine.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 34px;
+  max-width: 220px;
+  padding: 0 var(--s2) 0 var(--s3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-size: var(--t-small);
+  transition: border-color var(--fl-quick), background var(--fl-quick), color var(--fl-quick);
+}
+
+.fl-app .fl-pick:hover { border-color: var(--border-strong); background: var(--bg-hover); color: var(--text); }
+.fl-app .fl-pick > svg { flex: 0 0 auto; width: 14px; height: 14px; }
+.fl-app .fl-pick > svg:last-child { opacity: 0.6; width: 11px; height: 11px; }
+
+.fl-app .fl-pick-current {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.fl-app .fl-pick-menu { min-width: 320px; padding: 0; overflow: hidden; }
+.fl-app .fl-pick-field { border-bottom: 1px solid var(--border); padding: 0 var(--s3); }
+.fl-app .fl-pick-field input { height: 40px; font-size: var(--t-body); }
+.fl-app .fl-pick-list { max-height: 52vh; overflow-y: auto; padding: var(--s2); }
+.fl-app .fl-pick-group + .fl-pick-group { margin-top: var(--s2); }
+
+.fl-app .fl-pick-head {
+  display: block;
+  padding: var(--s2) var(--s3) var(--s1);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-pick-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  border-radius: var(--radius-sm);
+  transition: background var(--fl-quick);
+}
+
+.fl-app .fl-pick-row:hover { background: var(--bg-hover); }
+
+.fl-app .fl-pick-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  color: var(--text-muted);
+  font-size: var(--t-body);
+  text-align: left;
+}
+
+.fl-app .fl-pick-row:hover .fl-pick-open { color: var(--text); }
+.fl-app .fl-pick-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-app .fl-pick-keep { height: 26px; padding: 0 var(--s2); opacity: 0.5; }
+.fl-app .fl-pick-keep:hover { opacity: 1; }
+.fl-app .fl-pick-keep[aria-pressed="true"] { opacity: 1; color: var(--accent-text); }
+.fl-app .fl-pick-keep svg { width: 13px; height: 13px; }
+
+/* The machine in the trail, with how it is answering and the address. */
+.fl-app .fl-crumbs-host {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+  padding: 2px var(--s2);
+  border-radius: var(--radius-sm);
+  transition: background var(--fl-quick);
+}
+
+.fl-app .fl-crumbs-host:hover { background: var(--bg-hover); text-decoration: none; }
+.fl-app .fl-crumbs-name { color: var(--text); font-weight: 600; }
+.fl-app .fl-crumbs-where { font-family: var(--font-mono); font-size: var(--t-label); color: var(--text-faint); }
+
+@media (max-width: 1200px) {
+  .fl-app .fl-crumbs-where { display: none; }
+}

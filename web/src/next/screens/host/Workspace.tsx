@@ -12,6 +12,7 @@ import { Shell, type Face } from "../../Shell";
 import {
   Bones, Empty, Head, HeadSlot, Pill, Problem, Tag, Tags, type Tone,
 } from "../../kit";
+import { module as findModule } from "../../../lib/modules";
 import { HOST_MODULES } from "./modules";
 
 /**
@@ -61,7 +62,15 @@ export function HostWorkspace() {
   };
 
   return (
-    <Shell trail={{ section: "Hosts", to: "/next/hosts", here: data?.hostname }} face={face}>
+    <Shell
+      trail={{
+        section: "Hosts",
+        to: "/next/hosts",
+        host: data,
+        module: data ? findModule(module)?.name : undefined,
+      }}
+      face={face}
+    >
       {host.error ? <Problem>{String(host.error)}</Problem> : !data ? <Bones rows={4} /> : (
         <>
           <HostHead host={data} />

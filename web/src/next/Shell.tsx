@@ -16,11 +16,11 @@ import { LOCALES, useLocale } from "../i18n";
 import { useCapabilities } from "../lib/capabilities";
 import { fleetNavigation, type NavGroup } from "../lib/navigation";
 import type { IconName } from "../components/icons";
-import type { Whoami } from "../lib/types";
+import type { Host, Whoami } from "../lib/types";
 import { Icon } from "../components/icons";
 import { LogoMark } from "../components/Logo";
 import { useT } from "../i18n";
-import { Pill, Problem } from "./kit";
+import { Pill, Problem, toneClass, type Tone } from "./kit";
 
 /**
  * The shell of the panel: a rail of places down the left, a bar across the
@@ -33,7 +33,26 @@ import { Pill, Problem } from "./kit";
  */
 
 /** Where the reader is, for the bar: the section, and the host if on one. */
-export type Trail = { section: string; to?: string; here?: string };
+export type Trail = {
+  section: string;
+  to?: string;
+  here?: string;
+  /** Set on a machine's screen, once the machine is known. */
+  host?: Host;
+  /** The English name of the open module, where the address names one. */
+  module?: string;
+};
+
+/** What the panel last heard from a machine, as a tone. */
+function connectionTone(state?: string | null): Tone {
+  if (state === "online") return "ok";
+  if (state === "stale") return "warn";
+  if (state === "offline") return "error";
+  return "unknown";
+}
+
+/** Several class names into one, dropping what is not there. */
+const join = (...parts: (string | false | undefined)[]) => parts.filter(Boolean).join(" ");
 
 /** One place the rail leads to. */
 export type RailItem = {
@@ -166,9 +185,44 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
           </button>
           <nav className="fl-crumbs" aria-label={t("Breadcrumb")}>
             {trail.to ? <Link to={trail.to}>{t(trail.section)}</Link> : <span>{t(trail.section)}</span>}
-            {trail.here && <><Icon name="chevron" /><span className="fl-crumbs-here">{trail.here}</span></>}
+            {/* On a machine the trail names the machine itself, with how
+                it is answering and the address somebody would type -
+                the two things that tell one host from another. */}
+            {trail.host ? (
+              <>
+                <Icon name="chevron" />
+                <Link
+                  to={`/next/hosts/${trail.host.id}`}
+                  className={trail.module ? "fl-crumbs-host" : "fl-crumbs-host fl-crumbs-here"}
+                  title={t("Open the host overview")}
+                >
+                  <span className={join("fl-dot", toneClass(connectionTone(trail.host.connection_state)))} />
+                  <span className="fl-crumbs-name">{trail.host.hostname}</span>
+                  <span className="fl-crumbs-where">
+                    {trail.host.management_address || t("address unknown")}
+                  </span>
+                </Link>
+                {trail.module && (
+                  <><Icon name="chevron" /><span className="fl-crumbs-here">{t(trail.module)}</span></>
+                )}
+              </>
+            ) : trail.here ? (
+              <><Icon name="chevron" /><span className="fl-crumbs-here">{trail.here}</span></>
+            ) : null}
           </nav>
           <span className="fl-bar-spacer" />
+          {/* Two boxes of one look, as the panel being replaced has: the
+              host selector, which lists machines and nothing else, and
+              the finder, which reaches anything. An operator moving
+              between machines should not have to think of a search. */}
+          <HostSelect
+            host={trail.host}
+            module={onModule?.[2]}
+            recent={recent}
+            setRecent={setRecent}
+            favourite={favourite}
+            setFavourite={setFavourite}
+          />
           <button
             type="button"
             className="fl-search"
@@ -494,6 +548,9 @@ const RECENT_KEY = "flotestro.next.hosts.recent";
 const FAVOURITE_KEY = "flotestro.next.hosts.favourite";
 const RECENT = 8;
 
+/** How many machines the selector lists at once; more is a narrower query away. */
+const HOSTS_SHOWN = 20;
+
 type Kept = { id: string; name: string };
 
 function keep(list: string[]): Kept[] {
@@ -721,6 +778,147 @@ function Finder({ places, module, recent, setRecent, favourite, setFavourite, on
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The selector of machines: the one box in the bar that lists hosts and
+ * nothing else.
+ *
+ * The finder reaches anything and is opened from the keyboard; this is
+ * for the hand, and for the question an operator asks twenty times a
+ * day - "the same thing, on that other machine". It opens on what this
+ * browser keeps and what it opened lately, narrows on what is typed by
+ * asking the fleet, and lands on the module already open.
+ */
+function HostSelect({ host, module, recent, setRecent, favourite, setFavourite }: {
+  host?: Host;
+  module?: string;
+  recent: string[];
+  setRecent: (next: string[] | ((current: string[]) => string[])) => void;
+  favourite: string[];
+  setFavourite: (next: string[] | ((current: string[]) => string[])) => void;
+}) {
+  const t = useT();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const holder = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    field.current?.focus();
+    const away = (event: globalThis.MouseEvent) => {
+      if (!holder.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const escape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+
+  const asked = useDebounced(query.trim(), 200);
+  const fleet = useQuery({
+    queryKey: ["host-select", asked],
+    queryFn: () => api.get<Collection<Host>>(
+      `/api/v1/hosts?limit=${HOSTS_SHOWN}${asked ? `&q=${encodeURIComponent(asked)}` : ""}`),
+    enabled: open,
+    retry: false,
+  });
+
+  const address = (id: string) => `/next/hosts/${encodeURIComponent(id)}${module ? `/${module}` : ""}`;
+  const kept = keep(favourite);
+  const lately = keep(recent).filter((one) => !kept.some((other) => other.id === one.id));
+  const asking = asked !== "";
+
+  const go = (one: Kept) => {
+    setRecent((current) => [packed(one), ...current.filter((other) => keep([other])[0].id !== one.id)].slice(0, RECENT));
+    setOpen(false);
+    setQuery("");
+    navigate(address(one.id));
+  };
+
+  const star = (one: Kept) =>
+    setFavourite((current) => current.some((other) => keep([other])[0].id === one.id)
+      ? current.filter((other) => keep([other])[0].id !== one.id)
+      : [...current, packed(one)]);
+
+  const group = (title: string, rows: Kept[], states?: Map<string, string>) => rows.length === 0 ? null : (
+    <div className="fl-pick-group" key={title}>
+      <span className="fl-pick-head">{title}</span>
+      {rows.map((one) => (
+        <div className="fl-pick-row" key={one.id}>
+          <button type="button" className="fl-pick-open" onClick={() => go(one)} data-testid={`pick-${one.id}`}>
+            <span className={join("fl-dot", toneClass(connectionTone(states?.get(one.id))))} />
+            <span className="fl-pick-name">{one.name}</span>
+          </button>
+          <button
+            type="button"
+            className="fl-plain fl-pick-keep"
+            aria-pressed={kept.some((other) => other.id === one.id)}
+            title={t("Keep this machine at the top of the list")}
+            onClick={() => star(one)}
+          >
+            <Icon name="star" />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+
+  const states = new Map((fleet.data?.items ?? []).map((one) => [one.id, one.connection_state as string]));
+
+  return (
+    <div className="fl-menu-anchor" ref={holder}>
+      <button
+        type="button"
+        className="fl-pick"
+        onClick={() => setOpen((on) => !on)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        data-testid="host-select"
+      >
+        <Icon name="server" />
+        <span className="fl-pick-current">
+          {host ? host.hostname : t("Pick a machine")}
+        </span>
+        <Icon name="chevron" />
+      </button>
+      {open && (
+        <div className="fl-menu fl-pick-menu" role="listbox" data-testid="host-select-open">
+          <div className="fl-finder-field fl-pick-field">
+            <Icon name="search" />
+            <input
+              ref={field}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t("A machine by name or address…")}
+              aria-label={t("A machine by name or address…")}
+              data-testid="host-select-field"
+            />
+          </div>
+          <div className="fl-pick-list">
+            {!asking && group(t("Kept"), kept, states)}
+            {!asking && group(t("Lately"), lately, states)}
+            {fleet.isLoading ? (
+              <p className="fl-finder-none">{t("Reading the fleet…")}</p>
+            ) : (fleet.data?.items ?? []).length === 0 ? (
+              <p className="fl-finder-none">{t("No machine answers to that.")}</p>
+            ) : (
+              group(
+                asking ? t("Found") : t("The fleet"),
+                (fleet.data?.items ?? []).map((one) => ({ id: one.id, name: one.hostname || one.id })),
+                states,
+              )
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
