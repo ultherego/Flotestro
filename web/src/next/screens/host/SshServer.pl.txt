@@ -1,5 +1,0 @@
-  "Methods enabled": "Metody włączone",
-  "Nothing was counted: the snapshot could not be read.": "Nic nie policzono: nie udało się odczytać migawki.",
-  "This host reported no host key.": "Ten host nie zgłosił żadnego klucza hosta.",
-  "Where this came from": "Skąd to pochodzi",
-  "What has to be read first": "Co trzeba przeczytać najpierw",

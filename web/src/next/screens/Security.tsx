@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { api } from "../../lib/api";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
+import { api, LIST_PAGE, loadedItems } from "../../lib/api";
 import { absoluteTime, relativeTime } from "../../lib/format";
 import type { Facet, FleetActivity, RemediationOrder, RemediationPreview, Whoami } from "../../lib/types";
 import { useT } from "../../i18n";
@@ -26,6 +26,14 @@ import {
  * then orders one campaign that waits for approval like any other.
  */
 
+/** One host failing one check, with what was found on it. */
+export type HostWithFinding = {
+  host_id: string;
+  hostname: string;
+  observed?: string;
+  action?: string;
+};
+
 type FleetCheck = {
   check_id: string;
   title: string;
@@ -36,8 +44,24 @@ type FleetCheck = {
   unknown: number;
   not_applicable: number;
   fixable: number;
-  hosts?: { host_id: string; hostname: string }[];
+  hosts?: HostWithFinding[];
 };
+
+/** One page of the hosts failing one check, read with a cursor. */
+type CheckHostsPage = {
+  check_id: string;
+  items: HostWithFinding[];
+  count: number;
+  next_cursor?: string;
+  partial: boolean;
+  partial_reason?: string;
+};
+
+/** The address one page of the hosts failing a check is read from. */
+export function checkHostsAddress(checkID: string, cursor: string): string {
+  return `/api/v1/security?check=${encodeURIComponent(checkID)}&limit=${LIST_PAGE}`
+    + (cursor ? `&cursor=${encodeURIComponent(cursor)}` : "");
+}
 
 type View = {
   hosts: number;
@@ -126,6 +150,9 @@ export function Security() {
     scope: "findings", site: "", environment: "", canary: 1, wave: 5, concurrent: 2, manualGate: false,
   });
   const [shown, setShown] = useState<{ key: string; preview: RemediationPreview } | null>(null);
+  // The check whose failing hosts are open under its row. One at a time: a
+  // list of checks with every host list open under it is not a list.
+  const [expanded, setExpanded] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [reason, setReason] = useState("");
 
@@ -294,6 +321,12 @@ export function Security() {
               testId="checks"
               loading={view.isLoading}
               empty={t("No check ran over this fleet.")}
+              /* The hosts failing a check open under the check, read a
+                 page at a time. A row that says "forty hosts" and offers
+                 no way to learn which forty is half an answer. */
+              opened={(one) => one.check_id === expanded}
+              detail={(one) => <CheckHosts check={one} />}
+              remember="fl.columns.security-checks"
               columns={[
                 ...(remediates
                   ? [{
@@ -313,7 +346,24 @@ export function Security() {
                       ),
                     }]
                   : []),
-                { key: "title", head: t("Check"), cell: (one) => one.title },
+                {
+                  key: "title",
+                  head: t("Check"),
+                  cell: (one) => one.failed > 0
+                    ? (
+                      <Button
+                        kind="word"
+                        onClick={() => setExpanded(one.check_id === expanded ? "" : one.check_id)}
+                        testId={`hosts-${one.check_id}`}
+                        title={one.check_id === expanded
+                          ? t("Hide the hosts failing {check}", { check: one.check_id })
+                          : t("Show the hosts failing {check}", { check: one.check_id })}
+                      >
+                        {one.title}
+                      </Button>
+                    )
+                    : one.title,
+                },
                 { key: "id", head: t("Identifier"), minor: true, tight: true, cell: (one) => (
                   <code title={one.check_id}>{one.check_id}</code>
                 ) },
@@ -329,6 +379,12 @@ export function Security() {
                   one.unknown > 0 ? <b className="fl-unknown">{one.unknown}</b> : <span className="fl-faint">0</span>
                 ) },
                 { key: "passed", head: t("Passing"), num: true, minor: true, cell: (one) => one.passed },
+                // A check that does not apply to a host enters neither
+                // compliance nor non-compliance, and is counted apart.
+                {
+                  key: "na", head: t("Does not apply"), num: true, minor: true, optional: true,
+                  cell: (one) => one.not_applicable,
+                },
                 { key: "fixable", head: t("Fixable"), num: true, cell: (one) => (
                   one.fixable > 0 ? <Pill tone="warn">{one.fixable}</Pill> : <span className="fl-faint">—</span>
                 ) },
@@ -598,6 +654,86 @@ export function Security() {
         </Modal>
       )}
     </>
+  );
+}
+
+/**
+ * The hosts failing one check, a page at a time.
+ *
+ * Until the first page lands, the sample the fleet answer already carried
+ * is drawn: it is the same rows, and an empty list under an open row
+ * would read as "no host fails this" when the truth is "nothing has
+ * arrived yet".
+ */
+function CheckHosts({ check }: { check: FleetCheck }) {
+  const t = useT();
+  const list = useInfiniteQuery({
+    queryKey: ["security", "fleet", "check", check.check_id],
+    queryFn: ({ pageParam }) => api.get<CheckHostsPage>(checkHostsAddress(check.check_id, pageParam)),
+    initialPageParam: "",
+    getNextPageParam: (last) => last.next_cursor || undefined,
+  });
+  const hosts = list.data ? loadedItems<HostWithFinding>(list.data) : (check.hosts ?? []);
+  const left = Math.max(0, check.failed - hosts.length);
+
+  return (
+    <Card
+      title={t("Hosts failing {check}", { check: check.check_id })}
+      note={check.expected ? t("Expected: {expected}", { expected: check.expected }) : undefined}
+      flush
+      foot={list.hasNextPage
+        ? (
+          <Button
+            kind="quiet"
+            onClick={() => void list.fetchNextPage()}
+            disabled={list.isFetchingNextPage}
+            testId={`more-${check.check_id}`}
+          >
+            {list.isFetchingNextPage ? t("Reading…") : t("Load more ({n} left)", { n: left })}
+          </Button>
+        )
+        : undefined}
+    >
+      {list.error
+        ? <Problem>{refusalText(list.error)}</Problem>
+        : (
+          <Table
+            rows={hosts}
+            keyOf={(one) => one.host_id}
+            rowTestId={(one) => `failing-${one.host_id}`}
+            testId={`check-hosts-${check.check_id}`}
+            loading={list.isLoading && hosts.length === 0}
+            empty={t("No host is listed as failing this check.")}
+            columns={[
+              {
+                key: "host",
+                head: t("Host"),
+                cell: (one) => (
+                  <Link to={`/next/hosts/${one.host_id}/security`}>{one.hostname || one.host_id.slice(0, 8)}</Link>
+                ),
+              },
+              {
+                key: "observed",
+                head: t("What was found"),
+                tight: true,
+                // What nobody read is an em dash; a check can fail without
+                // the host having said what it found.
+                cell: (one) => one.observed
+                  ? <code title={one.observed}>{one.observed}</code>
+                  : <span className="fl-faint">—</span>,
+              },
+              {
+                key: "action",
+                head: t("Fixed by"),
+                tight: true,
+                cell: (one) => one.action
+                  ? <code title={one.action}>{one.action}</code>
+                  : <span className="fl-faint">—</span>,
+              },
+            ]}
+          />
+        )}
+    </Card>
   );
 }
 

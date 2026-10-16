@@ -281,6 +281,10 @@ export function Logs({ host }: { host: Host }) {
   // bounded already, and the operator narrows what came back.
   const [search, setSearch] = useState("");
   const [matchIndex, setMatchIndex] = useState(0);
+  // A journal line is long, and a reader chasing a stack trace wants it
+  // folded rather than scrolled sideways. The panel being replaced wrapped
+  // by default and let the choice be made; so does this one.
+  const [wrap, setWrap] = useState(true);
 
   const stream = useJournalPreview(preview, paused);
 
@@ -782,6 +786,7 @@ export function Logs({ host }: { host: Host }) {
               >
                 ↓
               </Button>
+              <Check checked={wrap} onChange={setWrap}>{t("wrap lines")}</Check>
               <Button kind="quiet" disabled={!output?.length} onClick={download} testId="download">
                 {t("Download")}
               </Button>
@@ -795,22 +800,16 @@ export function Logs({ host }: { host: Host }) {
               ? <Empty icon="logs">{preview ? t("Waiting for the first lines…") : t("Nothing matched.")}</Empty>
               : (
                 <Stack>
-                  {/* The match is shown as its own line with its number: the
-                      whole block below stays exactly what the host wrote, so
-                      what is copied out of it is the host's own text. */}
-                  {currentLine >= 0 && (
-                    <Readout
-                      label={t("Match {n} of {total}, line {line}", {
-                        n: current + 1, total: matches.length, line: currentLine + 1,
-                      })}
-                      value={output[currentLine]}
-                      testId="current-match"
-                    />
-                  )}
+                  {/* What is sought is marked where it occurs: a search that
+                      can only say which line matched makes the reader do the
+                      finding a second time. */}
                   <Readout
                     label={preview ? t("The stream, newest at the foot") : t("What the host sent")}
                     value={output.join("\n")}
                     lines={24}
+                    highlight={search}
+                    atLine={currentLine >= 0 ? currentLine : undefined}
+                    wrap={wrap}
                     testId="log-output"
                   />
                 </Stack>

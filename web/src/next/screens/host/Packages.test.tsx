@@ -97,6 +97,9 @@ afterEach(() => {
   cleanup();
   sent.length = 0;
   for (const key of Object.keys(answers)) delete answers[key];
+  // The folded columns are this browser's; one test must not fold them
+  // for the next.
+  window.localStorage.clear();
 });
 
 describe("the software of one host", () => {
@@ -303,5 +306,42 @@ describe("reading what a package says about itself", () => {
     expect(jobTone("failed")).toBe("error");
     expect(jobTone("ineligible")).toBe("unknown");
     expect(jobTone("queued")).toBe("warn");
+  });
+});
+
+describe("what the package table kept from the panel being replaced", () => {
+  const listed = () => Object.assign(answers, {
+    ...quiet,
+    "/api/v1/hosts/h1/actions": allow(...EVERY),
+    "/api/v1/hosts/h1/inventory/packages": fragment({ manager: "apt", installed: 2 }),
+    "/api/v1/hosts/h1/packages": {
+      items: [
+        { name: "nginx", version: "1.24.0-1", architecture: "amd64", origin: "debian" },
+        { name: "htop", version: "3.2.2-2", architecture: "amd64", origin: "debian" },
+      ],
+      count: 2,
+      state: { package_count: 2 },
+    },
+  });
+
+  it("folds a column away and keeps the choice in this browser", async () => {
+    listed();
+    draw();
+    await waitFor(() => expect(screen.getByTestId("packages")).toBeInTheDocument());
+    expect(within(screen.getByTestId("packages")).getByText("Version")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("packages-columns"));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Version" }));
+    expect(within(screen.getByTestId("packages")).queryByText("Version")).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("fl.columns.host-packages")).toContain("version");
+  });
+
+  it("marks the row the card beside the table is about", async () => {
+    listed();
+    draw();
+    await waitFor(() => expect(screen.getByTestId("package-nginx")).toBeInTheDocument());
+    expect(screen.getByTestId("package-nginx")).not.toHaveClass("fl-row-marked");
+    fireEvent.click(within(screen.getByTestId("package-nginx")).getByRole("button", { name: "nginx" }));
+    await waitFor(() => expect(screen.getByTestId("package-nginx")).toHaveClass("fl-row-marked"));
+    expect(screen.getByTestId("package-htop")).not.toHaveClass("fl-row-marked");
   });
 });

@@ -224,6 +224,29 @@ export function deviceInUse(device: Device, devices: Device[]): boolean {
     other !== device && (other.parent === device.name || other.parent === device.path) && deviceInUse(other, devices));
 }
 
+/**
+ * How deep a device sits in the disk -> partition -> volume topology.
+ *
+ * A flat list of block devices says nothing about what sits on what, and
+ * the parent printed as a second line makes the reader rebuild the tree
+ * in their head. The depth is what the table sets the row in by. A
+ * parent is named either way round by lsblk, so both are followed, and
+ * the walk is bounded in case a holder chain points back at itself.
+ */
+export function deviceDepth(device: Device, devices: Device[]): number {
+  let depth = 0;
+  let at: Device | undefined = device;
+  const seen = new Set<string>();
+  while (at?.parent && depth < 8 && !seen.has(at.path)) {
+    seen.add(at.path);
+    const parent: string = at.parent;
+    at = devices.find((one) => one.name === parent || one.path === parent);
+    if (!at) break;
+    depth += 1;
+  }
+  return depth;
+}
+
 /** A mount point as lsblk prints it: "[SWAP]" is swap, the rest a path. */
 export function mountpointWords(mountpoint: string): string {
   return mountpoint === "[SWAP]" ? "swap" : mountpoint;
@@ -718,15 +741,19 @@ export function Storage({ host }: { host: Host }) {
               rowTestId={(one) => `device-${one.path}`}
               empty={t("This host reports no block device.")}
               columns={[
-                // The sub-line reflects the disk -> partition -> volume
-                // topology; the kit draws no tree and an indent of its own
-                // would be an appearance this module is not allowed to own.
-                { key: "path", head: t("Device"), tight: true, cell: (one) => (
-                  <TwoLine sub={one.parent ? t("on {parent}", { parent: one.parent }) : undefined}>
-                    {one.path}
-                    {one.read_only && <Pill>{t("read-only")}</Pill>}
-                  </TwoLine>
-                ) },
+                // The row is set in by the disk -> partition -> volume
+                // topology, which is how the panel being replaced drew it:
+                // the eye reads what sits on what without reading a word.
+                {
+                  key: "path", head: t("Device"), tight: true,
+                  indent: (one) => deviceDepth(one, devices),
+                  cell: (one) => (
+                    <>
+                      {one.path}
+                      {one.read_only && <Pill>{t("read-only")}</Pill>}
+                    </>
+                  ),
+                },
                 { key: "type", head: t("Type"), minor: true, cell: (one) => one.type },
                 { key: "size", head: t("Size"), num: true, cell: (one) => bytes(one.size_bytes) },
                 { key: "fs", head: t("Filesystem"), cell: (one) => (

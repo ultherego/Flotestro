@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import { Hosts } from "./Hosts";
 
@@ -14,6 +14,8 @@ import { Hosts } from "./Hosts";
  */
 
 const asked: string[] = [];
+/** The addresses the export asked the server for, through the panel's fetch. */
+const fetched: string[] = [];
 const posted: { path: string; body: unknown }[] = [];
 const answers: Record<string, unknown> = {};
 /** What the server refuses, by the address it is asked at. */
@@ -23,6 +25,16 @@ vi.mock("../../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/api")>();
   return {
     ...actual,
+    // The export goes through the panel's own fetch, which carries the
+    // session a bare <a download> would drop.
+    fetchWithCredentials: (url: string) => {
+      fetched.push(url);
+      return Promise.resolve({
+        ok: true,
+        headers: { get: () => null },
+        blob: () => Promise.resolve(new Blob(["hostname\n"])),
+      } as unknown as Response);
+    },
     api: {
       ...actual.api,
       get: (path: string) => {
@@ -72,14 +84,28 @@ function Where() {
   return <span data-testid="where">{`${location.pathname}${location.search}`}</span>;
 }
 
-function draw() {
+/* The screen sits on its own address, as it does in the panel: a list that
+   takes the reader somewhere else is gone by the time they arrive, and one
+   left mounted would go on writing its filters into the new address. */
+function draw(at = "/next/hosts") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter>{children}<Where /></MemoryRouter>
+      <MemoryRouter initialEntries={[at]}>
+        <Routes>
+          <Route path="/next/hosts" element={children} />
+          <Route path="*" element={null} />
+        </Routes>
+        <Where />
+      </MemoryRouter>
     </QueryClientProvider>
   );
   return render(<Hosts />, { wrapper });
+}
+
+/** The filters the old list folded away; they open on one press. */
+function openMoreFilters() {
+  fireEvent.click(screen.getByTestId("more-filters"));
 }
 
 /** What the signed-in reader may do; absent, they may only read. */
@@ -87,9 +113,16 @@ const whoami = (...permissions: string[]) => ({
   subject: "operator", kind: "user", roles: [], bindings: [], permissions,
 });
 
+/** A relay as the server names one: the filter sends nothing else. */
+const RELAY = "9f1c2d3e-4a5b-6c7d-8e9f-0a1b2c3d4e5f";
+
 afterEach(() => {
   cleanup();
+  // The folded columns and the page size are this browser's, and this
+  // browser is the same one in the next test.
+  window.localStorage.clear();
   asked.length = 0;
+  fetched.length = 0;
   posted.length = 0;
   for (const key of Object.keys(answers)) delete answers[key];
   for (const key of Object.keys(refusals)) delete refusals[key];
@@ -136,7 +169,11 @@ describe("the host list", () => {
     expect(busy).toHaveTextContent("3 security");
     // A host with nothing to report says so with a dash, not with an empty
     // cell that reads as a column that failed to draw.
-    expect(screen.getByTestId("host-clean").querySelectorAll(".fl-pill")).toHaveLength(1);
+    const clean = screen.getByTestId("host-clean");
+    expect(clean).toHaveTextContent("—");
+    expect(clean).not.toHaveTextContent("reboot");
+    expect(clean).not.toHaveTextContent("failed units");
+    expect(clean).not.toHaveTextContent("security");
   });
 
   it("narrows on the server, not in the browser", async () => {
@@ -178,7 +215,11 @@ describe("what the list can do to the hosts on it", () => {
     expect(screen.queryByRole("link", { name: "Add host" })).toBeNull();
     expect(screen.queryByLabelText("select agent-arch")).toBeNull();
     expect(screen.queryByTestId("set-metadata")).toBeNull();
+    // The route is still reachable - by identifier, typed - but the names
+    // of the relays belong to whoever may list them.
+    openMoreFilters();
     expect(screen.queryByTestId("filter-relay")).toBeNull();
+    expect(screen.getByTestId("filter-relay-id")).toBeInTheDocument();
   });
 
   it("ticks rows and takes them to the Bulk workspace", async () => {
@@ -303,24 +344,273 @@ describe("what the list can do to the hosts on it", () => {
     // Every listed tag has to be on the host, and the database decides
     // which ones do - not the page that happens to be loaded.
     await waitFor(() => expect(asked.some((one) => one.includes("tag=role%3Ddb"))).toBe(true));
-    expect(screen.getByTestId("clear-tags")).toHaveTextContent("role=db");
+    // What the list is narrowed by stands over it as a chip, with its own
+    // way off.
+    expect(screen.getByTestId("active-filters")).toHaveTextContent("role=db");
+    expect(screen.getByTestId("clear-tags")).toBeInTheDocument();
   });
 
   it("offers the route filter only to whoever may list the relays", async () => {
     Object.assign(answers, {
       ...two(),
       "/api/v1/whoami": whoami("host.enroll.read", "host.enroll.create"),
-      "/api/v1/relays": { items: [{ id: "r1", name: "relay-lab" }] },
+      "/api/v1/relays": { items: [{ id: RELAY, name: "relay-lab" }] },
     });
     draw();
-    await waitFor(() => expect(screen.getByTestId("filter-relay")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("link", { name: "Add host" })).toBeInTheDocument());
     expect(screen.getByRole("link", { name: "Add host" })).toHaveAttribute("href", "/next/hosts/new");
+    openMoreFilters();
+    expect(screen.getByTestId("filter-relay")).toBeInTheDocument();
     // The relays themselves arrive after the list: a route cannot be
     // chosen before the option that names it is there.
     await waitFor(() => expect(screen.getByRole("option", { name: "relay-lab" })).toBeInTheDocument());
     asked.length = 0;
-    fireEvent.change(screen.getByTestId("filter-relay"), { target: { value: "r1" } });
+    fireEvent.change(screen.getByTestId("filter-relay"), { target: { value: RELAY } });
     // The route narrows on the server like every other filter here.
-    await waitFor(() => expect(asked.some((one) => one.includes("relay=r1"))).toBe(true));
+    await waitFor(() => expect(asked.some((one) => one.includes(`relay=${RELAY}`))).toBe(true));
+  });
+});
+
+/**
+ * The chrome the list was read with in the panel being replaced: its
+ * twenty-odd filters, its order, its columns, its page and its export.
+ *
+ * Every one of them is the server's. A filter that sifted the page that
+ * happens to be loaded would answer over a hundred hosts out of ten
+ * thousand and look like an answer about the fleet.
+ */
+describe("the chrome of the list", () => {
+  const fleet = () => ({
+    "/api/v1/hosts": { items: [host({})], total: 1 },
+    "/api/v1/fleet/activity": activity,
+    "/api/v1/whoami": whoami(),
+    "/api/v1/teams": { items: [{ id: "t1", name: "platform" }] },
+  });
+
+  /** A filter chosen from a list or ticked: the server hears it at once. */
+  const CHOSEN: { name: string; testId: string; value: string; sent: string }[] = [
+    { name: "the system", testId: "filter-os-family", value: "arch", sent: "os_family=arch" },
+    { name: "the lifecycle", testId: "filter-lifecycle", value: "retired", sent: "lifecycle_state=retired" },
+    { name: "the maintenance window", testId: "filter-maintenance", value: "true", sent: "maintenance=true" },
+    { name: "the capability", testId: "filter-capability", value: "docker", sent: "capability=docker" },
+    { name: "the helper mode", testId: "filter-helper-mode", value: "enforce", sent: "helper_mode=enforce" },
+    { name: "the channel", testId: "filter-channel", value: "beta", sent: "channel=beta" },
+    { name: "the reboot", testId: "filter-reboot", value: "true", sent: "reboot_required=true" },
+    { name: "the security updates", testId: "filter-security", value: "true", sent: "security_updates=true" },
+    { name: "the team", testId: "filter-team", value: "none", sent: "team=none" },
+  ];
+
+  /** A filter typed into a box: the server hears it once the typing stops. */
+  const TYPED: { name: string; testId: string; value: string; sent: string }[] = [
+    { name: "the search", testId: "search", value: "agent-fed", sent: "q=agent-fed" },
+    { name: "the site", testId: "filter-site", value: "krk", sent: "site=krk" },
+    { name: "the environment", testId: "filter-environment", value: "prod", sent: "environment=prod" },
+    { name: "the owner", testId: "filter-owner", value: "platform", sent: "owner=platform" },
+    { name: "the tags", testId: "filter-tags", value: "role=db", sent: "tag=role%3Ddb" },
+    { name: "the directory domain", testId: "filter-identity-domain", value: "corp.example", sent: "identity_domain=corp.example" },
+    { name: "the failure domain", testId: "filter-failure-domain", value: "rack-a", sent: "failure_domain=rack-a" },
+  ];
+
+  /** A box ticked under "needs attention": one filter, by the label on it. */
+  const TICKED: { label: string; sent: string }[] = [
+    { label: "failed units", sent: "failed_units=true" },
+    { label: "package database broken", sent: "package_db_broken=true" },
+    { label: "SSSD offline", sent: "sssd_offline=true" },
+    { label: "agent behind", sent: "agent_behind=true" },
+  ];
+
+  it.each(CHOSEN)("narrows by $name on the server, and keeps it in the address", async ({ testId, value, sent }) => {
+    Object.assign(answers, fleet());
+    draw();
+    await waitFor(() => expect(screen.getByTestId("host-agent-arch")).toBeInTheDocument());
+    openMoreFilters();
+    // The systems are the fleet's own, so the option has to have arrived.
+    await waitFor(() => expect(screen.getByTestId(testId)).toBeInTheDocument());
+    asked.length = 0;
+    fireEvent.change(screen.getByTestId(testId), { target: { value } });
+    await waitFor(() => expect(asked.some((one) => one.includes(sent))).toBe(true));
+    // A narrowed list is a link: what narrows it is in the address.
+    expect(screen.getByTestId("where")).toHaveTextContent(sent);
+  });
+
+  it.each(TYPED)("narrows by $name on the server, and keeps it in the address", async ({ testId, value, sent }) => {
+    Object.assign(answers, fleet());
+    draw();
+    await waitFor(() => expect(screen.getByTestId("host-agent-arch")).toBeInTheDocument());
+    if (testId !== "search") openMoreFilters();
+    asked.length = 0;
+    fireEvent.change(screen.getByTestId(testId), { target: { value } });
+    await waitFor(() => expect(asked.some((one) => one.includes(sent))).toBe(true));
+    expect(screen.getByTestId("where")).toHaveTextContent(sent);
+  });
+
+  it.each(TICKED)("narrows to the hosts with $label, on the server", async ({ label, sent }) => {
+    Object.assign(answers, fleet());
+    draw();
+    await waitFor(() => expect(screen.getByTestId("host-agent-arch")).toBeInTheDocument());
+    openMoreFilters();
+    asked.length = 0;
+    fireEvent.click(screen.getByLabelText(label));
+    await waitFor(() => expect(asked.some((one) => one.includes(sent))).toBe(true));
+    expect(screen.getByTestId("where")).toHaveTextContent(sent);
+  });
+
+  it("narrows by the connection state, and says how many are in each", async () => {
+    Object.assign(answers, fleet());
+    draw();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Online 3/ })).toBeInTheDocument());
+    // Every state the old select offered, including the hosts nobody has
+    // heard a word from.
+    expect(screen.getByRole("button", { name: /Unknown 0/ })).toBeInTheDocument();
+    asked.length = 0;
+    fireEvent.click(screen.getByRole("button", { name: /Stale 0/ }));
+    await waitFor(() => expect(asked.some((one) => one.includes("connection_state=stale"))).toBe(true));
+    expect(screen.getByTestId("where")).toHaveTextContent("connection_state=stale");
+  });
+
+  it("carries a refusal handed to it in the address through to the server", async () => {
+    Object.assign(answers, fleet());
+    draw("/next/hosts?connection_refusal=certificate_expired");
+    await waitFor(() => expect(asked.some((one) => one.includes("connection_refusal=certificate_expired"))).toBe(true));
+    // And says in words what the list is narrowed by.
+    await waitFor(() => expect(screen.getByTestId("active-filters")).toHaveTextContent("certificate expired"));
+  });
+
+  it("will not send a relay identifier that is only half typed", async () => {
+    Object.assign(answers, { ...fleet(), "/api/v1/whoami": whoami() });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("host-agent-arch")).toBeInTheDocument());
+    openMoreFilters();
+    asked.length = 0;
+    fireEvent.change(screen.getByTestId("filter-relay-id"), { target: { value: "9f1c2d3e-4a5b" } });
+    // It stays in the address, because the reader typed it; it does not go
+    // to the server, which would refuse it and take the whole list with it.
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("relay=9f1c2d3e-4a5b"));
+    expect(asked.some((one) => one.includes("relay="))).toBe(false);
+    fireEvent.change(screen.getByTestId("filter-relay-id"), { target: { value: RELAY } });
+    await waitFor(() => expect(asked.some((one) => one.includes(`relay=${RELAY}`))).toBe(true));
+  });
+
+  it("orders the list on the server, and in the order it is told", async () => {
+    Object.assign(answers, fleet());
+    draw();
+    await waitFor(() => expect(screen.getByTestId("host-agent-arch")).toBeInTheDocument());
+    // Nothing asked for is nothing sent: the list's own order is the name.
+    expect(asked.some((one) => one.includes("sort="))).toBe(false);
+    asked.length = 0;
+    // The heading is the control, as it was in the panel being replaced,
+    // and the same heading a second time turns the order round.
+    fireEvent.click(screen.getByTestId("hosts-sort-seen"));
+    await waitFor(() => expect(asked.some((one) => one.includes("sort=last_seen_at"))).toBe(true));
+    await waitFor(() => expect(
+      screen.getByTestId("hosts-sort-seen").closest("th"),
+    ).toHaveAttribute("aria-sort", "ascending"));
+    asked.length = 0;
+    fireEvent.click(screen.getByTestId("hosts-sort-seen"));
+    await waitFor(() => expect(
+      asked.some((one) => decodeURIComponent(one).includes("sort=last_seen_at:desc")),
+    ).toBe(true));
+    await waitFor(() => expect(
+      screen.getByTestId("hosts-sort-seen").closest("th"),
+    ).toHaveAttribute("aria-sort", "descending"));
+    expect(screen.getByTestId("where")).toHaveTextContent("sort=last_seen_at%3Adesc");
+    // A column folded away takes its order with it, as it did before:
+    // owner starts folded, so it has no heading until it is unfolded.
+    expect(screen.queryByTestId("hosts-sort-owner")).toBeNull();
+    fireEvent.click(screen.getByTestId("hosts-columns"));
+    fireEvent.click(screen.getByLabelText("Owner"));
+    expect(screen.getByTestId("hosts-sort-owner")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Owner"));
+    expect(screen.queryByTestId("hosts-sort-owner")).toBeNull();
+  });
+
+  it("leaves out an order naming a column the server has not got", async () => {
+    Object.assign(answers, fleet());
+    draw("/next/hosts?sort=whatever");
+    await waitFor(() => expect(screen.getByTestId("host-agent-arch")).toBeInTheDocument());
+    expect(asked.some((one) => one.includes("sort="))).toBe(false);
+  });
+
+  it("folds a column away, and the browser remembers which", async () => {
+    Object.assign(answers, fleet());
+    draw();
+    await waitFor(() => expect(screen.getByTestId("host-agent-arch")).toBeInTheDocument());
+    // The owner is empty on most fleets until somebody records it, so the
+    // column starts folded - as it did in the panel being replaced.
+    expect(screen.queryByTestId("host-owner")).toBeNull();
+    fireEvent.click(screen.getByTestId("hosts-columns"));
+    fireEvent.click(screen.getByLabelText("Owner"));
+    await waitFor(() => expect(screen.getByTestId("host-owner")).toBeInTheDocument());
+    expect(JSON.parse(window.localStorage.getItem("fl.columns.next-hosts") ?? "[]")).not.toContain("owner");
+
+    // And it is still unfolded the next time the screen is opened.
+    cleanup();
+    draw();
+    await waitFor(() => expect(screen.getByTestId("host-owner")).toBeInTheDocument());
+  });
+
+  it("asks the server for as many rows as the reader chose, and remembers it", async () => {
+    Object.assign(answers, fleet());
+    draw();
+    await waitFor(() => expect(screen.getByTestId("host-agent-arch")).toBeInTheDocument());
+    asked.length = 0;
+    fireEvent.change(screen.getByTestId("page-size"), { target: { value: "25" } });
+    await waitFor(() => expect(asked.some((one) => one.includes("limit=25"))).toBe(true));
+    expect(window.localStorage.getItem("flotestro.page-size.hosts")).toBe("25");
+  });
+
+  it("exports the list that is on the screen, with the filter on it", async () => {
+    Object.assign(answers, fleet());
+    draw();
+    await waitFor(() => expect(screen.getByTestId("host-agent-arch")).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId("search"), { target: { value: "agent-fed" } });
+    await waitFor(() => expect(asked.some((one) => one.includes("q=agent-fed"))).toBe(true));
+    fireEvent.click(screen.getByTestId("export-csv"));
+    await waitFor(() => expect(fetched).toHaveLength(1));
+    // The screen's filter, as a file; the page the screen happens to be on
+    // is not part of the question.
+    expect(fetched[0]).toContain("/api/v1/hosts?");
+    expect(fetched[0]).toContain("q=agent-fed");
+    expect(fetched[0]).toContain("format=csv");
+    expect(fetched[0]).not.toContain("limit=");
+    expect(fetched[0]).not.toContain("cursor=");
+  });
+
+  it("says when it last read the list, and reads it again on request", async () => {
+    Object.assign(answers, fleet());
+    draw();
+    await waitFor(() => expect(screen.getByTestId("host-agent-arch")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("refreshed")).toHaveTextContent("refreshed"));
+    asked.length = 0;
+    fireEvent.click(screen.getByTestId("refresh-now"));
+    await waitFor(() => expect(asked.some((one) => one.startsWith("/api/v1/hosts?"))).toBe(true));
+  });
+
+  it("clears every filter at once, and leaves the order alone", async () => {
+    Object.assign(answers, fleet());
+    draw("/next/hosts?site=krk&sort=last_seen_at");
+    await waitFor(() => expect(screen.getByTestId("active-filters")).toHaveTextContent("krk"));
+    fireEvent.click(screen.getByTestId("clear-filters"));
+    await waitFor(() => expect(screen.queryByTestId("active-filters")).toBeNull());
+    expect(screen.getByTestId("where")).toHaveTextContent("sort=last_seen_at");
+    expect(screen.getByTestId("where")).not.toHaveTextContent("site=krk");
+  });
+
+  it("takes a count in the composition to the hosts it counted", async () => {
+    Object.assign(answers, fleet());
+    draw();
+    await waitFor(() => expect(screen.getByTestId("host-agent-arch")).toBeInTheDocument());
+    // The composition carries every dimension the old one did; "lab" is a
+    // site, and pressing it asks the server for that site alone.
+    asked.length = 0;
+    fireEvent.click(screen.getByRole("button", { name: "lab" }));
+    await waitFor(() => expect(asked.some((one) => one.includes("site=lab"))).toBe(true));
+  });
+
+  it("offers the enrolment to a reader with nothing to look at", async () => {
+    Object.assign(answers, { ...fleet(), "/api/v1/hosts": { items: [] }, "/api/v1/whoami": whoami("host.enroll.create") });
+    draw();
+    await waitFor(() => expect(screen.getByText("No host matches the filters.")).toBeInTheDocument());
+    expect(screen.getAllByRole("link", { name: "Add host" })[0]).toHaveAttribute("href", "/next/hosts/new");
   });
 });

@@ -211,7 +211,7 @@ describe("the jobs module of a host", () => {
     expect(screen.queryByTestId("cancel-j5")).toBeNull();
   });
 
-  it("opens the attempts of a job beside the list, with the way to its journal", async () => {
+  it("opens the attempts of a job under its own row, with the way to its journal", async () => {
     Object.assign(answers, {
       "/api/v1/settings/layout": layout,
       "/api/v1/actions": contracts,
@@ -231,6 +231,13 @@ describe("the jobs module of a host", () => {
     expect(screen.getByTestId("stdout-at1")).toHaveTextContent("restarted sshd.service");
     expect(screen.getByRole("link", { name: /Read the journal of this job/ }))
       .toHaveAttribute("href", "/next/hosts/h1/logs?job=j1");
+    // Under the job's own row, across the whole width, which is where the
+    // panel being replaced opened it.
+    const row = screen.getByTestId("job-j1");
+    expect(row.nextElementSibling).toHaveClass("fl-row-detail");
+    expect(row.nextElementSibling?.contains(screen.getByTestId("stdout-at1"))).toBe(true);
+    expect(row.nextElementSibling?.querySelector("td")?.getAttribute("colspan"))
+      .toBe(String(row.querySelectorAll("td").length));
   });
 });
 

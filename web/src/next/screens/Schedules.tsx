@@ -9,8 +9,8 @@ import { useT, type Translate } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Kpi, Kpis,
-  Modal, Note, Pill, Presets, Problem, Row, Stack, Table, Toolbar, type Tone,
+  Actions, Banner, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Kpi, Kpis,
+  Modal, Note, Pill, Presets, Problem, Row, Stack, Table, Toolbar, TwoLine, type Tone,
 } from "../kit";
 import { campaignTone } from "./Campaigns";
 
@@ -403,6 +403,28 @@ export function calendarRows(entries: CalendarEntry[], year: number, month: numb
     list.forEach((entry, index) => out.push({ day, date, entry, index }));
   }
   return out;
+}
+
+/** One square of the month: the date, whether it belongs to it, and what stands on it. */
+export type CalendarDay = { date: Date; day: string; inMonth: boolean; entries: CalendarEntry[] };
+
+/**
+ * The month as weeks of seven days, Monday first, every day carrying what
+ * stands on it.
+ *
+ * The days of the neighbouring months are drawn to fill the week out and
+ * carry nothing: the server was asked about this month, so an entry on
+ * one of them would be an entry nobody asked about.
+ */
+export function monthDays(entries: CalendarEntry[], year: number, month: number): CalendarDay[][] {
+  const from = new Date(year, month, 1);
+  const to = new Date(year, month + 1, 1);
+  const byDay = entriesByDay(entries, from, to);
+  return monthGrid(year, month).map((week) => week.map((date) => {
+    const day = dayKey(date);
+    const inMonth = date.getMonth() === month && date.getFullYear() === year;
+    return { date, day, inMonth, entries: inMonth ? byDay.get(day) ?? [] : [] };
+  }));
 }
 
 /** What a destructive answer is being asked about. */
@@ -864,6 +886,9 @@ export function Schedules() {
             title={t("Maintenance calendar")}
             flush
             note={t("Hosts in maintenance, campaign windows and the moments of the schedules, in the browser's zone.")}
+            foot={entries !== undefined && calendarRows(entries, month.year, month.month).length === 0
+              ? t("Nothing is planned in this month.")
+              : undefined}
           >
             <Toolbar
               end={
@@ -882,7 +907,7 @@ export function Schedules() {
             {calendar.error ? (
               <Problem>{String(calendar.error)}</Problem>
             ) : (
-              <MonthRows year={month.year} month={month.month} entries={entries} />
+              <MonthView year={month.year} month={month.month} entries={entries} />
             )}
           </Card>
         ),
@@ -953,88 +978,91 @@ export function Schedules() {
 }
 
 /**
- * The month as rows: a day, what stands on it, and when.
+ * The month, read across: seven columns of weekdays and a row per week.
  *
- * The screen it replaces drew seven columns of its own. The kit has one
- * table and no month grid, and a screen that writes a grid is the thing
- * the kit exists to stop; so the month is read down instead of across,
- * with every day that carries something and nothing of the days that do
- * not.
+ * A list of days is not a month - the owner reads this one the way a
+ * calendar is read, and the shape of the month is half of what it says.
+ * It is still only kit pieces: the panel's one `Table`, seven columns
+ * wide, with a day of the month in each cell. Nothing here writes a
+ * grid, a width or a colour of its own.
  */
-function MonthRows({ year, month, entries }: { year: number; month: number; entries?: CalendarEntry[] }) {
+function MonthView({ year, month, entries }: { year: number; month: number; entries?: CalendarEntry[] }) {
   const t = useT();
-  const rows = calendarRows(entries ?? [], year, month);
   const today = dayKey(new Date());
   const names = [t("Mon"), t("Tue"), t("Wed"), t("Thu"), t("Fri"), t("Sat"), t("Sun")];
-  const time = (value?: string | null) => value ? absoluteTime(value).slice(11, 16) : "";
+  // The month has not arrived: the shape of it, not the word "Loading…",
+  // and not a month of empty squares that reads as a month with nothing on.
+  if (entries === undefined) return <Bones rows={6} height={64} />;
+  const weeks = monthDays(entries, year, month);
   return (
     <Table
-      rows={rows}
-      keyOf={(one) => `${one.day}-${one.entry.kind}-${one.entry.id}-${one.index}`}
-      loading={entries === undefined}
+      rows={weeks}
+      keyOf={(week) => `week-${week[0].day}`}
       testId="calendar"
-      rowTestId={(one) => `day-${one.day}`}
-      empty={t("Nothing is planned in this month.")}
-      columns={[
-        {
-          key: "day",
-          head: t("Day"),
-          cell: (one) => (
-            // Only the first entry of a day repeats the date: a column of
-            // the same number eleven times reads as eleven days.
-            one.index > 0 ? <span className="fl-faint">·</span> : (
-              <span className="fl-nowrap">
-                {`${names[(one.date.getDay() + 6) % 7]} ${one.date.getDate()}`}
-                {one.day === today && <> <Pill tone="accent">{t("today")}</Pill></>}
-              </span>
-            )
-          ),
-        },
-        {
-          key: "kind",
-          head: t("What"),
-          cell: (one) => (
-            <Pill tone={entryTone(one.entry)} title={entryTitle(t, one.entry)}>
-              {kindWord(t, one.entry.kind)}
-            </Pill>
-          ),
-        },
-        {
-          key: "name",
-          head: t("Name"),
-          cell: (one) => {
-            const to = entryLink(one.entry);
-            return to
-              ? <Link to={to} title={entryTitle(t, one.entry)}>{one.entry.name}</Link>
-              : <span title={entryTitle(t, one.entry)}>{one.entry.name}</span>;
-          },
-        },
-        {
-          key: "when",
-          head: t("At"),
-          minor: true,
-          cell: (one) => (
-            // A window that began before this day has no hour on it: the
-            // hour it opened belongs to the day it opened on.
-            startsOn(one.entry, one.day) || one.entry.kind === "schedule"
-              ? <span className="fl-nowrap">{time(one.entry.start)}</span>
-              : <span className="fl-faint">{t("runs through")}</span>
-          ),
-        },
-        {
-          key: "why",
-          head: t("Detail"),
-          minor: true,
-          tight: true,
-          cell: (one) => {
-            const detail = one.entry.kind === "host_window"
-              ? [one.entry.reason, one.entry.set_by].filter(Boolean).join(" · ")
-              : one.entry.state ?? "";
-            return detail ? <span title={detail}>{detail}</span> : <span className="fl-faint">—</span>;
-          },
-        },
-      ]}
+      rowTestId={(week) => `week-${week[0].day}`}
+      columns={names.map((name, column) => ({
+        // No weekday is `minor`: a month missing its Saturday on a narrow
+        // screen is not a month.
+        key: WEEKDAYS[column],
+        head: name,
+        cell: (week: CalendarDay[]) => <DayCell day={week[column]} today={today} />,
+      }))}
     />
+  );
+}
+
+/** One square of the month: its number, and everything standing on it. */
+function DayCell({ day, today }: { day: CalendarDay; today: string }) {
+  const t = useT();
+  // A day of the neighbouring month fills the week out and says nothing:
+  // the server was asked about this month only.
+  if (!day.inMonth) return null;
+  return (
+    <div data-testid={`day-${day.day}`}>
+      <Stack>
+        <span className="fl-nowrap">
+          {day.date.getDate()}
+          {day.day === today && <> <Pill tone="accent">{t("today")}</Pill></>}
+        </span>
+        {day.entries.map((entry, index) => (
+          <DayEntry key={`${entry.kind}-${entry.id}-${index}`} entry={entry} day={day.day} />
+        ))}
+      </Stack>
+    </div>
+  );
+}
+
+/**
+ * One thing standing on one day: what kind it is, when, what it is called
+ * and where it leads.
+ *
+ * Every word the flattened list carried is here - the kind, the hour, the
+ * name, the link and the whole of it in the title - because the month was
+ * not meant to cost the reader any of them.
+ */
+function DayEntry({ entry, day }: { entry: CalendarEntry; day: string }) {
+  const t = useT();
+  const title = entryTitle(t, entry);
+  const to = entryLink(entry);
+  // A window that began before this day has no hour on it: the hour it
+  // opened belongs to the day it opened on.
+  const opens = startsOn(entry, day) || entry.kind === "schedule";
+  const at = entry.start ? absoluteTime(entry.start).slice(11, 16) : "";
+  const detail = entry.kind === "host_window"
+    ? [entry.reason, entry.set_by].filter(Boolean).join(" · ")
+    : entry.state ?? "";
+  return (
+    <TwoLine sub={detail || undefined}>
+      <Pill tone={entryTone(entry)} title={title}>{kindWord(t, entry.kind)}</Pill>
+      {" "}
+      {opens
+        ? <span className="fl-nowrap">{at}</span>
+        : <span className="fl-faint">{t("runs through")}</span>}
+      {" "}
+      {to
+        ? <Link to={to} title={title}>{entry.name}</Link>
+        : <span title={title}>{entry.name}</span>}
+    </TwoLine>
   );
 }
 

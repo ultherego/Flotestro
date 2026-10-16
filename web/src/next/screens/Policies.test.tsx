@@ -144,8 +144,36 @@ describe("the policy list", () => {
     const row = screen.getByTestId("policy-baseline-cron");
     expect(within(row).getByRole("link", { name: "baseline-cron" })).toHaveAttribute("href", "/next/policies/p1");
     expect(row).toHaveTextContent("v1");
-    expect(row).toHaveTextContent("7 compliant");
-    expect(row).toHaveTextContent("2 drift");
+    const bar = within(row).getByTestId("compliance-p1");
+    expect(within(bar).getByText("compliant")).toBeInTheDocument();
+    expect(within(bar).getByText("7")).toBeInTheDocument();
+    expect(within(bar).getByText("drift")).toBeInTheDocument();
+    expect(within(bar).getByText("2")).toBeInTheDocument();
+  });
+
+  /**
+   * The compliance of a policy is read down the column, which is what a
+   * bar can do and a row of pills cannot: the widths say at a glance
+   * which policy the fleet is furthest from. The old list had one, the
+   * first draft of this one gave it up for four tinted pills, and this
+   * holds it here.
+   */
+  it("draws the compliance of a policy as one stacked bar, wide in proportion to the verdicts", async () => {
+    Object.assign(answers, {
+      "/api/v1/policies": { items: [policy()] },
+      "/api/v1/whoami": nothing,
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("policy-baseline-cron")).toBeInTheDocument());
+    const bar = screen.getByTestId("compliance-p1");
+    // One piece per verdict that has a count, in the fixed order, each
+    // as wide as its share of the ten verdicts.
+    const pieces = within(bar).getAllByRole("listitem");
+    expect(pieces.map((one) => one.getAttribute("title"))).toEqual(["compliant", "drift", "not applicable"]);
+    expect(pieces[0]).toHaveStyle({ "--fl-share": String(7 / 10) });
+    expect(pieces[1]).toHaveStyle({ "--fl-share": String(2 / 10) });
+    // And the counts are still readable on it.
+    expect(pieces.map((one) => one.textContent)).toEqual(["7compliant", "2drift", "1not applicable"]);
   });
 
   it("says a policy nobody evaluated is unevaluated, not wholly compliant", async () => {

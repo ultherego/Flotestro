@@ -987,8 +987,15 @@ function InstalledPackages({ host, packages, busy, reading, onRead, onHold, onRe
                   rows={paged}
                   keyOf={key}
                   rowTestId={(row) => `package-${row.name}`}
+                  /* The chosen row is marked: the card of what can be done
+                     to it sits beside the table, and without the mark it
+                     belongs to no row the reader can see. */
+                  marked={(row) => key(row) === selected}
                   testId="packages"
                   empty={t("No package matches.")}
+                  /* The columns an operator folds away are this browser's;
+                     the name of the package is the row and always stays. */
+                  remember="fl.columns.host-packages"
                   columns={[
                     {
                       key: "name", head: t("Package"), tight: true, cell: (row) => (
@@ -1003,12 +1010,18 @@ function InstalledPackages({ host, packages, busy, reading, onRead, onHold, onRe
                         </Button>
                       ),
                     },
-                    { key: "version", head: t("Version"), tight: true, cell: (row) => packageVersion(row) },
+                    {
+                      key: "version", head: t("Version"), tight: true, optional: true,
+                      cell: (row) => packageVersion(row),
+                    },
                     ...(showArchitecture
-                      ? [{ key: "architecture", head: t("Architecture"), minor: true, cell: (row: PackageRow) => row.architecture || "—" }]
+                      ? [{
+                        key: "architecture", head: t("Architecture"), minor: true, optional: true,
+                        cell: (row: PackageRow) => row.architecture || "—",
+                      }]
                       : []),
                     {
-                      key: "source", head: t("Source"), minor: true, cell: (row) => (
+                      key: "source", head: t("Source"), minor: true, optional: true, cell: (row) => (
                         <span title={row.origin || undefined}>
                           {row.repository_id || row.origin || originWords(t, row.origin_class)}
                         </span>
@@ -1021,7 +1034,8 @@ function InstalledPackages({ host, packages, busy, reading, onRead, onHold, onRe
                     ...(showPlan
                       ? [
                         {
-                          key: "candidate", head: t("Upgrade to"), tight: true, cell: (row: PackageRow) => (
+                          key: "candidate", head: t("Upgrade to"), tight: true, optional: true,
+                          cell: (row: PackageRow) => (
                             <span title={row.candidateOrigin || undefined}>
                               {row.candidate ?? "—"}
                               {row.action && row.action !== "upgrade" && <Pill tone="warn">{t(row.action)}</Pill>}
@@ -1029,14 +1043,14 @@ function InstalledPackages({ host, packages, busy, reading, onRead, onHold, onRe
                           ),
                         },
                         {
-                          key: "security", head: t("Security"), cell: (row: PackageRow) => (
+                          key: "security", head: t("Security"), optional: true, cell: (row: PackageRow) => (
                             row.security ? <Pill tone="error">{t("security")}</Pill> : "—"
                           ),
                         },
                       ]
                       : []),
                     {
-                      key: "held", head: t("Held"), cell: (row) => (
+                      key: "held", head: t("Held"), optional: true, cell: (row) => (
                         row.held === true
                           ? <Pill tone="warn">{t("held")}</Pill>
                           : row.held === undefined
@@ -1327,7 +1341,7 @@ function Repositories({ hostID, view, open, onOpen, onIntent }: {
             ),
           },
           {
-            key: "actions", head: t("Actions"), actions: true, cell: (source) => (
+            key: "actions", head: t("Actions"), actions: true, optional: true, cell: (source) => (
               <Guard action="packages.repository.set" host={hostID}>
                 <Button
                   kind="quiet"

@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import {
-  Storage, byIdName, carriesData, destructiveRefusal, deviceInUse, hasStableIdentity, identity,
+  Storage, byIdName, carriesData, destructiveRefusal, deviceDepth, deviceInUse, hasStableIdentity, identity,
   isSnapshot, memberRefusal, mountOrder, mountPlanBinding, mountRows, mountpointWords,
   storageSuggestions, usageTone,
 } from "./Storage";
@@ -336,5 +336,35 @@ describe("what the storage module works out on its own", () => {
       expected_serial: "S1234",
       expected_uuid: "",
     });
+  });
+});
+
+describe("the topology the device list kept from the panel being replaced", () => {
+  const sdb = disk({ name: "sdb", path: "/dev/sdb", type: "disk" });
+  const part = disk({ name: "sdb1", path: "/dev/sdb1", type: "part", parent: "sdb", size_bytes: 1000 });
+  const vol = disk({ name: "vg-data", path: "/dev/mapper/vg-data", type: "lvm", parent: "sdb1", size_bytes: 500 });
+
+  it("counts a disk, a partition on it and a volume on that as three depths", () => {
+    const all = [sdb, part, vol];
+    expect(deviceDepth(sdb, all)).toBe(0);
+    expect(deviceDepth(part, all)).toBe(1);
+    expect(deviceDepth(vol, all)).toBe(2);
+  });
+
+  it("stops rather than walking for ever when a parent points back at itself", () => {
+    const loop = disk({ name: "a", path: "/dev/a", parent: "b" });
+    const back = disk({ name: "b", path: "/dev/b", parent: "a" });
+    expect(deviceDepth(loop, [loop, back])).toBeLessThanOrEqual(8);
+  });
+
+  it("sets each row in by its depth, so disk -> partition -> volume is visible", async () => {
+    base({ mounts: [], devices: [sdb, part, vol] });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("device-/dev/sdb")).toBeInTheDocument());
+    const depth = (path: string) =>
+      screen.getByTestId(`device-${path}`).querySelector(".fl-indent")?.getAttribute("data-depth");
+    expect(depth("/dev/sdb")).toBe("0");
+    expect(depth("/dev/sdb1")).toBe("1");
+    expect(depth("/dev/mapper/vg-data")).toBe("2");
   });
 });

@@ -1,8 +1,0 @@
-  "Open the job": "Otwórz zadanie",
-  "A {mode} is already scheduled on this host for {when}.": "Na tym hoście zaplanowano już {mode} na {when}.",
-  "{n} of them blocking": "w tym blokujących: {n}",
-  "nothing asks for one": "nic go nie wymaga",
-  "block": "blokuje",
-  "A reboot is finished only when the host comes back with a new boot ID; a shutdown is never finished here, because nothing in this panel can turn the machine back on.": "Restart jest zakończony dopiero wtedy, gdy host wróci z nowym boot ID; wyłączenie nie kończy się tutaj nigdy, bo nic w tym panelu nie włączy maszyny z powrotem.",
-  "Both are delayed 15 seconds on the host, so whoever is logged in sees the warning.": "Oba są na hoście opóźnione o 15 sekund, żeby zalogowani zdążyli zobaczyć ostrzeżenie.",
-  "The journal numbers boots back from the current one: 0 is this boot, -1 the one before.": "Journal numeruje bootowania wstecz od bieżącego: 0 to ten boot, -1 poprzedni.",

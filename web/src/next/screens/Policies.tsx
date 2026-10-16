@@ -19,7 +19,7 @@ import { FacetList, useFleetFacets } from "../../pages/Bulk";
 import { campaignTone } from "./Campaigns";
 import {
   Actions, Band, Banner, Bones, Button, Card, Check, Download, Empty, Fact, Facts, Field, Fields,
-  HeadActions, Kpi, Modal, Note, Pill, Problem, Stack, Table, Tags, Toolbar, TwoLine,
+  HeadActions, Kpi, Modal, Note, Pill, Problem, Stack, Table, Toolbar, TwoLine,
   type Segment, type Tone,
 } from "../kit";
 
@@ -446,7 +446,11 @@ export function Policies() {
                 { key: "version", head: t("Version"), cell: (one) => <Standing policy={one} /> },
                 { key: "mode", head: t("Remediation"), minor: true, cell: (one) => modeLabel(one.remediation_mode, t) },
                 { key: "rules", head: t("Rules"), num: true, cell: (one) => one.rules.length },
-                { key: "compliance", head: t("Compliance"), cell: (one) => <Compliance counts={one.counts} /> },
+                {
+                  key: "compliance",
+                  head: t("Compliance"),
+                  cell: (one) => <Compliance counts={one.counts} testId={`compliance-${one.id}`} />,
+                },
                 {
                   key: "evaluated",
                   head: t("Last evaluated"),
@@ -631,19 +635,31 @@ export function Standing({ policy }: { policy: Pick<Policy, "version" | "draft" 
   }
 }
 
-/** The verdicts of a policy as one pill per verdict that has a count. */
-export function Compliance({ counts }: { counts: Policy["counts"] | undefined }) {
+/**
+ * The verdicts of a policy as one stacked bar, compliant first and the
+ * rest in the fixed order, each piece as wide as its share and carrying
+ * its own count.
+ *
+ * A row of pills says the same numbers and loses the thing the bar was
+ * for: a column of them cannot be read down. The widths can, which is
+ * why the list the owner reads has always had a bar here.
+ */
+export function Compliance({ counts, testId }: {
+  counts: Policy["counts"] | undefined;
+  testId?: string;
+}) {
   const t = useT();
   const segments = complianceShares(counts);
   if (segments.length === 0) return <Pill tone="unknown">{t("not evaluated")}</Pill>;
   return (
-    <Tags>
-      {segments.map((segment) => (
-        <Pill key={segment.verdict} tone={verdictTone(segment.verdict)}>
-          {t("{n} {verdict}", { n: segment.count, verdict: verdictLabel(segment.verdict, t) })}
-        </Pill>
-      ))}
-    </Tags>
+    <Band
+      testId={testId}
+      segments={segments.map((segment): Segment => ({
+        label: verdictLabel(segment.verdict, t),
+        value: segment.count,
+        tone: verdictTone(segment.verdict),
+      }))}
+    />
   );
 }
 

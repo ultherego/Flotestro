@@ -140,6 +140,33 @@ describe("the trail", () => {
     await waitFor(() => expect(asked.some((one) => one.includes("outcome=denied"))).toBe(true));
   });
 
+  it("carries the approval and the changed fields under the row, unasked", async () => {
+    Object.assign(answers, {
+      "/api/v1/audit": {
+        items: [
+          event({
+            id: 7,
+            action: "host.owner",
+            before: { owner: "tszymanski", site: "lab" },
+            after: { owner: "akowalska", site: "lab" },
+            approval_chain: { created_by: "tszymanski", approvers: ["akowalska"] },
+          }),
+          event({ id: 8, action: "host.read" }),
+        ],
+        count: 2,
+      },
+    });
+    draw();
+    // Read on the way past: the trail is scanned before anything is opened.
+    const line = await screen.findByTestId("under-7");
+    expect(line).toHaveTextContent("Ordered by tszymanski");
+    expect(line).toHaveTextContent("owner");
+    expect(line).toHaveTextContent("akowalska");
+    expect(line).not.toHaveTextContent("site");
+    // An event that approved nothing and moved nothing says nothing.
+    expect(screen.queryByTestId("under-8")).toBeNull();
+  });
+
   it("opens an event into both sides of what it changed", async () => {
     Object.assign(answers, {
       "/api/v1/audit": {
@@ -157,7 +184,7 @@ describe("the trail", () => {
     });
     draw();
     await waitFor(() => expect(screen.getByTestId("open-7")).toBeInTheDocument());
-    expect(screen.getByText("Open an event to read everything the trail kept about it.")).toBeInTheDocument();
+    expect(screen.queryByTestId("changes")).toBeNull();
     fireEvent.click(screen.getByTestId("open-7"));
     const changes = await screen.findByTestId("changes");
     // Only what differs: the site stood still and is not a change.
@@ -165,7 +192,61 @@ describe("the trail", () => {
     expect(changes).toHaveTextContent("tszymanski");
     expect(changes).toHaveTextContent("akowalska");
     expect(changes).not.toHaveTextContent("site");
-    expect(screen.getByText(/Ordered by tszymanski/)).toBeInTheDocument();
+    // Twice over: the row carries it unasked, and the open event repeats
+    // it among the rest of what the trail kept.
+    expect(screen.getAllByText(/Ordered by tszymanski/)).toHaveLength(2);
+  });
+
+  /**
+   * The event opens under the row it belongs to, across the width of the
+   * list - which is where the panel being replaced read it. A card
+   * elsewhere on the board makes the reader hunt for the thing they just
+   * clicked, and the row they were on scrolls away while they do.
+   */
+  it("opens the event under its own row, and closes it again from there", async () => {
+    Object.assign(answers, {
+      "/api/v1/audit": {
+        items: [
+          event({ id: 7, action: "host.owner", before: { owner: "a" }, after: { owner: "b" } }),
+          event({ id: 8, action: "job.create" }),
+        ],
+        count: 2,
+      },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("open-7")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("open-7"));
+
+    const detail = await screen.findByTestId("changes");
+    // The detail is a row of the events table, not a card beside it.
+    const opened = detail.closest("tr.fl-row-detail");
+    expect(opened).not.toBeNull();
+    expect(opened?.closest("table")).toBe(screen.getByTestId("events"));
+    // And it stands directly under the row it belongs to.
+    expect(opened?.previousElementSibling).toBe(screen.getByTestId("event-7"));
+
+    fireEvent.click(screen.getByTestId("open-7"));
+    await waitFor(() => expect(screen.queryByTestId("changes")).toBeNull());
+  });
+
+  /**
+   * An incident is read key by key, and the field somebody opens an
+   * event for is often one the panel has no sentence about. The record
+   * itself stands under the facts, as it did on the old screen.
+   */
+  it("keeps the whole record under the facts, verbatim", async () => {
+    Object.assign(answers, {
+      "/api/v1/audit": {
+        items: [event({ id: 11, action: "job.create", detail: { odd_field: "nobody wrote a sentence for this" } })],
+        count: 1,
+      },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("open-11")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("open-11"));
+    const record = await screen.findByTestId("event-record-11");
+    expect(record).toHaveTextContent("odd_field");
+    expect(record).toHaveTextContent("nobody wrote a sentence for this");
   });
 
   it("says a refusal to read the trail in words, rather than drawing an empty list", async () => {

@@ -17,8 +17,7 @@ import { toLocalInput } from "./Audit";
 import { Board } from "../Board";
 import { useT } from "../../i18n";
 import {
-  Band, Bars, Bones, Card, Download, Empty, Fact, Facts, Field, Fields, Note, Pill,
-  Problem, Screen, Seg, type Segment, Stack, Table, type Tone, TwoLine,
+  Band, Bars, Bones, Card, Download, Empty, Fact, Facts, Field, Fields, Note, Pill, Problem, Screen, Seg, Stack, Table, TwoLine, printPage, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -266,7 +265,7 @@ export function Reports() {
         </p>
       }
       actions={
-        <button type="button" className="fl-quiet" onClick={() => window.print()} disabled={!ready}>
+        <button type="button" className="fl-quiet" onClick={printPage} disabled={!ready}>
           {t("Print")}
         </button>
       }
@@ -540,10 +539,17 @@ function CampaignsCard({ report, error, ready, params }: {
 }) {
   const t = useT();
   const totals = report?.totals;
-  // A month of a busy fleet closes a hundred campaigns; the screen shows the
-  // first rows in the server's order and unfolds the rest on request, while
-  // the file always carries them all.
-  const [unfolded, setUnfolded] = useState(false);
+  /* Every campaign of the period is on the page, and that is the point:
+     what is not in the document is not on the paper either, and this
+     report is printed. The panel this replaces kept every row for that
+     reason and the first draft of this one dropped all but the first
+     twenty-five, so a printed month of a busy fleet stopped at row 25
+     with nothing to say it had.
+
+     The reader may still fold it back to the first rows for a quick
+     read; the table scrolls inside its own card either way, and the
+     file carries them all whatever is folded. */
+  const [unfolded, setUnfolded] = useState(true);
   const all = report?.campaigns ?? [];
   const folded = Math.max(0, all.length - FOLDED_ROWS);
   const rows = unfolded ? all : all.slice(0, FOLDED_ROWS);
@@ -557,8 +563,8 @@ function CampaignsCard({ report, error, ready, params }: {
           ? (
             <>
               {unfolded
-                ? t("All {n} campaigns are shown.", { n: all.length })
-                : t("The first {shown} of {total} campaigns are shown; the file carries them all.", { shown: FOLDED_ROWS, total: all.length })}
+                ? t("All {n} campaigns are shown, so a printed copy carries them all.", { n: all.length })
+                : t("The first {shown} of {total} campaigns are shown; the file carries them all, a printed copy only these.", { shown: FOLDED_ROWS, total: all.length })}
               <button type="button" className="fl-quiet fl-small" onClick={() => setUnfolded(!unfolded)}
                       data-testid="campaigns-fold">
                 {unfolded ? t("Show the first {n} only", { n: FOLDED_ROWS }) : t("Show all {n}", { n: all.length })}

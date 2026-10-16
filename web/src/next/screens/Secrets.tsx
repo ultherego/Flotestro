@@ -347,12 +347,6 @@ function SecretStore() {
           </C>
         )}
 
-        {rotating && canWrite && (
-          <C span={12}>
-            <RotateSecret key={rotating.name} secret={rotating} onDone={settled} onCancel={() => setAside(null)} />
-          </C>
-        )}
-
         <Card
           span={12}
           title={t("Secrets")}
@@ -378,6 +372,14 @@ function SecretStore() {
               keyOf={(one) => one.id}
               rowTestId={(one) => `secret-${one.name}`}
               testId="secrets-table"
+              /* The rotation belongs under the secret it rotates: the panel
+                 being replaced opened it in a second row there, and a card
+                 elsewhere on the page leaves the reader checking which
+                 secret the form in front of them is about. */
+              opened={(one) => rotating?.name === one.name && canWrite}
+              detail={(one) => (
+                <RotateSecret key={one.name} secret={one} onDone={settled} onCancel={() => setAside(null)} />
+              )}
               empty={secrets.length === 0
                 ? t("No secrets are stored in this installation. A secret is a value a job may be handed on one host for one run; nothing here can read it back afterwards.")
                 : t("No secret matches the search.")}
@@ -428,16 +430,19 @@ function SecretStore() {
                           {copied === one.name ? t("Copied") : failed === one.name ? t("Copy by hand") : t("Copy reference")}
                         </button>
                       )}
+                      {/* The button that opens the row closes it again,
+                          because the form is in the row it opened. */}
                       {!one.retired_at && canWrite && (
                         <button
                           type="button"
                           className="fl-quiet fl-small"
-                          onClick={() => setAside({ kind: "rotate", name: one.name })}
-                          disabled={aside !== null}
-                          aria-label={t("Rotate {name}", { name: one.name })}
+                          onClick={() => setAside(rotating?.name === one.name ? null : { kind: "rotate", name: one.name })}
+                          disabled={aside !== null && rotating?.name !== one.name}
+                          aria-expanded={rotating?.name === one.name}
+                          aria-label={rotating?.name === one.name ? undefined : t("Rotate {name}", { name: one.name })}
                           data-testid={`rotate-${one.name}`}
                         >
-                          {t("Rotate")}
+                          {rotating?.name === one.name ? t("Close") : t("Rotate")}
                         </button>
                       )}
                       {!one.retired_at && canDestroy && (

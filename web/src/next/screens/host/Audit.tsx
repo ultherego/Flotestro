@@ -146,7 +146,6 @@ export function Audit({ host }: { host: Host }) {
   }, {})).sort((a, b) => b.count - a.count).slice(0, 8);
 
   const rows = events ?? [];
-  const chosen = rows.find((one) => one.id === opened);
   const listed = filtered
     ? t("The {n} listed events on this host that match the filter, by how they ended.", { n: rows.length })
     : t("The last {n} events on this host, by how they ended.", { n: loaded ? rows.length : AUDIT_PAGE });
@@ -259,6 +258,19 @@ export function Audit({ host }: { host: Host }) {
             rows={rows}
             keyOf={(one) => String(one.id)}
             rowTestId={(one) => `event-${one.id}`}
+            /* The whole record opens under the event it belongs to, as the
+               panel being replaced opened it: the row shows five columns,
+               and an incident wants every key of what the trail kept. */
+            opened={(one) => one.id === opened}
+            detail={(one) => (
+              <Readout
+                label={t("The event as the trail wrote it")}
+                value={JSON.stringify(one, null, 2)}
+                lines={24}
+                wrap
+                testId="record"
+              />
+            )}
             testId="events"
             loading={trail.isLoading}
             empty={filtered ? t("No event matches the filter.") : t("No events.")}
@@ -291,25 +303,6 @@ export function Audit({ host }: { host: Host }) {
               ) },
             ]}
           />
-        </Card>
-      ),
-      event: (
-        <Card
-          title={t("The record")}
-          note={chosen ? t("Event {id}, as the trail keeps it.", { id: chosen.id }) : undefined}
-        >
-          {/* The whole event verbatim: the row shows five columns, and an
-              incident wants every key of the record. */}
-          {!chosen
-            ? <Empty icon="audit">{t("Open an event to read everything the trail kept about it.")}</Empty>
-            : (
-              <Readout
-                label={t("The event as the trail wrote it")}
-                value={JSON.stringify(chosen, null, 2)}
-                lines={24}
-                testId="record"
-              />
-            )}
         </Card>
       ),
     }} />
@@ -354,5 +347,4 @@ export const HOST_AUDIT: BoardEntry[] = [
   { key: "outcomes", title: "Outcomes", width: 8, height: 2 },
   { key: "actors", title: "By actor", width: 4, height: 3 },
   { key: "events", title: "Audit", width: 12, height: 6 },
-  { key: "event", title: "The record", width: 12, height: 4 },
 ];

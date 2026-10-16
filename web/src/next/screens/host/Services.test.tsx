@@ -93,6 +93,9 @@ afterEach(() => {
   cleanup();
   sent.length = 0;
   for (const key of Object.keys(answers)) delete answers[key];
+  // The folded columns are this browser's, so one test must not leave
+  // them folded for the next.
+  window.localStorage.clear();
 });
 
 describe("the units of one host", () => {
@@ -250,5 +253,39 @@ describe("the condition of a unit", () => {
     expect(unitTone("failed")).toBe("error");
     expect(unitTone("inactive")).toBe("neutral");
     expect(unitTone("activating")).toBe("unknown");
+  });
+});
+
+describe("what the unit list kept from the panel being replaced", () => {
+  const listed = () => Object.assign(answers, {
+    "/api/v1/hosts/h1/actions": allow(...EVERY),
+    "/api/v1/hosts/h1/inventory/services": fragment("services", { failed_units: [], failed_units_known: true }),
+    "/api/v1/hosts/h1/inventory/services.full": fragment("services.full", { units: [unit()] }),
+  });
+
+  it("opens a unit's detail under its own row, not in a card somewhere else", async () => {
+    listed();
+    draw();
+    await waitFor(() => expect(screen.getByTestId("unit-nginx.service")).toBeInTheDocument());
+    fireEvent.click(within(screen.getByTestId("unit-nginx.service")).getByRole("button", { name: "nginx.service" }));
+    await waitFor(() =>
+      expect(within(screen.getByTestId("units")).getByText(/asked about this unit|not been read yet/)).toBeInTheDocument());
+    // The detail is the row immediately under the unit's own, across the
+    // whole width - which is where the old module put it.
+    const row = screen.getByTestId("unit-nginx.service");
+    expect(row.nextElementSibling).toHaveClass("fl-row-detail");
+    expect(row.nextElementSibling?.querySelector("td")?.getAttribute("colspan"))
+      .toBe(String(row.querySelectorAll("td").length));
+  });
+
+  it("folds a column away and keeps the choice in this browser", async () => {
+    listed();
+    draw();
+    await waitFor(() => expect(screen.getByTestId("units")).toBeInTheDocument());
+    expect(within(screen.getByTestId("units")).getByText("Sub-state")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("units-columns"));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Sub-state" }));
+    expect(within(screen.getByTestId("units")).queryByText("Sub-state")).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("fl.columns.host-services")).toContain("sub");
   });
 });

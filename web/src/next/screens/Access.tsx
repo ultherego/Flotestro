@@ -492,7 +492,8 @@ type Ask =
   | { kind: "revoke-role"; row: Row; held: Held; teamName: string }
   | { kind: "end-session"; row: Row; session: SessionView }
   | { kind: "clear-password"; row: Row }
-  | { kind: "remove-mapping"; mapping: GroupMapping };
+  | { kind: "remove-mapping"; mapping: GroupMapping }
+  | { kind: "remove-role"; role: RoleInfo };
 
 /* ---------------------------------------------------------- the screen */
 
@@ -516,8 +517,11 @@ export function Access() {
   const [issued, setIssued] = useState<IssuedToken | null>(null);
   const [copied, setCopied] = useState(false);
   const [refusal, setRefusal] = useState<ApiError | null>(null);
-  // The role of the installation's own that is open for editing.
-  const [editingRole, setEditingRole] = useState<RoleInfo | null>(null);
+  /* The role of the installation's own that is open in the editor, or
+     "new" for one that does not exist yet. Defining a role and editing
+     one are the same form against the same vocabulary; only the name and
+     the call at the end of it differ. */
+  const [editingRole, setEditingRole] = useState<RoleInfo | "new" | null>(null);
 
   const onError = (error: unknown) => setRefusal(error instanceof ApiError ? error : null);
   const refresh = () => {
@@ -698,6 +702,20 @@ export function Access() {
       api.del(`/api/v1/principals/${row.id}/password?reason=${encodeURIComponent(reason.trim())}`),
     onSuccess: settled, onError,
   });
+  /* A role is removed by name, with the reason in the address: the
+     server refuses one that is still granted, and the refusal is shown
+     as it comes rather than guessed at here. */
+  const removeRole = useMutation({
+    mutationFn: ({ role, reason }: { role: RoleInfo; reason: string }) =>
+      api.del(`/api/v1/roles/${encodeURIComponent(role.role)}?reason=${encodeURIComponent(reason)}`),
+    onSuccess: () => {
+      setAsk(null);
+      if (editingRole !== "new" && editingRole !== null) setEditingRole(null);
+      void queryClient.invalidateQueries({ queryKey: ["roles"] });
+      void queryClient.invalidateQueries({ queryKey: ["whoami"] });
+    },
+    onError,
+  });
   const removeMapping = useMutation({
     mutationFn: ({ mapping, reason }: { mapping: GroupMapping; reason: string }) =>
       api.del(`/api/v1/group-mappings/${mapping.id}?reason=${encodeURIComponent(reason)}`),
@@ -709,7 +727,8 @@ export function Access() {
   });
 
   const busy = disable.isPending || enable.isPending || revokeTokens.isPending || issueToken.isPending
-    || revokeToken.isPending || revokeRole.isPending || endSession.isPending || clearPassword.isPending;
+    || revokeToken.isPending || revokeRole.isPending || endSession.isPending || clearPassword.isPending
+    || removeRole.isPending;
 
   /* ------------------------------------------------------- what is drawn */
 
@@ -1076,15 +1095,18 @@ export function Access() {
             roles={catalogue.data?.items ?? []}
             loading={catalogue.isLoading}
             manages={manages}
-            editing={editingRole?.role}
+            editing={editingRole === "new" ? undefined : editingRole?.role}
+            defining={editingRole === "new"}
             onEdit={setEditingRole}
+            onDefine={() => setEditingRole("new")}
+            onRemove={(role) => setAsk({ kind: "remove-role", role })}
           />
         ),
 
         roleeditor: editingRole !== null && (
           <RoleEditor
-            key={editingRole.role}
-            role={editingRole}
+            key={editingRole === "new" ? "new" : editingRole.role}
+            role={editingRole === "new" ? null : editingRole}
             vocabulary={vocabulary.data?.items}
             onDone={() => {
               setEditingRole(null);
@@ -1125,6 +1147,7 @@ export function Access() {
               case "end-session": return endSession.mutate({ row: ask.row, session: ask.session, reason });
               case "clear-password": return clearPassword.mutate({ row: ask.row, reason });
               case "remove-mapping": return removeMapping.mutate({ mapping: ask.mapping, reason });
+              case "remove-role": return removeRole.mutate({ role: ask.role, reason });
             }
           }}
         >
@@ -2172,13 +2195,17 @@ function Review({ teamName }: { teamName: (id: string) => string }) {
  * permissions are in the code, where they are read in review, and a copy
  * in the database would be a second answer to the same question.
  */
-function RolesOfInstallation({ roles, loading, manages, editing, onEdit }: {
+function RolesOfInstallation({ roles, loading, manages, editing, defining, onEdit, onDefine, onRemove }: {
   roles: RoleInfo[];
   loading: boolean;
   manages: boolean;
   /** Which of them is open in the editor, so the row says so. */
   editing?: string;
+  /** Whether the editor is already writing a role that does not exist yet. */
+  defining: boolean;
   onEdit: (role: RoleInfo) => void;
+  onDefine: () => void;
+  onRemove: (role: RoleInfo) => void;
 }) {
   const t = useT();
   const own = roles.filter((one) => !one.built_in);
@@ -2187,6 +2214,19 @@ function RolesOfInstallation({ roles, loading, manages, editing, onEdit }: {
       title={t("Roles of this installation")}
       note={t("A role defined here carries exactly the permissions it was given; the product's own roles cannot be changed.")}
       flush
+      tools={manages
+        ? (
+          <button
+            type="button"
+            className="fl-quiet fl-small"
+            disabled={defining}
+            onClick={onDefine}
+            data-testid="define-role"
+          >
+            {t("Define a role")}
+          </button>
+        )
+        : undefined}
     >
       <Table
         rows={own}
@@ -2194,7 +2234,7 @@ function RolesOfInstallation({ roles, loading, manages, editing, onEdit }: {
         rowTestId={(one) => `role-${one.role}`}
         testId="own-roles"
         loading={loading}
-        empty={t("No role of this installation's own. The product's roles are listed under what a role may be given.")}
+        empty={t("No role of this installation's own. The product's roles are listed under what a role may be given; define one when none of them is the job somebody actually does.")}
         columns={[
           { key: "role", head: t("Role"), tight: true, cell: (one) => <span className="fl-mono">{one.role}</span> },
           {
@@ -2217,15 +2257,27 @@ function RolesOfInstallation({ roles, loading, manages, editing, onEdit }: {
             actions: true,
             cell: (one) => manages
               ? (
-                <button
-                  type="button"
-                  className="fl-quiet fl-small"
-                  disabled={editing === one.role}
-                  onClick={() => onEdit(one)}
-                  data-testid={`edit-role-${one.role}`}
-                >
-                  {t("Edit")}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="fl-quiet fl-small"
+                    disabled={editing === one.role}
+                    onClick={() => onEdit(one)}
+                    data-testid={`edit-role-${one.role}`}
+                  >
+                    {t("Edit")}
+                  </button>
+                  {/* Removing a role is a decision, so it goes through the
+                      one dialog with its reason, like every other. */}
+                  <button
+                    type="button"
+                    className="fl-danger fl-small"
+                    onClick={() => onRemove(one)}
+                    data-testid={`remove-role-${one.role}`}
+                  >
+                    {t("Remove")}
+                  </button>
+                </>
               )
               // Somebody who may not write a role is offered nothing here
               // rather than a button that comes back a refusal.
@@ -2319,6 +2371,9 @@ function RoleCatalogue({ roles, vocabulary, loading, problem }: {
   );
 }
 
+/** The shape of a role name the server takes, and will not take twice. */
+const ROLE_NAME = /^[a-z][a-z0-9_]{1,62}$/;
+
 /**
  * Writing a role: what it is for, and which permissions it carries.
  *
@@ -2328,25 +2383,32 @@ function RoleCatalogue({ roles, vocabulary, loading, problem }: {
  * the role loses, so the dialog says so by name before it is sent.
  */
 function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
-  role: RoleInfo;
+  /** The role being changed, or null for one that does not exist yet. */
+  role: RoleInfo | null;
   vocabulary: PermissionInfo[] | undefined;
   onDone: () => void;
   onCancel: () => void;
   onError: (error: unknown) => void;
 }) {
   const t = useT();
-  const [description, setDescription] = useState(role.description ?? "");
-  const [chosen, setChosen] = useState<string[]>([...role.permissions]);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState(role?.description ?? "");
+  const [chosen, setChosen] = useState<string[]>([...(role?.permissions ?? [])]);
   const [search, setSearch] = useState("");
   const [asking, setAsking] = useState(false);
   const [reason, setReason] = useState("");
 
   const save = useMutation({
-    mutationFn: (given: string) => api.put(`/api/v1/roles/${encodeURIComponent(role.role)}`, {
-      description: description.trim(),
-      permissions: [...chosen].sort(),
-      reason: given,
-    }),
+    mutationFn: (given: string) => {
+      const body = {
+        description: description.trim(),
+        permissions: [...chosen].sort(),
+        reason: given,
+      };
+      return role
+        ? api.put(`/api/v1/roles/${encodeURIComponent(role.role)}`, body)
+        : api.post("/api/v1/roles", { role: name.trim(), ...body });
+    },
     onSuccess: () => { setAsking(false); setReason(""); onDone(); },
     onError: (error) => { setAsking(false); onError(error); },
   });
@@ -2359,11 +2421,15 @@ function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
   const needle = search.trim().toLowerCase();
   const offered = (vocabulary ?? []).filter((one) => !needle || one.permission.toLowerCase().includes(needle));
   const groups = [...new Set(offered.map((one) => one.group))];
-  const losing = permissionsLost(role.permissions, chosen);
+  const losing = permissionsLost(role?.permissions ?? [], chosen);
+  // The name is what every binding, mapping and audit line carries, and
+  // it cannot be changed afterwards, so the server's own shape for it is
+  // the shape the form holds the reader to.
+  const nameValid = role !== null || ROLE_NAME.test(name.trim());
 
   return (
     <Card
-      title={t("Edit the role {role}", { role: role.role })}
+      title={role ? t("Edit the role {role}", { role: role.role }) : t("Define a role")}
       note={t("A role carries at least one permission, and every save writes the whole list.")}
       tools={
         <button type="button" className="fl-quiet fl-small" onClick={onCancel} data-testid="role-close">
@@ -2373,6 +2439,21 @@ function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
     >
       <Stack>
         <Fields>
+          {!role && (
+            <Field
+              label={t("Name")}
+              hint={t("Lower case letters, digits and underscores. It is what every binding, mapping and audit line carries, and it cannot be changed later.")}
+              wide
+            >
+              <input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="shift_lead"
+                autoComplete="off"
+                data-testid="role-name"
+              />
+            </Field>
+          )}
           <Field label={t("What it is for")} wide>
             <input value={description} onChange={(event) => setDescription(event.target.value)}
                    data-testid="role-description" />
@@ -2421,22 +2502,25 @@ function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
         <Actions>
           <button
             type="button"
-            disabled={chosen.length === 0 || vocabulary === undefined || save.isPending}
+            disabled={!nameValid || chosen.length === 0 || vocabulary === undefined || save.isPending}
             onClick={() => { setReason(""); setAsking(true); }}
             data-testid="role-save"
           >
-            {t("Save the role")}
+            {role ? t("Save the role") : t("Define the role")}
           </button>
           <button type="button" className="fl-quiet" onClick={onCancel} disabled={save.isPending}>
             {t("Cancel")}
           </button>
           {chosen.length === 0 && <Note>{t("A role carries at least one permission.")}</Note>}
+          {!nameValid && <Note>{t("A name of lower case letters, digits and underscores, starting with a letter.")}</Note>}
         </Actions>
       </Stack>
 
       {asking && (
         <Modal
-          title={t("Save the role {role}", { role: role.role })}
+          title={role
+            ? t("Save the role {role}", { role: role.role })
+            : t("Define the role {role}", { role: name.trim() })}
           onClose={() => setAsking(false)}
           actions={
             <>
@@ -2447,7 +2531,7 @@ function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
                 onClick={() => save.mutate(reason.trim())}
                 data-testid="role-confirm"
               >
-                {save.isPending ? t("Working…") : t("Save the role")}
+                {save.isPending ? t("Working…") : role ? t("Save the role") : t("Define the role")}
               </button>
               <button type="button" className="fl-quiet" onClick={() => setAsking(false)} disabled={save.isPending}>
                 {t("Cancel")}
@@ -2456,9 +2540,11 @@ function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
           }
         >
           <Note>
-            {losing.length > 0
-              ? t("The role is written whole: everybody holding it loses {permissions} on their next request.", { permissions: losing.join(", ") })
-              : t("The role is written whole with the {n} permissions chosen. Nobody loses anything by this.", { n: chosen.length })}
+            {!role
+              ? t("The role {role} is created with the {n} permissions chosen. Nobody holds it yet, so nobody gains anything until it is granted.", { role: name.trim(), n: chosen.length })
+              : losing.length > 0
+                ? t("The role is written whole: everybody holding it loses {permissions} on their next request.", { permissions: losing.join(", ") })
+                : t("The role is written whole with the {n} permissions chosen. Nobody loses anything by this.", { n: chosen.length })}
           </Note>
           <Fields>
             <Field
@@ -2489,6 +2575,7 @@ export function askTitle(t: Translate, ask: Ask): string {
     case "end-session": return t("End a session of {subject}", { subject: ask.row.subject });
     case "clear-password": return t("Remove the password of {subject}", { subject: ask.row.subject });
     case "remove-mapping": return t("Remove the mapping of {group}", { group: ask.mapping.group_name });
+    case "remove-role": return t("Remove the role {role}", { role: ask.role.role });
   }
 }
 
@@ -2533,6 +2620,15 @@ function askText(t: Translate, ask: Ask, teamName: string): ReactNode {
       return t("The group {group} stops granting {role}. Whoever holds the role through this mapping alone loses it on their next request.", {
         group: ask.mapping.group_name, role: ask.mapping.role,
       });
+    case "remove-role":
+      /* Whether the role is still granted is a count the server keeps; a
+         count nobody read is not a nought, so a role whose use is unknown
+         is not promised to come away cleanly. */
+      return (ask.role.bindings ?? 0) + (ask.role.mappings ?? 0) > 0
+        ? t("This role is still granted, so the panel will refuse to remove it. Revoke the bindings and the group mappings that name it first.")
+        : ask.role.bindings === undefined || ask.role.mappings === undefined
+          ? t("How much this role is granted is not known here. If anything still holds it, the panel refuses the removal and nothing changes.")
+          : t("The role is removed. Nothing is granted through it, so nobody loses access by this.");
   }
 }
 
@@ -2548,6 +2644,7 @@ function askAction(t: Translate, ask: Ask): string {
     case "end-session": return t("End session");
     case "clear-password": return t("Remove the password");
     case "remove-mapping": return t("Remove");
+    case "remove-role": return t("Remove");
   }
 }
 

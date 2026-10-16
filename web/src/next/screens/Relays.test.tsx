@@ -143,6 +143,37 @@ describe("the relays of the sites", () => {
     expect(within(waiting).getByText("—")).toBeInTheDocument();
   });
 
+  /**
+   * The cards under the list are about one relay. Nothing on the screen
+   * said which until the row itself carried the mark, so a reader of a
+   * long list had to scroll back to the title of the card to find out
+   * what they were looking at.
+   */
+  it("marks the row the cards below are about, and moves the mark with the choice", async () => {
+    Object.assign(answers, {
+      "/api/v1/relays": { items: [relay({}), relay({ id: "r2", name: "relay-krakow", site: "krakow" })], count: 2 },
+      "/api/v1/relays/r1": { relay: relay({}), hosts: [] },
+      "/api/v1/relays/r2": { relay: relay({ id: "r2", name: "relay-krakow", site: "krakow" }), hosts: [] },
+      "/api/v1/relays/r1/buffer-history": {
+        relay_id: "r1", range: "24h", step_seconds: 60, rollup: false,
+        points: [], latest: null, alerts: [], raw_retention_hours: 48, rollup_retention_days: 30,
+      },
+      "/api/v1/relays/r2/buffer-history": {
+        relay_id: "r2", range: "24h", step_seconds: 60, rollup: false,
+        points: [], latest: null, alerts: [], raw_retention_hours: 48, rollup_retention_days: 30,
+      },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("relay-relay-warsaw")).toBeInTheDocument());
+    // With no relay in the address the first of the list is the one read.
+    expect(screen.getByTestId("relay-relay-warsaw")).toHaveClass("fl-row-marked");
+    expect(screen.getByTestId("relay-relay-krakow")).not.toHaveClass("fl-row-marked");
+
+    fireEvent.click(screen.getByTestId("pick-relay-krakow"));
+    await waitFor(() => expect(screen.getByTestId("relay-relay-krakow")).toHaveClass("fl-row-marked"));
+    expect(screen.getByTestId("relay-relay-warsaw")).not.toHaveClass("fl-row-marked");
+  });
+
   it("narrows by site on the server, with what was typed", async () => {
     Object.assign(answers, { "/api/v1/relays": { items: [], count: 0 } });
     draw();

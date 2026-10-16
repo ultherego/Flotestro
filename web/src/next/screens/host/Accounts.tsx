@@ -12,7 +12,7 @@ import { Board } from "../../Board";
 import type { BoardEntry } from "../../../components/board";
 import {
   Actions, Band, Banner, Bars, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields,
-  Modal, Note, Pill, Problem, Table, Tabs, Toolbar, TwoLine, type Segment, type Tone,
+  Modal, Note, Pill, Problem, Stack, Table, Tabs, Toolbar, TwoLine, type Segment, type Tone,
 } from "../../kit";
 
 /**
@@ -281,7 +281,6 @@ export function Accounts({ host }: { host: Host }) {
   const accounts = query.data?.accounts ?? [];
   // The list is unknown until it lands: dashes, not a host without accounts.
   const known = query.data ? accounts : undefined;
-  const selected = accounts.find((one) => one.name === open);
   const sources: LocalAccount["source"][] = ["local", "directory", "system", "unknown"];
 
   const access: Segment[] = [
@@ -350,6 +349,19 @@ export function Accounts({ host }: { host: Host }) {
               keyOf={(one) => one.name}
               loading={query.isLoading}
               rowTestId={(one) => `account-${one.name}`}
+              /* Keys, groups and expiry open under the account they belong
+                 to, as the panel being replaced opened them: a card
+                 elsewhere on the board makes the reader hunt for it. */
+              opened={(one) => one.name === open}
+              detail={(one) => (
+                <AccountDetail
+                  host={host}
+                  account={one}
+                  request={request}
+                  onAsk={setAsk}
+                  onClose={() => setOpen(null)}
+                />
+              )}
               empty={showSystem
                 ? t("The host reported no system accounts.")
                 : t("The host has not reported user accounts yet.")}
@@ -427,15 +439,7 @@ export function Accounts({ host }: { host: Host }) {
             />
           </Card>
         ),
-        account: selected && (
-          <AccountPanel
-            host={host}
-            account={selected}
-            request={request}
-            onAsk={setAsk}
-            onClose={() => setOpen(null)}
-          />
-        ),
+
       }} />
 
       {ask?.kind === "unlock" && (
@@ -518,8 +522,15 @@ function Expiry({ account }: { account: LocalAccount }) {
 
 /* ------------------------------------------------------- the one account */
 
-/** The three things that can be changed about one account, behind tabs. */
-function AccountPanel({ host, account, request, onAsk, onClose }: {
+/**
+ * The three things that can be changed about one account, behind tabs,
+ * under the row the account is on.
+ *
+ * The panel being replaced opened the keys, the groups and the expiry in
+ * extra rows under the account. A card on the board instead of that is a
+ * place the reader has to find; this is where they already are.
+ */
+function AccountDetail({ host, account, request, onAsk, onClose }: {
   host: Host;
   account: LocalAccount;
   request: Request;
@@ -529,25 +540,23 @@ function AccountPanel({ host, account, request, onAsk, onClose }: {
   const t = useT();
   const [tab, setTab] = useState<"keys" | "groups" | "expiry">("keys");
   return (
-    <Card
-      title={t("{name} on this host", { name: account.name })}
-      tools={<Button kind="word" onClick={onClose}>{t("Close")}</Button>}
-      bar={
-        <Tabs
-          value={tab}
-          onChange={setTab}
-          tabs={[
-            { value: "keys", label: t("SSH keys"), count: account.ssh_keys.length },
-            { value: "groups", label: t("Groups") },
-            { value: "expiry", label: t("Expiry") },
-          ]}
-        />
-      }
-    >
+    <Stack>
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { value: "keys", label: t("SSH keys"), count: account.ssh_keys.length },
+          { value: "groups", label: t("Groups") },
+          { value: "expiry", label: t("Expiry") },
+        ]}
+      />
       {tab === "keys" && <KeysTab host={host} account={account} request={request} onAsk={onAsk} />}
       {tab === "groups" && <GroupsTab host={host} account={account} request={request} />}
       {tab === "expiry" && <ExpiryTab host={host} account={account} request={request} />}
-    </Card>
+      <Actions>
+        <Button kind="word" onClick={onClose}>{t("Close")}</Button>
+      </Actions>
+    </Stack>
   );
 }
 
@@ -1216,7 +1225,6 @@ export const HOST_ACCOUNTS: BoardEntry[] = [
   { key: "sources", title: "By source", width: 4, height: 2 },
   { key: "create", title: "New local account", width: 12, height: 3 },
   { key: "accounts", title: "Accounts", width: 12, height: 4 },
-  { key: "account", title: "One account", width: 12, height: 4 },
 ];
 
 /** The name this module's arrangement is stored under. */

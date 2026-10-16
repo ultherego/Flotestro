@@ -151,6 +151,91 @@ describe("a reader who may not remediate", () => {
   });
 });
 
+describe("the hosts behind a check", () => {
+  /** One page of the hosts failing the SSH check, with a cursor onwards. */
+  const page = (over: Record<string, unknown> = {}) => ({
+    check_id: "ssh_root_login",
+    items: [
+      { host_id: "h1", hostname: "web-1", observed: "PermitRootLogin yes", action: "file.render" },
+      { host_id: "h2", hostname: "web-2", observed: "PermitRootLogin prohibit-password" },
+    ],
+    count: 3,
+    partial: false,
+    ...over,
+  });
+
+  /**
+   * A row saying three hosts fail and offering no way to learn which
+   * three is half an answer. The panel being replaced opened them under
+   * the check, a page at a time, and so does this one.
+   */
+  it("opens the failing hosts under the check, and reads them from the server", async () => {
+    given({ "/api/v1/security?check=ssh_root_login": page({ next_cursor: "" }) });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("hosts-ssh_root_login")).toBeInTheDocument());
+    // Nothing is read until somebody asks for it.
+    expect(asked.some((one) => one.includes("check=ssh_root_login"))).toBe(false);
+
+    fireEvent.click(screen.getByTestId("hosts-ssh_root_login"));
+    // The sample the fleet answer carried stands there at once, so an
+    // open row never reads as "no host fails this"; the page replaces it.
+    expect(screen.getByTestId("failing-h1")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("failing-h1")).toHaveTextContent("PermitRootLogin yes"));
+    expect(asked.some((one) => one.includes("check=ssh_root_login"))).toBe(true);
+
+    const row = screen.getByTestId("failing-h1");
+    expect(within(row).getByRole("link", { name: "web-1" })).toHaveAttribute("href", "/next/hosts/h1/security");
+    expect(row).toHaveTextContent("file.render");
+    // An operation nobody named is an em dash, never an empty cell.
+    expect(screen.getByTestId("failing-h2")).toHaveTextContent("—");
+
+    // And it is a row of the checks table, not a card somewhere else.
+    const opened = row.closest("tr.fl-row-detail") ?? row.closest("table")?.closest("tr.fl-row-detail");
+    expect(opened).not.toBeNull();
+    expect(opened?.previousElementSibling).toBe(screen.getByTestId("check-ssh_root_login"));
+  });
+
+  it("reads the next page on request, and says how many are still to come", async () => {
+    given({
+      "/api/v1/security?check=ssh_root_login": page({ next_cursor: "c2" }),
+      "/api/v1/security?check=ssh_root_login&limit=100&cursor=c2": {
+        check_id: "ssh_root_login", count: 3, partial: false,
+        items: [{ host_id: "h3", hostname: "web-3", observed: "PermitRootLogin yes" }],
+      },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("hosts-ssh_root_login")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("hosts-ssh_root_login"));
+    const more = await screen.findByTestId("more-ssh_root_login");
+    expect(more).toHaveTextContent("Load more (1 left)");
+    fireEvent.click(more);
+    await waitFor(() => expect(asked.some((one) => one.includes("cursor=c2"))).toBe(true));
+  });
+
+  it("closes again from the same place it opened", async () => {
+    given({ "/api/v1/security?check=ssh_root_login": page() });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("hosts-ssh_root_login")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("hosts-ssh_root_login"));
+    await waitFor(() => expect(screen.getByTestId("failing-h1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("hosts-ssh_root_login"));
+    await waitFor(() => expect(screen.queryByTestId("failing-h1")).not.toBeInTheDocument());
+  });
+
+  it("offers nothing to open on a check nothing fails", async () => {
+    given({
+      "/api/v1/security": {
+        hosts: 10, hosts_judged: 10, unknown_hosts: 0,
+        checks: [check({ failed: 0, fixable: 0, hosts: [] })],
+        generated_at: "2026-10-16T08:00:00Z",
+      },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("check-ssh_root_login")).toBeInTheDocument());
+    expect(screen.queryByTestId("hosts-ssh_root_login")).not.toBeInTheDocument();
+  });
+});
+
 describe("the checks", () => {
   it("keys a row on the check the server named, not on a field it never sent", async () => {
     given();

@@ -275,6 +275,9 @@ export function Relays() {
               keyOf={(one) => one.id}
               rowTestId={(one) => `relay-${one.name}`}
               testId="relays"
+              /* The cards under the list are about one relay, and nothing
+                 said which until the row itself carried the mark. */
+              marked={(one) => one.id === chosenID}
               empty={list.isLoading
                 ? t("Reading the relays…")
                 : t("No relay is registered. A relay is enrolled from the add-host screen with a relay token; a site that reaches the panel directly needs none.")}

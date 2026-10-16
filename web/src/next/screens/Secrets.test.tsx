@@ -417,6 +417,35 @@ describe("rotating and retiring", () => {
     expect(document.body.textContent ?? "").not.toContain(VALUE);
   });
 
+  /**
+   * The rotation belongs under the secret it rotates. The panel being
+   * replaced opened it in a second row there, and a card elsewhere on
+   * the page leaves the reader checking which secret the form in front
+   * of them is about - on a store of forty, that is the whole question.
+   */
+  it("opens the rotation under the row of the secret it rotates", async () => {
+    Object.assign(answers, {
+      "/api/v1/secrets": { items: [secret({}), secret({ id: "s2", name: "ca.key" })] },
+      "/api/v1/whoami": writer,
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("rotate-repo.token")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("rotate-repo.token"));
+
+    const field = await screen.findByTestId("rotate-value");
+    const opened = field.closest("tr.fl-row-detail");
+    expect(opened).not.toBeNull();
+    expect(opened?.closest("table")).toBe(screen.getByTestId("secrets-table"));
+    expect(opened?.previousElementSibling).toBe(screen.getByTestId("secret-repo.token"));
+    // The other secret is still a row, and still offers its own rotation.
+    expect(screen.getByTestId("secret-ca.key")).toBeInTheDocument();
+
+    // The button that opened the row closes it again.
+    expect(screen.getByTestId("rotate-repo.token")).toHaveTextContent("Close");
+    fireEvent.click(screen.getByTestId("rotate-repo.token"));
+    await waitFor(() => expect(screen.queryByTestId("rotate-value")).toBeNull());
+  });
+
   it("will not retire until it is acknowledged and a reason is given", async () => {
     Object.assign(answers, { "/api/v1/secrets": { items: [secret({})] }, "/api/v1/whoami": writer });
     Object.assign(writes, { "/api/v1/secrets/repo.token/retire": secret({ retired_at: "2026-10-16T00:00:00Z" }) });

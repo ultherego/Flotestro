@@ -1289,6 +1289,23 @@
   white-space: nowrap;
 }
 
+/* A heading that orders the list is the heading, not a button drawn
+   beside it: it inherits every one of the head's own letters and only
+   adds the arrow that says which way the rows run. */
+.fl-app .fl-table th .fl-head-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+}
+.fl-app .fl-table th .fl-head-sort:hover { color: var(--text); }
+.fl-app .fl-table th[aria-sort="ascending"] .fl-head-sort,
+.fl-app .fl-table th[aria-sort="descending"] .fl-head-sort { color: var(--text); }
+
 .fl-app .fl-table td {
   padding: var(--s3) var(--s5);
   border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
@@ -1302,6 +1319,8 @@
 .fl-app .fl-table .fl-minor { color: var(--text-muted); }
 .fl-app .fl-table .fl-num { text-align: right; font-variant-numeric: tabular-nums; }
 .fl-app .fl-table .fl-cell-actions { text-align: right; white-space: nowrap; }
+
+.fl-app .fl-table .fl-cell-top { vertical-align: top; }
 
 .fl-app .fl-table .fl-tight {
   white-space: nowrap;
@@ -2157,6 +2176,11 @@
 
 .fl-app .fl-readout-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
 
+.fl-app .fl-readout-body mark.fl-mark-now {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
 .fl-app .fl-readout-body mark {
   background: color-mix(in srgb, var(--accent) 34%, transparent);
   color: var(--text);
@@ -2461,6 +2485,15 @@
   background: color-mix(in srgb, var(--bg-sunken) 60%, transparent);
 }
 
+/* What a row says without being asked: quieter than the row above it,
+   because it is read on the way past rather than looked up. */
+.fl-app .fl-row-under > td {
+  padding: 0 var(--s5) var(--s3);
+  font-size: var(--t-small);
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border);
+}
+
 /* A tree inside a table: the depth is a width, not an indentation
    character, so a name still reads as a name when it is copied. */
 .fl-app .fl-indent { display: inline-block; vertical-align: middle; }
@@ -2511,3 +2544,88 @@
 .fl-app .fl-diff-in { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok-text); }
 .fl-app .fl-diff-out { background: color-mix(in srgb, var(--error) 14%, transparent); color: var(--error-text); }
 .fl-app .fl-diff-where { color: var(--text-faint); }
+
+/* ---------------------------------------------------------------------
+   N. The panel on paper
+
+   The Reports screen is printed. What the reader prints is the panel,
+   not a document: the rail, the top bar, the buttons and every scroller
+   are the screen's furniture and none of it belongs on the sheet.
+
+   One of these rules matters more than the rest. A card's body and a
+   table's wrapper scroll on screen, and a scroller prints only what
+   happens to be in view - so a report of two hundred rows comes out as
+   the first fifteen with nothing on the sheet to say the rest existed.
+   That is the failure this block is here to stop.
+   ------------------------------------------------------------------ */
+
+@media print {
+  /* Where the reader is, and what they could do from here: neither is
+     part of the report. */
+  .fl-app .fl-rail,
+  .fl-app .fl-rail-backdrop,
+  .fl-app .fl-bar,
+  .fl-app .fl-skip,
+  .fl-app .fl-arrange,
+  .fl-app .fl-grip,
+  .fl-app .fl-finder,
+  .fl-app .fl-finder-backdrop,
+  .fl-app .fl-modal-backdrop,
+  .fl-app .fl-menu,
+  .fl-app .fl-head-actions,
+  .fl-app .fl-helpmark,
+  .fl-app .fl-card-tools,
+  .fl-app .fl-card-bar,
+  .fl-app .fl-toolbar,
+  .fl-app .fl-columns,
+  .fl-app .fl-pager,
+  .fl-app .fl-rows,
+  .fl-app .fl-seg,
+  .fl-app .fl-actions,
+  .ui-toasts { display: none !important; }
+
+  /* The page is the sheet: no rail to leave room for, no viewport to be
+     as tall as, no window padding. */
+  .fl-app,
+  .fl-app .fl-page { min-height: 0; }
+  .fl-app .fl-page,
+  .fl-app .fl-folded .fl-page { margin-left: 0; }
+  .fl-app .fl-screen { padding: 0; }
+
+  /* The board is a grid of fixed rows on screen; on paper it is one
+     card after another, each as tall as what is in it. */
+  .fl-app .fl-placed { display: block; }
+  .fl-app .fl-held,
+  .fl-app .fl-held > * { height: auto; }
+  .fl-app .fl-held + .fl-held { margin-top: var(--s5); }
+
+  /* Nothing scrolls on paper, and nothing is cut off by a height that
+     was there to make a card fit a screen. */
+  .fl-app .fl-card-body,
+  .fl-app .fl-placed .fl-card-body,
+  .fl-app .fl-tablewrap,
+  .fl-app .fl-card-body > .fl-tablewrap,
+  .fl-app .fl-readout-body {
+    overflow: visible;
+    max-height: none;
+  }
+
+  /* A sticky head lands in the middle of the rows on the second sheet;
+     a real table head repeats at the top of each instead. */
+  .fl-app .fl-table th { position: static; }
+  .fl-app .fl-table thead { display: table-header-group; }
+  .fl-app .fl-table tr { break-inside: avoid; }
+
+  /* A card is a step above the floor on screen; on paper it is a block
+     that is not broken across two sheets. */
+  .fl-app .fl-card {
+    break-inside: avoid;
+    box-shadow: none;
+    margin-bottom: var(--s5);
+  }
+  .fl-app .fl-card::before { display: none; }
+
+  /* An address nobody can click is text; the colour of a link says
+     nothing on a sheet of paper. */
+  .fl-app a { color: inherit; text-decoration: none; }
+}

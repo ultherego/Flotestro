@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import { ToastProvider } from "../../../components/Toast";
 import type { Host, MetricPoint } from "../../../lib/types";
+import { bytes } from "../../../lib/format";
 import { Monitoring, axisLabel, busiestInterface, readings, usageTone } from "./Monitoring";
 
 /**
@@ -133,6 +134,33 @@ describe("the monitoring module of a host", () => {
     // the twenty-eight the host never sent are nowhere on it.
     const chart = screen.getByTestId("cpu-chart");
     expect(chart.querySelectorAll(".fl-chart-axis")).toHaveLength(2);
+  });
+
+  it("draws a percentage to a hundred and labels memory in bytes, not in bare digits", async () => {
+    Object.assign(answers, {
+      "/api/v1/settings/layout": layout,
+      "/api/v1/hosts/h1/actions": probeAllowed,
+      "/api/v1/hosts/h1/metrics": {
+        host_id: "h1", range: "3h", step_seconds: 60, sampling_interval_seconds: 60, source: "agent",
+        points: [point({ at: "2026-10-16T08:00:00Z" }), point({ at: "2026-10-16T08:01:00Z" })],
+        gaps: [],
+        latest: point({ at: "2026-10-16T08:01:00Z" }),
+        last_sample_at: "2026-10-16T08:01:00Z",
+      },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("cpu-chart")).toBeInTheDocument());
+    // Every reading is 12%, and the axis still goes to a hundred: a chart
+    // scaled to its own highest reading says a host at 12% is as loaded as
+    // one at 99%.
+    const cpu = [...screen.getByTestId("cpu-chart").querySelectorAll(".fl-chart-scale")]
+      .map((one) => one.textContent);
+    expect(cpu).toEqual(["0%", "50%", "100%"]);
+    // The memory axis says what the numbers mean; 4000 on its own does not.
+    const memory = [...screen.getByTestId("memory-chart").querySelectorAll(".fl-chart-scale")]
+      .map((one) => one.textContent ?? "");
+    expect(memory[memory.length - 1]).toBe(bytes(4000));
+    expect(memory.every((one) => /[A-Za-z]/.test(one))).toBe(true);
   });
 
   it("silences with the reason and the window the server takes, and refuses a reason too short", async () => {

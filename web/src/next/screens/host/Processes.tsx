@@ -379,21 +379,25 @@ export function Processes({ host }: { host: Host }) {
                   rowTestId={({ process }) => `process-${process.pid}`}
                   testId="processes"
                   empty={t("No process answers this filter.")}
+                  /* The columns an operator folds away are this browser's;
+                     the PID and the command are the row's identity and
+                     cannot be folded. */
+                  remember="fl.columns.host-processes"
                   columns={[
                     { key: "pid", head: "PID", num: true, cell: ({ process }) => process.pid },
                     {
-                      key: "user", head: t("User"),
+                      key: "user", head: t("User"), optional: true,
                       cell: ({ process }) => process.user || <Pill tone="unknown">{t("unknown")}</Pill>,
                     },
                     {
-                      key: "memory", head: t("Memory"), cell: ({ process }) => (
+                      key: "memory", head: t("Memory"), optional: true, cell: ({ process }) => (
                         kernelThread(process)
                           ? <span title={t("A kernel thread has no address space of its own.")}>—</span>
                           : <Meter share={process.rss_bytes / maxRss} tone="info" text={bytes(process.rss_bytes)} />
                       ),
                     },
                     {
-                      key: "cpu", head: t("CPU time share"), minor: true, cell: ({ process }) => (
+                      key: "cpu", head: t("CPU time share"), minor: true, optional: true, cell: ({ process }) => (
                         <Meter
                           share={cpuTotal > 0 ? process.cpu_ticks / cpuTotal : 0}
                           tone="info"
@@ -401,9 +405,12 @@ export function Processes({ host }: { host: Host }) {
                         />
                       ),
                     },
-                    { key: "threads", head: t("Threads"), num: true, minor: true, cell: ({ process }) => process.threads },
                     {
-                      key: "state", head: t("State"), cell: ({ process }) => (
+                      key: "threads", head: t("Threads"), num: true, minor: true, optional: true,
+                      cell: ({ process }) => process.threads,
+                    },
+                    {
+                      key: "state", head: t("State"), optional: true, cell: ({ process }) => (
                         <Pill tone={processTone(process.state)} title={process.state}>
                           {t(stateWords(process.state))}
                         </Pill>
@@ -411,22 +418,23 @@ export function Processes({ host }: { host: Host }) {
                     },
                     /* The PID alone says nothing about whose process it is. */
                     {
-                      key: "managed", head: t("Managed by"), minor: true, tight: true, cell: ({ process }) => (
+                      key: "managed", head: t("Managed by"), minor: true, tight: true, optional: true,
+                      cell: ({ process }) => (
                         process.container
                           ? `${t("container")} ${process.container.slice(0, 12)}`
                           : process.unit || (kernelThread(process) ? t("kernel") : "—")
                       ),
                     },
                     /* In the tree the command is set in by its depth and a
-                       parent carries the fold; the flat table has neither. */
+                       parent carries the fold; the flat table has neither.
+                       The setting-in is the kit's and is measured: a run of
+                       non-breaking spaces is read aloud by a screen reader
+                       and travels with the command when it is copied. */
                     {
-                      key: "command", head: t("Command"), tight: true, cell: ({ process, depth, children }) => (
+                      key: "command", head: t("Command"), tight: true,
+                      indent: ({ depth }) => (tree ? depth : 0),
+                      cell: ({ process, children }) => (
                         <>
-                          {tree && depth > 0 && (
-                            <span data-testid="process-indent" data-depth={depth}>
-                              {"   ".repeat(depth)}
-                            </span>
-                          )}
                           {tree && children > 0 && (
                             <Button
                               kind="word"
@@ -451,7 +459,7 @@ export function Processes({ host }: { host: Host }) {
                        than ordering a job the host will refuse. The
                        agent's own process is a warning, not a refusal. */
                     {
-                      key: "actions", head: t("Actions"), actions: true, cell: ({ process }) => (
+                      key: "actions", head: t("Actions"), actions: true, optional: true, cell: ({ process }) => (
                         process.pid === 1 || kernelThread(process) ? (
                           <span title={process.pid === 1
                             ? t("PID 1 ignores signals it does not handle; a reboot is ordered on the Power screen.")

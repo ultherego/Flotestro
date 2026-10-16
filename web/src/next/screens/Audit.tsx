@@ -9,7 +9,7 @@ import { useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Band, Banner, Bars, Card, Chart, Empty, Fact, Facts, Field, Fields, HeadActions, Note, Pill, Problem, Row, Seg, type Segment, type Series, Stack, Table, type Tone, TwoLine,
+  Band, Banner, Bars, Card, Chart, Empty, Fact, Facts, Field, Fields, HeadActions, Note, Pill, Problem, Readout, Row, Seg, type Segment, type Series, Stack, Table, type Tone, TwoLine,
 } from "../kit";
 
 /**
@@ -207,8 +207,6 @@ export function Audit() {
   const clearActor = () => { setActorKind(""); setActorPrincipalID(""); setActorResourceID(""); };
   const pinned = actorPrincipalID || actorResourceID;
 
-  const chosen = events.find((one) => one.id === opened);
-
   return (
     <>
       <HeadActions><button type="button" className="fl-quiet" onClick={exportTrail} disabled={exporting} data-testid="export">
@@ -340,6 +338,17 @@ export function Audit() {
               keyOf={(one) => String(one.id)}
               rowTestId={(one) => `event-${one.id}`}
               testId="events"
+              /* An event opens under its own row, across the width of the
+                 list. The panel being replaced read it there, and a card
+                 elsewhere on the board makes the reader hunt for the thing
+                 they just clicked. */
+              opened={(one) => one.id === opened}
+              detail={(one) => <EventDetail event={one} />}
+              /* What an approval rested on and which fields a change
+                 touched are read on the way past, not looked up: the
+                 panel being replaced carried both under every row that
+                 had them, and a trail is scanned before it is opened. */
+              under={(one) => <EventUnder event={one} />}
               empty={trail.isLoading ? t("Reading the trail…") : t("No event answers this.")}
               columns={[
                 { key: "when", head: t("When"), cell: (one) => (
@@ -373,18 +382,34 @@ export function Audit() {
             />
           </Card>
         ),
-        event: (
-          <Card
-            title={t("The event")}
-            note={chosen ? t("Event {id}, as the trail keeps it.", { id: chosen.id }) : undefined}
-          >
-            {!chosen
-              ? <Empty>{t("Open an event to read everything the trail kept about it.")}</Empty>
-              : <EventDetail event={chosen} />}
-          </Card>
-        ),
       }} />
     </>
+  );
+}
+
+/**
+ * The line a row carries without being clicked: what the approval rested
+ * on, and which fields the event moved. A row with neither says nothing.
+ */
+function EventUnder({ event }: { event: AuditEvent }) {
+  const t = useT();
+  const chain = event.approval_chain;
+  const changes = changedKeys(event.before, event.after);
+  if (!chain && changes.length === 0) return null;
+  return (
+    <Note testId={`under-${event.id}`}>
+      {chain && t("Ordered by {creator}, approved by {approvers}.", {
+        creator: chain.created_by,
+        approvers: chain.approvers.length > 0 ? chain.approvers.join(", ") : "\u2014",
+      })}
+      {changes.map((change, index) => (
+        <span key={change.key}>
+          {index > 0 || chain ? " \u00b7 " : ""}
+          <code>{change.key}</code>{": "}
+          <span className="fl-faint">{change.before}</span>{" \u2192 "}{change.after}
+        </span>
+      ))}
+    </Note>
   );
 }
 
@@ -469,6 +494,16 @@ function EventDetail({ event }: { event: AuditEvent }) {
           ))}
         </Facts>
       )}
+
+      {/* The record itself, verbatim. An incident is read key by key,
+          and a field the panel has no sentence for is exactly the one
+          somebody is looking for when they open an event at all. */}
+      <Readout
+        label={t("The event as the trail wrote it")}
+        value={JSON.stringify(event, null, 2)}
+        lines={16}
+        testId={`event-record-${event.id}`}
+      />
     </Stack>
   );
 }
@@ -694,6 +729,5 @@ export const AUDIT: BoardEntry[] = [
   { key: "per_hour", title: "Events per hour", width: 8, height: 3 },
   { key: "outcome", title: "Outcome", width: 4, height: 2 },
   { key: "events", title: "Events", width: 12, height: 6 },
-  { key: "event", title: "The event", width: 8, height: 4 },
   { key: "actors", title: "By actor", width: 4, height: 3 },
 ];

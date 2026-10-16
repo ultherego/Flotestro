@@ -7,7 +7,7 @@ import { useT } from "../../../i18n";
 import { Board } from "../../Board";
 import type { BoardEntry } from "../../../components/board";
 import {
-  Band, Banner, Bars, Button, Card, Empty, Field, Fields, Kpi, Note, Pill, Problem, Readout,
+  Band, Banner, Bars, Button, Card, Diff, Empty, Field, Fields, Kpi, Note, Pill, Problem,
   Table, type Segment,
 } from "../../kit";
 import {
@@ -483,11 +483,13 @@ export function Files({ host }: { host: Host }) {
             title={t("Difference")}
             note={t("Left: version {version}. Right: what the panel expects now.", { version: comparison.slice(0, 12) })}
           >
-            <Readout
+            {/* A patch read as plain text is a patch nobody reads: what
+                goes in and what comes out carry the product's own
+                colours, as they did in the panel being replaced. */}
+            <Diff
               label={t("Difference")}
-              value={differenceText(chosen.data.content, current.data.content)}
+              text={differenceText(chosen.data.content, current.data.content)}
               testId="file-difference"
-              lines={20}
             />
           </Card>
         ) : undefined,

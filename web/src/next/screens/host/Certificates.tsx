@@ -903,6 +903,10 @@ export function Certificates({ host }: { host: Host }) {
                 loading={report.isLoading}
                 testId="certificates"
                 rowTestId={(one) => `certificate-${one.path}`}
+                /* The row the cards beside the table are about carries the
+                   mark, as it did in the panel being replaced: without it
+                   the detail belongs to no row the reader can see. */
+                marked={(one) => one.path === selected}
                 columns={[
                   {
                     key: "path",

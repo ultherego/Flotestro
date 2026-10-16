@@ -5,7 +5,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import { ApiError } from "../../lib/api";
-import { Jobs, jobTone, orderAgainAddress, prettyJSON, reasonAccepted } from "./Jobs";
+import {
+  Jobs, JOBS_COLUMNS_KEY, JOBS_PAGE_SIZE_KEY, jobTone, orderAgainAddress, prettyJSON, reasonAccepted,
+} from "./Jobs";
 import { ToastProvider } from "../../components/Toast";
 
 /**
@@ -111,9 +113,10 @@ describe("the job list", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("job-j2")).toBeInTheDocument());
     const row = screen.getByTestId("job-j2");
-    // A job still running has no result and no finishing time: three
-    // dashes, and not a single nought anywhere on the row.
-    expect(row.querySelectorAll(".fl-faint")).toHaveLength(3);
+    // A job still running has no result and no approver: a dash for each,
+    // and not a single nought anywhere on the row. (Its finishing time is
+    // the third, in the column that starts folded.)
+    expect(row.querySelectorAll(".fl-faint")).toHaveLength(2);
     expect(within(row).queryByText("0")).toBeNull();
   });
 
@@ -230,6 +233,58 @@ describe("deciding on a job", () => {
     expect(posted.map((one) => one.path)).toEqual(["/api/v1/jobs/j9/approve", "/api/v1/jobs/j10/approve"]);
   });
 
+  /**
+   * A code alone tells an operator who has not met it before nothing.
+   * The panel being replaced put the guide the server serves - what it
+   * means, what to do next, whether a repeat is worth anything - under
+   * the pointer, and that is where it belongs.
+   */
+  it("carries the server's guide for an error code, and not the bare code", async () => {
+    Object.assign(answers, {
+      "/api/v1/jobs": {
+        items: [job({ id: "j12", state: "failed", result_status: "failure", result_error_code: "unit.reset_failed" })],
+        count: 1,
+      },
+      "/api/v1/settings/layout": layout,
+      "/api/v1/fleet/activity": noActivity,
+      "/api/v1/errors": {
+        items: [{
+          code: "unit.reset_failed", meaning: "the unit would not reset",
+          action: "read the journal of the unit", retry: "never", counts_as_failure: true,
+        }],
+      },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("job-j12")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("unit.reset_failed")).toHaveAttribute(
+      "title", expect.stringContaining("the unit would not reset"),
+    ));
+    const code = screen.getByText("unit.reset_failed");
+    expect(code).toHaveAttribute("title", expect.stringContaining("read the journal of the unit"));
+    expect(code).toHaveAttribute("title", expect.stringContaining("a retry will fail the same way"));
+  });
+
+  it("does not draw a code the server says is no failure as one", async () => {
+    Object.assign(answers, {
+      "/api/v1/jobs": {
+        items: [job({ id: "j13", state: "succeeded", result_error_code: "unit.no_change" })],
+        count: 1,
+      },
+      "/api/v1/settings/layout": layout,
+      "/api/v1/fleet/activity": noActivity,
+      "/api/v1/errors": {
+        items: [{
+          code: "unit.no_change", meaning: "the unit was already as ordered",
+          action: "nothing", retry: "never", counts_as_failure: false,
+        }],
+      },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("job-j13")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("unit.no_change")).toHaveClass("fl-neutral"));
+    expect(screen.getByText("unit.no_change")).not.toHaveClass("fl-error");
+  });
+
   it("offers the order again only where the job is over and did not do its work", async () => {
     Object.assign(answers, {
       "/api/v1/jobs": { items: [job({ id: "j11", state: "failed", result_status: "failure" })], count: 1 },
@@ -317,6 +372,176 @@ describe("the attempts of a job, read on the list", () => {
     const code = await screen.findByText("Exit code");
     expect(code.closest(".fl-fact")).toHaveTextContent("—");
     expect(code.closest(".fl-fact")).not.toHaveTextContent("0");
+  });
+
+  /**
+   * The attempts open under the row they belong to, across the width of
+   * the list. The panel being replaced read them there; a card elsewhere
+   * on the board costs the reader the place in the list they were
+   * working, which is the only reason a row is ever opened.
+   */
+  it("opens the attempts under the row and not in a card beside the list", async () => {
+    listing({ "/api/v1/jobs/j1/attempts": { items: [attempt()], count: 1 } });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("attempts-j1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("attempts-j1"));
+    const output = await screen.findByTestId("attempt-stderr");
+    const opened = output.closest("tr.fl-row-detail");
+    expect(opened).not.toBeNull();
+    expect(opened?.closest("table")).toBe(screen.getByTestId("jobs"));
+    expect(opened?.previousElementSibling).toBe(screen.getByTestId("job-j1"));
+  });
+
+  /**
+   * A package plan read as JSON is a package plan nobody reads. The old
+   * screen wrote a sentence for every kind of detail the product defines,
+   * and the whole of the answer stayed underneath for the kinds it did
+   * not know.
+   */
+  it("says a package plan in words, with the whole of the answer still under it", async () => {
+    listing({
+      "/api/v1/jobs/j1/attempts": {
+        items: [attempt({
+          detail: {
+            kind: "package_plan", manager: "apt", changes: ["nginx", "curl"],
+            download_bytes: 5 * 1048576, reboot_predicted: true,
+            space: [{ path: "/var", purpose: "download", basis: "download_only", needed_bytes: 2048, available_bytes: 1024 }],
+          },
+        })],
+        count: 1,
+      },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("attempts-j1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("attempts-j1"));
+    await waitFor(() => expect(screen.getByText(/plan apt: 2 changes, download 5 MB/)).toBeInTheDocument());
+    expect(screen.getByText(/reboot predicted/)).toBeInTheDocument();
+    // The file system that has not got the room says so where it is read.
+    expect(screen.getByText(/needs 2.0 KiB, 1.0 KiB free/)).toBeInTheDocument();
+    // And nothing is hidden by the sentence: the answer itself is there.
+    expect(screen.getByTestId("attempt-detail-1")).toHaveTextContent("package_plan");
+  });
+
+  it("names the maintainer script that failed, which a successful transaction does not otherwise say", async () => {
+    listing({
+      "/api/v1/jobs/j1/attempts": {
+        items: [attempt({
+          detail: { kind: "package_apply", applied: ["nginx"], reboot_required: true, scriptlet_errors: ["nginx"] },
+        })],
+        count: 1,
+      },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("attempts-j1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("attempts-j1"));
+    await waitFor(() => expect(screen.getByText(/1 packages applied/)).toBeInTheDocument());
+    expect(screen.getByText(/maintainer script failed: nginx/)).toBeInTheDocument();
+  });
+
+  it("writes a blocking enrolment check as a refusal and a non-blocking one as a warning", async () => {
+    listing({
+      "/api/v1/jobs/j1/attempts": {
+        items: [attempt({
+          detail: {
+            kind: "domain_enroll",
+            checks: [
+              { name: "dns", passed: false, blocking: true, detail: "SRV record missing" },
+              { name: "ntp", passed: false, blocking: false, detail: "drift 4s" },
+              { name: "port", passed: true, detail: "389 open" },
+            ],
+          },
+        })],
+        count: 1,
+      },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("attempts-j1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("attempts-j1"));
+    await waitFor(() => expect(screen.getByText("blocking")).toBeInTheDocument());
+    expect(screen.getByText("blocking")).toHaveClass("fl-error");
+    expect(screen.getByText("warning")).toHaveClass("fl-warn");
+    expect(screen.getByText("passed")).toHaveClass("fl-ok");
+    expect(screen.getByText("SRV record missing")).toBeInTheDocument();
+  });
+
+  it("reads a host plan as what it would do, with the text that lands on the host under it", async () => {
+    listing({
+      "/api/v1/jobs/j1/attempts": {
+        items: [attempt({
+          detail: {
+            kind: "file_plan",
+            plan: { action: "update", changes: ["content", "mode"], commands: ["install -m 0644 /tmp/x /etc/x"] },
+          },
+        })],
+        count: 1,
+      },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("attempts-j1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("attempts-j1"));
+    await waitFor(() => expect(screen.getByText(/will change · content, mode/)).toBeInTheDocument());
+    expect(screen.getByTestId("plan-verbatim")).toHaveTextContent("install -m 0644 /tmp/x /etc/x");
+  });
+
+  it("draws nothing of its own for a kind nobody wrote a sentence for, and keeps the whole answer", async () => {
+    listing({
+      "/api/v1/jobs/j1/attempts": {
+        items: [attempt({ detail: { kind: "something_new", whatever: 7 } })],
+        count: 1,
+      },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("attempts-j1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("attempts-j1"));
+    const whole = await screen.findByTestId("attempt-detail-1");
+    expect(whole).toHaveTextContent("something_new");
+    expect(whole).toHaveTextContent("whatever");
+  });
+});
+
+describe("what the list remembers between visits", () => {
+  it("lets the reader fold a column away, and keeps it folded in this browser", async () => {
+    Object.assign(answers, {
+      "/api/v1/jobs": { items: [job({})], count: 1 },
+      "/api/v1/settings/layout": layout,
+      "/api/v1/fleet/activity": noActivity,
+    });
+    const first = draw();
+    await waitFor(() => expect(screen.getByTestId("job-j1")).toBeInTheDocument());
+    expect(screen.getByTestId("jobs")).toHaveTextContent("Requested by");
+
+    fireEvent.click(screen.getByTestId("jobs-columns"));
+    fireEvent.click(screen.getByLabelText("Requested by"));
+    await waitFor(() => expect(screen.getByTestId("jobs")).not.toHaveTextContent("Requested by"));
+    expect(JSON.parse(window.localStorage.getItem(JOBS_COLUMNS_KEY) ?? "[]")).toContain("by");
+
+    // And the next visit opens on the columns the reader left.
+    first.unmount();
+    cleanup();
+    draw();
+    await waitFor(() => expect(screen.getByTestId("job-j1")).toBeInTheDocument());
+    expect(screen.getByTestId("jobs")).not.toHaveTextContent("Requested by");
+    window.localStorage.removeItem(JOBS_COLUMNS_KEY);
+  });
+
+  it("keeps the page size the operator chose, and asks the server for it", async () => {
+    Object.assign(answers, {
+      "/api/v1/jobs": { items: [job({})], count: 1 },
+      "/api/v1/settings/layout": layout,
+      "/api/v1/fleet/activity": noActivity,
+    });
+    const first = draw();
+    await waitFor(() => expect(screen.getByTestId("page-size")).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId("page-size"), { target: { value: "200" } });
+    await waitFor(() => expect(asked.some((one) => one.includes("limit=200"))).toBe(true));
+    expect(window.localStorage.getItem(JOBS_PAGE_SIZE_KEY)).toBe("200");
+
+    first.unmount();
+    cleanup();
+    asked.length = 0;
+    draw();
+    await waitFor(() => expect(asked.some((one) => one.includes("limit=200"))).toBe(true));
+    window.localStorage.removeItem(JOBS_PAGE_SIZE_KEY);
   });
 });
 

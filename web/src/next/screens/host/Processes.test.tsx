@@ -89,6 +89,9 @@ afterEach(() => {
   cleanup();
   sent.length = 0;
   for (const key of Object.keys(answers)) delete answers[key];
+  // The folded columns are this browser's; one test must not fold them
+  // for the next.
+  window.localStorage.clear();
 });
 
 describe("the processes of one host", () => {
@@ -253,5 +256,45 @@ describe("reading a process", () => {
   it("knows the agent by the unit that carries it", () => {
     expect(agentProcess(process({ unit: "flotestro-agent.service" }))).toBe(true);
     expect(agentProcess(process({ unit: "nginx.service" }))).toBe(false);
+  });
+});
+
+describe("what the process table kept from the panel being replaced", () => {
+  const snapshot = () => Object.assign(answers, {
+    "/api/v1/hosts/h1/actions": allow("process.list", "process.signal"),
+    "/api/v1/hosts/h1/inventory/processes": fragment({
+      processes: [
+        process({ pid: 10, ppid: 1, name: "nginx", command: "nginx: master" }),
+        process({ pid: 11, ppid: 10, name: "nginx worker", command: "nginx: worker" }),
+      ],
+      total: 2,
+    }),
+  });
+
+  it("sets a child in by its depth, measured, rather than by a run of spaces", async () => {
+    snapshot();
+    draw();
+    await waitFor(() => expect(screen.getByTestId("process-11")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("checkbox", { name: "Tree" }));
+    await waitFor(() => {
+      const child = screen.getByTestId("process-11").querySelector(".fl-indent");
+      expect(child).toHaveAttribute("data-depth", "1");
+    });
+    // The parent stands at the left edge, and nothing is written into the
+    // command itself: a run of spaces travels with it when it is copied.
+    expect(screen.getByTestId("process-10").querySelector(".fl-indent"))
+      .toHaveAttribute("data-depth", "0");
+    expect(screen.getByTestId("process-11").textContent).not.toMatch(/\u00a0/);
+  });
+
+  it("folds a column away and keeps the choice in this browser", async () => {
+    snapshot();
+    draw();
+    await waitFor(() => expect(screen.getByTestId("processes")).toBeInTheDocument());
+    expect(within(screen.getByTestId("processes")).getByText("Threads")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("processes-columns"));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Threads" }));
+    expect(within(screen.getByTestId("processes")).queryByText("Threads")).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("fl.columns.host-processes")).toContain("threads");
   });
 });

@@ -376,7 +376,7 @@ export function Services({ host }: { host: Host }) {
                         cell: (one) => <Button kind="word" onClick={() => lead(one)}>{one}</Button>,
                       },
                       {
-                        key: "actions", head: t("Actions"), actions: true, cell: (one) => (
+                        key: "actions", head: t("Actions"), actions: true, optional: true, cell: (one) => (
                           <>
                             <Guard action="unit.restart" host={host.id}>
                               <Button onClick={() => operation("unit.restart", one)}>{t("Restart")}</Button>
@@ -463,6 +463,24 @@ export function Services({ host }: { host: Host }) {
                   rowTestId={(one) => `unit-${one.name}`}
                   testId="units"
                   empty={t("No unit answers this filter.")}
+                  /* The unit's detail belongs under its own row: the panel
+                     being replaced put it in a second row there, and a card
+                     elsewhere on the board makes the reader hunt for it. */
+                  opened={(one) => one.name === expanded}
+                  detail={(one) => (
+                    <UnitDetailCard
+                      hostID={host.id}
+                      unit={one}
+                      detail={details[one.name]}
+                      loading={detail.isPending && detail.variables === one.name}
+                      error={detailError}
+                      onLead={lead}
+                      onRetry={() => open(one.name, true)}
+                    />
+                  )}
+                  /* The columns an operator folds away are this browser's,
+                     and the unit's name and its buttons always stay. */
+                  remember="fl.columns.host-services"
                   columns={[
                     {
                       key: "unit", head: t("Unit"), tight: true, cell: (one) => (
@@ -476,13 +494,13 @@ export function Services({ host }: { host: Host }) {
                       ),
                     },
                     {
-                      key: "active", head: t("Active"),
+                      key: "active", head: t("Active"), optional: true,
                       cell: (one) => <Pill tone={unitTone(one.active_state)}>{one.active_state}</Pill>,
                     },
-                    { key: "sub", head: t("Sub-state"), minor: true, cell: (one) => one.sub_state || "—" },
-                    { key: "onboot", head: t("On boot"), cell: (one) => one.unit_file_state || "—" },
+                    { key: "sub", head: t("Sub-state"), minor: true, optional: true, cell: (one) => one.sub_state || "—" },
+                    { key: "onboot", head: t("On boot"), optional: true, cell: (one) => one.unit_file_state || "—" },
                     {
-                      key: "actions", head: t("Actions"), actions: true, cell: (one) => (
+                      key: "actions", head: t("Actions"), actions: true, optional: true, cell: (one) => (
                         <>
                           {one.active_state === "active" ? (
                             <>
@@ -530,13 +548,14 @@ export function Services({ host }: { host: Host }) {
           </Card>
         ),
 
-        /* A failed unit opened before the listing was read still gets its
-           detail: the detail is its own read, not a row of the list. */
-        detail: expanded !== null && (
+        /* A unit with a row shows its detail under that row. This container
+           is for the one that has none: a failed unit opened before the
+           listing was read, or one the filter leaves out. The detail is its
+           own read, not a row of the list. */
+        detail: expanded !== null && !shown.some((one) => one.name === expanded) && (
           <Card
             title={expanded}
             note={t("What the host says about this unit, read on its own.")}
-            tools={<Button kind="quiet" onClick={() => open(expanded, true)}>{t("Read again")}</Button>}
           >
             <UnitDetailCard
               hostID={host.id}
@@ -684,6 +703,7 @@ function UnitDetailCard({ hostID, unit, detail, loading, error, onLead, onRetry 
             the cursor travels in the address. */}
         <Tag to={logs}>{t("Follow in Logs")}</Tag>
         <Button kind="quiet" onClick={() => onLead(unit.name)}>{t("Narrow the list to this unit")}</Button>
+        <Button kind="quiet" onClick={onRetry}>{t("Read again")}</Button>
       </Actions>
     </div>
   );

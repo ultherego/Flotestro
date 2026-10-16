@@ -218,6 +218,14 @@ export function Monitoring({ host }: { host: Host }) {
 
   const everyLabel = (count: number) => Math.max(1, Math.ceil(count / 8));
   const axis = (labels: string[]) => labels.map(label);
+  /* A measure with a ceiling is drawn to that ceiling. A CPU chart scaled
+     to its own highest reading says a host at 4% is as loaded as one at
+     99%; memory drawn against the host's total says how much of the
+     machine is gone. The axis is written in the measure's own units: a
+     memory axis labelled 4294967296 is a number nobody reads. */
+  const memoryTop = Math.max(0, ...points.map((one) => one.memory_total ?? 0));
+  const percent = (value: number) => `${Math.round(value)}%`;
+  const rate = (value: number) => `${bytes(value)}/s`;
 
   /**
    * What stands where a drawing would, while there is nothing to draw: the
@@ -359,6 +367,8 @@ export function Monitoring({ host }: { host: Host }) {
                   testId="cpu-chart"
                   labels={axis(cpu.labels)}
                   everyLabel={everyLabel(cpu.labels.length)}
+                  max={100}
+                  format={percent}
                   series={[{ name: t("CPU"), tone: "accent", values: cpu.values[0] }]}
                 />
               ))}
@@ -383,6 +393,7 @@ export function Monitoring({ host }: { host: Host }) {
                   testId="load-chart"
                   labels={axis(load.labels)}
                   everyLabel={everyLabel(load.labels.length)}
+                  format={(value) => String(Math.round(value * 100) / 100)}
                   series={[
                     { name: t("1 min"), tone: "accent", values: load.values[0] },
                     { name: t("5 min"), tone: "warn", values: load.values[1] },
@@ -407,6 +418,8 @@ export function Monitoring({ host }: { host: Host }) {
                   testId="memory-chart"
                   labels={axis(memory.labels)}
                   everyLabel={everyLabel(memory.labels.length)}
+                  max={memoryTop > 0 ? memoryTop : undefined}
+                  format={bytes}
                   series={[
                     { name: t("Memory used"), tone: "accent", values: memory.values[0] },
                     { name: t("Swap used"), tone: "warn", values: memory.values[1] },
@@ -431,6 +444,7 @@ export function Monitoring({ host }: { host: Host }) {
                   testId="network-chart"
                   labels={axis(network.labels)}
                   everyLabel={everyLabel(network.labels.length)}
+                  format={rate}
                   series={[
                     { name: t("{name} received", { name: link.name }), tone: "ok", values: network.values[0] },
                     { name: t("{name} sent", { name: link.name }), tone: "accent", values: network.values[1] },
@@ -460,6 +474,7 @@ export function Monitoring({ host }: { host: Host }) {
                       testId="agent-memory-chart"
                       labels={axis(agentMemory.labels)}
                       everyLabel={everyLabel(agentMemory.labels.length)}
+                      format={bytes}
                       series={[
                         { name: t("Agent RSS"), tone: "accent", values: agentMemory.values[0] },
                         // The helper sleeps between orders, so it is drawn
@@ -477,6 +492,7 @@ export function Monitoring({ host }: { host: Host }) {
                       testId="agent-cpu-chart"
                       labels={axis(agentCPU.labels)}
                       everyLabel={everyLabel(agentCPU.labels.length)}
+                      format={(value) => `${Math.round(value * 10) / 10}%`}
                       series={[{ name: t("Agent CPU, percent of one core"), tone: "accent", values: agentCPU.values[0] }]}
                     />
                   )}

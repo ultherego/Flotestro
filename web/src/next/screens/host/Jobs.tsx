@@ -178,7 +178,6 @@ export function Jobs({ host }: { host: Host }) {
     ? t("The {n} listed jobs on this host that match the filter, by where they stand.", { n: jobs.length })
     : t("The last {n} jobs on this host, by where they stand.", { n: loaded ? jobs.length : JOBS_PAGE });
 
-  const chosen = jobs.find((one) => one.id === opened);
   const wantsReason = asking !== null && (asking.verdict === "cancel" || needsReason(asking.job.action_type));
   const ready = !wantsReason || reasonAccepted(reason);
 
@@ -280,6 +279,20 @@ export function Jobs({ host }: { host: Host }) {
               rows={jobs}
               keyOf={(one) => one.id}
               rowTestId={(one) => `job-${one.id}`}
+              /* The attempts open under the job they belong to, as the
+                 panel being replaced opened them, with the two ways on
+                 from there under them. */
+              opened={(one) => one.id === opened}
+              detail={(one) => (
+                <Stack>
+                  <Attempts jobId={one.id} />
+                  <Note>
+                    <Link to={`/next/jobs/${one.id}`}>{t("Open the job: full payload, plan and output")}</Link>
+                    {" · "}
+                    <Link to={`/next/hosts/${host.id}/logs?job=${one.id}`}>{t("Read the journal of this job")}</Link>
+                  </Note>
+                </Stack>
+              )}
               testId="jobs"
               loading={list.isLoading}
               empty={filtered ? t("No job matches the filter.") : t("No jobs for this host.")}
@@ -385,27 +398,6 @@ export function Jobs({ host }: { host: Host }) {
                 } },
               ]}
             />
-          </Card>
-        ),
-        attempts: (
-          <Card
-            title={t("Attempts")}
-            note={chosen
-              ? t("What the host did about {operation}, attempt by attempt.", { operation: chosen.action_type })
-              : undefined}
-            foot={chosen
-              ? (
-                <>
-                  <Link to={`/next/jobs/${chosen.id}`}>{t("Open the job: full payload, plan and output")}</Link>
-                  {" · "}
-                  <Link to={`/next/hosts/${host.id}/logs?job=${chosen.id}`}>{t("Read the journal of this job")}</Link>
-                </>
-              )
-              : undefined}
-          >
-            {!chosen
-              ? <Empty icon="jobs">{t("Open a job to read what the host did about it.")}</Empty>
-              : <Attempts jobId={chosen.id} />}
           </Card>
         ),
       }} />
@@ -532,5 +524,4 @@ export const HOST_JOBS: BoardEntry[] = [
   { key: "modules", title: "By module", width: 4, height: 2 },
   { key: "requesters", title: "Requested by", width: 3, height: 2 },
   { key: "jobs", title: "Jobs", width: 12, height: 6 },
-  { key: "attempts", title: "Attempts", width: 12, height: 4 },
 ];

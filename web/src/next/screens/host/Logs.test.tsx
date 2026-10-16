@@ -218,12 +218,48 @@ describe("the logs module of a host", () => {
     await waitFor(() => expect(screen.getByTestId("log-output")).toBeInTheDocument());
 
     fireEvent.change(screen.getByTestId("search"), { target: { value: "sshd" } });
+    const here = () => screen.getByTestId("log-output").querySelector("[data-here]")?.textContent?.trim();
     expect(screen.getByTestId("match-count")).toHaveTextContent("1 of 2 matches");
-    expect(screen.getByTestId("current-match")).toHaveTextContent("sshd accepted");
+    // The line walked to is marked where it stands in the output, not
+    // lifted out of it: what is copied stays what the host sent.
+    expect(here()).toBe("sshd accepted");
     fireEvent.click(screen.getByTestId("next-match"));
-    expect(screen.getByTestId("current-match")).toHaveTextContent("sshd refused");
+    expect(here()).toBe("sshd refused");
     fireEvent.change(screen.getByTestId("search"), { target: { value: "nothing like this" } });
     expect(screen.getByTestId("match-count")).toHaveTextContent("0 matches");
+  });
+
+  it("marks what is sought in the output, and folds a long line on request", async () => {
+    Object.assign(answers, {
+      "/api/v1/settings/layout": layout,
+      "/api/v1/hosts/h1/actions": reads,
+      "/api/v1/jobs/job-1/attempts": {
+        items: [{ status: "succeeded", detail: { lines: ["sshd accepted", "cron ran", "sshd refused"] } }],
+      },
+    });
+    draw();
+    await screen.findByTestId("read");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fireEvent.click(screen.getByTestId("read"));
+    await vi.advanceTimersByTimeAsync(2000);
+    vi.useRealTimers();
+    await waitFor(() => expect(screen.getByTestId("log-output")).toBeInTheDocument());
+
+    const output = screen.getByTestId("log-output");
+    // Nothing sought, nothing marked.
+    expect(output.querySelectorAll("mark")).toHaveLength(0);
+    fireEvent.change(screen.getByTestId("search"), { target: { value: "sshd" } });
+    // Both occurrences are marked where they are, so the reader does not
+    // have to find them a second time inside the line.
+    const marks = [...output.querySelectorAll("mark")].map((one) => one.textContent);
+    expect(marks).toEqual(["sshd", "sshd"]);
+
+    // The wrap is the reader's and starts on, as it did in the old module.
+    const wrapping = screen.getByRole("checkbox", { name: "wrap lines" });
+    expect(wrapping).toBeChecked();
+    expect(output.querySelector("pre")).toHaveClass("fl-readout-wrap");
+    fireEvent.click(wrapping);
+    expect(screen.getByTestId("log-output").querySelector("pre")).not.toHaveClass("fl-readout-wrap");
   });
 });
 

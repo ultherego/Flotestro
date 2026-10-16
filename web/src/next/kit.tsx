@@ -402,8 +402,8 @@ export function TwoLine({ children, sub }: { children: ReactNode; sub?: ReactNod
   );
 }
 
-export function Note({ children }: { children: ReactNode }) {
-  return <p className="fl-note">{children}</p>;
+export function Note({ children, testId }: { children: ReactNode; testId?: string }) {
+  return <p className="fl-note" data-testid={testId}>{children}</p>;
 }
 
 /**
@@ -446,7 +446,20 @@ export type Column<Row> = {
   startFolded?: boolean;
   /** How deep this row sits under the one above: a tree in a table. */
   indent?: (row: Row) => number;
+  /** The cell's content starts at the top: a square of a month, a list in a cell. */
+  top?: boolean;
   head?: ReactNode;
+  /**
+   * The column's name where it is listed rather than drawn - in the
+   * chooser. A head that is a control, or an icon, needs a word there.
+   */
+  label?: ReactNode;
+  /**
+   * What the server calls ordering by this column. Given one, the head
+   * becomes the control: the panel being replaced sorted by clicking
+   * the heading, and a reader who knows that looks there first.
+   */
+  sort?: string;
   cell: (row: Row) => ReactNode;
   /** Numbers are read down a column, so they line up on their digits. */
   num?: boolean;
@@ -469,7 +482,7 @@ export type Column<Row> = {
  */
 export function Table<Row>({
   columns, rows, keyOf, empty, loading = false, rowTestId, testId,
-  detail, opened, marked, remember,
+  detail, opened, under, marked, remember, sort, onSort,
 }: {
   columns: Column<Row>[];
   rows: Row[];
@@ -494,10 +507,22 @@ export function Table<Row>({
   detail?: (row: Row) => ReactNode;
   /** Which rows are open. */
   opened?: (row: Row) => boolean;
+  /**
+   * A line the row carries under itself without being asked.
+   *
+   * For what a reader scanning the list needs to see - which fields a
+   * change touched, what an approval rested on. Unlike `detail` it is
+   * not behind a click, and a row with nothing to say returns nothing.
+   */
+  under?: (row: Row) => ReactNode;
   /** The row the cards beside the table are about. */
   marked?: (row: Row) => boolean;
   /** The browser key under which the folded columns are kept. */
   remember?: string;
+  /** Which column the rows are in the order of, and which way. */
+  sort?: { by: string; down: boolean };
+  /** The reader asked for this column's order; the same one turns it round. */
+  onSort?: (by: string) => void;
   rowTestId?: (row: Row) => string;
   testId?: string;
 }) {
@@ -520,6 +545,7 @@ export function Table<Row>({
       column.actions && "fl-cell-actions",
       column.minor && "fl-minor",
       column.tight && "fl-tight",
+      column.top && "fl-cell-top",
     ) || undefined;
 
   const fold = (key: string) =>
@@ -546,7 +572,7 @@ export function Table<Row>({
                   checked={!folded.includes(one.key)}
                   onChange={() => fold(one.key)}
                 >
-                  {one.head}
+                  {one.label ?? one.head}
                 </Check>
               ))}
             </div>
@@ -555,9 +581,30 @@ export function Table<Row>({
       )}
       <table className="fl-table" data-testid={testId}>
         <thead>
-          <tr>{shown.map((column) => (
-            <th key={column.key} scope="col" className={classOf(column)}>{column.head}</th>
-          ))}</tr>
+          <tr>{shown.map((column) => {
+            const by = column.sort;
+            const on = by !== undefined && sort?.by === by;
+            return (
+              <th
+                key={column.key}
+                scope="col"
+                className={classOf(column)}
+                aria-sort={on ? (sort.down ? "descending" : "ascending") : by ? "none" : undefined}
+              >
+                {by && onSort ? (
+                  <button
+                    type="button"
+                    className="fl-plain fl-head-sort"
+                    onClick={() => onSort(by)}
+                    data-testid={testId ? `${testId}-sort-${column.key}` : undefined}
+                  >
+                    {column.head}
+                    <span aria-hidden="true">{on ? (sort.down ? "\u2193" : "\u2191") : "\u2195"}</span>
+                  </button>
+                ) : column.head}
+              </th>
+            );
+          })}</tr>
         </thead>
         <tbody>
           {rows.map((row, index) => {
@@ -579,6 +626,14 @@ export function Table<Row>({
                     <td colSpan={shown.length}>{detail(row)}</td>
                   </tr>
                 )}
+                {(() => {
+                  const says = under?.(row);
+                  return says ? (
+                    <tr className="fl-row-under">
+                      <td colSpan={shown.length}>{says}</td>
+                    </tr>
+                  ) : null;
+                })()}
               </Fragment>
             );
           })}
@@ -1775,7 +1830,7 @@ export function Button({ kind = "do", onClick, disabled, title, icon, children, 
  * it rather than somewhere else on the screen. A screen that put one of
  * these in a text field gave its label two controls.
  */
-export function Readout({ label, value, note, lines, highlight, wrap = false, testId }: {
+export function Readout({ label, value, note, lines, highlight, wrap = false, atLine, testId }: {
   label?: ReactNode;
   value: string;
   note?: ReactNode;
@@ -1790,10 +1845,28 @@ export function Readout({ label, value, note, lines, highlight, wrap = false, te
   highlight?: string;
   /** Fold a long line instead of scrolling it sideways. */
   wrap?: boolean;
+  /**
+   * Which line the reader is standing on, counting from 0.
+   *
+   * What is sought is marked on that line apart from everywhere else,
+   * and the line is brought into view. A search over a thousand lines
+   * that can only say "match 7 of 40" leaves the finding to the reader,
+   * which is the work the search was for.
+   */
+  atLine?: number;
   testId?: string;
 }) {
   const t = useT();
   const toast = useToast();
+  const here = useRef<HTMLElement | null>(null);
+  // Brought into view when the line the reader stands on changes, and not
+  // on every line a live stream appends: a view being followed is not
+  // pulled back to a match the reader has already read.
+  useEffect(() => {
+    // Guarded: a window without the call (an old browser, a test) must
+    // still show the mark rather than lose the whole readout to a throw.
+    here.current?.scrollIntoView?.({ block: "nearest" });
+  }, [atLine, highlight]);
   const take = async () => {
     const { copyToClipboard } = await import("../lib/clipboard");
     const done = await copyToClipboard(value);
@@ -1815,7 +1888,7 @@ export function Readout({ label, value, note, lines, highlight, wrap = false, te
         className={join("fl-readout-body", wrap && "fl-readout-wrap")}
         style={lines ? { maxHeight: `${lines * 1.5}em` } : undefined}
       >
-        {marked(value, highlight)}
+        {marked(value, highlight, atLine, here)}
       </pre>
       {note && <span className="fl-field-hint">{note}</span>}
     </div>
@@ -1823,22 +1896,53 @@ export function Readout({ label, value, note, lines, highlight, wrap = false, te
 }
 
 /** The text, with every occurrence of what is sought marked in it. */
-function marked(value: string, needle?: string): ReactNode {
+function marked(
+  value: string,
+  needle?: string,
+  atLine?: number,
+  here?: { current: HTMLElement | null },
+): ReactNode {
   const what = needle?.trim() ?? "";
   if (what === "") return value;
-  const out: ReactNode[] = [];
-  const lower = value.toLowerCase();
   const seek = what.toLowerCase();
-  let at = 0;
-  for (;;) {
-    const found = lower.indexOf(seek, at);
-    if (found < 0) break;
-    if (found > at) out.push(value.slice(at, found));
-    out.push(<mark key={found}>{value.slice(found, found + what.length)}</mark>);
-    at = found + what.length;
-  }
-  if (out.length === 0) return value;
-  if (at < value.length) out.push(value.slice(at));
+  const lines = value.split("\n");
+  const out: ReactNode[] = [];
+  let any = false;
+  lines.forEach((line, index) => {
+    const tail = index < lines.length - 1 ? "\n" : "";
+    const now = atLine !== undefined && index === atLine;
+    const lower = line.toLowerCase();
+    const pieces: ReactNode[] = [];
+    let from = 0;
+    for (;;) {
+      const found = lower.indexOf(seek, from);
+      if (found < 0) break;
+      if (found > from) pieces.push(line.slice(from, found));
+      pieces.push(
+        <mark key={found} className={now ? "fl-mark-now" : undefined}>
+          {line.slice(found, found + what.length)}
+        </mark>,
+      );
+      from = found + what.length;
+    }
+    if (pieces.length === 0) {
+      out.push(line + tail);
+      return;
+    }
+    any = true;
+    if (from < line.length) pieces.push(line.slice(from));
+    pieces.push(tail);
+    out.push(
+      <span
+        key={index}
+        data-here={now ? "" : undefined}
+        ref={now && here ? (node) => { here.current = node; } : undefined}
+      >
+        {pieces}
+      </span>,
+    );
+  });
+  if (!any) return value;
   return out;
 }
 
@@ -1952,4 +2056,35 @@ export function ShownOnce({ label, value, note, onClose, testId }: {
       </span>
     </div>
   );
+}
+
+/* ------------------------------------------------------------- paper */
+
+/**
+ * Print what is on the screen.
+ *
+ * The panel's own themes are dark, and a dark screen on paper is either
+ * a wasted cartridge or text nobody can read. The reader's theme is put
+ * aside for the length of the printing and given straight back: the
+ * stylesheet decides nothing about colour here, which is the rule, and
+ * the sheet comes out as a document rather than as a photograph of a
+ * screen.
+ */
+export function printPage() {
+  const root = document.documentElement;
+  const was = root.dataset.theme;
+  root.dataset.theme = "latte";
+  const back = () => {
+    if (was === undefined) delete root.dataset.theme;
+    else root.dataset.theme = was;
+    window.removeEventListener("afterprint", back);
+  };
+  window.addEventListener("afterprint", back);
+  try {
+    window.print();
+  } finally {
+    // A browser that never fires afterprint - and a test - still gets
+    // its theme back.
+    if (typeof window.onafterprint === "undefined") back();
+  }
 }

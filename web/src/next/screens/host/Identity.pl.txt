@@ -1,8 +1,0 @@
-  "Type the hostname to confirm: {name}": "Wpisz nazwę hosta, aby potwierdzić: {name}",
-  "Local sudoers make somebody root on this host: {what}": "Lokalny sudoers daje komuś roota na tym hoście: {what}",
-  "The identity module could not be read: {reason}": "Nie udało się odczytać modułu tożsamości: {reason}",
-  "{n} of them": "sztuk: {n}",
-  "Preflight": "Test wstępny",
-  "The host answered with no checks.": "Host odpowiedział bez żadnych kontroli.",
-  "{count} lines were not understood and may grant something the table does not show: {where}": "Nierozpoznanych linii: {count}; mogą nadawać uprawnienia, których tabela nie pokazuje: {where}",
-  "Files not read: {files}": "Nieodczytane pliki: {files}",

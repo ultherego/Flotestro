@@ -159,6 +159,13 @@ describe("the audit module of a host", () => {
     const record = await screen.findByTestId("record");
     expect(record).toHaveTextContent("\"action\": \"unit.restart\"");
     expect(record).toHaveTextContent("\"session_id\": \"sess-0123456789abcdef\"");
+    // It opens under the event's own row, across the whole width, which is
+    // where the panel being replaced opened it.
+    const row = screen.getByTestId("event-1");
+    expect(row.nextElementSibling).toHaveClass("fl-row-detail");
+    expect(row.nextElementSibling?.contains(record)).toBe(true);
+    expect(row.nextElementSibling?.querySelector("td")?.getAttribute("colspan"))
+      .toBe(String(row.querySelectorAll("td").length));
   });
 
   it("says plainly that the trail is not for this reader", async () => {

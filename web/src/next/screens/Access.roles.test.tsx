@@ -18,6 +18,8 @@ import { ToastProvider } from "../../components/Toast";
  */
 
 const answers: Record<string, unknown> = {};
+/** Every write the screen made, in the order it made them. */
+const sent: { method: string; path: string; body?: unknown }[] = [];
 
 vi.mock("../../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/api")>();
@@ -34,9 +36,9 @@ vi.mock("../../lib/api", async (importOriginal) => {
     api: {
       ...actual.api,
       get: (path: string) => answer(path),
-      post: () => Promise.resolve({}),
-      put: () => Promise.resolve({}),
-      del: () => Promise.resolve(undefined),
+      post: (path: string, body?: unknown) => { sent.push({ method: "POST", path, body }); return Promise.resolve({}); },
+      put: (path: string, body?: unknown) => { sent.push({ method: "PUT", path, body }); return Promise.resolve({}); },
+      del: (path: string, body?: unknown) => { sent.push({ method: "DELETE", path, body }); return Promise.resolve(undefined); },
     },
   };
 });
@@ -92,6 +94,7 @@ function draw() {
 
 afterEach(() => {
   cleanup();
+  sent.length = 0;
   for (const key of Object.keys(answers)) delete answers[key];
 });
 
@@ -163,6 +166,91 @@ describe("the roles of this installation", () => {
     expect(screen.getByRole("checkbox", { name: "secret.write" })).not.toBeChecked();
     fireEvent.click(screen.getByTestId("role-close"));
     await waitFor(() => expect(screen.queryByText("Edit the role shift_lead")).not.toBeInTheDocument());
+  });
+
+  /**
+   * Defining a role and removing one were in the panel being replaced and
+   * did not come across. Without the first, an installation whose job
+   * nobody's role describes has nowhere to say so; without the second, a
+   * role written by mistake stays on the list for good.
+   */
+  it("defines a role by name against the server's own vocabulary", async () => {
+    given();
+    draw();
+    fireEvent.click(await screen.findByTestId("define-role"));
+    await waitFor(() => expect(screen.getByTestId("role-name")).toBeInTheDocument());
+    // Nothing is ticked on a role that does not exist yet.
+    expect(screen.getByRole("checkbox", { name: "unit.restart" })).not.toBeChecked();
+    expect(screen.getByTestId("role-save")).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId("role-name"), { target: { value: "night_shift" } });
+    fireEvent.change(screen.getByTestId("role-description"), { target: { value: "the night shift" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "unit.restart" }));
+    expect(screen.getByTestId("role-save")).toBeEnabled();
+
+    fireEvent.click(screen.getByTestId("role-save"));
+    await waitFor(() => expect(screen.getByTestId("role-reason")).toBeInTheDocument());
+    // Nothing is written before the reason the trail keeps.
+    expect(screen.getByTestId("role-confirm")).toBeDisabled();
+    fireEvent.change(screen.getByTestId("role-reason"), { target: { value: "the night shift needs no reboots" } });
+    fireEvent.click(screen.getByTestId("role-confirm"));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toEqual({
+      method: "POST",
+      path: "/api/v1/roles",
+      body: {
+        role: "night_shift",
+        description: "the night shift",
+        permissions: ["unit.restart"],
+        reason: "the night shift needs no reboots",
+      },
+    });
+  });
+
+  it("refuses a name the server would refuse, and says what shape one takes", async () => {
+    given();
+    draw();
+    fireEvent.click(await screen.findByTestId("define-role"));
+    await waitFor(() => expect(screen.getByTestId("role-name")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("checkbox", { name: "unit.restart" }));
+    fireEvent.change(screen.getByTestId("role-name"), { target: { value: "Night Shift" } });
+    expect(screen.getByTestId("role-save")).toBeDisabled();
+    expect(screen.getByText(/lower case letters, digits and underscores/)).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("role-name"), { target: { value: "night_shift" } });
+    expect(screen.getByTestId("role-save")).toBeEnabled();
+  });
+
+  it("removes a role through the one dialog, with its reason in the address", async () => {
+    given();
+    draw();
+    fireEvent.click(await screen.findByTestId("remove-role-shift_lead"));
+    await waitFor(() => expect(screen.getByText("Remove the role shift_lead")).toBeInTheDocument());
+    // A role that is still granted says the removal will be refused.
+    expect(screen.getByText(/the panel will refuse to remove it/)).toBeInTheDocument();
+    expect(screen.getByTestId("ask-confirm")).toBeDisabled();
+    fireEvent.change(screen.getByTestId("ask-reason"), { target: { value: "written by mistake" } });
+    fireEvent.click(screen.getByTestId("ask-confirm"));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0].method).toBe("DELETE");
+    expect(sent[0].path).toBe("/api/v1/roles/shift_lead?reason=written%20by%20mistake");
+  });
+
+  it("promises nothing about a role whose use the server never counted", async () => {
+    given({ "/api/v1/roles": { items: [{ role: "shift_lead", permissions: ["unit.restart"] }], count: 1 } });
+    draw();
+    fireEvent.click(await screen.findByTestId("remove-role-shift_lead"));
+    await waitFor(() => expect(screen.getByText(/not known here/)).toBeInTheDocument());
+    expect(screen.queryByText(/nobody loses access by this/)).not.toBeInTheDocument();
+  });
+
+  it("offers a reader who may not manage access no way to define or remove one", async () => {
+    given({ "/api/v1/whoami": { permissions: ["host.read"] } });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("role-shift_lead")).toBeInTheDocument());
+    expect(screen.queryByTestId("define-role")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("remove-role-shift_lead")).not.toBeInTheDocument();
   });
 
   it("will not write a role against a vocabulary that has not arrived", async () => {

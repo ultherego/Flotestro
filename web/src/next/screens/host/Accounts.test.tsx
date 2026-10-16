@@ -259,3 +259,28 @@ describe("a host's accounts", () => {
     (api as unknown as { get: unknown }).get = read;
   });
 });
+
+describe("where one account opens", () => {
+  it("puts the keys, the groups and the expiry under the account's own row", async () => {
+    Object.assign(answers, {
+      "/api/v1/hosts/h1/local-accounts": { accounts: [
+        account({ name: "jane", groups: ["sudo"] }),
+        account({ name: "bob", uid: 1001 }),
+      ] },
+      "/api/v1/hosts/h1/actions": allowed,
+    });
+    draw();
+    const row = await screen.findByTestId("account-jane");
+    fireEvent.click(screen.getByTestId("manage-jane"));
+    // The three tabs open in the row immediately under jane's, across the
+    // whole width - which is where the old module put them.
+    const detail = screen.getByTestId("account-jane").nextElementSibling;
+    expect(detail).toHaveClass("fl-row-detail");
+    expect(detail?.querySelector("td")?.getAttribute("colspan"))
+      .toBe(String(row.querySelectorAll("td").length));
+    expect(within(detail as HTMLElement).getByRole("tab", { name: /Groups/ })).toBeInTheDocument();
+    expect(within(detail as HTMLElement).getByRole("tab", { name: /Expiry/ })).toBeInTheDocument();
+    // One account opens at a time: there is one detail row in the table.
+    expect(document.querySelectorAll(".fl-row-detail")).toHaveLength(1);
+  });
+});

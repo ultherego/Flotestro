@@ -331,6 +331,10 @@ describe("what the module does", () => {
     expect(table).toHaveTextContent("abcdef0123456789");
     expect(asked.some((one) =>
       one.startsWith("/api/v1/hosts/h1/certificates/deployments?path=%2Fetc%2Fpki%2Ftls%2Fcerts%2Fweb.crt"))).toBe(true);
+    // The row the cards beside the table are about carries the mark, as it
+    // did in the panel being replaced; without it the detail belongs to no
+    // row the reader can see.
+    expect(screen.getByTestId("certificate-/etc/pki/tls/certs/web.crt")).toHaveClass("fl-row-marked");
   });
 });
 

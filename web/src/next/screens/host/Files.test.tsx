@@ -254,3 +254,31 @@ describe("what the files module works out on its own", () => {
     expect(differenceText("one\ntwo", "one\nthree")).toBe("  one\n- two\n+ three");
   });
 });
+
+describe("the patch the difference kept from the panel being replaced", () => {
+  it("colours what the version would put in and what it would take out", async () => {
+    base([file({})]);
+    Object.assign(answers, {
+      "/api/v1/hosts/h1/files/history": {
+        items: [
+          { sha256: "a".repeat(64), size_bytes: 10, applied_at: "2026-10-15T08:00:00Z", applied_by: "tester" },
+          { sha256: "c".repeat(64), size_bytes: 10, applied_at: "2026-10-14T08:00:00Z", applied_by: "tester" },
+        ],
+      },
+      [`/api/v1/files/versions/${"a".repeat(64)}`]: { content: "one\nthree" },
+      [`/api/v1/files/versions/${"c".repeat(64)}`]: { content: "one\ntwo" },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("open-/etc/example.conf")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("open-/etc/example.conf"));
+    await waitFor(() => expect(screen.getByTestId(`compare-${"c".repeat(64)}`)).toBeEnabled());
+    fireEvent.click(screen.getByTestId(`compare-${"c".repeat(64)}`));
+    await waitFor(() => expect(screen.getByTestId("file-difference")).toBeInTheDocument());
+    const patch = screen.getByTestId("file-difference");
+    // The line that goes out and the line that comes in are told apart by
+    // the product's own colours, which is what the old <pre class="ui-diff">
+    // did and what a plain readout lost.
+    expect(patch.querySelector(".fl-diff-out")?.textContent).toBe("- two");
+    expect(patch.querySelector(".fl-diff-in")?.textContent).toBe("+ three");
+  });
+});

@@ -6,15 +6,21 @@ import { exportAddress, exportFileName } from "../../components/ExportButton";
 import { useToast } from "../../components/Toast";
 import { stateName } from "../../components/ui";
 import { useDebounced } from "../../lib/debounce";
-import { absoluteTime, relativeTime, toInstant } from "../../lib/format";
+import { absoluteTime, bytes, relativeTime, toInstant } from "../../lib/format";
 import { needsReason } from "../../lib/actions";
+import { useErrorGuides } from "../../lib/errors";
+import { useStoredState } from "../../lib/storage";
+import {
+  changesSummary, isHostPlan, planWords,
+  type HostPlan, type PackagePlanFacts, type SpaceFact,
+} from "../../components/plan";
 import { OPERATIONS_INTERVAL, REFRESH_INTERVAL, useProgress } from "../../lib/stream";
 import type { Attempt, Campaign, FleetActivity, Job } from "../../lib/types";
 import { useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Band, Bars, Bones, Button, Card, Chart, Empty, Fact, Facts, Field, Fields, Meter, Modal, Note, Pill, Presets, Problem, RowsPerPage, Stack, Table, Tag, Tags, Toolbar, TwoLine, type Segment, type Tone,
+  Band, Bars, Bones, Button, Card, Chart, Empty, Fact, Facts, Field, Fields, Meter, Modal, Note, PAGE_SIZES, Pill, Presets, Problem, Readout, RowsPerPage, Stack, Table, Tag, Tags, Toolbar, TwoLine, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -143,6 +149,16 @@ export function orderAgainAddress(job: Pick<Job, "action_type" | "payload" | "ho
   return `/bulk?${query}`;
 }
 
+/** Where this browser keeps the page size of the operations list. */
+export const JOBS_PAGE_SIZE_KEY = "flotestro.page-size.next-jobs";
+
+/** Where this browser keeps the columns the reader folded away. */
+export const JOBS_COLUMNS_KEY = "fl.columns.next-jobs";
+
+/** A page size the list offers; anything else in storage is ignored. */
+const isPageSize = (value: unknown): value is number =>
+  typeof value === "number" && (PAGE_SIZES as readonly number[]).includes(value);
+
 /** What a decision is being taken on, and which decision it is. */
 type Asking = { verdict: "approve" | "cancel"; jobs: Job[] };
 
@@ -172,7 +188,9 @@ export function Jobs() {
     }
   }, [address]);
 
-  const [size, setSize] = useState(50);
+  // The page size the operator chose, kept in this browser: a list worked
+  // at two hundred rows is worked at two hundred rows again tomorrow.
+  const [size, setSize] = useStoredState<number>(JOBS_PAGE_SIZE_KEY, 50, isPageSize);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   // The job whose attempts are open under the list. One at a time: a list
   // of fifty with fifty sets of output under it is not a list any more.
@@ -325,10 +343,6 @@ export function Jobs() {
   const wantsReason = asking !== null
     && (asking.verdict === "cancel" || asking.jobs.some((job) => needsReason(job.action_type)));
   const ready = !wantsReason || reasonAccepted(reason);
-
-  // A row that has scrolled off the list, or that a refetch has dropped,
-  // takes its attempts with it rather than leaving a card over nothing.
-  const openedJob = jobs.find((job) => job.id === opened);
 
   return (
     <>
@@ -530,6 +544,15 @@ export function Jobs() {
               rowTestId={(job) => `job-${job.id}`}
               testId="jobs"
               loading={list.isLoading} empty={t("No job matches this.")}
+              /* The attempts open under the row they belong to. The panel
+                 being replaced read them there, and a card elsewhere on
+                 the board loses the place in the list that was being
+                 worked - which is the whole reason a row is opened. */
+              opened={(job) => job.id === opened}
+              detail={(job) => <Attempts job={job} onClose={() => setOpened("")} />}
+              /* The columns a reader folds away are this browser's; the
+                 operation and the buttons always stay. */
+              remember={JOBS_COLUMNS_KEY}
               columns={[
                 {
                   key: "pick",
@@ -571,6 +594,7 @@ export function Jobs() {
                   key: "host",
                   head: t("Host"),
                   tight: true,
+                  optional: true,
                   cell: (job) => (
                     <Link to={`/next/hosts/${job.host_id}`} className="fl-nowrap">
                       {job.hostname || job.host_id.slice(0, 8)}
@@ -580,6 +604,7 @@ export function Jobs() {
                 {
                   key: "state",
                   head: t("State"),
+                  optional: true,
                   cell: (job) => {
                     const budget = job.state === "queued" ? waitedBudget(job.wait_reason) : "";
                     const moving = progress.get(job.id);
@@ -615,6 +640,7 @@ export function Jobs() {
                   head: t("Requested by"),
                   minor: true,
                   tight: true,
+                  optional: true,
                   cell: (job) => <span title={job.created_by}>{job.created_by}</span>,
                 },
                 {
@@ -622,6 +648,7 @@ export function Jobs() {
                   head: t("Approved by"),
                   minor: true,
                   tight: true,
+                  optional: true,
                   // One approval starts nothing where two are required: the
                   // reader is to see whom we are still waiting for rather than
                   // press Approve and watch nothing happen.
@@ -640,8 +667,9 @@ export function Jobs() {
                 {
                   key: "result",
                   head: t("Result"),
+                  optional: true,
                   cell: (job) => job.result_error_code
-                    ? <Pill tone="error" title={job.result_message}>{job.result_error_code}</Pill>
+                    ? <ResultCode code={job.result_error_code} message={job.result_message} />
                     : job.result_status
                       ? <span title={job.result_message}>{t(stateName(job.result_status))}</span>
                       : <span className="fl-faint">—</span>,
@@ -650,12 +678,18 @@ export function Jobs() {
                   key: "created",
                   head: t("Created"),
                   minor: true,
+                  optional: true,
                   cell: (job) => <span title={absoluteTime(job.created_at)}>{relativeTime(job.created_at)}</span>,
                 },
                 {
                   key: "finished",
                   head: t("Finished"),
                   minor: true,
+                  // Folded to start with, as it was in the panel being
+                  // replaced: a job's end is read from its state, and the
+                  // reader who wants the hour unfolds the column.
+                  optional: true,
+                  startFolded: true,
                   cell: (job) => job.finished_at
                     ? <span title={absoluteTime(job.finished_at)}>{relativeTime(job.finished_at)}</span>
                     : <span className="fl-faint">—</span>,
@@ -706,7 +740,6 @@ export function Jobs() {
             />
           </Card>
         ),
-        attempts: openedJob && <Attempts job={openedJob} onClose={() => setOpened("")} />,
       }} />
 
       {asking && (
@@ -855,20 +888,272 @@ function OneAttempt({ attempt }: { attempt: Attempt }) {
           </Fact>
         )}
       </Facts>
-      {/* The typed result as the host answered it. A sentence per known
-          kind leaves a kind nobody wrote one for unreadable; the whole of
-          it is readable whatever the host grew since. */}
+      {/* The typed result as the host answered it: a sentence for the
+          kinds the product knows, and the whole of it underneath - a kind
+          nobody wrote a sentence for is still readable, and a kind that
+          has one is read without anybody parsing JSON by eye. */}
       {attempt.detail && Object.keys(attempt.detail).length > 0 && (
         <>
           <Note>{t("What the host returned")}</Note>
-          <pre className="fl-mono" data-testid={`attempt-detail-${attempt.attempt_number}`}>
-            {prettyJSON(attempt.detail)}
-          </pre>
+          <TypedResult detail={attempt.detail} />
+          <Readout
+            label={t("The whole of it")}
+            value={prettyJSON(attempt.detail)}
+            lines={14}
+            testId={`attempt-detail-${attempt.attempt_number}`}
+          />
         </>
       )}
       {attempt.stdout && <Output label="stdout" text={attempt.stdout} />}
       {attempt.stderr && <Output label="stderr" text={attempt.stderr} />}
     </Stack>
+  );
+}
+
+/**
+ * An error code with the guide the server serves for it: what it means,
+ * what to do next, and whether repeating the order is worth anything.
+ *
+ * The panel being replaced put all three under the pointer, and a code
+ * alone - `unit.reset_failed` - tells an operator who has not met it
+ * before nothing at all. A code the server has no guide for keeps the
+ * message the host sent with it.
+ */
+function ResultCode({ code, message }: { code: string; message?: string }) {
+  const t = useT();
+  const guide = useErrorGuides().get(code);
+  if (!guide) return <Pill tone="error" title={message}>{code}</Pill>;
+  const retry: Record<string, string> = {
+    never: t("a retry will fail the same way"),
+    automatic: t("retried automatically"),
+    after_change: t("retry after the named change"),
+    after_replan: t("compute the plan again first"),
+    read_state: t("read the state of the host before repeating"),
+  };
+  const title = `${t(guide.meaning)}\n${t("Next")}: ${t(guide.action)}\n${t("Retry")}: ${retry[guide.retry] ?? guide.retry}`
+    + (message ? `\n${message}` : "");
+  // A code that does not count as a failure is not drawn as one: a job
+  // that changed nothing because nothing needed changing is not an error.
+  return <Pill tone={guide.counts_as_failure ? "error" : "neutral"} title={title}>{code}</Pill>;
+}
+
+/* ------------------------------------------------- what the host said */
+
+/** One check of a domain enrolment, as the host answered it. */
+type EnrolCheck = { name: string; passed?: boolean; blocking?: boolean; detail?: string };
+
+/** One unit of a unit_status answer. */
+type UnitLine = { name: string; active_state?: string; sub_state?: string };
+
+/** A value of the detail read as a list, or nothing where it is not one. */
+function listOf<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+/**
+ * The result of an attempt in the words of the operation that produced it.
+ *
+ * A package plan, the space a change needs, the checks a domain enrolment
+ * ran: each of these is a shape the product defines, and a sentence about
+ * it is read where the same facts as JSON are only skimmed. A kind nobody
+ * wrote a sentence for draws nothing here - the whole of the detail stands
+ * underneath, so nothing is ever hidden by this not knowing a kind.
+ */
+export function TypedResult({ detail }: { detail: Record<string, unknown> }) {
+  const t = useT();
+  const kind = typeof detail.kind === "string" ? detail.kind : undefined;
+
+  if (kind === "package_plan") {
+    const changes = listOf<unknown>(detail.changes).length;
+    const download = typeof detail.download_bytes === "number" ? detail.download_bytes : 0;
+    return (
+      <Stack>
+        <Note>
+          {t("plan {manager}: {changes} changes, download {mb} MB", {
+            manager: String(detail.manager ?? "—"),
+            changes,
+            mb: Math.round(download / 1048576),
+          })}
+          {detail.reboot_predicted === true && `, ${t("reboot predicted")}`}
+        </Note>
+        <SpaceFacts facts={listOf<SpaceFact>(detail.space)} />
+      </Stack>
+    );
+  }
+
+  if (kind === "package_apply") {
+    const applied = listOf<unknown>(detail.applied).length;
+    const attention = listOf<string>(detail.packages_needing_attention);
+    const scriptlets = listOf<string>(detail.scriptlet_errors);
+    return (
+      <Stack>
+        <Note>
+          {t("{n} packages applied", { n: applied })}
+          {detail.reboot_required === true && `, ${t("reboot required")}`}
+        </Note>
+        <Tags>
+          {detail.package_database_broken === true && (
+            <Pill tone="error">{t("the package database needs repair")}</Pill>
+          )}
+          {attention.length > 0 && (
+            <Pill tone="warn" title={attention.join(", ")}>
+              {t("needing attention: {names}", { names: attention.join(", ") })}
+            </Pill>
+          )}
+          {/* rpm keeps a package whose %post failed: the transaction is a
+              success with a defect, and the defect is named here. */}
+          {scriptlets.length > 0 && (
+            <Pill tone="error" title={scriptlets.join(", ")}>
+              {t("maintainer script failed: {names}", { names: scriptlets.join(", ") })}
+            </Pill>
+          )}
+        </Tags>
+      </Stack>
+    );
+  }
+
+  if (kind === "domain_enroll") {
+    const checks = listOf<EnrolCheck>(detail.checks);
+    if (checks.length === 0) return null;
+    return (
+      <Facts>
+        {checks.map((check) => (
+          <Fact
+            key={check.name}
+            label={
+              <Pill tone={check.passed === true ? "ok" : check.passed === false ? (check.blocking ? "error" : "warn") : "unknown"}>
+                {check.passed === true
+                  ? t("passed")
+                  : check.passed === false
+                    ? (check.blocking ? t("blocking") : t("warning"))
+                    : t("unknown")}
+              </Pill>
+            }
+          >
+            <TwoLine sub={check.detail || undefined}><code>{check.name}</code></TwoLine>
+          </Fact>
+        ))}
+      </Facts>
+    );
+  }
+
+  if (kind === "unit_status") {
+    const units = listOf<UnitLine>(detail.units);
+    if (units.length === 0) return null;
+    return (
+      <Facts>
+        {units.map((unit) => (
+          <Fact key={unit.name} label={<code>{unit.name}</code>} mono>
+            {`${unit.active_state ?? "—"}/${unit.sub_state ?? "—"}`}
+          </Fact>
+        ))}
+      </Facts>
+    );
+  }
+
+  if (isHostPlan(kind)) {
+    const plan = (detail.plan ?? {}) as HostPlan & PackagePlanFacts;
+    return <PlanWords plan={plan} />;
+  }
+
+  return null;
+}
+
+/**
+ * A host plan in one line: what it would do, what it refuses to do, and
+ * the text that actually lands on the host.
+ *
+ * The operator consents to the document, not to a paraphrase of it, so
+ * the verbatim part is here and not only on the job's own screen.
+ */
+function PlanWords({ plan }: { plan: HostPlan & PackagePlanFacts }) {
+  const t = useT();
+  if (plan.refusal) return <Pill tone="error">{t("refused: {reason}", { reason: plan.refusal })}</Pill>;
+  if (plan.validator_failed) {
+    return (
+      <Pill tone="error" title={plan.validator_output}>
+        {t("validator failed")}
+        {plan.validator_output ? `: ${plan.validator_output.slice(0, 200)}` : ""}
+      </Pill>
+    );
+  }
+  const parts = [planWords(plan, t)];
+  if (plan.changes?.length) parts.push(changesSummary(plan.changes));
+  // The source resolved to a UUID is what goes to the host; the path from
+  // the order stays only for comparison.
+  if (plan.resolved_source && plan.resolved_source !== plan.requested_source) {
+    parts.push(`${plan.requested_source ?? "—"} → ${plan.resolved_source}`);
+  }
+  const verbatim = plan.document
+    ? { label: t("Document"), text: plan.document }
+    : plan.commands?.length
+      ? { label: t("Commands"), text: plan.commands.join("\n") }
+      : null;
+  return (
+    <Stack>
+      <Note>{parts.join(" · ")}</Note>
+      {plan.warnings && plan.warnings.length > 0 && (
+        <Tags>
+          {plan.warnings.map((warning) => <Pill key={warning} tone="warn">{warning}</Pill>)}
+        </Tags>
+      )}
+      {verbatim && <Readout label={verbatim.label} value={verbatim.text} lines={10} testId="plan-verbatim" />}
+    </Stack>
+  );
+}
+
+/**
+ * Where the bytes of a package change go, file system by file system.
+ *
+ * A file system with fewer free bytes than the change needs is the reason
+ * the host will refuse, so it is said as a warning and not as a number
+ * the reader has to subtract for themselves.
+ */
+function SpaceFacts({ facts }: { facts: SpaceFact[] }) {
+  const t = useT();
+  if (facts.length === 0) return null;
+  const purposes: Record<string, string> = {
+    download: t("download cache"), install: t("installed files"), boot: t("boot files"),
+  };
+  return (
+    <Facts>
+      {facts.map((fact) => {
+        const known = fact.basis !== undefined && fact.basis !== "unknown";
+        const short = known && (fact.needed_bytes ?? 0) > (fact.available_bytes ?? 0);
+        const basis = fact.basis === "download_only"
+          ? t("estimated from the archives alone")
+          : fact.basis === "boot_files"
+            ? t("estimated from the running kernel")
+            : "";
+        return (
+          <Fact
+            key={`${fact.purpose ?? ""}:${fact.path}`}
+            label={
+              <TwoLine sub={fact.filesystem && fact.filesystem !== fact.path ? fact.filesystem : undefined}>
+                <code>{fact.path}</code>
+              </TwoLine>
+            }
+          >
+            <TwoLine sub={basis || undefined}>
+              <Pill
+                tone={short ? "error" : known ? "ok" : "unknown"}
+                title={short
+                  ? t("The host will refuse this change: the file system has fewer free bytes than the change needs.")
+                  : undefined}
+              >
+                {purposes[fact.purpose ?? ""] ?? fact.purpose ?? t("unknown")}
+                {": "}
+                {known
+                  ? t("needs {needed}, {available} free", {
+                      needed: bytes(fact.needed_bytes), available: bytes(fact.available_bytes),
+                    })
+                  : t("need unknown, {available} free", { available: bytes(fact.available_bytes) })}
+              </Pill>
+            </TwoLine>
+          </Fact>
+        );
+      })}
+    </Facts>
   );
 }
 
@@ -932,5 +1217,4 @@ export const JOBS: BoardEntry[] = [
   { key: "activity", title: "Operations, last 24 h", width: 8, height: 3 },
   { key: "operations", title: "By operation", width: 4, height: 2 },
   { key: "jobs", title: "Jobs", width: 12, height: 6 },
-  { key: "attempts", title: "Attempts", width: 12, height: 4 },
 ];

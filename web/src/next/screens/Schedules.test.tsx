@@ -358,6 +358,55 @@ describe("the schedules the fleet runs on a clock", () => {
 });
 
 describe("the maintenance calendar", () => {
+  /**
+   * A month is read across, not down.
+   *
+   * The first draft of this screen flattened the calendar into a row per
+   * day-and-entry, because the kit draws one table and has no calendar
+   * piece. A list of days answers "what is on the 5th" and loses the
+   * question the owner actually opens this card for - what the month
+   * looks like - so the month is built out of that one table instead:
+   * seven weekday columns, a week to a row, a day in every cell.
+   */
+  it("draws the month as a month: seven weekdays across and a week to a row", async () => {
+    Object.assign(answers, base([], [
+      {
+        kind: "host_window", id: "h1", name: "agent-arch",
+        start: "2026-10-05T08:00:00Z", end: "2026-10-05T12:00:00Z",
+        reason: "kernel", set_by: "tszymanski",
+      },
+    ]));
+    vi.setSystemTime(new Date("2026-10-16T09:00:00Z"));
+    draw();
+    await waitFor(() => expect(screen.getByTestId("calendar")).toBeInTheDocument());
+    const calendar = screen.getByTestId("calendar");
+    expect(within(calendar).getAllByRole("columnheader").map((one) => one.textContent))
+      .toEqual(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
+
+    // October 2026 opens on a Thursday and runs five weeks, so the 1st
+    // stands in the fourth column and the Monday before it is a square
+    // of the month before: drawn to fill the week out, carrying nothing.
+    const weeks = within(calendar).getAllByRole("row").slice(1);
+    expect(weeks).toHaveLength(5);
+    const first = within(weeks[0]).getAllByRole("cell");
+    expect(first[3]).toHaveTextContent("1");
+    expect(first[0]).toBeEmptyDOMElement();
+    expect(within(weeks[1]).getAllByRole("cell")[0])
+      .toContainElement(screen.getByTestId("day-2026-10-05"));
+    // The day the clock is on says so, and only that one.
+    expect(within(screen.getByTestId("day-2026-10-16")).getByText("today")).toBeInTheDocument();
+    expect(screen.getAllByText("today")).toHaveLength(1);
+
+    // And the entry stands in its own square with everything the
+    // flattened list gave it: the kind, the hour, the name and the link.
+    const fifth = screen.getByTestId("day-2026-10-05");
+    expect(within(fifth).getByText("maintenance")).toBeInTheDocument();
+    expect(within(fifth).getByRole("link", { name: "agent-arch" }))
+      .toHaveAttribute("href", "/next/hosts/h1");
+    expect(fifth).toHaveTextContent("kernel · tszymanski");
+    vi.useRealTimers();
+  });
+
   it("names what stands on each day and leads to it inside the new panel", async () => {
     Object.assign(answers, base([], [
       {
