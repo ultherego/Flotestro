@@ -179,6 +179,6 @@ export function campaignTone(state: string): Tone {
 export const CAMPAIGNS_SCREEN = "next_campaigns";
 
 export const CAMPAIGNS: BoardEntry[] = [
-  { key: "state", title: "State", width: 12, height: 3 },
+  { key: "state", title: "State", width: 12, height: 2 },
   { key: "list", title: "Campaigns", width: 12, height: 8 },
 ];
