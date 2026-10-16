@@ -73,6 +73,23 @@
   color: var(--text);
 }
 
+.fl-app button,
+.fl-app input,
+.fl-app select,
+.fl-app textarea {
+  min-height: 0;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  white-space: normal;
+}
+
 /* How a thing is going, as one class that sets one pair of variables.
    Everything below reads --tone for a fill and --tone-text for a word,
    so no piece of the kit ever names a state colour itself. */
@@ -171,8 +188,9 @@
 }
 
 .fl-app .fl-brand-name {
+  font-size: 17px;
   font-weight: 650;
-  letter-spacing: 0.01em;
+  letter-spacing: -0.01em;
   white-space: nowrap;
   overflow: hidden;
 }
@@ -180,38 +198,53 @@
 .fl-app .fl-folded .fl-brand-name { display: none; }
 .fl-app .fl-folded .fl-brand { justify-content: center; padding-inline: 0; }
 
+/* The rail scrolls without saying so: a bar down the side of a list of
+   places is chrome nobody reads, and the list is plainly cut off when
+   there is more of it. */
 .fl-app .fl-nav {
   flex: 1 1 auto;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: var(--s4) var(--s3) var(--s5);
-  scrollbar-width: thin;
+  padding: var(--s3) 0 var(--s5);
+  scrollbar-width: none;
 }
 
-.fl-app .fl-navgroup + .fl-navgroup { margin-top: var(--s4); }
+.fl-app .fl-nav::-webkit-scrollbar { display: none; }
 
-/* The group's heading is the thing that folds it. */
+/* A hairline between groups, so the rail reads as sections of places
+   rather than one long list. */
+.fl-app .fl-navgroup + .fl-navgroup {
+  margin-top: var(--s3);
+  padding-top: var(--s3);
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+/* The group's heading names the section and folds it: its mark and its
+   word in the accent, so the eye finds a section before it reads one. */
 .fl-app .fl-navgroup-label {
   display: flex;
   align-items: center;
-  gap: var(--s2);
+  gap: var(--s3);
   width: 100%;
-  padding: var(--s1) var(--s3) var(--s2);
+  padding: var(--s2) var(--s4) var(--s2);
   border: 0;
   background: none;
-  font-size: 10px;
+  font-size: var(--t-small);
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--text-faint);
+  color: var(--accent-text);
   text-align: left;
-  transition: color var(--fl-quick);
+  transition: opacity var(--fl-quick);
 }
 
-.fl-app .fl-navgroup-label:hover { color: var(--text-muted); }
+.fl-app .fl-navgroup-label:hover { opacity: 0.8; }
 .fl-app .fl-navgroup-label span { flex: 1 1 auto; min-width: 0; }
-.fl-app .fl-navgroup-label svg { width: 11px; height: 11px; transition: transform var(--fl-quick); }
-.fl-app .fl-navgroup-shut .fl-navgroup-label svg { transform: rotate(-90deg); }
+.fl-app .fl-navgroup-label > svg { flex: 0 0 auto; width: 16px; height: 16px; }
+
+.fl-app .fl-navgroup-fold { display: inline-flex; opacity: 0.6; transition: transform var(--fl-quick); }
+.fl-app .fl-navgroup-fold svg { width: 11px; height: 11px; }
+.fl-app .fl-navgroup-shut .fl-navgroup-fold { transform: rotate(-90deg); }
 
 .fl-app .fl-folded .fl-navgroup-label {
   font-size: 0;
@@ -225,14 +258,16 @@
   background: var(--border);
 }
 
+/* A place is a line across the rail, not a pill inside it: the band of
+   the one the reader is standing on reaches both edges, with an arrow
+   at the left pointing into the page. */
 .fl-app .fl-navitem {
   position: relative;
   display: flex;
   align-items: center;
   gap: var(--s3);
-  padding: 0 var(--s3);
-  height: 36px;
-  border-radius: var(--radius);
+  padding: 0 var(--s4) 0 var(--s5);
+  height: 38px;
   color: var(--text-muted);
   font-size: var(--t-body);
   text-decoration: none;
@@ -240,25 +275,28 @@
 }
 
 .fl-app .fl-navitem:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
-.fl-app .fl-navitem svg { flex: 0 0 auto; width: 16px; height: 16px; }
+.fl-app .fl-navitem > svg { flex: 0 0 auto; width: 16px; height: 16px; opacity: 0.85; }
 
 .fl-app .fl-navitem.fl-on {
-  background: var(--accent-soft);
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--accent) 22%, transparent),
+    color-mix(in srgb, var(--accent) 8%, transparent));
   color: var(--accent-text);
   font-weight: 600;
 }
 
-/* The bar on the left edge says "here" without colour, so it survives a
-   theme change and a reader who cannot tell the colours apart. */
+/* The arrow says "here" without colour, so it survives a theme and a
+   reader who cannot tell the colours apart. */
 .fl-app .fl-navitem.fl-on::before {
   content: "";
   position: absolute;
   left: 0;
-  top: 7px;
-  bottom: 7px;
-  width: 2px;
-  border-radius: 0 2px 2px 0;
-  background: var(--accent);
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 7px solid var(--accent);
+  border-top: 19px solid transparent;
+  border-bottom: 19px solid transparent;
 }
 
 .fl-app .fl-navitem.fl-off { opacity: 0.45; cursor: not-allowed; }
@@ -303,7 +341,7 @@
   display: grid;
   place-items: center;
   padding: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text-muted);

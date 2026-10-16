@@ -27,6 +27,8 @@ export type NavGroup = {
   key: string;
   /** The English heading; a group without one is a single top-level item. */
   label?: string;
+  /** The mark beside the heading, so a group is found by shape as well as by word. */
+  icon?: IconName;
   items: NavItem[];
 };
 
@@ -85,6 +87,7 @@ export function fleetNavigation(permissions: Set<string>, capabilities: Capabili
   return [
     {
       key: "fleet",
+      icon: "hosts",
       label: "Fleet",
       items: [
         { to: "/dashboard", label: "Dashboard", icon: "dashboard" },
@@ -105,6 +108,7 @@ export function fleetNavigation(permissions: Set<string>, capabilities: Capabili
     },
     {
       key: "operations",
+      icon: "jobs",
       label: "Operations",
       items: [
         { to: "/jobs", label: "Jobs", icon: "jobs" },
@@ -137,6 +141,7 @@ export function fleetNavigation(permissions: Set<string>, capabilities: Capabili
     },
     {
       key: "security",
+      icon: "security",
       label: "Security",
       items: [
         ...(v.seesSecurity ? [{ to: "/security", label: "Security", icon: "security" as const }] : []),
@@ -147,6 +152,7 @@ export function fleetNavigation(permissions: Set<string>, capabilities: Capabili
     },
     {
       key: "continuity",
+      icon: "backups",
       label: "Continuity",
       items: [
         ...(v.seesBackups ? [{ to: "/backups", label: "Backups", icon: "backups" as const }] : []),
@@ -155,6 +161,7 @@ export function fleetNavigation(permissions: Set<string>, capabilities: Capabili
     },
     {
       key: "identity",
+      icon: "identity",
       label: "Identity",
       items: [
         ...(v.directory ? [{ to: "/directory", label: "Directory", icon: "directory" as const }] : []),

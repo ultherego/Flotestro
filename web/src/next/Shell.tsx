@@ -50,7 +50,7 @@ export type RailItem = {
  * answers to "where am I", which is the one question a rail exists for.
  */
 export type Face = {
-  groups: { key: string; label?: string; items: RailItem[] }[];
+  groups: { key: string; label?: string; icon?: IconName; items: RailItem[] }[];
   back?: { to: string; label: string };
 };
 
@@ -79,6 +79,7 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
       .map((group: NavGroup) => ({
         key: group.key,
         label: group.label,
+        icon: group.icon,
         items: group.items.map((item) => ({ to: `/next${item.to}`, label: item.label, icon: item.icon })),
       })),
   };
@@ -345,8 +346,9 @@ function Rail({ group }: { group: Face["groups"][number] }) {
           aria-expanded={!folded}
           data-testid={`group-${group.key}`}
         >
+          {group.icon && <Icon name={group.icon} />}
           <span>{t(group.label)}</span>
-          <Icon name="chevron" />
+          <i className="fl-navgroup-fold" aria-hidden="true"><Icon name="chevron" /></i>
         </button>
       )}
       {!folded && group.items.map((item) => {
