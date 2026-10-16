@@ -113,6 +113,10 @@ func TestEveryAllowlistEntryStillAllowsTheFixtureItWasWrittenFor(t *testing.T) {
 		`{ key: "operations_24h", title: "Operations, last 24 h", width: 6 }`,
 		`MUSTNOTLEAVE`,
 		`b3BlbnNzaC1rZXk=`,
+		// The value the server hands back when a personal API token is
+		// minted, in the three tests that prove the panel shows it once and
+		// never writes it anywhere else.
+		`token: "flt_9XQ2vmS1aZ"`,
 	}
 	for _, fixture := range fixtures {
 		allowed := false
