@@ -489,6 +489,7 @@
 .fl-app .fl-faint { color: var(--ink-faint); font-size: 12px; }
 .fl-app .fl-name { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .fl-app .fl-num { text-align: right; font-variant-numeric: tabular-nums; }
+.fl-app .fl-nowrap { white-space: nowrap; }
 .fl-app .fl-truncate { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fl-app .fl-subhead {
   margin-bottom: var(--x2);

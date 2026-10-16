@@ -6159,6 +6159,9 @@ export const pl: Record<string, string> = {
   "Source: {source}, revision {revision}, observed {when}": "Źródło: {source}, rewizja {revision}, odczyt {when}",
   "{used} of {total}": "{used} z {total}",
   "on {what}": "na {what}",
+  // Kampanie w nowym panelu.
+  "At a gate": "Przy bramce",
+  "No campaign matches this.": "Żadna kampania tego nie spełnia.",
   "The share of the fleet the panel has heard from.": "Jaka część floty odezwała się do panelu.",
   "Add a container…": "Dodaj kontener…",
   "Take this container off the screen": "Zdejmij ten kontener z ekranu",
