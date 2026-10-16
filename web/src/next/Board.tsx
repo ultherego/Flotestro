@@ -2,7 +2,7 @@ import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNod
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import {
-  BOARD_COLUMNS, BOARD_HEIGHTS, BOARD_ROW, boardToDraw, isPlaced, placeAll,
+  BOARD_COLUMNS, BOARD_HEIGHTS, boardToDraw, isPlaced, placeAll,
   type BoardEntry, type BoardWidget, type StoredBoard,
 } from "../components/board";
 import { useToast } from "../components/Toast";
@@ -59,6 +59,17 @@ export function settle(widgets: BoardWidget[], held: string): BoardWidget[] {
   // The record keeps the order it had; only the places changed.
   return widgets.map((one) => settled.find((other) => other.key === one.key) ?? one);
 }
+
+/**
+ * The height of one row of the board, in pixels.
+ *
+ * It is here and in `--fl-row` of the stylesheet, and the two must
+ * agree: the grid draws by the first and the corner measures by the
+ * second, so a difference makes a container jump as it is sized. It is
+ * the height of a headline tile, because that is the smallest thing
+ * anybody puts on a board.
+ */
+export const ROW = 132;
 
 export function Board({ screen, catalogue, drawn }: {
   /**
@@ -173,7 +184,7 @@ export function Board({ screen, catalogue, drawn }: {
     const column = columnWidth();
     if (column <= 0) return;
     const dx = Math.round((event.clientX - hold.fromX) / column);
-    const dy = Math.round((event.clientY - hold.fromY) / BOARD_ROW);
+    const dy = Math.round((event.clientY - hold.fromY) / ROW);
     const start = hold.start;
     const next = { ...start };
     if (hold.mode === "move") {

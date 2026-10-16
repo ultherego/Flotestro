@@ -43,7 +43,7 @@
   --fl-bar: 60px;
   --fl-gutter: var(--s5);
   --fl-pad: var(--s7);
-  --fl-row: 116px;
+  --fl-row: 132px;
 
   --fl-card: color-mix(in srgb, var(--bg-panel) 94%, var(--text) 6%);
   --fl-edge: color-mix(in srgb, var(--text) 9%, transparent);
@@ -57,8 +57,8 @@
      that carry across a 4k screen. */
   --fl-title: 30px;
   --fl-card-title: 15px;
-  --fl-metric: 40px;
-  --fl-metric-big: 54px;
+  --fl-metric: 36px;
+  --fl-metric-big: 46px;
   --fl-metric-small: 26px;
 
   font-family: var(--font);
@@ -523,7 +523,7 @@
   display: flex;
   align-items: flex-start;
   gap: var(--s4);
-  margin-bottom: var(--s5);
+  margin-bottom: 0;
 }
 
 .fl-app .fl-head-mark {
@@ -622,7 +622,12 @@
   align-items: start;
 }
 
-.fl-app .fl-grid + .fl-grid { margin-top: var(--fl-gutter); }
+/* Every block a screen puts down stands the same distance from the one
+   before it - a grid, a stack, a banner, a table of its own. Said here
+   once, no screen can hold a different opinion. */
+.fl-app .fl-screen > * + * { margin-top: var(--fl-gutter); }
+.fl-app .fl-stack { gap: var(--fl-gutter); }
+.fl-app .fl-stack-l { gap: var(--s6); }
 
 .fl-app .fl-c1, .fl-app .fl-c2, .fl-app .fl-c3, .fl-app .fl-c4,
 .fl-app .fl-c5, .fl-app .fl-c6, .fl-app .fl-c7, .fl-app .fl-c8,
@@ -660,8 +665,8 @@
   gap: var(--fl-gutter);
 }
 
-.fl-app .fl-stack { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
-.fl-app .fl-stack-l { display: flex; flex-direction: column; gap: var(--s6); min-width: 0; }
+.fl-app .fl-stack { display: flex; flex-direction: column; min-width: 0; }
+.fl-app .fl-stack-l { display: flex; flex-direction: column; min-width: 0; }
 .fl-app .fl-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); min-width: 0; }
 
 /* ---------------------------------------------------------------------
@@ -755,7 +760,6 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   gap: var(--s2);
   height: 100%;
   padding: var(--s5);
@@ -1474,7 +1478,6 @@
   align-items: center;
   gap: var(--s3);
   padding: var(--s3) var(--s4);
-  margin-bottom: var(--s4);
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--tone, var(--warn)) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--tone, var(--warn)) 30%, transparent);
