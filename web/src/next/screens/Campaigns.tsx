@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
-import { relativeTime, absoluteTime } from "../../lib/format";
+import { useDebounced } from "../../lib/debounce";
+import { usePageSize } from "../../components/SortableTable";
+import { relativeTime, absoluteTime, toInstant } from "../../lib/format";
 import type { Campaign } from "../../lib/types";
 import { stateName } from "../../components/ui";
 import { useT } from "../../i18n";
@@ -35,13 +37,35 @@ export function Campaigns() {
   const t = useT();
   const [params, setParams] = useSearchParams();
   const state = params.get("state") ?? "";
+  const [action, setAction] = useState(params.get("action") ?? "");
   const [requester, setRequester] = useState(params.get("requester") ?? "");
+  const [since, setSince] = useState(params.get("since") ?? "");
   const [page, setPage] = useState(1);
-  const [size, setSize] = useState(PAGE);
+  // The page size is the reader's preference and is kept in the browser,
+  // under the same name the panel being replaced kept it under.
+  const [size, setSize] = usePageSize("campaigns", PAGE);
+  // Typed filters settle before they are sent: a letter at a time is a
+  // request at a time, and the list under the hand flickers.
+  const settledAction = useDebounced(action.trim());
+  const settledRequester = useDebounced(requester.trim());
+  const sinceInstant = toInstant(since);
+
+  // The address follows the filter, not the other way round: what the
+  // reader narrowed the list to is what the link they copy carries.
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (state) next.set("state", state);
+    if (settledAction) next.set("action", settledAction);
+    if (settledRequester) next.set("requester", settledRequester);
+    if (since) next.set("since", since);
+    if (next.toString() !== params.toString()) setParams(next, { replace: true });
+  }, [state, settledAction, settledRequester, since, params, setParams]);
 
   const query = new URLSearchParams({ limit: String(size) });
   if (state) query.set("state", state);
-  if (requester.trim()) query.set("requester", requester.trim());
+  if (settledAction) query.set("action", settledAction);
+  if (settledRequester) query.set("requester", settledRequester);
+  if (sinceInstant) query.set("since", sinceInstant);
   if (page > 1) query.set("offset", String((page - 1) * size));
 
   const list = useQuery({
@@ -114,6 +138,22 @@ export function Campaigns() {
           >
             <Find value={requester} onChange={(value) => { setRequester(value); setPage(1); }}
                   placeholder={t("Requested by")} testId="requester" />
+            <input
+              value={action}
+              onChange={(event) => { setAction(event.target.value); setPage(1); }}
+              placeholder={t("operation")}
+              aria-label={t("operation")}
+              title={t("the operation the campaign orders, e.g. packages.upgrade")}
+              data-testid="action"
+            />
+            <input
+              type="datetime-local"
+              value={since}
+              onChange={(event) => { setSince(event.target.value); setPage(1); }}
+              aria-label={t("Started after")}
+              title={t("Started after")}
+              data-testid="since"
+            />
             <select
               value={state}
               onChange={(event) => narrow(event.target.value)}

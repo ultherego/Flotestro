@@ -47,10 +47,12 @@ const campaign = (over: Record<string, unknown>) => ({
   ...over,
 });
 
-function draw() {
+function draw(where = "/next/campaigns") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[where]}><ToastProvider>{children}</ToastProvider></MemoryRouter>
+    </QueryClientProvider>
   );
   return render(<Campaigns />, { wrapper });
 }
@@ -100,6 +102,34 @@ describe("the campaign list", () => {
     asked.length = 0;
     fireEvent.change(screen.getByTestId("state"), { target: { value: "paused" } });
     await waitFor(() => expect(asked.some((one) => one.includes("state=paused"))).toBe(true));
+  });
+
+  it("narrows by the operation and by when a campaign started, as the old list did", async () => {
+    Object.assign(answers, { "/api/v1/campaigns": { items: [], count: 0, total: 0, limit: 50, offset: 0 } });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("action")).toBeInTheDocument());
+    asked.length = 0;
+    // Typed filters settle before they are sent: a letter at a time is a
+    // request at a time, and the list under the hand flickers.
+    fireEvent.change(screen.getByTestId("action"), { target: { value: "packages.upgrade" } });
+    await waitFor(() => expect(
+      asked.some((one) => decodeURIComponent(one).includes("action=packages.upgrade")),
+    ).toBe(true));
+    asked.length = 0;
+    fireEvent.change(screen.getByTestId("since"), { target: { value: "2026-10-01T00:00" } });
+    await waitFor(() => expect(asked.some((one) => one.includes("since="))).toBe(true));
+  });
+
+  it("takes the whole filter from the address and puts it back", async () => {
+    Object.assign(answers, { "/api/v1/campaigns": { items: [], count: 0, total: 0, limit: 50, offset: 0 } });
+    draw("/next/campaigns?action=packages.upgrade&requester=tszymanski");
+    // What the reader narrowed the list to is what the link they copy
+    // carries, so a link in and a link out are the same link.
+    await waitFor(() => expect(
+      asked.some((one) => decodeURIComponent(one).includes("action=packages.upgrade")),
+    ).toBe(true));
+    expect(asked.some((one) => one.includes("requester=tszymanski"))).toBe(true);
+    expect((screen.getByTestId("action") as HTMLInputElement).value).toBe("packages.upgrade");
   });
 
   it("says an empty list is empty rather than drawing a head over nothing", async () => {
