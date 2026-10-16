@@ -12,6 +12,7 @@ import type { BoardEntry } from "../../../components/board";
 import {
   Actions, Band, Banner, Bars, Button, Card, Empty, Field, Fields, Note, Pill, Problem,
   Readout, Stack, Table, type Segment, type Tone,
+  stacked,
 } from "../../kit";
 
 /**
@@ -215,22 +216,20 @@ export function Compose({ host }: { host: Host }) {
 
   return (
     <Board screen={HOST_COMPOSE_SCREEN} catalogue={HOST_COMPOSE} drawn={{
-      notices: (
-        <Stack>
-          {readOnly && <Banner tone="info">{readOnly}</Banner>}
-          {message && <Problem>{message}</Problem>}
-          {ordered && (
-            <Banner tone="ok">
-              {ordered.requires_approval
-                ? t("The deployment is waiting for approval.")
-                : t("The deployment has been queued.")}
-              {" "}
-              <Link to={`/next/jobs/${ordered.id}`}>{t("job {id}", { id: ordered.id.slice(0, 8) })}</Link>
-              {" · "}
-              <Link to={`/next/hosts/${host.id}/jobs`}>{t("See all jobs")}</Link>
-            </Banner>
-          )}
-        </Stack>
+      notices: stacked(
+        readOnly && <Banner tone="info">{readOnly}</Banner>,
+        message && <Problem>{message}</Problem>,
+        ordered && (
+          <Banner tone="ok">
+            {ordered.requires_approval
+              ? t("The deployment is waiting for approval.")
+              : t("The deployment has been queued.")}
+            {" "}
+            <Link to={`/next/jobs/${ordered.id}`}>{t("job {id}", { id: ordered.id.slice(0, 8) })}</Link>
+            {" · "}
+            <Link to={`/next/hosts/${host.id}/jobs`}>{t("See all jobs")}</Link>
+          </Banner>
+        ),
       ),
       deployments: (
         <Card

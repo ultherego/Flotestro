@@ -1769,6 +1769,19 @@
 .fl-app .fl-toolbar select,
 .fl-app .fl-card-bar select { width: auto; min-width: 140px; max-width: 320px; }
 
+/* The same for a box somebody types in. Without this it keeps the full
+   width every field inside a screen has, and a bar of four filters comes
+   out as four lines stacked down the card - which is what the jobs list
+   looked like until this rule. The search box sizes itself and is left
+   alone. */
+.fl-app .fl-toolbar input:not([type="checkbox"]):not([type="radio"]):not(.fl-find input),
+.fl-app .fl-card-bar input:not([type="checkbox"]):not([type="radio"]):not(.fl-find input) {
+  width: auto;
+  flex: 0 1 200px;
+  min-width: 120px;
+  max-width: 320px;
+}
+
 .fl-app .fl-find input,
 .fl-app .fl-toolbar .fl-find input {
   width: 100%;

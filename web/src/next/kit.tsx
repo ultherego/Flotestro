@@ -213,6 +213,20 @@ export function Stack({ children, wide = false }: { children: ReactNode; wide?: 
   return <div className={wide ? "fl-stack-l" : "fl-stack"}>{children}</div>;
 }
 
+/**
+ * The ones of these that are there, stacked - or nothing at all.
+ *
+ * A container on the board is left out when it has nothing to draw, but
+ * `<Stack>{a && <Banner/>}{b && <Banner/>}</Stack>` is something to draw
+ * even when neither banner is: the row is kept and the screen opens with
+ * a band of empty floor across it. This hands back null in that case.
+ */
+export function stacked(...items: ReactNode[]): ReactNode {
+  const real = items.filter((one) => one !== null && one !== undefined && one !== false && one !== "");
+  if (real.length === 0) return null;
+  return <Stack>{real.map((one, index) => <Fragment key={index}>{one}</Fragment>)}</Stack>;
+}
+
 export function Row({ children }: { children: ReactNode }) {
   return <div className="fl-row">{children}</div>;
 }
@@ -410,14 +424,15 @@ export function Note({ children, testId }: { children: ReactNode; testId?: strin
  * An empty list says so in one sentence and, where one exists, offers the
  * action that fills it. A blank card looks like a page that did not load.
  */
-export function Empty({ children, action, icon = "check" }: {
+export function Empty({ children, action, icon = "check", testId }: {
   children: ReactNode;
   action?: ReactNode;
   /** The mark above the sentence; a bare sentence reads as a failure. */
   icon?: IconName;
+  testId?: string;
 }) {
   return (
-    <div className="fl-empty">
+    <div className="fl-empty" data-testid={testId}>
       <span className="fl-empty-mark" aria-hidden="true"><Icon name={icon} /></span>
       <p>{children}</p>
       {action && <div className="fl-empty-actions">{action}</div>}
@@ -818,10 +833,16 @@ export function Toolbar({ children, end }: { children?: ReactNode; end?: ReactNo
 }
 
 /** The box a list is searched with: the mark is inside the field. */
-export function Find({ value, onChange, placeholder, testId }: {
+export function Find({ value, onChange, placeholder, title, testId }: {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
+  /**
+   * What the search actually looks in, where the placeholder is too short
+   * to say it - "hostname, address, machine ID or owner" does not fit in
+   * a box but is the difference between searching and guessing.
+   */
+  title?: string;
   testId?: string;
 }) {
   return (
@@ -831,8 +852,9 @@ export function Find({ value, onChange, placeholder, testId }: {
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
+        title={title}
+        aria-label={title ?? placeholder}
         data-testid={testId}
-        aria-label={placeholder}
       />
     </span>
   );
@@ -1255,15 +1277,24 @@ export function Field({ label, hint, wide = false, children }: {
 }
 
 /** A checkbox with its sentence; the box lines up with the first line. */
-export function Check({ checked, onChange, disabled, children }: {
+export function Check({ checked, onChange, disabled, children, title, testId }: {
   checked: boolean;
   onChange: (value: boolean) => void;
   disabled?: boolean;
   children: ReactNode;
+  /** The longer sentence the short label stands for, under the pointer. */
+  title?: string;
+  testId?: string;
 }) {
   return (
-    <label className="fl-check">
-      <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
+    <label className="fl-check" title={title}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        data-testid={testId}
+      />
       <span>{children}</span>
     </label>
   );

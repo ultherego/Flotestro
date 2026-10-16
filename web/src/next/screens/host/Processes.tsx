@@ -563,6 +563,8 @@ export const HOST_PROCESSES_SCREEN = "next_host_processes";
 export const HOST_PROCESSES: BoardEntry[] = [
   { key: "states", title: "Process states", width: 12, height: 2 },
   { key: "users", title: "By user", width: 6, height: 3 },
-  { key: "managed", title: "Managed by", width: 6, height: 3 },
+  // Three buckets, whatever the host runs: a unit answers for the process,
+  // a container does, or nothing does.
+  { key: "managed", title: "Managed by", width: 6, height: 2 },
   { key: "list", title: "Processes", width: 12, height: 6 },
 ];

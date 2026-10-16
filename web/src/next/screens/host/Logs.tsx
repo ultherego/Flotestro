@@ -14,6 +14,7 @@ import type { BoardEntry } from "../../../components/board";
 import {
   Actions, Band, Banner, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Note,
   Pill, Problem, Readout, Row, Stack, type Segment,
+  stacked,
 } from "../../kit";
 
 /**
@@ -494,21 +495,18 @@ export function Logs({ host }: { host: Host }) {
 
   return (
     <Board screen={HOST_LOGS_SCREEN} catalogue={HOST_LOGS} drawn={{
-      notices: (
-        <Stack>
-          {readOnly && <Banner tone="info">{readOnly}</Banner>}
-          {errorMessage && <Problem>{errorMessage}</Problem>}
-          {/* A view that has ended still says what it could not carry: the
-              gap belongs to the lines that came back, not to the moment
-              they stopped arriving. */}
-          {!preview && watched !== null && watched > 0 && (
-            <Banner tone="warn">{droppedNotice(watched, t)}</Banner>
-          )}
-          {/* A second gap, and not the same one: these messages never
-              reached the host's journal at all, so they are in no view and
-              in no read. */}
-          {!preview && hostGap && <Banner tone="unknown">{hostGap.text}</Banner>}
-        </Stack>
+      notices: stacked(
+        readOnly && <Banner tone="info">{readOnly}</Banner>,
+        errorMessage && <Problem>{errorMessage}</Problem>,
+        // A view that has ended still says what it could not carry: the
+        // gap belongs to the lines that came back, not to the moment they
+        // stopped arriving.
+        !preview && watched !== null && watched > 0 && (
+          <Banner tone="warn">{droppedNotice(watched, t)}</Banner>
+        ),
+        // A second gap, and not the same one: these messages never reached
+        // the host's journal at all, so they are in no view and in no read.
+        !preview && hostGap && <Banner tone="unknown">{hostGap.text}</Banner>,
       ),
       counts: (
         <Card

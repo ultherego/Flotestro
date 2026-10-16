@@ -774,7 +774,8 @@ export const HOST_SERVICES_SCREEN = "next_host_services";
 export const HOST_SERVICES: BoardEntry[] = [
   { key: "states", title: "Unit states", width: 12, height: 2 },
   { key: "failed", title: "Failed units", width: 6, height: 3 },
-  { key: "onboot", title: "On boot", width: 6, height: 3 },
+  // The four unit-file states and "other": five bars on every host.
+  { key: "onboot", title: "On boot", width: 6, height: 2 },
   { key: "units", title: "All units", width: 12, height: 5 },
   { key: "detail", title: "The unit", width: 12, height: 5 },
 ];

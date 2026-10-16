@@ -16,6 +16,7 @@ import type { BoardEntry } from "../../../components/board";
 import {
   Actions, Band, Banner, Bones, Button, Card, Chart, Check, Empty, Fact, Facts, Field, Fields,
   HeadActions, Meter, Note, Pill, Problem, Seg, Stack, Table, Tags, type Segment, type Tone,
+  stacked,
 } from "../../kit";
 
 /**
@@ -291,32 +292,30 @@ export function Monitoring({ host }: { host: Host }) {
       </HeadActions>
 
       <Board screen={HOST_MONITORING_SCREEN} catalogue={HOST_MONITORING} drawn={{
-        notices: (
-          <Stack>
-            {readOnly && <Banner tone="info">{readOnly}</Banner>}
-            {message && <Banner tone="info">{message}</Banner>}
-            {/* A hole in the data and a quiet machine read alike on a chart,
-                so the holes and their cause are named before the charts. */}
-            {holes && (
-              <Banner tone="warn">
-                {holes}
-                {explained?.reason ? ` ${t("Cause: {reason}.", { reason: explained.reason })}` : ""}
-              </Banner>
-            )}
-            {refusedSamples > 0 && (
-              <Banner tone="error">
-                {t("{n} samples refused", { n: refusedSamples })}
-                {refused[0]?.reason ? ` · ${refused[0].reason}` : ""}
-              </Banner>
-            )}
-            {clock && (
-              <Banner tone="warn">
-                {t("The panel stamped {n} readings of this host with its own time; the host's clock stood {skew} from the panel's.", {
-                  n: clock.samples, skew: uptime(Math.round(Math.abs(clock.skew_millis) / 1000)),
-                })}
-              </Banner>
-            )}
-          </Stack>
+        notices: stacked(
+          readOnly && <Banner tone="info">{readOnly}</Banner>,
+          message && <Banner tone="info">{message}</Banner>,
+          // A hole in the data and a quiet machine read alike on a chart,
+          // so the holes and their cause are named before the charts.
+          holes && (
+            <Banner tone="warn">
+              {holes}
+              {explained?.reason ? ` ${t("Cause: {reason}.", { reason: explained.reason })}` : ""}
+            </Banner>
+          ),
+          refusedSamples > 0 && (
+            <Banner tone="error">
+              {t("{n} samples refused", { n: refusedSamples })}
+              {refused[0]?.reason ? ` \u00b7 ${refused[0].reason}` : ""}
+            </Banner>
+          ),
+          clock && (
+            <Banner tone="warn">
+              {t("The panel stamped {n} readings of this host with its own time; the host's clock stood {skew} from the panel's.", {
+                n: clock.samples, skew: uptime(Math.round(Math.abs(clock.skew_millis) / 1000)),
+              })}
+            </Banner>
+          ),
         ),
         alerts_band: (
           <Card

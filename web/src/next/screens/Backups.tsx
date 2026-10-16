@@ -443,7 +443,8 @@ export const BACKUPS: BoardEntry[] = [
   { key: "unrestored", title: "Never restored", width: 3, height: 1 },
   { key: "age", title: "Age of the newest copy", width: 7, height: 2 },
   { key: "coverage", title: "Hosts", width: 5, height: 2 },
-  { key: "calendar", title: "Last 14 days", width: 8, height: 3 },
+  // A chart of a fixed height over a fixed fortnight: it does not grow with the fleet.
+  { key: "calendar", title: "Last 14 days", width: 8, height: 2 },
   { key: "tools", title: "Tools and verification", width: 4, height: 2 },
   { key: "repositories", title: "Repositories", width: 12, height: 4 },
   { key: "list", title: "Definitions", width: 12, height: 5 },

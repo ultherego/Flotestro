@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import type { ReactElement } from "react";
-import { Band, Bars, Card, Chart, Diff, Find, Flow, Kpi, Needs, Pie, Pill, Ring, Squares, Table, Tile, Toolbar, pageNumbers } from "./kit";
+import { Band, Bars, Card, Chart, Diff, Find, Flow, Kpi, Needs, Pie, Pill, Readout, Ring, Squares, Table, Tile, Toolbar, pageNumbers, stacked } from "./kit";
 
 /**
  * The kit decides what the panel looks like, so the rules a screen must
@@ -307,6 +307,43 @@ describe("what a table can do besides list", () => {
     expect(document.querySelectorAll(".fl-row-marked")).toHaveLength(1);
   });
 
+  it("makes the heading the control that orders the list", () => {
+    const asked: string[] = [];
+    draw(<Table
+      testId="t"
+      rows={rows}
+      keyOf={(row) => row.id}
+      sort={{ by: "name", down: false }}
+      onSort={(by) => asked.push(by)}
+      columns={[{ ...columns[0], sort: "name" }, columns[1]]}
+    />);
+    // The panel being replaced sorted by clicking the heading, so that is
+    // where a reader who learned it looks first.
+    const head = screen.getByTestId("t-sort-name");
+    expect(head.closest("th")).toHaveAttribute("aria-sort", "ascending");
+    fireEvent.click(head);
+    expect(asked).toEqual(["name"]);
+  });
+
+  it("leaves a column with no order a plain word", () => {
+    draw(<Table testId="t" rows={rows} keyOf={(row) => row.id} onSort={() => {}} columns={columns} />);
+    expect(screen.queryByTestId("t-sort-name")).toBeNull();
+    expect(screen.getByText("Name").closest("th")).not.toHaveAttribute("aria-sort");
+  });
+
+  it("lets a row say something without being opened, and nothing where it has nothing", () => {
+    draw(<Table
+      testId="t"
+      rows={rows}
+      keyOf={(row) => row.id}
+      under={(row) => row.id === "a" ? <span>owner: nobody → somebody</span> : null}
+      columns={columns}
+    />);
+    // Read on the way past: what a change touched is not worth a click.
+    expect(screen.getByText("owner: nobody \u2192 somebody")).toBeInTheDocument();
+    expect(document.querySelectorAll(".fl-row-under")).toHaveLength(1);
+  });
+
   it("folds a column away and keeps it folded", () => {
     draw(<Table testId="t" rows={rows} keyOf={(row) => row.id} remember="fl.test.columns" columns={columns} />);
     // The column said it starts folded, so the head is not drawn.
@@ -314,6 +351,37 @@ describe("what a table can do besides list", () => {
     fireEvent.click(screen.getByTestId("t-columns"));
     fireEvent.click(screen.getByText("Extra"));
     expect(screen.getAllByText("Extra").length).toBeGreaterThan(0);
+  });
+});
+
+describe("a reading of what a host sent", () => {
+  const lines = ["sshd accepted", "cron ran", "sshd refused"].join("\n");
+
+  it("marks the line the reader stands on apart from the rest", () => {
+    draw(<Readout testId="out" value={lines} highlight="sshd" atLine={2} />);
+    const here = screen.getByTestId("out").querySelector("[data-here]");
+    expect(here?.textContent?.trim()).toBe("sshd refused");
+    // Every occurrence is marked; only the one being walked to is the
+    // current one, or the reader does the finding a second time.
+    expect(screen.getByTestId("out").querySelectorAll("mark")).toHaveLength(2);
+    expect(screen.getByTestId("out").querySelectorAll("mark.fl-mark-now")).toHaveLength(1);
+  });
+
+  it("leaves the text alone when nothing is sought", () => {
+    draw(<Readout testId="out" value={lines} />);
+    expect(screen.getByTestId("out").querySelectorAll("mark")).toHaveLength(0);
+    expect(screen.getByTestId("out")).toHaveTextContent("cron ran");
+  });
+});
+
+describe("a stack of the notices there are", () => {
+  it("is nothing at all when there are none", () => {
+    expect(stacked(false, null, undefined, "")).toBeNull();
+  });
+
+  it("holds the ones that are there", () => {
+    draw(<>{stacked(false, <span>one thing</span>, null)}</>);
+    expect(screen.getByText("one thing")).toBeInTheDocument();
   });
 });
 
