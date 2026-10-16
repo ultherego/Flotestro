@@ -5,9 +5,9 @@ import { api } from "../lib/api";
 import { copyToClipboard } from "../lib/clipboard";
 import type { Whoami } from "../lib/types";
 import { Board } from "../components/board";
-import { ErrorBox, Time, Empty } from "../components/ui";
+import { ErrorBox, Time } from "../components/ui";
 import { absoluteTime } from "../lib/format";
-import { Actions, Card, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
+import { Actions, Empty, Field, Fields, PageHead, Panel, Toolbar } from "../ui/kit";
 import { Breakdown, StatusBar } from "../components/widgets";
 import { useT } from "../i18n";
 
@@ -141,7 +141,7 @@ function ValueField({ label, value, onChange }: { label: string; value: string; 
           <input type="password" value={value} onChange={(e) => onChange(e.target.value)} autoComplete="new-password" />
         )}
       </Field>
-      <label className="toggle">
+      <label className="ui-check">
         <input type="checkbox" checked={shown} onChange={(e) => setShown(e.target.checked)} />
         {t("Show the value")}
       </label>
@@ -226,7 +226,7 @@ export function Secrets() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         title={t("Secrets")}
         description={t("Values go in and do not come out.")}
         help={<p>{t("Values go in and do not come out. Nothing here can read a secret back: the only way out is a short lease issued to one host for one job, and the value never appears in a job payload, in the audit trail or in inventory. The store is encrypted with a key kept outside the database.")}</p>}
@@ -243,26 +243,26 @@ export function Secrets() {
         drawn={{
           store: (
             <>
-              <Card className="span-8" title={t("Store")} description={t("{n} secrets; the never-rotated ones are counted among the issuable, still on their first version.", { n: secrets.length })}>
+              <Panel className="ui-col-8" title={t("Store")} description={t("{n} secrets; the never-rotated ones are counted among the issuable, still on their first version.", { n: secrets.length })}>
           <StatusBar segments={[
             { label: t("Issuable"), value: counts?.issuable, tone: "ok" },
             { label: t("Never rotated"), value: counts?.neverRotated, tone: "warn" },
             { label: t("Retired"), value: counts?.retired, tone: "unknown" },
           ]} />
-        </Card>
+        </Panel>
             </>
           ),
           by_creator: (
             <>
-              <Card className="span-4" title={t("By creator")} description={t("Who put the secrets in.")}>
+              <Panel className="ui-col-4" title={t("By creator")} description={t("Who put the secrets in.")}>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : byCreator.length === 0 ? (
-            <p className="fp-blank">{t("Nobody has put a secret in yet.")}</p>
+            <p className="ui-empty">{t("Nobody has put a secret in yet.")}</p>
           ) : (
-            <Breakdown tone="neutral" items={byCreator.map(([creator, n]) => ({ label: <span className="mono">{creator}</span>, value: n }))} />
+            <Breakdown tone="neutral" items={byCreator.map(([creator, n]) => ({ label: <span className="ui-mono">{creator}</span>, value: n }))} />
           )}
-        </Card>
+        </Panel>
 
         {/* The outcome of the last request stands by the button that made it. */}
             </>
@@ -270,19 +270,19 @@ export function Secrets() {
           new_secret: (
             <>
               {canWrite && (
-          <Card
-            className="span-12"
+          <Panel
+            className="ui-col-12"
             title={t("New secret")}
             footer={
               <Actions>
                 <button onClick={() => create.mutate()} disabled={!createReady || create.isPending}>
                   {t("Create")}
                 </button>
-                {create.error ? <span className="page-error">{errorText(create.error)}</span> : null}
+                {create.error ? <span className="ui-errorbox">{errorText(create.error)}</span> : null}
               </Actions>
             }
           >
-            <FieldGrid>
+            <Fields>
               <Field label={t("Name (lowercase, digits, dot, dash, underscore)")}>
                 <input value={name} onChange={(e) => setName(e.target.value)} placeholder="repo.token" autoComplete="off" />
               </Field>
@@ -291,17 +291,17 @@ export function Secrets() {
               </Field>
               <ValueField label={t("Value")} value={value} onChange={setValue} />
               <ReasonField value={reason} onChange={setReason} />
-            </FieldGrid>
-          </Card>
+            </Fields>
+          </Panel>
         )}
             </>
           ),
           list: (
             <>
-              <Card className="span-12" flush>
+              <Panel className="ui-col-12" flush>
           <Toolbar end={loaded && <span>{t("{shown} of {n} secrets", { shown: shown.length, n: secrets.length })}</span>}>
             <input placeholder={t("Search by name or description")} value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 260 }} />
-            {notice && <span className="source">{notice}</span>}
+            {notice && <span className="ui-note">{notice}</span>}
           </Toolbar>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
@@ -312,7 +312,7 @@ export function Secrets() {
           ) : (
             <table>
               <thead>
-                <tr><th scope="col">{t("Name")}</th><th scope="col" className="num">{t("Version")}</th><th scope="col">{t("What for")}</th><th scope="col">{t("Created")}</th><th scope="col">{t("State")}</th><th scope="col"></th></tr>
+                <tr><th scope="col">{t("Name")}</th><th scope="col" className="ui-numeric">{t("Version")}</th><th scope="col">{t("What for")}</th><th scope="col">{t("Created")}</th><th scope="col">{t("State")}</th><th scope="col"></th></tr>
               </thead>
               <tbody>
                 {shown.map((secret) => {
@@ -338,7 +338,7 @@ export function Secrets() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
             </>
           )
         }}
@@ -375,36 +375,36 @@ function SecretRow({
     <>
       <tr>
         <td>
-          <Link to={`/secrets/${encodeURIComponent(secret.name)}`} className="mono">{secret.name}</Link>
+          <Link to={`/secrets/${encodeURIComponent(secret.name)}`} className="ui-mono">{secret.name}</Link>
         </td>
-        <td className="num">{secret.current_version}</td>
+        <td className="ui-numeric">{secret.current_version}</td>
         <td>{secret.description || "—"}</td>
         <td>
           {secret.created_by} · <Time value={secret.created_at} />
         </td>
         <td>
           {secret.retired_at ? (
-            <span className="badge error" title={absoluteTime(secret.retired_at)}>{t("retired")}</span>
+            <span className="ui-pill ui-error" title={absoluteTime(secret.retired_at)}>{t("retired")}</span>
           ) : (
-            <span className="badge ok">{t("issuable")}</span>
+            <span className="ui-pill ui-ok">{t("issuable")}</span>
           )}
         </td>
-        <td className="actions-cell">
-          <div className="row-actions">
+        <td className="ui-actioncell">
+          <div className="ui-rowactions">
             {/* A reference to a retired secret is a job that fails at
                 delivery, so the button goes with the lease. */}
             {!secret.retired_at && (
-              <button className="secondary" onClick={onCopy} title={secretReference(secret.name, secret.current_version)}>
+              <button className="ui-btn-secondary" onClick={onCopy} title={secretReference(secret.name, secret.current_version)}>
                 {copied ? t("Copied") : failed ? t("Copy by hand") : t("Copy reference")}
               </button>
             )}
             {!secret.retired_at && canRotate && (
-              <button className="secondary" aria-expanded={open === "rotate"} aria-label={open === "rotate" ? undefined : t("Rotate {name}", { name: secret.name })} onClick={() => onToggle("rotate")} disabled={busy}>
+              <button className="ui-btn-secondary" aria-expanded={open === "rotate"} aria-label={open === "rotate" ? undefined : t("Rotate {name}", { name: secret.name })} onClick={() => onToggle("rotate")} disabled={busy}>
                 {open === "rotate" ? t("Close") : t("Rotate")}
               </button>
             )}
             {!secret.retired_at && canRetire && (
-              <button className="secondary" aria-expanded={open === "retire"} aria-label={open === "retire" ? undefined : t("Retire {name}", { name: secret.name })} onClick={() => onToggle("retire")} disabled={busy}>
+              <button className="ui-btn-secondary" aria-expanded={open === "retire"} aria-label={open === "retire" ? undefined : t("Retire {name}", { name: secret.name })} onClick={() => onToggle("retire")} disabled={busy}>
                 {open === "retire" ? t("Close") : t("Retire")}
               </button>
             )}
@@ -412,14 +412,14 @@ function SecretRow({
         </td>
       </tr>
       {open === "rotate" && (
-        <tr className="detail-row" data-testid="secret-rotate" data-name={secret.name}>
+        <tr className="ui-detailrow" data-testid="secret-rotate" data-name={secret.name}>
           <td colSpan={6}>
             <RotateForm key={secret.name} secret={secret} rotate={rotate} onClose={onClose} />
           </td>
         </tr>
       )}
       {open === "retire" && (
-        <tr className="detail-row" data-testid="secret-retire" data-name={secret.name}>
+        <tr className="ui-detailrow" data-testid="secret-retire" data-name={secret.name}>
           <td colSpan={6}>
             <RetireForm key={secret.name} secret={secret} retire={retire} onClose={onClose} />
           </td>
@@ -439,20 +439,20 @@ function RotateForm({ secret, rotate, onClose }: { secret: Secret; rotate: Rotat
   const mine = rotate.variables?.name === secret.name;
   const busy = rotate.isPending && mine;
   return (
-    <div className="stack">
-      <p className="source">
+    <div className="ui-stack">
+      <p className="ui-note">
         {t("A new value for {name} becomes version {version}; the jobs already delivered keep the version they were given.", { name: secret.name, version: secret.current_version + 1 })}
       </p>
-      <FieldGrid>
+      <Fields>
         <ValueField label={t("New value")} value={value} onChange={setValue} />
         <ReasonField value={reason} onChange={setReason} />
-      </FieldGrid>
+      </Fields>
       <Actions>
         <button onClick={() => rotate.mutate({ name: secret.name, value, reason })} disabled={!value || !reasonGiven(reason) || busy}>
           {busy ? t("Rotating…") : t("Rotate")}
         </button>
-        <button className="secondary" onClick={onClose} disabled={busy}>{t("Cancel")}</button>
-        {mine && rotate.error ? <span className="page-error">{errorText(rotate.error)}</span> : null}
+        <button className="ui-btn-secondary" onClick={onClose} disabled={busy}>{t("Cancel")}</button>
+        {mine && rotate.error ? <span className="ui-errorbox">{errorText(rotate.error)}</span> : null}
       </Actions>
     </div>
   );
@@ -469,23 +469,23 @@ function RetireForm({ secret, retire, onClose }: { secret: Secret; retire: Retir
   const mine = retire.variables?.name === secret.name;
   const busy = retire.isPending && mine;
   return (
-    <div className="stack">
-      <p className="source">
+    <div className="ui-stack">
+      <p className="ui-note">
         {t("No host will be issued {name} again, at any version. A job that names it will fail at the lease. The metadata and the version history stay; a retirement cannot be undone.", { name: secret.name })}
       </p>
-      <FieldGrid>
+      <Fields>
         <ReasonField value={reason} onChange={setReason} />
-        <label className="toggle">
+        <label className="ui-check">
           <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
           {t("I understand that {name} stops being issued for good.", { name: secret.name })}
         </label>
-      </FieldGrid>
+      </Fields>
       <Actions>
-        <button className="danger" onClick={() => retire.mutate({ name: secret.name, reason })} disabled={!confirmed || !reasonGiven(reason) || busy}>
+        <button className="ui-btn-danger" onClick={() => retire.mutate({ name: secret.name, reason })} disabled={!confirmed || !reasonGiven(reason) || busy}>
           {busy ? t("Retiring…") : t("Retire {name}", { name: secret.name })}
         </button>
-        <button className="secondary" onClick={onClose} disabled={busy}>{t("Cancel")}</button>
-        {mine && retire.error ? <span className="page-error">{errorText(retire.error)}</span> : null}
+        <button className="ui-btn-secondary" onClick={onClose} disabled={busy}>{t("Cancel")}</button>
+        {mine && retire.error ? <span className="ui-errorbox">{errorText(retire.error)}</span> : null}
       </Actions>
     </div>
   );

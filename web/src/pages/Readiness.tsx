@@ -3,8 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { FleetReadiness, ReadinessGap } from "../lib/types";
-import { ErrorBox, Empty } from "../components/ui";
-import { Card, Field, FieldGrid, PageHeader } from "../components/layout";
+import { ErrorBox } from "../components/ui";
+import { Empty, Field, Fields, PageHead, Panel } from "../ui/kit";
 import { useT } from "../i18n";
 
 /**
@@ -57,23 +57,23 @@ export default function Readiness() {
 
   return (
     <>
-      <PageHeader title={t("Readiness")}
+      <PageHead title={t("Readiness")}
         help={<p>{t("What has been measured against the criteria for production, and what has not. A criterion with no measurement behind it is shown as unmeasured rather than as met.")}</p>}
       />
-      <Card>
-        <FieldGrid>
+      <Panel>
+        <Fields>
           <Field label={t("hosts")}>{data.hosts}</Field>
           {/* A fleet whose hosts have said nothing is not a fleet without
               gaps, and the number says so rather than leaving a quiet zero. */}
           <Field label={t("silent about their adapters")}>
-            {data.silent > 0 ? <span className="badge unknown">{data.silent}</span> : 0}
+            {data.silent > 0 ? <span className="ui-pill ui-unknown">{data.silent}</span> : 0}
           </Field>
           <Field label={t("operations that need an adapter")}>{data.operations}</Field>
           <Field label={t("orderable nowhere")}>
-            {data.unorderable > 0 ? <span className="badge warn">{data.unorderable}</span> : 0}
+            {data.unorderable > 0 ? <span className="ui-pill ui-warn">{data.unorderable}</span> : 0}
           </Field>
-        </FieldGrid>
-      </Card>
+        </Fields>
+      </Panel>
 
       {data.gaps.length === 0 && verdict === "ok" && (
         <Empty>{t("Every operation can be ordered on every host of this fleet.")}</Empty>
@@ -85,21 +85,21 @@ export default function Readiness() {
       )}
 
       {nowhere.length > 0 && (
-        <Card title={t("Nowhere in this fleet")}>
-          <p className="source">
+        <Panel title={t("Nowhere in this fleet")}>
+          <p className="ui-note">
             {t("No visible host offers what these operations need, so ordering one would be refused everywhere.")}
           </p>
           <Gaps gaps={nowhere} />
-        </Card>
+        </Panel>
       )}
 
       {somewhere.length > 0 && (
-        <Card title={t("On some hosts")}>
-          <p className="source">
+        <Panel title={t("On some hosts")}>
+          <p className="ui-note">
             {t("Other hosts offer these, so an operation reaches part of the fleet. A host of another family is often a reason rather than a fault.")}
           </p>
           <Gaps gaps={somewhere} />
-        </Card>
+        </Panel>
       )}
     </>
   );
@@ -161,7 +161,7 @@ function GapRow({ gap, open, onToggle }: {
         <td>
           <button
             type="button"
-            className="expander"
+            className="ui-expander"
             aria-expanded={open}
             aria-label={open
               ? t("Hide the operations {requirement} blocks", { requirement: gap.requirement })
@@ -180,31 +180,31 @@ function GapRow({ gap, open, onToggle }: {
             </span>
           ))}
           {gap.satisfied > 0 && (
-            <div className="source">{count(t, gap.satisfied, "host offers it", "hosts offer it")}</div>
+            <div className="ui-note">{count(t, gap.satisfied, "host offers it", "hosts offer it")}</div>
           )}
         </td>
         <td>
           {silent === gap.hosts.length && silent > 0
-            ? <span className="badge unknown">{t("has reported no adapter at all")}</span>
+            ? <span className="ui-pill ui-unknown">{t("has reported no adapter at all")}</span>
             : shared
               ? shared
               : gap.hosts.map((host) => (
                   <div key={host.id}>
-                    <span className="source">{host.hostname}: </span>
+                    <span className="ui-note">{host.hostname}: </span>
                     {host.silent
-                      ? <span className="badge unknown">{t("has reported no adapter at all")}</span>
-                      : host.reason || <span className="badge unknown">{t("gave no reason")}</span>}
+                      ? <span className="ui-pill ui-unknown">{t("has reported no adapter at all")}</span>
+                      : host.reason || <span className="ui-pill ui-unknown">{t("gave no reason")}</span>}
                   </div>
                 ))}
         </td>
       </tr>
       {open && (
-        <tr className="detail-row">
+        <tr className="ui-detailrow">
           <td colSpan={4}>
-            {/* Columns rather than one long line and rather than one name per
+            {/* Cols rather than one long line and rather than one name per
                 row: fifteen operation names read as a list at a glance and as
                 neither of the other two. */}
-            <ul className="fp-op-grid">
+            <ul className="ui-namegrid">
               {gap.operations.map((operation) => <li key={operation}><code>{operation}</code></li>)}
             </ul>
           </td>

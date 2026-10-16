@@ -5,8 +5,8 @@ import { api, ApiError, LIST_PAGE, loadedItems } from "../lib/api";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import { useDebounced } from "../lib/debounce";
 import { Board } from "../components/board";
-import { ErrorBox, Time, Empty } from "../components/ui";
-import { Actions, Card, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
+import { ErrorBox, Time } from "../components/ui";
+import { Actions, Empty, Field, Fields, PageHead, Panel, Toolbar } from "../ui/kit";
 import { ExportButton } from "../components/ExportButton";
 import { Breakdown, Meter, StatusBar, type WidgetTone } from "../components/widgets";
 import { useT } from "../i18n";
@@ -250,8 +250,8 @@ export function FeedCandidates({ candidates }: { candidates: Candidate[] }) {
   });
 
   return (
-    <Card
-      className="span-12"
+    <Panel
+      className="ui-col-12"
       title={t("Feed fetches held back")}
       description={t("A fetch that lost most of its findings, or a whole release, is not activated. The data in force stay in force and grow stale, which is visible; accept a fetch only after reading what it lost.")}
       tone="warn"
@@ -261,7 +261,7 @@ export function FeedCandidates({ candidates }: { candidates: Candidate[] }) {
         <thead>
           <tr>
             <th scope="col">{t("Provider")}</th><th scope="col">{t("Reason")}</th>
-            <th scope="col" className="num">{t("Fetched")}</th><th scope="col" className="num">{t("In force")}</th>
+            <th scope="col" className="ui-numeric">{t("Fetched")}</th><th scope="col" className="ui-numeric">{t("In force")}</th>
             <th scope="col">{t("Held back")}</th><th scope="col" />
           </tr>
         </thead>
@@ -273,36 +273,36 @@ export function FeedCandidates({ candidates }: { candidates: Candidate[] }) {
               <tr key={candidate.id}>
                 <td>
                   {candidate.provider}
-                  <div className="source mono">{candidate.digest.slice(0, 12)}</div>
+                  <div className="ui-note ui-mono">{candidate.digest.slice(0, 12)}</div>
                 </td>
                 <td>
-                  <span className="badge warn">{GATE_REASONS[candidate.reason] ?? candidate.reason}</span>
+                  <span className="ui-pill ui-warn">{GATE_REASONS[candidate.reason] ?? candidate.reason}</span>
                   {lost.length > 0 && (
-                    <div className="source">{t("no longer covers {releases}", { releases: lost.join(", ") })}</div>
+                    <div className="ui-note">{t("no longer covers {releases}", { releases: lost.join(", ") })}</div>
                   )}
                 </td>
-                <td className="num">{candidate.advisories}</td>
-                <td className="num">{candidate.active_advisories}</td>
+                <td className="ui-numeric">{candidate.advisories}</td>
+                <td className="ui-numeric">{candidate.active_advisories}</td>
                 <td><Time value={candidate.held_at ?? candidate.fetched_at} /></td>
                 <td>
                   {open === candidate.id ? (
-                    <FieldGrid>
+                    <Fields>
                       <Field label={t("Reason (kept in the audit trail)")} hint={t("At least 8 characters. Say what you checked: the vendor retired findings, the release went out of support.")} wide>
                         <input value={reason} onChange={(e) => setReason(e.target.value)} />
                       </Field>
                       <Actions>
                         <button
-                          className="danger"
+                          className="ui-btn-danger"
                           disabled={reason.trim().length < 8 || accept.isPending}
                           onClick={() => accept.mutate(candidate.id)}
                         >
                           {t("Accept this fetch")}
                         </button>
-                        <button className="secondary" onClick={() => { setOpen(""); setReason(""); }}>{t("Cancel")}</button>
+                        <button className="ui-btn-secondary" onClick={() => { setOpen(""); setReason(""); }}>{t("Cancel")}</button>
                       </Actions>
-                    </FieldGrid>
+                    </Fields>
                   ) : (
-                    <button className="secondary" onClick={() => { setOpen(candidate.id); setMessage(""); }}>
+                    <button className="ui-btn-secondary" onClick={() => { setOpen(candidate.id); setMessage(""); }}>
                       {t("Accept…")}
                     </button>
                   )}
@@ -312,8 +312,8 @@ export function FeedCandidates({ candidates }: { candidates: Candidate[] }) {
           })}
         </tbody>
       </table>
-      {message && <p className="source">{message}</p>}
-    </Card>
+      {message && <p className="ui-note">{message}</p>}
+    </Panel>
   );
 }
 
@@ -393,7 +393,7 @@ export function FleetVulnerabilities() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         title={t("Vulnerabilities")}
         description={t("Decided by each distribution's own security tracker.")}
         help={<p>{t("Decided by each distribution's own security tracker, because fixes are backported: a version that looks vulnerable upstream may already carry the patch. Upstream feeds can add descriptions and scores later, but they never overrule the vendor.")}</p>}
@@ -401,7 +401,7 @@ export function FleetVulnerabilities() {
       <FleetCoverage coverage={data} />
 
       {Object.keys(data.coverage_reasons ?? {}).length > 0 && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>
             {t("Incomplete coverage: {reasons}. Those hosts show zero findings because nothing could be decided, not because they are clean.", {
               reasons: Object.entries(data.coverage_reasons)
@@ -430,19 +430,19 @@ export function FleetVulnerabilities() {
         drawn={{
           findings: (
             <>
-              <Card className="span-8" title={t("Findings")} description={t("By what the vendor offers for them.")}>
+              <Panel className="ui-col-8" title={t("Findings")} description={t("By what the vendor offers for them.")}>
           <StatusBar segments={[
             { label: t("Vendor fix"), value: data.affected_with_vendor_fix, tone: "error" },
             { label: t("No fix"), value: data.affected_no_fix, tone: "warn" },
             { label: t("Not established"), value: data.unknown, tone: "unknown" },
           ]} />
-          <p className="fp-note">
+          <p className="ui-note">
             {t("{cves} distinct CVEs · {advisories} vendor advisories · {packages} installed packages to move · {hosts} hosts affected.", {
               cves: data.unique_cves, advisories: data.unique_advisories,
               packages: data.affected_package_instances, hosts: data.hosts_affected,
             })}
           </p>
-        </Card>
+        </Panel>
 
         {/* The three segments are the whole fleet, host by host: fully
             assessed, assessed with packages the feed does not cover, and
@@ -453,8 +453,8 @@ export function FleetVulnerabilities() {
           ),
           assessed: (
             <>
-              <Card
-          className="span-4"
+              <Panel
+          className="ui-col-4"
           title={t("Assessed")}
           description={t("{n} of {total} hosts fully assessed", { n: data.hosts_assessed, total: data.total_hosts })}
         >
@@ -463,7 +463,7 @@ export function FleetVulnerabilities() {
             { label: t("Not fully assessed"), value: partlyAssessed, tone: "warn" },
             { label: t("Never assessed"), value: data.hosts_without_assessment, tone: "unknown" },
           ]} />
-        </Card>
+        </Panel>
 
         {/* A fetch the sanity gate held back is above the numbers rather
             than behind a settings page: it is the reason those numbers
@@ -474,13 +474,13 @@ export function FleetVulnerabilities() {
           ),
           security_data: (
             <>
-              <Card className="span-8" title={t("Security data")} flush>
+              <Panel className="ui-col-8" title={t("Security data")} flush>
           {!data.sources.length ? (
             <Empty>{t("No feed has been fetched yet.")}</Empty>
           ) : (
             <table>
               <thead>
-                <tr><th scope="col">{t("Provider")}</th><th scope="col" className="num">{t("Advisories")}</th><th scope="col">{t("Releases")}</th><th scope="col">{t("Fetched")}</th><th scope="col">{t("State")}</th></tr>
+                <tr><th scope="col">{t("Provider")}</th><th scope="col" className="ui-numeric">{t("Advisories")}</th><th scope="col">{t("Releases")}</th><th scope="col">{t("Fetched")}</th><th scope="col">{t("State")}</th></tr>
               </thead>
               <tbody>
                 {data.sources.map((source) => (
@@ -488,11 +488,11 @@ export function FleetVulnerabilities() {
                     <td>
                       {source.provider === "host repository metadata" ? t("host repository metadata") : source.provider}
                       {source.generation_id && (
-                        <div className="source mono">{t("generation {id}", { id: source.generation_id.slice(0, 8) })}</div>
+                        <div className="ui-note ui-mono">{t("generation {id}", { id: source.generation_id.slice(0, 8) })}</div>
                       )}
                     </td>
-                    <td className="num">{source.advisories}</td>
-                    <td className="source">
+                    <td className="ui-numeric">{source.advisories}</td>
+                    <td className="ui-note">
                       {source.hosts !== undefined
                         ? t("read on {n} hosts", { n: source.hosts })
                         : (source.releases ?? []).join(", ")}
@@ -500,13 +500,13 @@ export function FleetVulnerabilities() {
                     <td><Time value={source.fetched_at} /></td>
                     <td>
                       {source.error ? (
-                        <span className="badge error">{source.error.slice(0, 80)}</span>
+                        <span className="ui-pill ui-error">{source.error.slice(0, 80)}</span>
                       ) : source.stale ? (
-                        <span className="badge warn">
+                        <span className="ui-pill ui-warn">
                           {t("older than {n} h", { n: data.max_snapshot_age_hours })}
                         </span>
                       ) : (
-                        <span className="badge ok">{t("fresh")}</span>
+                        <span className="ui-pill ui-ok">{t("fresh")}</span>
                       )}
                     </td>
                   </tr>
@@ -514,16 +514,16 @@ export function FleetVulnerabilities() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
             </>
           ),
           by_host: (
             <>
-              <Card className="span-4" title={t("By host")} description={t("Hosts with open findings, the ones with a vendor fix first.")}>
+              <Panel className="ui-col-4" title={t("By host")} description={t("Hosts with open findings, the ones with a vendor fix first.")}>
           {affectedHosts.length === 0 ? (
-            <p className="fp-blank">{data.hosts_assessed > 0 ? t("No assessed host has an open finding.") : t("No host has been assessed yet.")}</p>
+            <p className="ui-empty">{data.hosts_assessed > 0 ? t("No assessed host has an open finding.") : t("No host has been assessed yet.")}</p>
           ) : (
-            <div className="fp-links">
+            <div className="ui-barlist-links">
               <Breakdown items={affectedHosts.map((item) => ({
                 label: <Link to={`/hosts/${item.host_id}/vulnerabilities`}>{item.hostname || item.host_id.slice(0, 8)}</Link>,
                 value: item.affected,
@@ -531,13 +531,13 @@ export function FleetVulnerabilities() {
               }))} />
             </div>
           )}
-        </Card>
+        </Panel>
             </>
           ),
           list: (
             <>
-              <Card
-          className="span-12"
+              <Panel
+          className="ui-col-12"
           title={filters.view === "cves" ? t("By CVE") : t("Hosts")}
           description={filters.view === "cves"
             ? t("One row per CVE across the hosts you can see, the gravest and the most widespread first. The host count is the number of machines to move; the fix count says on how many of them the vendor has released one.")
@@ -561,9 +561,9 @@ export function FleetVulnerabilities() {
           >
             {/* The same findings, grouped the other way round: a toggle,
                 not two pages, because the numbers above them are shared. */}
-            <div className="segmented" role="group" data-testid="view-toggle">
-              <button className={filters.view === "hosts" ? "active" : ""} onClick={() => change({ view: "hosts" })}>{t("By host")}</button>
-              <button className={filters.view === "cves" ? "active" : ""} onClick={() => change({ view: "cves" })}>{t("By CVE")}</button>
+            <div className="ui-segmented" role="group" data-testid="view-toggle">
+              <button className={filters.view === "hosts" ? "ui-active" : ""} onClick={() => change({ view: "hosts" })}>{t("By host")}</button>
+              <button className={filters.view === "cves" ? "ui-active" : ""} onClick={() => change({ view: "cves" })}>{t("By CVE")}</button>
             </div>
             <input
               placeholder={filters.view === "cves" ? t("CVE number or package name") : t("Search hostname")}
@@ -576,7 +576,7 @@ export function FleetVulnerabilities() {
               {SEVERITIES.map((severity) => <option key={severity} value={severity}>{severity}</option>)}
             </select>
             {filters.view === "cves" ? (
-              <label className="toggle">
+              <label className="ui-check">
                 <input type="checkbox" checked={filters.fixable} onChange={(e) => change({ fixable: e.target.checked })} />{" "}
                 {t("vendor fix available")}
               </label>
@@ -600,8 +600,8 @@ export function FleetVulnerabilities() {
               <table>
                 <thead>
                   <tr>
-                    <th scope="col">CVE</th><th scope="col">{t("Severity")}</th><th scope="col" className="num">CVSS</th>
-                    <th scope="col" className="num">{t("Hosts")}</th><th scope="col" className="num">{t("Vendor fix")}</th>
+                    <th scope="col">CVE</th><th scope="col">{t("Severity")}</th><th scope="col" className="ui-numeric">CVSS</th>
+                    <th scope="col" className="ui-numeric">{t("Hosts")}</th><th scope="col" className="ui-numeric">{t("Vendor fix")}</th>
                     <th scope="col">{t("Packages")}</th><th scope="col">{t("First seen")}</th>
                   </tr>
                 </thead>
@@ -610,22 +610,22 @@ export function FleetVulnerabilities() {
                     const preview = packagesPreview(row.packages);
                     return (
                       <tr key={row.cve}>
-                        <td><Link className="mono" to={`/vulnerabilities/${row.cve}`}>{row.cve}</Link></td>
+                        <td><Link className="ui-mono" to={`/vulnerabilities/${row.cve}`}>{row.cve}</Link></td>
                         <td>
                           <span className={severityClass(row.severity)} title={row.vendor_severity}>{row.severity}</span>
                         </td>
                         {/* The upstream score stands next to the vendor's
                             rating, never instead of it. */}
-                        <td className="num" title={row.cvss_severity}>{row.cvss_score === undefined ? "—" : row.cvss_score.toFixed(1)}</td>
-                        <td className="num">{row.hosts}</td>
-                        <td className="num">
+                        <td className="ui-numeric" title={row.cvss_severity}>{row.cvss_score === undefined ? "—" : row.cvss_score.toFixed(1)}</td>
+                        <td className="ui-numeric">{row.hosts}</td>
+                        <td className="ui-numeric">
                           {row.hosts_with_vendor_fix > 0
-                            ? <span className="badge ok">{t("{n} of {total}", { n: row.hosts_with_vendor_fix, total: row.hosts })}</span>
-                            : <span className="badge warn">{t("none")}</span>}
+                            ? <span className="ui-pill ui-ok">{t("{n} of {total}", { n: row.hosts_with_vendor_fix, total: row.hosts })}</span>
+                            : <span className="ui-pill ui-warn">{t("none")}</span>}
                         </td>
                         <td>
-                          <span className="mono">{preview.shown.join(", ")}</span>
-                          {preview.more > 0 && <span className="source"> {t("+{n} more", { n: preview.more })}</span>}
+                          <span className="ui-mono">{preview.shown.join(", ")}</span>
+                          {preview.more > 0 && <span className="ui-note"> {t("+{n} more", { n: preview.more })}</span>}
                         </td>
                         <td><Time value={row.first_seen} /></td>
                       </tr>
@@ -644,9 +644,9 @@ export function FleetVulnerabilities() {
             <table>
               <thead>
                 <tr>
-                  <th scope="col">{t("Host")}</th><th scope="col">{t("Distribution")}</th><th scope="col" className="num">{t("Open findings")}</th>
-                  <th scope="col" className="num">{t("Vendor fix")}</th><th scope="col" className="num">{t("No fix")}</th>
-                  <th scope="col" className="num">{t("Not established")}</th>
+                  <th scope="col">{t("Host")}</th><th scope="col">{t("Distribution")}</th><th scope="col" className="ui-numeric">{t("Open findings")}</th>
+                  <th scope="col" className="ui-numeric">{t("Vendor fix")}</th><th scope="col" className="ui-numeric">{t("No fix")}</th>
+                  <th scope="col" className="ui-numeric">{t("Not established")}</th>
                   <th scope="col" title={t("The share of the installed packages the vendor's tracker could say something about.")}>{t("Coverage")}</th>
                   <th scope="col">{t("Assessed")}</th>
                 </tr>
@@ -659,28 +659,28 @@ export function FleetVulnerabilities() {
                         {item.hostname || item.host_id.slice(0, 8)}
                       </Link>
                     </td>
-                    <td className="source">{item.distribution} {item.release}</td>
+                    <td className="ui-note">{item.distribution} {item.release}</td>
                     {/* The open findings by severity, the worst rung first:
                         "3 critical" says more than a sum. */}
-                    <td className="num">
+                    <td className="ui-numeric">
                       {item.affected}
                       {item.affected > 0 && item.by_severity && (
-                        <div className="source">
+                        <div className="ui-note">
                           {SEVERITIES.filter((severity) => (item.by_severity?.[severity] ?? 0) > 0)
                             .map((severity) => `${item.by_severity?.[severity]} ${severity}`).join(" · ")}
                         </div>
                       )}
                     </td>
-                    <td className="num">
+                    <td className="ui-numeric">
                       {item.affected_with_vendor_fix > 0
-                        ? <span className="badge error">{item.affected_with_vendor_fix}</span>
-                        : <span className="badge ok">0</span>}
+                        ? <span className="ui-pill ui-error">{item.affected_with_vendor_fix}</span>
+                        : <span className="ui-pill ui-ok">0</span>}
                     </td>
-                    <td className="num">{item.affected_no_fix}</td>
-                    <td className="num">{item.unknown}</td>
-                    <td className={item.coverage_reason ? undefined : "fp-meter-cell"} title={item.coverage_reason ? undefined : t("{percent}% of the {total} installed packages were matched against the tracker.", { percent: item.coverage_percent.toFixed(1), total: item.packages_total })}>
+                    <td className="ui-numeric">{item.affected_no_fix}</td>
+                    <td className="ui-numeric">{item.unknown}</td>
+                    <td className={item.coverage_reason ? undefined : "ui-metercell"} title={item.coverage_reason ? undefined : t("{percent}% of the {total} installed packages were matched against the tracker.", { percent: item.coverage_percent.toFixed(1), total: item.packages_total })}>
                       {item.coverage_reason ? (
-                        <span className="badge unknown">
+                        <span className="ui-pill ui-unknown">
                           {reason(item.coverage_reason)}
                         </span>
                       ) : (
@@ -690,7 +690,7 @@ export function FleetVulnerabilities() {
                           max={100}
                           tone={item.fully_assessed ? "ok" : "warn"}
                           text={
-                            <span className={`badge ${item.fully_assessed ? "ok" : "warn"}`}>
+                            <span className={`ui-pill ${item.fully_assessed ? "ui-ok" : "ui-warn"}`}>
                               {t("{percent}% of {total}", { percent: item.coverage_percent.toFixed(1), total: item.packages_total })}
                             </span>
                           }
@@ -705,25 +705,25 @@ export function FleetVulnerabilities() {
                     <td>
                       <Time value={item.evaluated_at} />
                       {item.evaluation_failed_reason && (
-                        <div className="source">
-                          <span className="badge error">{t("last pass failed")}</span>{" "}
+                        <div className="ui-note">
+                          <span className="ui-pill ui-error">{t("last pass failed")}</span>{" "}
                           {t("reading {source}", { source: item.evaluation_failed_source ?? "" })}
                         </div>
                       )}
                       {(() => {
                         const state = generationState(item, data.sources);
                         if (state === "current") {
-                          return <div className="source">{t("current feed generation")}</div>;
+                          return <div className="ui-note">{t("current feed generation")}</div>;
                         }
                         if (state === "older") {
                           return (
-                            <div className="source">
-                              <span className="badge warn">{t("older generation")}</span>
+                            <div className="ui-note">
+                              <span className="ui-pill ui-warn">{t("older generation")}</span>
                               {item.generation_at && <> <Time value={item.generation_at} /></>}
                             </div>
                           );
                         }
-                        return <div className="source">{t("generation not recorded")}</div>;
+                        return <div className="ui-note">{t("generation not recorded")}</div>;
                       })()}
                     </td>
                   </tr>
@@ -735,19 +735,19 @@ export function FleetVulnerabilities() {
               is left. */}
           {filters.view === "cves" && cveTable.hasNextPage && (
             <p>
-              <button className="secondary" onClick={() => cveTable.fetchNextPage()} disabled={cveTable.isFetchingNextPage}>
+              <button className="ui-btn-secondary" onClick={() => cveTable.fetchNextPage()} disabled={cveTable.isFetchingNextPage}>
                 {t("Load more ({n} left)", { n: cveTotal - cveRows.length })}
               </button>
             </p>
           )}
           {filters.view === "hosts" && hostTable.hasNextPage && (
             <p>
-              <button className="secondary" onClick={() => hostTable.fetchNextPage()} disabled={hostTable.isFetchingNextPage}>
+              <button className="ui-btn-secondary" onClick={() => hostTable.fetchNextPage()} disabled={hostTable.isFetchingNextPage}>
                 {t("Load more ({n} left)", { n: hostTotal - hostRows.length })}
               </button>
             </p>
           )}
-        </Card>
+        </Panel>
             </>
           )
         }}

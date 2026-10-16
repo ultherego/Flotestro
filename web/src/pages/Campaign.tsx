@@ -5,8 +5,8 @@ import { api, ApiError, type Collection } from "../lib/api";
 import type {
   Campaign as CampaignType, CampaignApproval, CampaignReport, CampaignTarget, SelectorExpression, TimelineEntry,
 } from "../lib/types";
-import { ErrorBox, ErrorCode, Time, Pair, Pairs, ProgressBar, Empty, JobState } from "../components/ui";
-import { Actions, Card, Columns, Field, FieldGrid, PageHeader, Toolbar, Verdict } from "../components/layout";
+import { ErrorBox, ErrorCode, Time, Pair, Pairs, ProgressBar, JobState } from "../components/ui";
+import { Actions, Cols, Empty, Field, Fields, PageHead, Panel, Toolbar, Verdict } from "../ui/kit";
 import { StatusBar } from "../components/widgets";
 import { JobPlan, PlanGroupView, STALE_PLAN_CODES, unknownPlanHosts } from "../components/plan";
 import { VirtualRows } from "../components/virtual";
@@ -364,10 +364,10 @@ export function Campaign() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         breadcrumb={[{ label: t("Campaigns"), to: "/campaigns" }]}
         title={data.name}
-        description={<><JobState state={data.state} /> · <span className="mono">{data.action_type}</span></>}
+        description={<><JobState state={data.state} /> · <span className="ui-mono">{data.action_type}</span></>}
         actions={
           <>
             {data.state === "awaiting_approval" && (
@@ -377,13 +377,13 @@ export function Campaign() {
               <button onClick={() => { setPendingStop(null); setAdvancing(true); }}>{t("Advance to the waves")}</button>
             )}
             {["canary", "running", "planned", "manual_gate"].includes(data.state) && (
-              <button className="secondary" onClick={() => setPendingStop("pause")}>{t("Pause")}</button>
+              <button className="ui-btn-secondary" onClick={() => setPendingStop("pause")}>{t("Pause")}</button>
             )}
             {(data.state === "paused" || data.state === "pausing") && (
               <button onClick={() => setPendingStop("resume")}>{t("Resume")}</button>
             )}
             {!SETTLED_CAMPAIGN_STATES.includes(data.state) && data.state !== "canceling" && (
-              <button className="secondary" onClick={() => setPendingStop("cancel")}>{t("Cancel")}</button>
+              <button className="ui-btn-secondary" onClick={() => setPendingStop("cancel")}>{t("Cancel")}</button>
             )}
             {canRetry && (
               <button onClick={() => { setPendingStop(null); setRetrying(true); }}>{t("Retry on failed hosts")}</button>
@@ -391,7 +391,7 @@ export function Campaign() {
             {/* The same order once more, written into the wizard: the
                 operation, the name and the payload; the targets and the
                 rollout are decided there again. */}
-            <Link className="button" to={bulkPrefill(data.action_type, data.name, data.payload ?? {})} title={t("Opens the Bulk workspace with the same operation, name and payload written in; the targets and the rollout are chosen again.")}>
+            <Link className="ui-btn" to={bulkPrefill(data.action_type, data.name, data.payload ?? {})} title={t("Opens the Bulk workspace with the same operation, name and payload written in; the targets and the rollout are chosen again.")}>
               {t("Clone")}
             </Link>
           </>
@@ -406,7 +406,7 @@ export function Campaign() {
       <OrderCard campaign={data} operation={operation} />
 
       {retrying && canRetry && (
-        <Card
+        <Panel
           title={t("Retry on failed hosts?")}
           description={t("A new campaign with the same operation, payload and rollout on exactly the {n} hosts that did not reach the desired state; the hosts that succeeded are not touched. It waits for its own approval and is linked to this one.", { n: retryable })}
           footer={
@@ -414,34 +414,34 @@ export function Campaign() {
               <button onClick={() => retry.mutate()} disabled={retry.isPending || !reasonValid(retryReason) || retryable === 0}>
                 {t("Order the retry on {n} hosts", { n: retryable })}
               </button>
-              <button className="secondary" onClick={() => setRetrying(false)}>{t("Back")}</button>
+              <button className="ui-btn-secondary" onClick={() => setRetrying(false)}>{t("Back")}</button>
             </Actions>
           }
         >
-          <FieldGrid>
+          <Fields>
             <Field label={t("Reason (kept in the audit trail)")} hint={t("Required: at least {n} characters.", { n: MIN_REASON })} wide>
               <input value={retryReason} onChange={(e) => setRetryReason(e.target.value)} />
             </Field>
             {/* An unknown host may hold the change half done; running it
                 again blind is the operator's call, made here on purpose. */}
-            <label className="toggle">
+            <label className="ui-check">
               <input type="checkbox" checked={includeUnknown} onChange={(e) => setIncludeUnknown(e.target.checked)} />{" "}
               {t("Include the {n} hosts that ended unknown (read what they hold first)", { n: unknown })}
             </label>
-          </FieldGrid>
+          </Fields>
           {retry.error && (
-            <p className="warning">
+            <p className="ui-banner">
               <span>
                 {retry.error instanceof ApiError && <><code>{retry.error.code}</code> · </>}
                 {retry.error instanceof Error ? retry.error.message : String(retry.error)}
               </span>
             </p>
           )}
-        </Card>
+        </Panel>
       )}
 
       {approving && data.state === "awaiting_approval" && (
-        <Card
+        <Panel
           title={t("Approve the campaign?")}
           description={t("The consent covers exactly what is on screen: this operation, this payload, these {count} hosts and this rollout. It is recorded with the fingerprint {fingerprint}, your authentication and the reason.", { count: total, fingerprint: data.approval_fingerprint.slice(0, 12) })}
           footer={
@@ -449,14 +449,14 @@ export function Campaign() {
               <button onClick={() => control.mutate("approve")} disabled={control.isPending || !approvalReady || approvalBlocked}>
                 {t("Approve")}
               </button>
-              <button className="secondary" onClick={() => setApproving(false)}>{t("Back")}</button>
+              <button className="ui-btn-secondary" onClick={() => setApproving(false)}>{t("Back")}</button>
             </Actions>
           }
         >
           {approvalBlocked && (
-            <p className="warning"><span>{t("Approval is blocked: {n} hosts have a plan the panel cannot read. Exclude them with a reason or plan the campaign again.", { n: unknownPlans.length })} {unknownPlans.slice(0, 12).join(", ")}</span></p>
+            <p className="ui-banner"><span>{t("Approval is blocked: {n} hosts have a plan the panel cannot read. Exclude them with a reason or plan the campaign again.", { n: unknownPlans.length })} {unknownPlans.slice(0, 12).join(", ")}</span></p>
           )}
-          <FieldGrid>
+          <Fields>
             <Field
               label={t("Reason (kept in the audit trail)")}
               hint={reasonForced
@@ -469,19 +469,19 @@ export function Campaign() {
             <Field label={t("Change ticket")} hint={t("Optional: the identifier or address of the change request.")}>
               <input value={changeTicket} onChange={(e) => setChangeTicket(e.target.value)} placeholder="CHG-1234" />
             </Field>
-          </FieldGrid>
-          {control.error && <p className="warning"><span>{control.error instanceof Error ? control.error.message : String(control.error)}</span></p>}
+          </Fields>
+          {control.error && <p className="ui-banner"><span>{control.error instanceof Error ? control.error.message : String(control.error)}</span></p>}
           {control.error instanceof ApiError && STALE_PLAN_CODES.has(control.error.code) && (
             <Actions>
-              <span className="source">{t("The host no longer computes this plan; plan again and approve the new one.")}</span>
-              <Link className="button" to={bulkPrefill(data.action_type, data.name, data.payload ?? {})}>{t("Replan")}</Link>
+              <span className="ui-note">{t("The host no longer computes this plan; plan again and approve the new one.")}</span>
+              <Link className="ui-btn" to={bulkPrefill(data.action_type, data.name, data.payload ?? {})}>{t("Replan")}</Link>
             </Actions>
           )}
-        </Card>
+        </Panel>
       )}
 
       {advancing && data.state === "manual_gate" && (
-        <Card
+        <Panel
           title={t("Advance to the waves?")}
           description={t("The canary is settled. {succeeded} hosts succeeded and {failed} failed; the remaining {notStarted} hosts start in waves of {wave} once you advance. The decision is recorded with your identity and the reason.", {
             succeeded: succeeded + noChange, failed: failed + unknown, notStarted, wave: data.wave_size,
@@ -491,21 +491,21 @@ export function Campaign() {
               <button onClick={() => control.mutate("advance")} disabled={control.isPending}>
                 {t("Advance to the waves")}
               </button>
-              <button className="secondary" onClick={() => setAdvancing(false)}>{t("Back")}</button>
+              <button className="ui-btn-secondary" onClick={() => setAdvancing(false)}>{t("Back")}</button>
             </Actions>
           }
         >
-          <FieldGrid>
+          <Fields>
             <Field label={t("Reason (kept in the audit trail)")} wide>
               <input value={advanceReason} onChange={(e) => setAdvanceReason(e.target.value)} />
             </Field>
-          </FieldGrid>
-          {control.error && <p className="warning"><span>{control.error instanceof Error ? control.error.message : String(control.error)}</span></p>}
-        </Card>
+          </Fields>
+          {control.error && <p className="ui-banner"><span>{control.error instanceof Error ? control.error.message : String(control.error)}</span></p>}
+        </Panel>
       )}
 
       {pendingStop && (
-        <Card
+        <Panel
           tone={pendingStop === "pause" ? "warn" : pendingStop === "cancel" ? "error" : undefined}
           title={pendingStop === "pause" ? t("Pause the campaign?") : pendingStop === "resume" ? t("Resume the campaign?") : t("Cancel the campaign?")}
           description={pendingStop === "pause"
@@ -516,23 +516,23 @@ export function Campaign() {
           footer={
             <Actions>
               <button
-                className={pendingStop === "cancel" ? "danger" : ""}
+                className={pendingStop === "cancel" ? "ui-btn-danger" : ""}
                 onClick={() => control.mutate(pendingStop)}
                 disabled={control.isPending}
               >
                 {pendingStop === "pause" ? t("Pause") : pendingStop === "resume" ? t("Resume") : t("Cancel the campaign")}
               </button>
-              <button className="secondary" onClick={() => setPendingStop(null)}>{t("Back")}</button>
+              <button className="ui-btn-secondary" onClick={() => setPendingStop(null)}>{t("Back")}</button>
             </Actions>
           }
         >
-          <FieldGrid>
+          <Fields>
             <Field label={t("Reason (kept in the audit trail)")} wide>
               <input value={stopReason} onChange={(e) => setStopReason(e.target.value)} />
             </Field>
-          </FieldGrid>
+          </Fields>
           {pendingStop === "cancel" && rollbackPlannable && reverseAction && (
-            <p className="subtitle">
+            <p className="ui-note">
               {reverseOperation?.campaign_ready ? (
                 <Link to={bulkPrefill(reverseAction, t("Rollback of {name}", { name: data.name }), reversePayload(actionType, data.payload), data.id)}>
                   {t("Plan the rollback")}
@@ -544,7 +544,7 @@ export function Campaign() {
               {t("The rollback is a new campaign with its own plans and its own approval; the version or the rollback identifier is per host.")}
             </p>
           )}
-        </Card>
+        </Panel>
       )}
 
       {/* The fate of the hosts as one coloured bar: the campaign's state
@@ -569,7 +569,7 @@ export function Campaign() {
         {data.finished_at && <span>{t("finished")} <Time value={data.finished_at} /></span>}
       </Verdict>
 
-      <Card title={t("Targets")}>
+      <Panel title={t("Targets")}>
         <StatusBar segments={[
           { label: t("Not started"), value: report.data ? notStarted - offlineQueued : undefined, tone: "neutral" },
           { label: t("Waiting for connection"), value: report.data ? offlineQueued : undefined, tone: "warn" },
@@ -581,7 +581,7 @@ export function Campaign() {
           { label: t("Unknown"), value: report.data ? unknown : undefined, tone: "warn" },
           { label: t("Skipped"), value: report.data ? (totals.skipped ?? 0) + (totals.canceled ?? 0) : undefined, tone: "unknown" },
         ]} />
-      </Card>
+      </Panel>
 
       {/* The way back, as a decision on a settled campaign: how many hosts
           changed, what class of return the operation declares, and one
@@ -589,13 +589,13 @@ export function Campaign() {
           no way back says so here instead of leaving the operator to infer
           it from a missing link. */}
       {offer.kind !== "not_settled" && (
-        <Card
+        <Panel
           title={t("Compensation")}
           description={`${t("Way back")}: ${rollbackWord} — ${rollbackMeaning}`}
           footer={offer.kind === "campaign" ? (
             <Actions>
-              <Link className="button" to={compensationOf()}>{t("Compensate {n} hosts", { n: offer.changed })}</Link>
-              <span className="subtitle">
+              <Link className="ui-btn" to={compensationOf()}>{t("Compensate {n} hosts", { n: offer.changed })}</Link>
+              <span className="ui-note">
                 {t("The compensation is a new campaign with its own plans and its own approval; the version or the rollback identifier is per host.")}
               </span>
             </Actions>
@@ -623,14 +623,14 @@ export function Campaign() {
                 : t("no compensation ordered yet")}
             </Pair>
           </Pairs>
-        </Card>
+        </Panel>
       )}
 
       {/* A host that came back with a different plan ran nothing: the
           consent covered the old plan, and the operator is to see which
           hosts need a new one rather than count them among the skipped. */}
       {report.data?.plan_changed && report.data.plan_changed.length > 0 && (
-        <Card
+        <Panel
           tone="warn"
           title={t("Plans changed after a reconnect")}
           description={t("These hosts came back with a state that gives a different plan than the one approved. Nothing ran on them; order a new campaign to approve the new plans.")}
@@ -645,25 +645,25 @@ export function Campaign() {
               </li>
             ))}
           </ul>
-        </Card>
+        </Panel>
       )}
 
       {/* The record of the campaign: who asked, who consented, how the waves
           went. Small things, so they stand beside each other as tiles rather
           than as three cards down the page. */}
-      <div className="parts">
-      <section className="part">
-        <h3 className="part-head"><span className="part-name">{t("Details")}</span></h3>
-        <div className="part-body">
+      <div className="ui-tiles">
+      <section className="ui-tile">
+        <h3 className="ui-tile-head"><span className="ui-tile-name">{t("Details")}</span></h3>
+        <div className="ui-tile-body">
         <Pairs>
           <Pair label={t("Requested by")}>{data.created_by}</Pair>
           <Pair label={t("Approved by")}>{data.approved_by || "—"}{data.approved_at && <> · <Time value={data.approved_at} /></>}</Pair>
           <Pair label={t("Approval fingerprint")}>
-            <span className="mono" title={data.approval_fingerprint}>{data.approval_fingerprint.slice(0, 16) || "—"}</span>
+            <span className="ui-mono" title={data.approval_fingerprint}>{data.approval_fingerprint.slice(0, 16) || "—"}</span>
           </Pair>
           {data.plan_set_hash && (
             <Pair label={t("Plan set fingerprint")}>
-              <span className="mono" title={data.plan_set_hash}>{data.plan_set_hash.slice(0, 16)}</span>
+              <span className="ui-mono" title={data.plan_set_hash}>{data.plan_set_hash.slice(0, 16)}</span>
             </Pair>
           )}
           <Pair label={t("Manual gate after the canary")}>
@@ -696,12 +696,12 @@ export function Campaign() {
       </section>
 
       {approvals.data && approvals.data.items.length > 0 && (
-        <section className="part">
-          <h3 className="part-head">
-            <span className="part-name">{t("Approval record")}</span>
-            <span className="part-summary">{t("written once, never changed")}</span>
+        <section className="ui-tile">
+          <h3 className="ui-tile-head">
+            <span className="ui-tile-name">{t("Approval record")}</span>
+            <span className="ui-tile-note">{t("written once, never changed")}</span>
           </h3>
-          <div className="part-body">
+          <div className="ui-tile-body">
           <table>
             <thead><tr><th scope="col">{t("Approved by")}</th><th scope="col">{t("Requested by")}</th><th scope="col">{t("Authentication")}</th><th scope="col">{t("Reason")}</th><th scope="col">{t("Change ticket")}</th><th scope="col">{t("When")}</th></tr></thead>
             <tbody>
@@ -714,7 +714,7 @@ export function Campaign() {
                     {record.authenticated_at && <> · <Time value={record.authenticated_at} /></>}
                   </td>
                   <td>{record.reason || "—"}</td>
-                  <td className="mono">{record.change_ticket || "—"}</td>
+                  <td className="ui-mono">{record.change_ticket || "—"}</td>
                   <td><Time value={record.created_at} /></td>
                 </tr>
               ))}
@@ -726,18 +726,18 @@ export function Campaign() {
 
 
       {report.data && (
-        <section className="part">
-          <h3 className="part-head">
-            <span className="part-name">{t("Waves")}</span>
-            <span className="part-summary">{t("{n} waves", { n: report.data.waves.length })}</span>
+        <section className="ui-tile">
+          <h3 className="ui-tile-head">
+            <span className="ui-tile-name">{t("Waves")}</span>
+            <span className="ui-tile-note">{t("{n} waves", { n: report.data.waves.length })}</span>
           </h3>
-          <div className="part-body">
+          <div className="ui-tile-body">
           <table>
-            <thead><tr><th scope="col" className="num">{t("Wave")}</th><th scope="col">{t("Canary")}</th><th scope="col">{t("Closed")}</th><th scope="col">{t("Summary")}</th></tr></thead>
+            <thead><tr><th scope="col" className="ui-numeric">{t("Wave")}</th><th scope="col">{t("Canary")}</th><th scope="col">{t("Closed")}</th><th scope="col">{t("Summary")}</th></tr></thead>
             <tbody>
               {report.data.waves.map((wave) => (
                 <tr key={wave.wave}>
-                  <td className="num">{wave.wave}</td>
+                  <td className="ui-numeric">{wave.wave}</td>
                   <td>{wave.is_canary ? t("yes") : t("no")}</td>
                   <td>{wave.completed ? t("yes") : t("no")}</td>
                   <td>{Object.entries(wave.totals).map(([state, count]) => `${state}: ${count}`).join(", ")}</td>
@@ -755,7 +755,7 @@ export function Campaign() {
           on the host. */}
       </div>
 
-      <Card
+      <Panel
         title={t("Plans")}
         description={t("One group is one shape of the change and the hosts that get it.")}
         flush
@@ -767,27 +767,27 @@ export function Campaign() {
         ) : plans.data.items.length === 0 ? (
           <Empty>{t("No plan yet.")}</Empty>
         ) : (
-          <div className="plan-groups">
+          <div className="ui-stack-s">
             {plans.data.items.map((group) => (
               <PlanGroupView key={group.plan_hash} group={group} action={actionType} stale={staleHosts} />
             ))}
             {staleHosts.length > 0 && canRetry && (
-              <p className="warning">
+              <p className="ui-banner">
                 <span>{t("{n} hosts refused the plan as stale; the previous consent does not carry over. Order a retry to plan them again.", { n: staleHosts.length })}</span>
-                <button className="secondary" onClick={() => setRetrying(true)}>{t("Replan")}</button>
+                <button className="ui-btn-secondary" onClick={() => setRetrying(true)}>{t("Replan")}</button>
               </p>
             )}
           </div>
         )}
-      </Card>
+      </Panel>
 
       {/* The trail is filtered in the browser: it is already loaded whole,
           and one kind of event or one host is what a diagnosis looks for.
           The export is the filtered rows, built here from the same list. */}
-      <Card
+      <Panel
         title={t("Timeline")}
         actions={events.length > 0 ? (
-          <a className="button" href={timelineCSV(events, loaded)} download={`campaign-${id}-timeline.csv`}>{t("Download the timeline as CSV")}</a>
+          <a className="ui-btn" href={timelineCSV(events, loaded)} download={`campaign-${id}-timeline.csv`}>{t("Download the timeline as CSV")}</a>
         ) : undefined}
         flush
       >
@@ -809,26 +809,26 @@ export function Campaign() {
               {events.map((entry) => (
                 <tr key={entry.id}>
                   <td><Time value={entry.occurred_at} /></td>
-                  <td className="mono">{entry.event_type}</td>
+                  <td className="ui-mono">{entry.event_type}</td>
                   <td>{eventHostName(entry, loaded)}</td>
                   <td>
                     {eventDescription(entry)}
                     {/* The task behind the event opens on its own page. */}
-                    {entry.payload?.job_id && <> · <Link className="mono" to={`/jobs/${entry.payload.job_id}`}>{entry.payload.job_id.slice(0, 8)}</Link></>}
+                    {entry.payload?.job_id && <> · <Link className="ui-mono" to={`/jobs/${entry.payload.job_id}`}>{entry.payload.job_id.slice(0, 8)}</Link></>}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-      </Card>
+      </Panel>
 
       {/* The export is a file, not a screen: a report of ten thousand hosts
           goes to a spreadsheet, streamed from the server page by page. */}
-      <Card
+      <Panel
         title={t("Targets")}
         actions={
-          <a className="button" href={`/api/v1/campaigns/${id}/report?format=csv`} download={`campaign-${id}.csv`}>{t("Download the targets as CSV")}</a>
+          <a className="ui-btn" href={`/api/v1/campaigns/${id}/report?format=csv`} download={`campaign-${id}.csv`}>{t("Download the targets as CSV")}</a>
         }
         flush
       >
@@ -853,7 +853,7 @@ export function Campaign() {
             height={480}
             columns={rowCompensation ? 9 : 8}
             rowKey={(target) => target.host_id}
-            head={<tr><th scope="col">{t("Host")}</th><th scope="col" className="num">{t("Wave")}</th><th scope="col">{t("Plan")}</th><th scope="col">{t("Steps")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Progress")}</th><th scope="col">{t("Error code")}</th><th scope="col">{t("Message")}</th>{rowCompensation && <th scope="col">{t("Way back")}</th>}</tr>}
+            head={<tr><th scope="col">{t("Host")}</th><th scope="col" className="ui-numeric">{t("Wave")}</th><th scope="col">{t("Plan")}</th><th scope="col">{t("Steps")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Progress")}</th><th scope="col">{t("Error code")}</th><th scope="col">{t("Message")}</th>{rowCompensation && <th scope="col">{t("Way back")}</th>}</tr>}
             onNearEnd={targets.hasNextPage && !targets.isFetchingNextPage ? () => targets.fetchNextPage() : undefined}
             loading={targets.isFetchingNextPage}
             render={(target) => {
@@ -869,7 +869,7 @@ export function Campaign() {
                   </td>
                   {/* A host that was settled when the campaign was ordered is in
                       no wave; showing it as wave zero would read as a canary. */}
-                  <td className="num" title={target.wave < 0 ? t("The host takes no part in the campaign and is in no wave.") : undefined}>
+                  <td className="ui-numeric" title={target.wave < 0 ? t("The host takes no part in the campaign and is in no wave.") : undefined}>
                     {target.wave < 0 ? "—" : target.wave}{target.wave === 0 && ` (${t("canary")})`}
                   </td>
                   {/* The consent covers the differences computed on the host,
@@ -879,7 +879,7 @@ export function Campaign() {
                   <td>
                     {planJob ? (
                       <button
-                        className="inline"
+                        className="ui-inline"
                         aria-pressed={selectedPlanJob?.jobId === planJob}
                         onClick={() => setSelectedPlanJob(
                           selectedPlanJob?.jobId === planJob
@@ -898,7 +898,7 @@ export function Campaign() {
                       the plan does: a strip does not fit a row. */}
                   <td>
                     <button
-                      className="inline"
+                      className="ui-inline"
                       aria-pressed={selectedStepsHost?.hostId === target.host_id}
                       onClick={() => setSelectedStepsHost(
                         selectedStepsHost?.hostId === target.host_id
@@ -917,7 +917,7 @@ export function Campaign() {
                     <JobState state={target.state} />
                     {target.blocker && (
                       <div
-                        className="source"
+                        className="ui-note"
                         title={target.blocker}
                         style={{ maxWidth: "28ch", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 }}
                       >
@@ -930,7 +930,7 @@ export function Campaign() {
                         to its end. */}
                     {cancelOutcomeLine(target as CancelState, t) && (
                       <div
-                        className="source"
+                        className="ui-note"
                         title={cancelOutcomeLine(target as CancelState, t)}
                         style={{ maxWidth: "28ch", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 }}
                       >
@@ -941,7 +941,7 @@ export function Campaign() {
                         let it go by name, with a reason. */}
                     {canSkipTarget(target, data.state) && (
                       <button
-                        className="inline"
+                        className="ui-inline"
                         onClick={() => askToSkip(target)}
                         disabled={skip.isPending}
                         title={t("Leave this host out with a reason; a skipped canary opens the waves.")}
@@ -989,31 +989,31 @@ export function Campaign() {
             to arrive is asked for again by hand, not by scrolling. */}
         {targets.hasNextPage && (
           <p>
-            <button className="secondary" onClick={() => targets.fetchNextPage()} disabled={targets.isFetchingNextPage}>
+            <button className="ui-btn-secondary" onClick={() => targets.fetchNextPage()} disabled={targets.isFetchingNextPage}>
               {t("Load more ({n} left)", { n: total - loaded.length })}
             </button>
           </p>
         )}
-      </Card>
+      </Panel>
       {selectedPlanJob && (
-        <Card
+        <Panel
           title={t("Plan for {host}", { host: selectedPlanJob.host })}
           footer={
             <Actions>
-              <button className="secondary" onClick={() => setSelectedPlanJob(null)}>{t("Close")}</button>
+              <button className="ui-btn-secondary" onClick={() => setSelectedPlanJob(null)}>{t("Close")}</button>
             </Actions>
           }
         >
           <JobPlan jobId={selectedPlanJob.jobId} />
-        </Card>
+        </Panel>
       )}
       {selectedStepsHost && (
-        <Card
+        <Panel
           title={t("Steps for {host}", { host: selectedStepsHost.host })}
           description={t("Every executable step of the host with its task, its attempts and the reason it did not run. A step without a record has not been reached.")}
           footer={
             <Actions>
-              <button className="secondary" onClick={() => setSelectedStepsHost(null)}>{t("Close")}</button>
+              <button className="ui-btn-secondary" onClick={() => setSelectedStepsHost(null)}>{t("Close")}</button>
             </Actions>
           }
         >
@@ -1022,7 +1022,7 @@ export function Campaign() {
             hostID={selectedStepsHost.hostId}
             compensation={rowCompensation ? compensationOf([selectedStepsHost.hostId]) : undefined}
           />
-        </Card>
+        </Panel>
       )}
     </>
   );
@@ -1044,14 +1044,14 @@ function OrderCard({ campaign, operation }: {
   const payloadText = JSON.stringify(campaign.payload ?? {}, null, 2);
   const [rollbackWord] = contractWords(t, "rollback", operation?.rollback);
   return (
-    <Card
+    <Panel
       title={t("The order")}
       description={t("What was ordered, as the approval binds it: this operation, this payload, these targets and this rollout. Read it before deciding; the fingerprint covers exactly this.")}
     >
-      <Columns wide>
-        <div className="stack">
+      <Cols wide>
+        <div className="ui-stack">
           <Pairs>
-            <Pair label={t("Operation")}><span className="mono">{campaign.action_type}</span></Pair>
+            <Pair label={t("Operation")}><span className="ui-mono">{campaign.action_type}</span></Pair>
             <Pair label={t("Contract")}>{operation ? <ContractChips contract={operation} /> : "—"}</Pair>
             {operation?.risk && <Pair label={t("Risk")}>{operation.risk}</Pair>}
             {operation?.rollback && <Pair label={t("Way back")}>{rollbackWord}</Pair>}
@@ -1059,7 +1059,7 @@ function OrderCard({ campaign, operation }: {
                 says what they resolved to. */}
             <Pair label={t("Targets as ordered")}>
               {selector.expression
-                ? <span className="mono">{describeExpression(selector.expression)}</span>
+                ? <span className="ui-mono">{describeExpression(selector.expression)}</span>
                 : selector.host_ids && selector.host_ids.length > 0
                   ? t("{n} hosts named one by one", { n: selector.host_ids.length })
                   : [selector.site && `${t("site")}: ${selector.site}`, selector.environment && `${t("environment")}: ${selector.environment}`, selector.os_family && `${t("OS family")}: ${selector.os_family}`].filter(Boolean).join(" · ") || t("the whole visible fleet")}
@@ -1079,7 +1079,7 @@ function OrderCard({ campaign, operation }: {
               {campaign.reboot_policy}
               {campaign.reboot_policy !== "never" && campaign.reboot_timeout_seconds ? ` · ${t("waits {n} s for the host to come back", { n: campaign.reboot_timeout_seconds })}` : ""}
             </Pair>
-            <Pair label={t("Health-check units")}>{units.length > 0 ? units.map((unit) => <span key={unit} className="chip chip-mono">{unit}</span>) : t("none")}</Pair>
+            <Pair label={t("Health-check units")}>{units.length > 0 ? units.map((unit) => <span key={unit} className="ui-tag ui-tag ui-mono">{unit}</span>) : t("none")}</Pair>
             <Pair label={t("Task timeout")}>{campaign.job_timeout_seconds ? t("{n} s", { n: campaign.job_timeout_seconds }) : t("the operation's default")}</Pair>
             <Pair label={t("Offline policy")}>{campaign.offline_policy}</Pair>
             <Pair label={t("Waits for offline hosts until")}>{campaign.deadline_at ? <Time value={campaign.deadline_at} /> : "—"}</Pair>
@@ -1116,17 +1116,17 @@ function OrderCard({ campaign, operation }: {
             )}
           </Pairs>
         </div>
-        <div className="stack">
+        <div className="ui-stack">
           <h3>{t("Payload")}</h3>
           <pre data-testid="order-payload">{payloadText}</pre>
           {secrets.length > 0 && (
-            <p className="subtitle">
+            <p className="ui-note">
               {t("Secrets referenced by name: {names}. The value never travels in the order; the host fetches it on a short lease when the task runs.", { names: secrets.join(", ") })}
             </p>
           )}
         </div>
-      </Columns>
-    </Card>
+      </Cols>
+    </Panel>
   );
 }
 
@@ -1213,23 +1213,23 @@ function TargetSteps({ campaignID, hostID, compensation }: {
           const name = t(STEP_NAMES[key] ?? key);
           return (
             <span key={key} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              {index > 0 && <span className="source">→</span>}
+              {index > 0 && <span className="ui-note">→</span>}
               {step ? (
-                <span className="chip" title={step.reason || undefined}>
+                <span className="ui-tag" title={step.reason || undefined}>
                   {name}
                   <JobState state={step.state} />
                   {/* The task carried the step and opens on its own page.
                       The short identifier is enough to tell it apart; the
                       whole one is on hover. */}
                   {step.job_id && (
-                    <Link to={`/jobs/${step.job_id}`} className="mono" title={step.job_id}>
+                    <Link to={`/jobs/${step.job_id}`} className="ui-mono" title={step.job_id}>
                       {step.job_id.slice(0, 8)}
                     </Link>
                   )}
-                  {step.attempts > 1 && <span className="source">{t("attempt {n}", { n: step.attempts })}</span>}
+                  {step.attempts > 1 && <span className="ui-note">{t("attempt {n}", { n: step.attempts })}</span>}
                 </span>
               ) : (
-                <span className="chip unknown" title={t("The host has not reached this step.")}>{name} —</span>
+                <span className="ui-tag ui-unknown" title={t("The host has not reached this step.")}>{name} —</span>
               )}
             </span>
           );

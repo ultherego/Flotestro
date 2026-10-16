@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { Time, Empty } from "../../components/ui";
+import { Time } from "../../components/ui";
 import { bytes } from "../../lib/format";
 import { Breakdown, Meter } from "../../components/widgets";
 import {
@@ -13,6 +13,7 @@ import {
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 type Rule = {
   family: string;
@@ -246,7 +247,7 @@ export function Firewall() {
       <Message text={message} />
 
       {snapshot?.unavailable_reason && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>{t("Firewall state could not be read: {reason}", { reason: snapshot.unavailable_reason })}</span>
         </p>
       )}
@@ -276,47 +277,47 @@ export function Firewall() {
         <Facts>
           <Fact label={t("Adapter")}>
             {snapshot?.adapter
-              ? <span className={snapshot.writable ? "badge ok" : "badge unknown"}>{adapterLabel(snapshot.adapter)}</span>
-              : <span className="badge unknown">{t("unknown")}</span>}
-            {snapshot?.read_only_reason && <span className="source"> · {snapshot.read_only_reason}</span>}
+              ? <span className={snapshot.writable ? "ui-pill ui-ok" : "ui-pill ui-unknown"}>{adapterLabel(snapshot.adapter)}</span>
+              : <span className="ui-pill ui-unknown">{t("unknown")}</span>}
+            {snapshot?.read_only_reason && <span className="ui-note"> · {snapshot.read_only_reason}</span>}
           </Fact>
           {snapshot?.ufw && (
             <Fact label={t("Default policy (ufw)")}>
               {snapshot.ufw.active
-                ? <span className="hm-mono">{snapshot.ufw.defaults || "—"}</span>
-                : <span className="badge unknown">{t("ufw inactive")}</span>}
-              {!snapshot.ufw.active && snapshot.ufw.reason && <span className="source"> · {snapshot.ufw.reason}</span>}
+                ? <span className="ui-mono">{snapshot.ufw.defaults || "—"}</span>
+                : <span className="ui-pill ui-unknown">{t("ufw inactive")}</span>}
+              {!snapshot.ufw.active && snapshot.ufw.reason && <span className="ui-note"> · {snapshot.ufw.reason}</span>}
             </Fact>
           )}
           {snapshot?.adapter === "nftables" && (
             <Fact label={t("Restored at boot")}>
               {!snapshot.persistent
-                ? <span className="badge unknown">{t("not reported by this agent")}</span>
+                ? <span className="ui-pill ui-unknown">{t("not reported by this agent")}</span>
                 : snapshot.persistent.compared
-                  ? <span className="hm-mono">{(snapshot.persistent.files ?? []).join(", ") || "—"}</span>
-                  : <span className="badge warn">{snapshot.persistent.reason}</span>}
-              {snapshot.persistent?.detail && <span className="source"> · {snapshot.persistent.detail}</span>}
+                  ? <span className="ui-mono">{(snapshot.persistent.files ?? []).join(", ") || "—"}</span>
+                  : <span className="ui-pill ui-warn">{snapshot.persistent.reason}</span>}
+              {snapshot.persistent?.detail && <span className="ui-note"> · {snapshot.persistent.detail}</span>}
             </Fact>
           )}
           {snapshot?.adapter === "nftables" && (
             <Fact label={t("Panel rules after a reboot")}>
               {!snapshot.persistent?.restore?.unit?.load_state
-                ? <span className="badge unknown">{t("not reported by this agent")}</span>
+                ? <span className="ui-pill ui-unknown">{t("not reported by this agent")}</span>
                 : restoreInForce(snapshot.persistent.restore)
-                  ? <span className="badge ok">{t("restored by the agent")}</span>
-                  : <span className="badge warn">{snapshot.persistent.restore.reason}</span>}
-              {snapshot.persistent?.restore?.detail && <span className="source"> · {snapshot.persistent.restore.detail}</span>}
+                  ? <span className="ui-pill ui-ok">{t("restored by the agent")}</span>
+                  : <span className="ui-pill ui-warn">{snapshot.persistent.restore.reason}</span>}
+              {snapshot.persistent?.restore?.detail && <span className="ui-note"> · {snapshot.persistent.restore.detail}</span>}
             </Fact>
           )}
           {/* The fingerprint ties the plan to the rule set: a change
               requested against a different set is not the same change the
               operator looked at. */}
-          <Fact label={t("Ruleset fingerprint")}><span className="hm-mono">{snapshot?.hash || "—"}</span></Fact>
+          <Fact label={t("Ruleset fingerprint")}><span className="ui-mono">{snapshot?.hash || "—"}</span></Fact>
           <Fact label={t("Rules owned by Flotestro")}>{own.length}</Fact>
           <Fact label={t("Read")}>{snapshot?.observed_at ? <Time value={snapshot.observed_at} /> : "—"}</Fact>
           <Fact label={t("By table")} wide>
             {tables.length
-              ? <Breakdown items={tables.map(([table, count]) => ({ label: <span className="hm-mono">{table}</span>, value: count }))} />
+              ? <Breakdown items={tables.map(([table, count]) => ({ label: <span className="ui-mono">{table}</span>, value: count }))} />
               : "—"}
           </Fact>
         </Facts>
@@ -343,9 +344,9 @@ export function Firewall() {
             <tbody>
               {snapshot.drift.map((entry, index) => (
                 <tr key={index}>
-                  <td><span className="badge warn">{entry.reason}</span></td>
-                  <td className="hm-mono">{entry.rule || "—"}</td>
-                  <td className="hm-mono">{[entry.family, entry.table, entry.chain, entry.zone].filter(Boolean).join(" ") || "—"}</td>
+                  <td><span className="ui-pill ui-warn">{entry.reason}</span></td>
+                  <td className="ui-mono">{entry.rule || "—"}</td>
+                  <td className="ui-mono">{[entry.family, entry.table, entry.chain, entry.zone].filter(Boolean).join(" ") || "—"}</td>
                   <td>{entry.detail}</td>
                 </tr>
               ))}
@@ -369,15 +370,15 @@ export function Firewall() {
             <tbody>
               {zones.map((zone) => (
                 <tr key={zone.name}>
-                  <td className="hm-mono hm-primary">{zone.name}</td>
+                  <td className="ui-mono ui-name">{zone.name}</td>
                   <td>
-                    {zone.active ? <span className="badge ok">{t("active")}</span> : <span className="badge">{t("inactive")}</span>}
-                    {zone.default && <span className="badge"> {t("default")}</span>}
+                    {zone.active ? <span className="ui-pill ui-ok">{t("active")}</span> : <span className="ui-pill">{t("inactive")}</span>}
+                    {zone.default && <span className="ui-pill"> {t("default")}</span>}
                   </td>
                   <td>{zone.target || "—"}</td>
-                  <td className="hm-mono">{(zone.interfaces ?? []).join(", ") || "—"}</td>
+                  <td className="ui-mono">{(zone.interfaces ?? []).join(", ") || "—"}</td>
                   <td>{(zone.services ?? []).join(", ") || "—"}</td>
-                  <td className="hm-mono">{(zone.ports ?? []).join(", ") || "—"}</td>
+                  <td className="ui-mono">{(zone.ports ?? []).join(", ") || "—"}</td>
                   <td>
                     <ActionGuard action="firewall.zone.port" host={host.id}>
                       <ZonePort zone={zone.name} onIntent={setIntent} hostname={host.hostname} />
@@ -404,7 +405,7 @@ export function Firewall() {
               onChange={(e) => setFilter(e.target.value)}
               placeholder={t("Filter by rule, chain or table")}
             />
-            <label className="toggle">
+            <label className="ui-check">
               <input type="checkbox" checked={ownOnly} onChange={(e) => setOwnOnly(e.target.checked)} />
               {t("Only rules owned by Flotestro")}
             </label>
@@ -431,9 +432,9 @@ export function Firewall() {
             <tbody>
               {rules.map((rule) => (
                 <tr key={`${rule.family}-${rule.table}-${rule.chain}-${rule.handle}`}>
-                  <td className="hm-mono">{rule.family} {rule.table}</td>
-                  <td className="hm-mono">{rule.chain}</td>
-                  <td className="hm-mono" title={rule.text}>
+                  <td className="ui-mono">{rule.family} {rule.table}</td>
+                  <td className="ui-mono">{rule.chain}</td>
+                  <td className="ui-mono" title={rule.text}>
                     {rule.text.slice(0, 70)}
                   </td>
                   {/* A rule in somebody else's table is neither ours nor durable. */}
@@ -441,14 +442,14 @@ export function Firewall() {
                     {rule.source === "managed" ? (
                       "Flotestro"
                     ) : (
-                      <span className="badge unknown">{rule.source}</span>
+                      <span className="ui-pill ui-unknown">{rule.source}</span>
                     )}
                   </td>
                   {/* A rule without a counter must not pretend nothing passed
                       through it. */}
                   <td>
                     {rule.packets === undefined ? (
-                      <span className="badge unknown">{t("no counter")}</span>
+                      <span className="ui-pill ui-unknown">{t("no counter")}</span>
                     ) : (
                       <Meter value={rule.packets} max={maxPackets} tone="info" text={`${rule.packets} pkt / ${bytes(rule.bytes ?? 0)}`} />
                     )}
@@ -457,7 +458,7 @@ export function Firewall() {
                     {rule.source === "managed" && (
                       <ActionGuard action="firewall.rule.remove" host={host.id}>
                         <button
-                          className="hm-danger"
+                          className="ui-btn-danger"
                           onClick={() =>
                             setIntent({
                               action: "firewall.rule.remove",
@@ -622,7 +623,7 @@ function ZonePort({
   };
 
   return (
-    <div className="operations">
+    <div className="ui-actions">
       <input
         value={port}
         onChange={(e) => setPort(e.target.value)}
@@ -632,7 +633,7 @@ function ZonePort({
       {["open", "close"].map((operation) => (
         <button
           key={operation}
-          className="secondary"
+          className="ui-btn-secondary"
           onClick={() => {
             const [number, protocol = "tcp"] = port.split("/");
             onIntent({
@@ -671,7 +672,7 @@ function ZoneService({
   const name = service.trim();
 
   return (
-    <div className="operations">
+    <div className="ui-actions">
       <input
         value={service}
         onChange={(e) => setService(e.target.value)}
@@ -685,7 +686,7 @@ function ZoneService({
       {["add", "remove"].map((operation) => (
         <button
           key={operation}
-          className="secondary"
+          className="ui-btn-secondary"
           onClick={() =>
             onIntent({
               action: "firewall.zone.service",

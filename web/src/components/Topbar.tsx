@@ -8,6 +8,7 @@ import { usePreferences } from "../lib/preferences";
 import { HostPicker } from "./HostPicker";
 import { HostSelect } from "./HostSelect";
 import { Icon } from "./icons";
+import { toneClass } from "../ui/kit";
 
 /**
  * Where the operator is, as the top bar tells it.
@@ -45,12 +46,12 @@ export function Topbar({
   const t = useT();
   const host = trail.host;
   return (
-    <header className="topbar">
+    <header className="ui-topbar">
       {/* Two buttons for the same edge: the fold on a wide screen, the
           drawer on a narrow one. The stylesheet shows one at a time. */}
       <button
         type="button"
-        className="topbar-fold"
+        className="ui-topbar-fold"
         onClick={onToggleCollapsed}
         title={collapsed ? t("Expand the sidebar") : t("Collapse the sidebar")}
         aria-label={collapsed ? t("Expand the sidebar") : t("Collapse the sidebar")}
@@ -59,7 +60,7 @@ export function Topbar({
       </button>
       <button
         type="button"
-        className="topbar-menu"
+        className="ui-topbar-menu"
         onClick={onOpenDrawer}
         aria-label={t("Open the navigation")}
         title={t("Open the navigation")}
@@ -67,28 +68,28 @@ export function Topbar({
         <Icon name="menu" />
       </button>
 
-      <nav className={host ? "topbar-trail on-host" : "topbar-trail"} aria-label={t("Breadcrumb")}>
+      <nav className={host ? "ui-topbar-trail ui-on-host" : "ui-topbar-trail"} aria-label={t("Breadcrumb")}>
         {trail.to ? (
-          <Link to={trail.to} className="topbar-crumb">{t(trail.section)}</Link>
+          <Link to={trail.to} className="ui-topbar-crumb">{t(trail.section)}</Link>
         ) : (
-          <h1 className="topbar-crumb current">{t(trail.section)}</h1>
+          <h1 className="ui-topbar-crumb ui-active">{t(trail.section)}</h1>
         )}
         {host && (
           <>
-            <Icon name="chevron" className="topbar-sep" />
+            <Icon name="chevron" className="ui-topbar-sep" />
             <Link
               to={`/hosts/${host.id}`}
-              className={trail.module ? "topbar-host" : "topbar-host current"}
+              className={trail.module ? "ui-topbar-chip" : "ui-topbar-chip ui-active"}
               title={t("Open the host overview")}
             >
               <ConnectionDot state={host.connection_state} />
-              <span className="topbar-host-name">{host.hostname}</span>
-              <span className="topbar-host-address">{host.management_address || t("address unknown")}</span>
+              <span className="ui-topbar-hostname">{host.hostname}</span>
+              <span className="ui-topbar-hostaddress">{host.management_address || t("address unknown")}</span>
             </Link>
             {trail.module && (
               <>
-                <Icon name="chevron" className="topbar-sep" />
-                <span className="topbar-crumb current">{t(trail.module)}</span>
+                <Icon name="chevron" className="ui-topbar-sep" />
+                <span className="ui-topbar-crumb ui-active">{t(trail.module)}</span>
               </>
             )}
           </>
@@ -97,10 +98,10 @@ export function Topbar({
 
       {/* Two boxes of one look: the host selector, which lists hosts and
           nothing else, and the palette, which finds anything. */}
-      <div className="topbar-search topbar-host-select">
+      <div className="ui-topbar-chip ui-topbar-hostselect">
         <HostSelect />
       </div>
-      <div className="topbar-search">
+      <div className="ui-topbar-chip">
         <HostPicker />
       </div>
 
@@ -112,7 +113,7 @@ export function Topbar({
 /** The connection state as a dot, in the same colours as the badge. */
 function ConnectionDot({ state }: { state: Host["connection_state"] }) {
   const kind = state === "online" ? "ok" : state === "offline" ? "error" : state === "stale" ? "warn" : "unknown";
-  return <span className={`dot ${kind}`} title={state} />;
+  return <span className={`ui-dot ${toneClass(kind)}`} title={state} />;
 }
 
 /**
@@ -150,48 +151,48 @@ function UserMenu({ user, onSignOut, theme, setTheme, scale, setScale }: {
   }, [open]);
 
   return (
-    <div className="topbar-user" ref={container}>
+    <div className="ui-topbar-user" ref={container}>
       <button
         type="button"
-        className="topbar-user-trigger"
+        className="ui-topbar-user"
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={t("Account menu")}
         title={`${name}\n${roles}`}
         onClick={() => setOpen((current) => !current)}
       >
-        <span className="topbar-avatar" aria-hidden="true">{initial(name)}</span>
-        <span className="topbar-user-name">{name}</span>
-        <Icon name="chevron" className="topbar-user-chevron" />
+        <span className="ui-avatar" aria-hidden="true">{initial(name)}</span>
+        <span className="ui-topbar-username">{name}</span>
+        <Icon name="chevron" className="ui-topbar-chevron" />
       </button>
 
       {open && (
-        <div className="user-menu" role="dialog" aria-label={t("Account menu")}>
-          <div className="user-menu-identity">
-            <span className="topbar-avatar" aria-hidden="true">{initial(name)}</span>
-            <span className="user-menu-text">
-              <span className="user-menu-name">{name}</span>
+        <div className="ui-menu ui-usermenu" role="dialog" aria-label={t("Account menu")}>
+          <div className="ui-usermenu-identity">
+            <span className="ui-avatar" aria-hidden="true">{initial(name)}</span>
+            <span className="ui-note">
+              <span className="ui-name">{name}</span>
               {/* The subject is shown only when a display name hides it:
                   it is what the audit trail and the bindings refer to. */}
               {user?.display_name && user.subject !== user.display_name && (
-                <span className="user-menu-subject">{user.subject}</span>
+                <span className="ui-usermenu-subject">{user.subject}</span>
               )}
-              <span className="user-menu-roles">{roles}</span>
+              <span className="ui-tags">{roles}</span>
             </span>
           </div>
-          <div className="user-menu-section">
-            <span className="user-menu-label">{t("Language")}</span>
+          <div className="ui-usermenu-section">
+            <span className="ui-usermenu-label">{t("Language")}</span>
             <LanguageSwitch />
           </div>
-          <div className="user-menu-section">
-            <span className="user-menu-label">{t("Theme")}</span>
+          <div className="ui-usermenu-section">
+            <span className="ui-usermenu-label">{t("Theme")}</span>
             <ThemeSwitch theme={theme} setTheme={setTheme} />
           </div>
-          <div className="user-menu-section">
-            <span className="user-menu-label">{t("Text size")}</span>
+          <div className="ui-usermenu-section">
+            <span className="ui-usermenu-label">{t("Text size")}</span>
             <ScaleSwitch scale={scale} setScale={setScale} />
           </div>
-          <div className="user-menu-session">
+          <div className="ui-note">
             {/* The rest of the person's settings - the zone, the page size,
                 the landing page - and their roles, sessions and tokens
                 need a page, not a popover. */}
@@ -202,7 +203,7 @@ function UserMenu({ user, onSignOut, theme, setTheme, scale, setScale }: {
             <a href={`/auth/login?force=1&redirect=${encodeURIComponent(window.location.pathname)}`}>
               {t("Switch account")}
             </a>
-            <a href="#" onClick={onSignOut} className="user-menu-signout" title={t("Sign out")}>
+            <a href="#" onClick={onSignOut} className="ui-usermenu-signout" title={t("Sign out")}>
               <Icon name="sign-out" />
               <span>{t("Sign out")}</span>
             </a>
@@ -228,12 +229,12 @@ export function LanguageSwitch() {
   const { save } = usePreferences();
   const t = useT();
   return (
-    <div className="language-switch" role="group" aria-label={t("Language")}>
+    <div className="ui-switch" role="group" aria-label={t("Language")}>
       {LOCALES.map((entry) => (
         <button
           key={entry.code}
           type="button"
-          className={entry.code === locale ? "active" : ""}
+          className={entry.code === locale ? "ui-active" : ""}
           aria-pressed={entry.code === locale}
           onClick={() => {
             setLocale(entry.code);
@@ -252,12 +253,12 @@ export function ThemeSwitch({ theme, setTheme }: { theme: Theme; setTheme: (them
   const t = useT();
   const { save } = usePreferences();
   return (
-    <div className="theme-switch" role="group" aria-label={t("Theme")}>
+    <div className="ui-switch" role="group" aria-label={t("Theme")}>
       {THEMES.map((entry) => (
         <button
           key={entry.code}
           type="button"
-          className={entry.code === theme ? "active" : ""}
+          className={entry.code === theme ? "ui-active" : ""}
           aria-pressed={entry.code === theme}
           title={t(entry.description)}
           onClick={() => {
@@ -265,7 +266,7 @@ export function ThemeSwitch({ theme, setTheme }: { theme: Theme; setTheme: (them
             save({ theme: entry.code }).catch(() => {});
           }}
         >
-          <span className={`theme-swatch ${entry.code}`} aria-hidden="true" />
+          <span className={`ui-themeswatch ui-theme-${entry.code}`} aria-hidden="true" />
           {t(entry.label)}
         </button>
       ))}
@@ -277,12 +278,12 @@ export function ThemeSwitch({ theme, setTheme }: { theme: Theme; setTheme: (them
 export function ScaleSwitch({ scale, setScale }: { scale: Scale; setScale: (scale: Scale) => void }) {
   const t = useT();
   return (
-    <div className="theme-switch scale-switch" role="group" aria-label={t("Text size")}>
+    <div className="ui-switch ui-switch" role="group" aria-label={t("Text size")}>
       {SCALES.map((entry) => (
         <button
           key={entry.code}
           type="button"
-          className={entry.code === scale ? "active" : ""}
+          className={entry.code === scale ? "ui-active" : ""}
           aria-pressed={entry.code === scale}
           title={t(entry.description)}
           onClick={() => setScale(entry.code)}

@@ -4,8 +4,8 @@ import { Link } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
 import type { GroupMapping, Whoami } from "../lib/types";
 import { useCapabilities } from "../lib/capabilities";
-import { ErrorBox, Empty } from "../components/ui";
-import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
+import { ErrorBox } from "../components/ui";
+import { Actions, Empty, Field, Fields, PageHead, Panel, toneClass } from "../ui/kit";
 import { Meter } from "../components/widgets";
 import { useToast } from "../components/Toast";
 import {
@@ -48,16 +48,16 @@ export function Setup() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         title={t("First run")}
         description={t("What the panel needs before a fleet is run from it.")}
         help={<p>{t("What the panel needs before a company fleet is run from it, what is already there, and where the rest is put in.")}</p>}
         icon="settings"
       />
 
-      {!list ? <Card><Empty>{t("Loading…")}</Empty></Card> : (
-        <div className="stack">
-          <Card
+      {!list ? <Panel><Empty>{t("Loading…")}</Empty></Panel> : (
+        <div className="ui-stack">
+          <Panel
             title={list.complete ? t("Every required step is done") : t("{done} of {total} required steps done", { done: list.done, total: list.total })}
             description={list.complete
               ? t("The warnings and the optional steps below are advice, not blockers.")
@@ -70,25 +70,25 @@ export function Setup() {
               text={t("{done} of {total}", { done: list.done, total: list.total })}
             />
             {list.bootstrap_live && (
-              <p className="source">
+              <p className="ui-note">
                 {tokensAlone(list.steps)
                   ? t("The bootstrap token still works, and nothing else administers this installation: issue an API token of your own, sign in with it, then revoke this one.")
                   : t("The bootstrap token still works. It is for the first mapping only: once an administrator signs in through the provider, revoke it.")}
               </p>
             )}
-          </Card>
+          </Panel>
 
           {list.steps.map((step, index) => {
             const words = guide[step.key] ?? { title: step.key, meaning: "" };
             const isCurrent = step.key === current;
             return (
-              <Card
+              <Panel
                 key={step.key}
                 tone={isCurrent ? "warn" : undefined}
-                title={<>{index + 1}. {words.title} <span className={`badge ${stepTone(step.state)}`}>{stateLabel[step.state]}</span></>}
+                title={<>{index + 1}. {words.title} <span className={`ui-pill ${toneClass(stepTone(step.state))}`}>{stateLabel[step.state]}</span></>}
                 description={words.meaning}
                 actions={step.path !== "/setup" && (
-                  <Link className="button" to={step.path}>{t(pageName(step.path))}</Link>
+                  <Link className="ui-btn" to={step.path}>{t(pageName(step.path))}</Link>
                 )}
               >
                 <p>
@@ -106,9 +106,9 @@ export function Setup() {
                 {step.key === "group_mapping" && (
                   mayAct(permissions, step.key)
                     ? <MappingForm open={step.state === "undone"} />
-                    : <p className="source">{t("Only whoever manages access can add a mapping; ask an administrator.")}</p>
+                    : <p className="ui-note">{t("Only whoever manages access can add a mapping; ask an administrator.")}</p>
                 )}
-              </Card>
+              </Panel>
             );
           })}
         </div>
@@ -133,18 +133,18 @@ function ConnectionTester({ path, label }: { path: string; label: string }) {
   return (
     <div>
       <Actions>
-        <button className="secondary" onClick={() => test.mutate()} disabled={test.isPending}>
+        <button className="ui-btn-secondary" onClick={() => test.mutate()} disabled={test.isPending}>
           {test.isPending ? t("Testing…") : label}
         </button>
         {result && (
-          <span className={`badge ${result.ok ? "ok" : "error"}`}>
+          <span className={`ui-pill ${result.ok ? "ui-ok" : "ui-error"}`}>
             {result.ok ? t("Answered in {ms} ms", { ms: result.elapsed_ms }) : result.reason ?? t("failed")}
           </span>
         )}
       </Actions>
       {test.error && <ErrorBox error={test.error} />}
       {result && (
-        <p className="source">
+        <p className="ui-note">
           {result.ok && result.provider && t("Issuer {issuer}, {keys} signing keys at {url}.", {
             issuer: result.provider.issuer, keys: result.provider.keys, url: result.provider.jwks_url,
           })}
@@ -191,7 +191,7 @@ function MappingForm({ open: initiallyOpen }: { open: boolean }) {
   if (!open) {
     return (
       <div>
-        <Actions><button className="secondary" onClick={() => setOpen(true)}>{t("Add a mapping here")}</button></Actions>
+        <Actions><button className="ui-btn-secondary" onClick={() => setOpen(true)}>{t("Add a mapping here")}</button></Actions>
       </div>
     );
   }
@@ -199,7 +199,7 @@ function MappingForm({ open: initiallyOpen }: { open: boolean }) {
   return (
     <div>
       <StepUpWarning error={warning} close={() => setWarning(null)} />
-      <FieldGrid>
+      <Fields>
         <Field label={t("Identity provider group")} hint={t("The group name as it appears in the login token.")}>
           <input value={group} onChange={(e) => setGroup(e.target.value)} placeholder="flotestro-admins" />
         </Field>
@@ -217,12 +217,12 @@ function MappingForm({ open: initiallyOpen }: { open: boolean }) {
         <Field label={t("Reason for the change")} hint={t("At least {n} characters; the button opens when they are there.", { n: REASON_MIN_LENGTH })} wide>
           <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("e.g. first run: the platform team administers the fleet")} />
         </Field>
-      </FieldGrid>
+      </Fields>
       <Actions>
         <button disabled={!ready || add.isPending} onClick={() => add.mutate()}>
           {add.isPending ? t("Working…") : t("Add mapping")}
         </button>
-        <button className="secondary" onClick={() => setOpen(false)} disabled={add.isPending}>{t("Cancel")}</button>
+        <button className="ui-btn-secondary" onClick={() => setOpen(false)} disabled={add.isPending}>{t("Cancel")}</button>
       </Actions>
     </div>
   );
@@ -236,24 +236,24 @@ function StepUpWarning({ error, close }: { error: ApiError | null; close: () => 
   if (!error) return null;
   if (error.code === "reauthentication_required") {
     return (
-      <div className="warning">
+      <div className="ui-banner">
         <div><strong>{t("Re-authentication required.")}</strong> {error.message}</div>
-        <div className="operations">
+        <div className="ui-actions">
           <button onClick={() => {
             const target = encodeURIComponent(window.location.pathname + window.location.search);
             window.location.href = `/auth/login?step_up=1&redirect=${target}`;
           }}>
             {t("Sign in again")}
           </button>
-          <button className="secondary" onClick={close}>{t("Close")}</button>
+          <button className="ui-btn-secondary" onClick={close}>{t("Close")}</button>
         </div>
       </div>
     );
   }
   return (
-    <div className="warning">
+    <div className="ui-banner">
       <div>{error.message}</div>
-      <div className="operations"><button onClick={close}>{t("Close")}</button></div>
+      <div className="ui-actions"><button onClick={close}>{t("Close")}</button></div>
     </div>
   );
 }

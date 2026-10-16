@@ -7,8 +7,8 @@ import type {
   PolicySpec, PolicyRemediationMode, PolicyVerdict, PolicyVersion, SelectorExpression, Whoami,
 } from "../lib/types";
 import { POLICY_MODES, POLICY_RULE_KINDS, POLICY_VERDICTS } from "../lib/types";
-import { ErrorBox, Empty, JobState, Time } from "../components/ui";
-import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
+import { ErrorBox, JobState, Time } from "../components/ui";
+import { Actions, Empty, Field, Fields, PageHead, Panel, Toolbar } from "../ui/kit";
 import { ExportButton } from "../components/ExportButton";
 import { StatusBar } from "../components/widgets";
 import { useConfirm } from "../components/Modal";
@@ -214,7 +214,7 @@ export function PolicyPage() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         icon="security"
         breadcrumb={[{ label: t("Policies"), to: "/policies" }]}
         title={record.name}
@@ -222,13 +222,13 @@ export function PolicyPage() {
         actions={(
           <>
             {canWrite && record.version > 0 && (
-              <button className="secondary" onClick={() => evaluate.mutate()} disabled={evaluate.isPending}>{t("Evaluate now")}</button>
+              <button className="ui-btn-secondary" onClick={() => evaluate.mutate()} disabled={evaluate.isPending}>{t("Evaluate now")}</button>
             )}
             {canPublish && !publishing && (
               <button onClick={() => setPublishing(true)}>{record.version === 0 ? t("Publish") : t("Publish a new version")}</button>
             )}
             {canWrite && (
-              <button className="secondary" onClick={askToDelete} disabled={remove.isPending}>{t("Delete")}</button>
+              <button className="ui-btn-secondary" onClick={askToDelete} disabled={remove.isPending}>{t("Delete")}</button>
             )}
           </>
         )}
@@ -236,30 +236,30 @@ export function PolicyPage() {
       />
 
       {publishing && (
-        <Card
+        <Panel
           title={record.version === 0 ? t("Publish") : t("Publish version {n}", { n: record.version + 1 })}
           description={t("The publication is the approval: the document is frozen as it stands, the loop judges by it, and in campaign or automatic mode a drift becomes a campaign on your authority. It asks for fresh authentication like the approval of a campaign.")}
           tone={record.remediation_mode === "automatic" ? "warn" : undefined}
         >
           {record.remediation_mode === "automatic" && (
-            <p className="hm-message">{t("Automatic remediation: the campaigns this policy orders are approved by this publication and start without a second look. This needs the policy.remediate.auto permission.")}</p>
+            <p className="ui-message">{t("Automatic remediation: the campaigns this policy orders are approved by this publication and start without a second look. This needs the policy.remediate.auto permission.")}</p>
           )}
-          <FieldGrid>
+          <Fields>
             <Field label={t("Reason")} hint={t("Recorded with the version.")} wide>
               <input value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />
             </Field>
-          </FieldGrid>
+          </Fields>
           <Actions>
             <button onClick={() => publish.mutate()} disabled={publish.isPending}>{t("Publish")}</button>
-            <button className="secondary" onClick={() => setPublishing(false)}>{t("Cancel")}</button>
+            <button className="ui-btn-secondary" onClick={() => setPublishing(false)}>{t("Cancel")}</button>
           </Actions>
-        </Card>
+        </Panel>
       )}
 
-      {message.text && <p className={message.error ? "hm-message error" : "hm-message"}>{message.text}</p>}
+      {message.text && <p className={message.error ? "ui-message ui-error" : "ui-message"}>{message.text}</p>}
 
-      <div className="widgets">
-        <Card className="span-8" title={t("Compliance")} description={record.last_evaluated_at
+      <div className="ui-grid">
+        <Panel className="ui-col-8" title={t("Compliance")} description={record.last_evaluated_at
           ? t("{n} verdicts of version {v}; last evaluated {when}", { n: total, v: record.version, when: new Date(record.last_evaluated_at).toLocaleString() })
           : t("Not evaluated yet.")}>
           <StatusBar segments={POLICY_VERDICTS.map((verdict) => ({
@@ -267,33 +267,33 @@ export function PolicyPage() {
             value: record.last_evaluated_at ? counts?.[verdict] ?? 0 : undefined,
             tone: verdict === "compliant" ? "ok" : verdict === "drift" ? "warn" : verdict === "error" ? "error" : "unknown",
           }))} />
-        </Card>
-        <Card className="span-4" title={t("Standing")}>
-          <dl className="hm-facts">
-            <div className="hm-fact"><dt>{t("Version")}</dt><dd><Standing policy={record} /></dd></div>
-            <div className="hm-fact"><dt>{t("Remediation")}</dt><dd>{modeLabel(record.remediation_mode, t)}</dd></div>
-            <div className="hm-fact"><dt>{t("Interval")}</dt><dd>{t("every {n} min", { n: intervalMinutes(record.check_interval_seconds) })}</dd></div>
-            <div className="hm-fact"><dt>{t("Published")}</dt><dd>{record.published_at ? <><Time value={record.published_at} /> · {record.published_by}</> : "—"}</dd></div>
-            <div className="hm-fact"><dt>{t("Enabled")}</dt><dd>{record.enabled ? t("yes") : t("no")}</dd></div>
+        </Panel>
+        <Panel className="ui-col-4" title={t("Standing")}>
+          <dl className="ui-facts">
+            <div className="ui-fact"><dt>{t("Version")}</dt><dd><Standing policy={record} /></dd></div>
+            <div className="ui-fact"><dt>{t("Remediation")}</dt><dd>{modeLabel(record.remediation_mode, t)}</dd></div>
+            <div className="ui-fact"><dt>{t("Interval")}</dt><dd>{t("every {n} min", { n: intervalMinutes(record.check_interval_seconds) })}</dd></div>
+            <div className="ui-fact"><dt>{t("Published")}</dt><dd>{record.published_at ? <><Time value={record.published_at} /> · {record.published_by}</> : "—"}</dd></div>
+            <div className="ui-fact"><dt>{t("Enabled")}</dt><dd>{record.enabled ? t("yes") : t("no")}</dd></div>
           </dl>
-        </Card>
+        </Panel>
 
-        <Card className="span-12" title={t("Document")} description={record.draft
+        <Panel className="ui-col-12" title={t("Document")} description={record.draft
           ? t("This draft differs from version {v}; the loop keeps judging by the published text until the next publication.", { v: record.version })
           : record.version === 0 ? t("A draft nobody has published; nothing is judged yet.") : t("As published in version {v}.", { v: record.version })}>
           <Editor policy={record} etag={policy.data.etag} canWrite={canWrite} onSaved={(saved) => { setMessage({ text: t("Saved.") }); queryClient.setQueryData(["policy", id], saved); refresh(); }} />
-        </Card>
+        </Panel>
 
-        <Card className="span-12" title={t("Results")} flush>
+        <Panel className="ui-col-12" title={t("Results")} flush>
           <Results policyID={id} />
-        </Card>
+        </Panel>
 
-        <Card className="span-6" title={t("Versions")} flush>
+        <Panel className="ui-col-6" title={t("Versions")} flush>
           <Versions policyID={id} />
-        </Card>
-        <Card className="span-6" title={t("Remediation campaigns")} description={t("Ordered by this policy for a drift set; each waits for its approval on its own page.")} flush>
+        </Panel>
+        <Panel className="ui-col-6" title={t("Remediation campaigns")} description={t("Ordered by this policy for a drift set; each waits for its approval on its own page.")} flush>
           <Campaigns policyID={id} />
-        </Card>
+        </Panel>
       </div>
     </>
   );
@@ -402,7 +402,7 @@ function Editor({ policy, etag, canWrite, onSaved }: { policy: Policy; etag: str
 
   return (
     <>
-      <FieldGrid>
+      <Fields>
         <Field label={t("Name")}>
           <input value={draft.name} onChange={(e) => change({ name: e.target.value })} disabled={!canWrite} />
         </Field>
@@ -415,49 +415,49 @@ function Editor({ policy, etag, canWrite, onSaved }: { policy: Policy; etag: str
           <input type="number" min={1} max={1440} value={draft.intervalMinutes} onChange={(e) => change({ intervalMinutes: Number(e.target.value) })} disabled={!canWrite} />
         </Field>
         <Field label={t("Enabled")} hint={t("A disabled policy keeps its verdicts and is not judged.")}>
-          <label className="toggle"><input type="checkbox" checked={draft.enabled} onChange={(e) => change({ enabled: e.target.checked })} disabled={!canWrite} /> {t("judge this policy")}</label>
+          <label className="ui-check"><input type="checkbox" checked={draft.enabled} onChange={(e) => change({ enabled: e.target.checked })} disabled={!canWrite} /> {t("judge this policy")}</label>
         </Field>
         <Field label={t("Description")} wide>
           <input value={draft.description} onChange={(e) => change({ description: e.target.value })} disabled={!canWrite} />
         </Field>
-      </FieldGrid>
+      </Fields>
 
-      <h4 className="widget-subhead">{t("Rules")}</h4>
+      <h4 className="ui-subhead">{t("Rules")}</h4>
       <Toolbar end={(
-        <label className="toggle">
+        <label className="ui-check">
           <input type="checkbox" checked={draft.rulesAsText} onChange={(e) => change(e.target.checked
             ? { rulesAsText: true, rulesText: rulesToText(draft.rules) }
             : { rulesAsText: false, ...(rulesFromText(draft.rulesText).rules ? { rules: rulesFromText(draft.rulesText).rules } : {}) })} />{" "}
           {t("edit as JSON")}
         </label>
       )}>
-        <span className="source">{t("{n} rules; each names facts the host reports and one typed operation that fixes the drift.", { n: draft.rules.length })}</span>
+        <span className="ui-note">{t("{n} rules; each names facts the host reports and one typed operation that fixes the drift.", { n: draft.rules.length })}</span>
       </Toolbar>
       {draft.rulesAsText ? (
-        <textarea className="mono" rows={12} value={draft.rulesText} onChange={(e) => change({ rulesText: e.target.value })} disabled={!canWrite} />
+        <textarea className="ui-mono" rows={12} value={draft.rulesText} onChange={(e) => change({ rulesText: e.target.value })} disabled={!canWrite} />
       ) : (
         <>
           {draft.rules.map((rule, index) => (
             <Toolbar key={index}>
-              <span className="badge">{index}</span>
+              <span className="ui-pill">{index}</span>
               <select value={rule.kind} onChange={(e) => change({ rules: draft.rules.map((r, i) => (i === index ? emptyRule(e.target.value as PolicyRuleKind) : r)) })} disabled={!canWrite}>
                 {POLICY_RULE_KINDS.includes(rule.kind as PolicyRuleKind) ? null : <option value={rule.kind}>{rule.kind}</option>}
                 {POLICY_RULE_KINDS.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
               </select>
               <RuleFields rule={rule} disabled={!canWrite} onChange={(delta) => updateRule(index, delta)} />
-              <button type="button" className="secondary" onClick={() => change({ rules: draft.rules.filter((_, i) => i !== index) })} disabled={!canWrite}>{t("Remove")}</button>
+              <button type="button" className="ui-btn-secondary" onClick={() => change({ rules: draft.rules.filter((_, i) => i !== index) })} disabled={!canWrite}>{t("Remove")}</button>
             </Toolbar>
           ))}
           {canWrite && (
             <Actions>
-              <button type="button" className="secondary" onClick={() => change({ rules: [...draft.rules, emptyRule("package_installed")] })}>{t("Add a rule")}</button>
+              <button type="button" className="ui-btn-secondary" onClick={() => change({ rules: [...draft.rules, emptyRule("package_installed")] })}>{t("Add a rule")}</button>
             </Actions>
           )}
         </>
       )}
 
-      <h4 className="widget-subhead">{t("Hosts")}</h4>
-      <FieldGrid>
+      <h4 className="ui-subhead">{t("Hosts")}</h4>
+      <Fields>
         <Field label={t("Named by")}>
           <select value={draft.targetMode} onChange={(e) => change({ targetMode: e.target.value as Draft["targetMode"] })} disabled={!canWrite}>
             <option value="filters">{t("site, environment and OS")}</option>
@@ -478,28 +478,28 @@ function Editor({ policy, etag, canWrite, onSaved }: { policy: Policy; etag: str
             <Field label={t("OS family")}><input value={draft.osFamily} onChange={(e) => change({ osFamily: e.target.value })} placeholder="debian" disabled={!canWrite} /></Field>
           </>
         )}
-      </FieldGrid>
+      </Fields>
       {draft.targetMode === "expression" && (
         <SelectorBuilder rules={draft.selectorRules} combine={draft.combine} onRules={(rules) => change({ selectorRules: rules })} onCombine={(combine) => change({ combine })} />
       )}
       {draft.targetMode === "json" && (
-        <textarea className="mono" rows={8} value={draft.expressionText} onChange={(e) => change({ expressionText: e.target.value })} disabled={!canWrite} />
+        <textarea className="ui-mono" rows={8} value={draft.expressionText} onChange={(e) => change({ expressionText: e.target.value })} disabled={!canWrite} />
       )}
-      <p className="source">
+      <p className="ui-note">
         {(() => {
           const { selector, error: selectorError } = selectorOf(draft);
           if (selectorError) return t("the expression does not parse: {error}", { error: selectorError });
-          if (selector?.expression) return <>{t("the policy will carry")} <span className="mono">{describeExpression(selector.expression)}</span></>;
+          if (selector?.expression) return <>{t("the policy will carry")} <span className="ui-mono">{describeExpression(selector.expression)}</span></>;
           const parts = [selector?.site && `site=${selector.site}`, selector?.environment && `environment=${selector.environment}`, selector?.os_family && `os_family=${selector.os_family}`].filter(Boolean);
-          return parts.length ? <>{t("the policy will carry")} <span className="mono">{parts.join(" ")}</span></> : t("no host is named yet; the publication refuses a policy over nobody");
+          return parts.length ? <>{t("the policy will carry")} <span className="ui-mono">{parts.join(" ")}</span></> : t("no host is named yet; the publication refuses a policy over nobody");
         })()}
       </p>
 
-      {error && <p className="hm-message error">{error}</p>}
+      {error && <p className="ui-message ui-error">{error}</p>}
       {canWrite && (
         <Actions>
           <button onClick={() => save.mutate()} disabled={save.isPending || draft.name.trim() === ""}>{t("Save the draft")}</button>
-          <button className="secondary" onClick={() => setDraft(draftOf(policy))}>{t("Discard changes")}</button>
+          <button className="ui-btn-secondary" onClick={() => setDraft(draftOf(policy))}>{t("Discard changes")}</button>
         </Actions>
       )}
     </>
@@ -511,7 +511,7 @@ function RuleFields({ rule, disabled, onChange }: { rule: PolicyRule; disabled: 
   const t = useT();
   const text = (field: keyof PolicyRule, placeholder: string, mono = false) => (
     <input
-      className={mono ? "mono" : undefined}
+      className={mono ? "ui-mono" : undefined}
       value={(rule[field] as string | undefined) ?? ""}
       placeholder={placeholder}
       onChange={(e) => onChange({ [field]: e.target.value } as Partial<PolicyRule>)}
@@ -538,7 +538,7 @@ function RuleFields({ rule, disabled, onChange }: { rule: PolicyRule; disabled: 
     case "ssh_key_present":
       return <>{text("user", t("account"), true)}{text("fingerprint", "SHA256:…", true)}{text("public_key", t("public key line (optional; lets the panel set it on an empty account)"), true)}</>;
     default:
-      return <span className="badge error">{t("unsupported kind")}</span>;
+      return <span className="ui-pill ui-error">{t("unsupported kind")}</span>;
   }
 }
 
@@ -573,8 +573,8 @@ function Results({ policyID }: { policyID: string }) {
           <option value="">{t("every verdict")}</option>
           {POLICY_VERDICTS.map((value) => <option key={value} value={value}>{verdictLabel(value, t)}</option>)}
         </select>
-        <input placeholder={t("host id")} value={host} onChange={(e) => { setHost(e.target.value); reset(); }} className="mono" />
-        <span className="source">{page.data ? t("{n} verdicts", { n: page.data.total }) : ""}</span>
+        <input placeholder={t("host id")} value={host} onChange={(e) => { setHost(e.target.value); reset(); }} className="ui-mono" />
+        <span className="ui-note">{page.data ? t("{n} verdicts", { n: page.data.total }) : ""}</span>
         <ExportButton path={`/api/v1/policies/${policyID}/results`} params={query} />
       </Toolbar>
       {page.error ? (
@@ -582,7 +582,7 @@ function Results({ policyID }: { policyID: string }) {
       ) : !page.data && rows.length === 0 ? (
         <Empty>{t("Loading…")}</Empty>
       ) : rows.length === 0 ? (
-        <EmptyState>{t("No verdict yet: the policy has not been evaluated, or nothing matches the filter.")}</EmptyState>
+        <Empty>{t("No verdict yet: the policy has not been evaluated, or nothing matches the filter.")}</Empty>
       ) : (
         <table>
           <thead>
@@ -592,10 +592,10 @@ function Results({ policyID }: { policyID: string }) {
             {rows.map((result) => (
               <tr key={`${result.host_id}:${result.rule_index}`}>
                 <td><Link to={`/hosts/${result.host_id}/policies`}>{result.hostname || result.host_id}</Link></td>
-                <td className="mono">{result.rule ? ruleSummary(result.rule) : `#${result.rule_index}`}</td>
+                <td className="ui-mono">{result.rule ? ruleSummary(result.rule) : `#${result.rule_index}`}</td>
                 <td><VerdictChip verdict={result.verdict} /></td>
                 <td>{result.reason || "—"}</td>
-                <td className="num">v{result.version}</td>
+                <td className="ui-numeric">v{result.version}</td>
                 <td><Time value={result.evaluated_at} /></td>
               </tr>
             ))}
@@ -604,7 +604,7 @@ function Results({ policyID }: { policyID: string }) {
       )}
       {page.data?.next_cursor && (
         <Actions>
-          <button className="secondary" onClick={() => setCursor(page.data?.next_cursor ?? "")} disabled={page.isFetching}>{t("Load more")}</button>
+          <button className="ui-btn-secondary" onClick={() => setCursor(page.data?.next_cursor ?? "")} disabled={page.isFetching}>{t("Load more")}</button>
         </Actions>
       )}
     </>
@@ -619,19 +619,19 @@ function Versions({ policyID }: { policyID: string }) {
   });
   if (versions.error) return <ErrorBox error={versions.error} />;
   if (!versions.data) return <Empty>{t("Loading…")}</Empty>;
-  if (versions.data.items.length === 0) return <EmptyState>{t("Never published.")}</EmptyState>;
+  if (versions.data.items.length === 0) return <Empty>{t("Never published.")}</Empty>;
   return (
     <table>
       <thead><tr><th scope="col">{t("Version")}</th><th scope="col">{t("Published")}</th><th scope="col">{t("By")}</th><th scope="col">{t("Authentication")}</th><th scope="col">{t("Reason")}</th><th scope="col">{t("Rules")}</th><th scope="col">{t("Remediation")}</th></tr></thead>
       <tbody>
         {versions.data.items.map((version) => (
           <tr key={version.version}>
-            <td className="num">v{version.version}</td>
+            <td className="ui-numeric">v{version.version}</td>
             <td><Time value={version.published_at} /></td>
             <td>{version.published_by}</td>
-            <td className="mono">{[version.authentication, version.acr, ...(version.amr ?? [])].filter(Boolean).join(" ") || "—"}</td>
+            <td className="ui-mono">{[version.authentication, version.acr, ...(version.amr ?? [])].filter(Boolean).join(" ") || "—"}</td>
             <td>{version.reason || "—"}</td>
-            <td className="num">{version.document.rules.length}</td>
+            <td className="ui-numeric">{version.document.rules.length}</td>
             <td>{modeLabel(version.document.remediation_mode, t)}</td>
           </tr>
         ))}
@@ -649,7 +649,7 @@ function Campaigns({ policyID }: { policyID: string }) {
   });
   if (campaigns.error) return <ErrorBox error={campaigns.error} />;
   if (!campaigns.data) return <Empty>{t("Loading…")}</Empty>;
-  if (campaigns.data.items.length === 0) return <EmptyState>{t("No campaign ordered: report mode, no drift, or a drift nothing can fix.")}</EmptyState>;
+  if (campaigns.data.items.length === 0) return <Empty>{t("No campaign ordered: report mode, no drift, or a drift nothing can fix.")}</Empty>;
   return (
     <table>
       <thead><tr><th scope="col">{t("Campaign")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Version")}</th><th scope="col">{t("Created")}</th></tr></thead>
@@ -658,7 +658,7 @@ function Campaigns({ policyID }: { policyID: string }) {
           <tr key={campaign.id}>
             <td><Link to={`/campaigns/${campaign.id}`}>{campaign.name}</Link></td>
             <td><JobState state={campaign.state} /></td>
-            <td className="num">v{campaign.policy_version}</td>
+            <td className="ui-numeric">v{campaign.policy_version}</td>
             <td><Time value={campaign.created_at} /></td>
           </tr>
         ))}

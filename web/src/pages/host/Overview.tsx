@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Time, OptionalFlag, OptionalNumber, Empty, ErrorBox, ErrorCode, JobState } from "../../components/ui";
+import { Time, OptionalFlag, OptionalNumber, ErrorBox, ErrorCode, JobState } from "../../components/ui";
 import { Icon, type IconName } from "../../components/icons";
 import { Meter } from "../../components/widgets";
 import { MetricTile } from "../../components/MetricTile";
@@ -23,6 +23,7 @@ import { FacetList, useFleetFacets } from "../Bulk";
 import { HOST_TEAM_PERMISSION, useTeams, type HostTeamFields } from "../Teams";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+import { Empty, toneClass } from "../../ui/kit";
 
 type SystemState = {
   os?: Record<string, string>;
@@ -170,7 +171,7 @@ export function Overview() {
           {/* A dash is not a zero: the host has not counted, and the
               operator is told where the count comes from. */}
           {(host.pending_updates === null || host.pending_updates === undefined) && (
-            <p className="source">
+            <p className="ui-note">
               {t("The update counts are unknown until the host plans its updates.")}{" "}
               <Link to={`/hosts/${host.id}/packages`}>{t("Packages")}</Link>
             </p>
@@ -182,7 +183,7 @@ export function Overview() {
             <>
               <Section title={t("System")} span={7} flush>
           <Facts>
-            <Fact label={t("Hostname")}><span className="hm-mono">{host.hostname}</span></Fact>
+            <Fact label={t("Hostname")}><span className="ui-mono">{host.hostname}</span></Fact>
             <Fact label={t("System")}>{host.os_distribution} {host.os_version} ({host.os_family})</Fact>
             <Fact label={t("Architecture")}>{host.architecture || "—"}</Fact>
             {/* The placement is edited here like the owner, but it is not
@@ -204,7 +205,7 @@ export function Overview() {
                 host={host}
                 editable={canEditFacts}
                 value={host.owner ?? ""}
-                shown={host.owner ? <span>{host.owner}</span> : <span className="badge unknown">{t("nobody")}</span>}
+                shown={host.owner ? <span>{host.owner}</span> : <span className="ui-pill ui-unknown">{t("nobody")}</span>}
                 label={t("Owner")}
                 help={t("Who answers for the host; empty hands it back to nobody.")}
                 placeholder={t("platform team")}
@@ -219,8 +220,8 @@ export function Overview() {
                 editable={canEditFacts}
                 value={host.management_address_source === "manual" ? host.management_address ?? "" : ""}
                 shown={host.management_address
-                  ? <span className="hm-mono">{host.management_address} <span className="badge" title={t(addressSourceMeaning(host.management_address_source))}>{host.management_address_source}</span></span>
-                  : <span className="badge unknown">{t("unknown")}</span>}
+                  ? <span className="ui-mono">{host.management_address} <span className="ui-pill" title={t(addressSourceMeaning(host.management_address_source))}>{host.management_address_source}</span></span>
+                  : <span className="ui-pill ui-unknown">{t("unknown")}</span>}
                 label={t("Management address")}
                 help={t("An IP address or a host name the panel reaches the host at. It replaces what the connection shows; empty forgets it and the observed address returns.")}
                 placeholder="10.0.0.5"
@@ -237,7 +238,7 @@ export function Overview() {
                 host={host}
                 editable={canEditFacts}
                 value={host.failure_domain ?? ""}
-                shown={host.failure_domain ? <span>{host.failure_domain}</span> : <span className="badge unknown">{t("not placed")}</span>}
+                shown={host.failure_domain ? <span>{host.failure_domain}</span> : <span className="ui-pill ui-unknown">{t("not placed")}</span>}
                 label={t("Failure domain")}
                 help={t("What the host goes down with: a rack, a zone, a cluster. Change budgets are keyed by it, so a campaign takes at most its share of one domain at a time; empty takes the host out from under the domain budgets.")}
                 placeholder={t("rack-12, zone-b")}
@@ -250,21 +251,21 @@ export function Overview() {
             <Fact label={t("Reboot required")}><OptionalFlag value={host.reboot_required} /></Fact>
             <Fact label={t("Failed units")}><OptionalNumber value={host.failed_units} /></Fact>
             <Fact label={t("Package database")}>
-              {host.package_database_broken ? <span className="badge error">{t("needs repair")}</span> : t("healthy")}
+              {host.package_database_broken ? <span className="ui-pill ui-error">{t("needs repair")}</span> : t("healthy")}
             </Fact>
             <Fact label={t("Enrolled")}><Time value={host.enrolled_at} /></Fact>
-            <Fact label={t("Machine ID")}><span className="hm-mono">{host.machine_id}</span></Fact>
-            <Fact label={t("Boot ID")}><span className="hm-mono">{host.boot_id || "—"}</span></Fact>
+            <Fact label={t("Machine ID")}><span className="ui-mono">{host.machine_id}</span></Fact>
+            <Fact label={t("Boot ID")}><span className="ui-mono">{host.boot_id || "—"}</span></Fact>
             {/* The release and, next to it, the commit the binary was built
                 from: the version names a release, the commit names the
                 sources, which matters once a package was rebuilt. An agent
                 from before the report shows the version alone. */}
             <Fact label={t("Agent version")}>
-              {host.agent_version || <span className="badge unknown">{t("unknown")}</span>}
+              {host.agent_version || <span className="ui-pill ui-unknown">{t("unknown")}</span>}
               {host.agent_build_commit && (
                 <>
                   {" "}
-                  <span className="hm-mono" title={`${t("Commit")}: ${host.agent_build_commit}`}>
+                  <span className="ui-mono" title={`${t("Commit")}: ${host.agent_build_commit}`}>
                     {host.agent_build_commit.slice(0, 12)}
                   </span>
                 </>
@@ -276,10 +277,10 @@ export function Overview() {
                 A host whose agent reported nothing is unknown, not legacy. */}
             <Fact label={t("Daemon config")}>
               {host.config_legacy === undefined
-                ? <span className="badge unknown">{t("unknown")}</span>
+                ? <span className="ui-pill ui-unknown">{t("unknown")}</span>
                 : host.config_legacy
-                  ? <span className="badge warn">{t("Schema migration")}</span>
-                  : <span className="badge ok">{t("up to date")}</span>}
+                  ? <span className="ui-pill ui-warn">{t("Schema migration")}</span>
+                  : <span className="ui-pill ui-ok">{t("up to date")}</span>}
             </Fact>
           </Facts>
           <RenameHost host={host} reported={module.data?.payload?.hostname} />
@@ -453,7 +454,7 @@ function HostFact({ host, editable, value, shown, label, help, placeholder, path
         {editable && (
           <>
             {" "}
-            <button type="button" className="link" onClick={open}>{t("edit")}</button>
+            <button type="button" className="ui-btn-link" onClick={open}>{t("edit")}</button>
           </>
         )}
       </span>
@@ -481,7 +482,7 @@ function HostFact({ host, editable, value, shown, label, help, placeholder, path
       </Fields>
       <FormActions>
         <button onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending ? t("saving…") : t("Save")}</button>
-        <button className="secondary" onClick={() => setEditing(false)} disabled={save.isPending}>{t("Cancel")}</button>
+        <button className="ui-btn-secondary" onClick={() => setEditing(false)} disabled={save.isPending}>{t("Cancel")}</button>
       </FormActions>
       <Message text={message} error />
     </Form>
@@ -544,11 +545,11 @@ function HostNotes({ host, editable }: { host: Host; editable: boolean }) {
     return (
       <div data-testid="fact-notes">
         {notes
-          ? <p className="hm-notes">{notes}</p>
-          : <span className="badge unknown">{t("no notes")}</span>}
+          ? <p className="ui-notes">{notes}</p>
+          : <span className="ui-pill ui-unknown">{t("no notes")}</span>}
         {editable && (
           <p>
-            <button type="button" className="link" onClick={open}>{notes ? t("edit") : t("write a note")}</button>
+            <button type="button" className="ui-btn-link" onClick={open}>{notes ? t("edit") : t("write a note")}</button>
           </p>
         )}
       </div>
@@ -580,7 +581,7 @@ function HostNotes({ host, editable }: { host: Host; editable: boolean }) {
       </Fields>
       <FormActions>
         <button onClick={() => save.mutate()} disabled={save.isPending || tooLong || !changed}>{save.isPending ? t("saving…") : t("Save")}</button>
-        <button className="secondary" onClick={() => setEditing(false)} disabled={save.isPending}>{t("Cancel")}</button>
+        <button className="ui-btn-secondary" onClick={() => setEditing(false)} disabled={save.isPending}>{t("Cancel")}</button>
       </FormActions>
       <Message text={message} error />
     </Form>
@@ -650,7 +651,7 @@ function HostPlacement({ host, editable }: { host: Host; editable: boolean }) {
         {movedAt && (
           <>
             {" "}
-            <span className="source" title={t("When an operator last moved the host to another site or environment.")}>
+            <span className="ui-note" title={t("When an operator last moved the host to another site or environment.")}>
               {t("moved {when}", { when: relativeTime(movedAt) })}
             </span>
           </>
@@ -658,7 +659,7 @@ function HostPlacement({ host, editable }: { host: Host; editable: boolean }) {
         {editable && (
           <>
             {" "}
-            <button type="button" className="link" onClick={open}>{t("edit")}</button>
+            <button type="button" className="ui-btn-link" onClick={open}>{t("edit")}</button>
           </>
         )}
       </span>
@@ -697,7 +698,7 @@ function HostPlacement({ host, editable }: { host: Host; editable: boolean }) {
       </FormNote>
       <FormActions>
         <button onClick={() => save.mutate()} disabled={save.isPending || !ready}>{save.isPending ? t("saving…") : t("Move")}</button>
-        <button className="secondary" onClick={() => setEditing(false)} disabled={save.isPending}>{t("Cancel")}</button>
+        <button className="ui-btn-secondary" onClick={() => setEditing(false)} disabled={save.isPending}>{t("Cancel")}</button>
       </FormActions>
       <Message text={message} error />
     </Form>
@@ -747,11 +748,11 @@ export function HostTeam({ host, editable }: { host: Host; editable: boolean }) 
       <span data-testid="fact-team">
         {placement.team_name
           ? <span>{placement.team_name}</span>
-          : <span className="badge unknown" title={t("Nobody has placed this host in a team; it is reachable through its site alone.")}>{t("no team")}</span>}
+          : <span className="ui-pill ui-unknown" title={t("Nobody has placed this host in a team; it is reachable through its site alone.")}>{t("no team")}</span>}
         {editable && (
           <>
             {" "}
-            <button type="button" className="link" onClick={open} data-testid="move-team">{t("move")}</button>
+            <button type="button" className="ui-btn-link" onClick={open} data-testid="move-team">{t("move")}</button>
           </>
         )}
       </span>
@@ -775,7 +776,7 @@ export function HostTeam({ host, editable }: { host: Host; editable: boolean }) 
       </FormNote>
       <FormActions>
         <button onClick={() => save.mutate()} disabled={save.isPending || !ready}>{save.isPending ? t("saving…") : t("Move")}</button>
-        <button className="secondary" onClick={() => setEditing(false)} disabled={save.isPending}>{t("Cancel")}</button>
+        <button className="ui-btn-secondary" onClick={() => setEditing(false)} disabled={save.isPending}>{t("Cancel")}</button>
       </FormActions>
       <Message text={message} error />
     </Form>
@@ -826,7 +827,7 @@ function RenameHost({ host, reported }: { host: Host; reported?: string }) {
   const unchanged = name === host.hostname;
 
   return (
-    <div className="hm-section-body">
+    <div className="ui-panel-body">
       {/* The name the host reports for itself, when the panel's differs:
           the host was renamed by hand, or a rename is on its way. */}
       {reported && reported !== host.hostname && (
@@ -837,7 +838,7 @@ function RenameHost({ host, reported }: { host: Host; reported?: string }) {
       <ActionGuard action="system.hostname.set" host={host.id}>
         {!open ? (
           <FormActions>
-            <button className="secondary" onClick={() => setOpen(true)} disabled={host.connection_state !== "online"}>
+            <button className="ui-btn-secondary" onClick={() => setOpen(true)} disabled={host.connection_state !== "online"}>
               {t("Rename host")}
             </button>
           </FormActions>
@@ -860,10 +861,10 @@ function RenameHost({ host, reported }: { host: Host; reported?: string }) {
               {t("The host checks first whether the name resolves in DNS to another machine and whether the agent's certificate is bound to the name. /etc/hosts follows the rename; DNS, Kerberos and service certificates do not.")}
             </FormNote>
             <FormActions>
-              <button className="hm-danger" onClick={() => setConfirming(true)} disabled={!orderReady(order) || unchanged || confirming}>
+              <button className="ui-btn-danger" onClick={() => setConfirming(true)} disabled={!orderReady(order) || unchanged || confirming}>
                 {t("Rename host…")}
               </button>
-              <button className="secondary" onClick={() => { setOpen(false); setConfirming(false); }}>{t("Cancel")}</button>
+              <button className="ui-btn-secondary" onClick={() => { setOpen(false); setConfirming(false); }}>{t("Cancel")}</button>
             </FormActions>
             <Message text={message} />
           </Form>
@@ -894,7 +895,7 @@ function RenameHost({ host, reported }: { host: Host; reported?: string }) {
 /** The state of the host as a badge; the colour says which kind of "no" it is. */
 function LifecycleBadge({ state }: { state: string }) {
   const t = useT();
-  return <span className={`badge ${lifecycleTone(state)}`} data-testid="lifecycle-state">{t(state)}</span>;
+  return <span className={`ui-pill ${toneClass(lifecycleTone(state))}`} data-testid="lifecycle-state">{t(state)}</span>;
 }
 
 /** What a state means for the operator reading the host. */
@@ -933,7 +934,7 @@ function Lifecycle({ host }: { host: Host }) {
           {host.lifecycle_changed_at
             ? <Time value={host.lifecycle_changed_at} />
             : host.enrolled_at
-              ? <><Time value={host.enrolled_at} /> <span className="source">· {t("since enrollment")}</span></>
+              ? <><Time value={host.enrolled_at} /> <span className="ui-note">· {t("since enrollment")}</span></>
               : "—"}
         </Fact>
         <Fact label={t("Decided by")}>{lifecycleActor(host) || "—"}</Fact>
@@ -943,7 +944,7 @@ function Lifecycle({ host }: { host: Host }) {
       <ReadOnlyModuleNotice host={host.id} actions={OVERVIEW_CHANGES} />
       {alive && <Quarantine host={host} />}
       {alive && <IdentityRecovery host={host} prompted={!!refusal && RECOVERABLE_REFUSALS.includes(refusal.code)} />}
-      {outcome && <div className="hm-section-body"><DecommissionResult outcome={outcome} /></div>}
+      {outcome && <div className="ui-panel-body"><DecommissionResult outcome={outcome} /></div>}
       {host.lifecycle_state !== "retired" && <DecommissionHost host={host} onDone={setOutcome} />}
     </>
   );
@@ -1013,7 +1014,7 @@ function Quarantine({ host }: { host: Host }) {
   if (!mayQuarantine && !mayRelease) return null;
 
   return (
-    <div className="hm-section-body" data-testid="quarantine">
+    <div className="ui-panel-body" data-testid="quarantine">
       {/* The permission list of the session, checked above, is the first
           gate; the preview of the host's actions judges in the scope of
           the host and in its lifecycle state, and is the second. */}
@@ -1029,7 +1030,7 @@ function Quarantine({ host }: { host: Host }) {
       {mayQuarantine && !open && (
         <ActionGuard action="host.quarantine" host={host.id}>
           <FormActions>
-            <button className="hm-danger" onClick={() => setOpen(true)}>{t("Quarantine host…")}</button>
+            <button className="ui-btn-danger" onClick={() => setOpen(true)}>{t("Quarantine host…")}</button>
           </FormActions>
         </ActionGuard>
       )}
@@ -1048,10 +1049,10 @@ function Quarantine({ host }: { host: Host }) {
               {t("The session is closed, the undelivered jobs are cancelled, and the host takes no operations and no secrets. A task already delivered runs to its end; the panel cannot undo it.")}
             </FormNote>
             <FormActions>
-              <button className="hm-danger" onClick={() => setConfirming("quarantine")} disabled={confirming !== null}>
+              <button className="ui-btn-danger" onClick={() => setConfirming("quarantine")} disabled={confirming !== null}>
                 {t("Quarantine host…")}
               </button>
-              <button className="secondary" onClick={() => { setOpen(false); setConfirming(null); }}>{t("Cancel")}</button>
+              <button className="ui-btn-secondary" onClick={() => { setOpen(false); setConfirming(null); }}>{t("Cancel")}</button>
             </FormActions>
           </Form>
         </ActionGuard>
@@ -1060,7 +1061,7 @@ function Quarantine({ host }: { host: Host }) {
       {signInAgain && (
         <FormActions>
           <button
-            className="secondary"
+            className="ui-btn-secondary"
             onClick={() => {
               const target = encodeURIComponent(window.location.pathname);
               window.location.href = `/auth/login?step_up=1&redirect=${target}`;
@@ -1113,7 +1114,7 @@ function ConnectionRefusalNotice({ host }: { host: Host }) {
         ? t("The host is kept out by its lifecycle state, a decision recorded above, not by a fault of its own.")
         : t("The certificate is on record for another host. Check which machine holds this identity before anything else.");
   return (
-    <div className="hm-section-body" data-testid="connection-refusal">
+    <div className="ui-panel-body" data-testid="connection-refusal">
       <Message
         error
         text={t("Connection refused: {reason} {when}.", {
@@ -1122,7 +1123,7 @@ function ConnectionRefusalNotice({ host }: { host: Host }) {
         })}
       />
       <FormNote>{remedy}</FormNote>
-      {refusal.detail && <FormNote><span className="hm-mono">{refusal.detail}</span></FormNote>}
+      {refusal.detail && <FormNote><span className="ui-mono">{refusal.detail}</span></FormNote>}
     </div>
   );
 }
@@ -1170,11 +1171,11 @@ function IdentityRecovery({ host, prompted }: { host: Host; prompted: boolean })
   });
 
   return (
-    <div className="hm-section-body" data-testid="identity-recovery">
+    <div className="ui-panel-body" data-testid="identity-recovery">
       {order && <RecoveryOrderResult host={host} order={order} />}
       {!open ? (
         <FormActions>
-          <button className={prompted ? undefined : "secondary"} onClick={() => setOpen(true)}>
+          <button className={prompted ? undefined : "ui-btn-secondary"} onClick={() => setOpen(true)}>
             {t("Order identity recovery…")}
           </button>
         </FormActions>
@@ -1195,13 +1196,13 @@ function IdentityRecovery({ host, prompted }: { host: Host; prompted: boolean })
             <button onClick={() => setConfirming(true)} disabled={confirming}>
               {t("Order identity recovery…")}
             </button>
-            <button className="secondary" onClick={() => { setOpen(false); setConfirming(false); }}>{t("Cancel")}</button>
+            <button className="ui-btn-secondary" onClick={() => { setOpen(false); setConfirming(false); }}>{t("Cancel")}</button>
           </FormActions>
           <Message text={message} error />
           {signInAgain && (
             <FormActions>
               <button
-                className="secondary"
+                className="ui-btn-secondary"
                 onClick={() => {
                   const target = encodeURIComponent(window.location.pathname);
                   window.location.href = `/auth/login?step_up=1&redirect=${target}`;
@@ -1240,17 +1241,17 @@ function IdentityRecovery({ host, prompted }: { host: Host; prompted: boolean })
 function RecoveryOrderResult({ host, order }: { host: Host; order: RecoveryOrder }) {
   const t = useT();
   return (
-    <div className="hm-form" data-testid="recovery-order">
+    <div className="ui-form" data-testid="recovery-order">
       <Message text={order.token
         ? t("The recovery order is placed. Run the command below on the host as root and paste the token when asked.")
         : t("A recovery order for this host is already open; its token was shown when it was placed.")} />
       <Facts>
         <Fact label={t("On the host")} wide>
-          <span className="hm-mono">flotestro-agentctl identity reset --confirm {host.hostname}</span>
+          <span className="ui-mono">flotestro-agentctl identity reset --confirm {host.hostname}</span>
         </Fact>
         {order.token && (
           <Fact label={t("Token (shown once)")} wide>
-            <span className="hm-mono" data-testid="recovery-token">{order.token}</span>
+            <span className="ui-mono" data-testid="recovery-token">{order.token}</span>
           </Fact>
         )}
         <Fact label={t("Expires")}><Time value={order.expires_at} /></Fact>
@@ -1294,14 +1295,14 @@ function DecommissionHost({ host, onDone }: { host: Host; onDone: (outcome: Deco
   const online = host.connection_state === "online";
 
   return (
-    <div className="hm-section-body">
+    <div className="ui-panel-body">
       {/* The trigger and the form stand behind the preview together: the
           server judges the permission in the host's scope and the state
           the host is in. */}
       <ActionGuard action="host.decommission" host={host.id}>
         {!open ? (
           <FormActions>
-            <button className="hm-danger" onClick={() => setOpen(true)}>
+            <button className="ui-btn-danger" onClick={() => setOpen(true)}>
               {t("Decommission host…")}
             </button>
           </FormActions>
@@ -1322,10 +1323,10 @@ function DecommissionHost({ host, onDone }: { host: Host; onDone: (outcome: Deco
               {t("The record, the inventory and the audit trail stay. A retired host does not come back; its machine is refused for a new-host token for 30 days.")}
             </FormNote>
             <FormActions>
-              <button className="hm-danger" onClick={() => setConfirming(true)} disabled={confirming}>
+              <button className="ui-btn-danger" onClick={() => setConfirming(true)} disabled={confirming}>
                 {t("Decommission host…")}
               </button>
-              <button className="secondary" onClick={() => { setOpen(false); setConfirming(false); }}>{t("Cancel")}</button>
+              <button className="ui-btn-secondary" onClick={() => { setOpen(false); setConfirming(false); }}>{t("Cancel")}</button>
             </FormActions>
             <Message text={message} error />
           </Form>
@@ -1360,7 +1361,7 @@ function DecommissionHost({ host, onDone }: { host: Host; onDone: (outcome: Deco
 function DecommissionResult({ outcome }: { outcome: DecommissionOutcome }) {
   const t = useT();
   return (
-    <div className="hm-form" data-testid="decommission-result">
+    <div className="ui-form" data-testid="decommission-result">
       {outcome.remote_cleanup_unconfirmed ? (
         <Message
           error
@@ -1376,7 +1377,7 @@ function DecommissionResult({ outcome }: { outcome: DecommissionOutcome }) {
         <Fact label={t("Jobs cancelled")}>{outcome.jobs_canceled}</Fact>
         <Fact label={t("Secret leases dropped")}>{outcome.leases_dropped ? t("yes") : t("not confirmed")}</Fact>
         <Fact label={t("Operations cut short")}>
-          {outcome.running_tasks.length === 0 ? t("none") : outcome.running_tasks.map((id) => <span key={id} className="hm-mono">{id.slice(0, 8)} </span>)}
+          {outcome.running_tasks.length === 0 ? t("none") : outcome.running_tasks.map((id) => <span key={id} className="ui-mono">{id.slice(0, 8)} </span>)}
         </Fact>
       </Facts>
     </div>
@@ -1430,16 +1431,16 @@ function RecentActivity({ host }: { host: Host }) {
               <tr key={`${item.kind}:${item.id}`}>
                 <td><Time value={item.at} /></td>
                 <td>
-                  <span className="badge" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <span className="ui-pill" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                     <Icon name={KIND_ICONS[item.kind]} />{t(kindName(item.kind))}
                   </span>
                 </td>
                 <td>
                   <ActivityTitle host={host} item={item} />
-                  {item.detail && <div className="source">{item.detail}</div>}
+                  {item.detail && <div className="ui-note">{item.detail}</div>}
                 </td>
                 <td><ActivityState item={item} /></td>
-                <td className="source"><ActivityActor host={host} item={item} /></td>
+                <td className="ui-note"><ActivityActor host={host} item={item} /></td>
               </tr>
             ))}
           </tbody>
@@ -1447,7 +1448,7 @@ function RecentActivity({ host }: { host: Host }) {
       )}
       <Foot>
         {timeline.hasNextPage && (
-          <button className="secondary" onClick={() => timeline.fetchNextPage()} disabled={timeline.isFetchingNextPage}>
+          <button className="ui-btn-secondary" onClick={() => timeline.fetchNextPage()} disabled={timeline.isFetchingNextPage}>
             {t("Load more")}
           </button>
         )}
@@ -1477,14 +1478,14 @@ function ActivityTitle({ host, item }: { host: Host; item: HostTimelineItem }) {
   // A session row carries the agent version as its title; on its own the
   // version reads as a nonsense name, so the row says what it is.
   const title = item.kind === "session"
-    ? <span>{t("Agent session")}{item.title && <span className="source"> · {t("agent {version}", { version: item.title })}</span>}</span>
-    : <span className="hm-mono">{item.title || "—"}</span>;
+    ? <span>{t("Agent session")}{item.title && <span className="ui-note"> · {t("agent {version}", { version: item.title })}</span>}</span>
+    : <span className="ui-mono">{item.title || "—"}</span>;
   return (
     <div>
       {target ? <Link to={target}>{title}</Link> : title}
       {/* The event words come from the server in a fixed set (created,
           finished, opened, ended, fired, resolved, selected, started). */}
-      {item.event && <span className="source"> · {t(item.event)}</span>}
+      {item.event && <span className="ui-note"> · {t(item.event)}</span>}
     </div>
   );
 }
@@ -1529,15 +1530,15 @@ function ActivityState({ item }: { item: HostTimelineItem }) {
     case "campaign":
       return <><JobState state={item.state} />{errorCode}</>;
     case "audit":
-      return <span className={`badge ${item.state === "success" ? "ok" : "error"}`}>{t(item.state)}</span>;
+      return <span className={`ui-pill ${item.state === "success" ? "ui-ok" : "ui-error"}`}>{t(item.state)}</span>;
     case "lifecycle":
-      return <span className={`badge ${lifecycleTone(item.state)}`}>{t(item.state)}</span>;
+      return <span className={`ui-pill ${toneClass(lifecycleTone(item.state))}`}>{t(item.state)}</span>;
     case "alert":
-      return <span className={`badge ${item.state === "firing" ? "error" : "ok"}`}>{t(item.state)}</span>;
+      return <span className={`ui-pill ${item.state === "firing" ? "ui-error" : "ui-ok"}`}>{t(item.state)}</span>;
     case "session":
-      return <span className={`badge ${item.state === "open" ? "ok" : ""}`}>{t(item.state)}</span>;
+      return <span className={`ui-pill ${item.state === "open" ? "ui-ok" : ""}`}>{t(item.state)}</span>;
     default:
-      return <span className="badge">{item.state}</span>;
+      return <span className="ui-pill">{item.state}</span>;
   }
 }
 
@@ -1590,28 +1591,28 @@ function Adapters({ host }: { host: ReturnType<typeof useHost> }) {
       <tbody>
         {adapters.map((adapter) => (
           <tr key={adapter.name}>
-            <td className="hm-mono">
+            <td className="ui-mono">
               {adapterSegment(adapter.name)
                 ? <Link to={`/hosts/${host.id}/${adapterSegment(adapter.name)}`}>{adapter.name}</Link>
                 : adapter.name}
             </td>
             <td>
               {!adapter.available ? (
-                <span className="badge">{t("unavailable")}</span>
+                <span className="ui-pill">{t("unavailable")}</span>
               ) : adapter.read_only ? (
-                <span className="badge warn">{t("read only")}</span>
+                <span className="ui-pill ui-warn">{t("read only")}</span>
               ) : (
-                <span className="badge ok">{t("available")}</span>
+                <span className="ui-pill ui-ok">{t("available")}</span>
               )}
             </td>
-            <td className="source">
+            <td className="ui-note">
               {Object.entries(adapter.features ?? {}).length === 0
                 ? "—"
                 : Object.entries(adapter.features ?? {})
                     .map(([name, present]) => `${name}: ${present ? t("yes") : t("no")}`)
                     .join(", ")}
             </td>
-            <td className="source">{adapter.reason || "—"}</td>
+            <td className="ui-note">{adapter.reason || "—"}</td>
           </tr>
         ))}
       </tbody>

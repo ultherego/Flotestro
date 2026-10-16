@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Collection } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { Time, Empty, JobState } from "../../components/ui";
+import { Time, JobState } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import {
   Field, Fields, Form, FormActions, FormNote, JobNotice, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets,
@@ -10,6 +10,7 @@ import {
 } from "./shared";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 type ProjectVersion = {
   job_id: string;
@@ -157,9 +158,9 @@ export function Compose() {
       />
       <Section title={t("Plan")} span={4} description={t("What the plan would change on this host, by kind.")}>
         {!plan ? (
-          <p className="source">{t("No plan yet.")}</p>
+          <p className="ui-note">{t("No plan yet.")}</p>
         ) : !changes.length ? (
-          <p className="source">{t("Nothing would change on this host.")}</p>
+          <p className="ui-note">{t("Nothing would change on this host.")}</p>
         ) : (
           <Breakdown
             items={changes.map(([action, count]) => ({
@@ -223,13 +224,13 @@ export function Compose() {
                   <td><Time value={version.created_at} /></td>
                   <td>{version.created_by}</td>
                   <td><JobState state={version.state} /></td>
-                  <td className="hm-mono">{version.plan_digest?.slice(0, 12) || "—"}</td>
+                  <td className="ui-mono">{version.plan_digest?.slice(0, 12) || "—"}</td>
                   <td>
                     {/* Rolling a change back is deploying an earlier version.
                         It is loaded into the editor so that it goes through
                         a plan - the host state may have changed since then. */}
                     <button
-                      className="secondary"
+                      className="ui-btn-secondary"
                       onClick={() => { setManifest(version.manifest); setPlan(null); }}
                     >
                       {t("Load into editor")}
@@ -252,19 +253,19 @@ export function Compose() {
             flush
           >
             {plan.warnings?.map((warning) => (
-              <p key={warning} className="warning"><span>{warning}</span></p>
+              <p key={warning} className="ui-banner"><span>{warning}</span></p>
             ))}
 
             <Table>
               <thead><tr><th scope="col">{t("Object")}</th><th scope="col">{t("Name")}</th><th scope="col">{t("Change")}</th></tr></thead>
               <tbody>
                 {!plan.changes?.length ? (
-                  <tr><td colSpan={3} className="empty">{t("Nothing would change on this host.")}</td></tr>
+                  <tr><td colSpan={3} className="ui-empty">{t("Nothing would change on this host.")}</td></tr>
                 ) : (
                   plan.changes.map((change) => (
                     <tr key={`${change.kind}/${change.name}`}>
                       <td>{change.kind}</td>
-                      <td className="hm-mono">{change.name}</td>
+                      <td className="ui-mono">{change.name}</td>
                       <td>{change.action}</td>
                     </tr>
                   ))
@@ -281,26 +282,26 @@ export function Compose() {
             flush
           >
             <Table>
-              <thead><tr><th scope="col">{t("Service")}</th><th scope="col">{t("Image")}</th><th scope="col">{t("Digest that will run")}</th><th scope="col" className="hm-num">{t("Replicas")}</th></tr></thead>
+              <thead><tr><th scope="col">{t("Service")}</th><th scope="col">{t("Image")}</th><th scope="col">{t("Digest that will run")}</th><th scope="col" className="ui-numeric">{t("Replicas")}</th></tr></thead>
               <tbody>
                 {(plan.services ?? []).map((service) => (
                   <tr key={service.name}>
-                    <td className="hm-mono hm-primary">{service.name}</td>
-                    <td className="hm-mono">{service.image}</td>
+                    <td className="ui-mono ui-name">{service.name}</td>
+                    <td className="ui-mono">{service.image}</td>
                     {/* The digest is the identity of what runs; the tag is what
                         the operator wrote. Both are shown so a moved tag can be
                         read off the plan. */}
-                    <td className="hm-mono" title={service.pinned_image}>
+                    <td className="ui-mono" title={service.pinned_image}>
                       {service.image_digest ? (
                         <>
                           {service.image_digest.replace(/^sha256:/, "").slice(0, 16)}…
-                          {service.digest_source && <span className="badge"> {t(digestSourceWords(service.digest_source))}</span>}
+                          {service.digest_source && <span className="ui-pill"> {t(digestSourceWords(service.digest_source))}</span>}
                         </>
                       ) : (
-                        <span className="badge unknown">{t("unresolved")}</span>
+                        <span className="ui-pill ui-unknown">{t("unresolved")}</span>
                       )}
                     </td>
-                    <td className="hm-num">{service.replicas ?? 1}</td>
+                    <td className="ui-numeric">{service.replicas ?? 1}</td>
                   </tr>
                 ))}
               </tbody>

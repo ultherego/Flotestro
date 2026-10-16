@@ -66,7 +66,7 @@ export function VirtualRows<T>({
   return (
     <div
       ref={container}
-      className="virtual"
+      className="ui-virtual"
       style={{ maxHeight: height }}
       onScroll={(e) => setScrollTop(Math.floor(e.currentTarget.scrollTop / stride) * stride)}
     >
@@ -74,7 +74,7 @@ export function VirtualRows<T>({
         <thead>{head}</thead>
         <tbody>
           {first > 0 && (
-            <tr className="spacer"><td colSpan={columns} style={{ height: first * stride }} /></tr>
+            <tr className="ui-spacer"><td colSpan={columns} style={{ height: first * stride }} /></tr>
           )}
           {items.slice(first, last).map((item, offset) => (
             <tr key={rowKey(item)} data-row style={{ height: rowHeight }}>
@@ -82,7 +82,7 @@ export function VirtualRows<T>({
             </tr>
           ))}
           {last < items.length && (
-            <tr className="spacer"><td colSpan={columns} style={{ height: (items.length - last) * stride }} /></tr>
+            <tr className="ui-spacer"><td colSpan={columns} style={{ height: (items.length - last) * stride }} /></tr>
           )}
         </tbody>
       </table>

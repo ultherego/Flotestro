@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { needsReason } from "../../lib/actions";
 import type { Job } from "../../lib/types";
-import { Time, Empty } from "../../components/ui";
+import { Time } from "../../components/ui";
 import { bytes } from "../../lib/format";
 import { Breakdown } from "../../components/widgets";
 import {
@@ -15,6 +15,7 @@ import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard"
 import { OperationForm } from "../../components/OperationForm";
 import { operationForm, startingForm, type FieldSuggestions, type FormValue } from "../../lib/operations";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 type Summary = {
   engine_version?: string;
@@ -156,7 +157,7 @@ export function Containers() {
   const [ordered, setOrdered] = useState<Job | null>(null);
   const summary = useModule<Summary>(host.id, "containers");
   const full = useModule<FullState>(host.id, "containers.full");
-  const unknown = <span className="badge unknown">{t("unknown")}</span>;
+  const unknown = <span className="ui-pill ui-unknown">{t("unknown")}</span>;
   // The state of the containers lands in the inventory when the read is over.
   const refetch = useModuleRefresh(host.id, ["containers", "containers.full"]);
 
@@ -283,8 +284,8 @@ export function Containers() {
           <Fact label={t("Engine")}>{state?.engine_version || unknown}</Fact>
           <Fact label="API">{state?.api_version || "—"}</Fact>
         </Facts>
-        <div className="hm-section-body">
-          <p className="widget-subhead">{t("Objects")}</p>
+        <div className="ui-panel-body">
+          <p className="ui-subhead">{t("Objects")}</p>
           {state?.images !== undefined || state?.networks !== undefined || state?.volumes !== undefined ? (
             <Breakdown
               items={[
@@ -296,7 +297,7 @@ export function Containers() {
               ]}
             />
           ) : (
-            <p className="source">{t("Known after a read from the host.")}</p>
+            <p className="ui-note">{t("Known after a read from the host.")}</p>
           )}
         </div>
       </Section>
@@ -304,13 +305,13 @@ export function Containers() {
       {state?.projects && state.projects.length > 0 && (
         <Section title={t("Compose projects")} count={state.projects.length} span={12} flush>
           <Table>
-            <thead><tr><th scope="col">{t("Project")}</th><th scope="col">{t("Services")}</th><th scope="col" className="hm-num">{t("Running")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Project")}</th><th scope="col">{t("Services")}</th><th scope="col" className="ui-numeric">{t("Running")}</th></tr></thead>
             <tbody>
               {state.projects.map((project) => (
                 <tr key={project.name}>
-                  <td className="hm-mono hm-primary">{project.name}</td>
+                  <td className="ui-mono ui-name">{project.name}</td>
                   <td>{project.services.join(", ") || "—"}</td>
-                  <td className="hm-num">{project.running} / {project.total}</td>
+                  <td className="ui-numeric">{project.running} / {project.total}</td>
                 </tr>
               ))}
             </tbody>
@@ -319,20 +320,20 @@ export function Containers() {
       )}
 
       <Section title={t("Engine objects")} span={12} flush>
-        <div className="tabs">
-          <button className={view === "containers" ? "active" : ""} onClick={() => setView("containers")}>
+        <div className="ui-tabs">
+          <button className={view === "containers" ? "ui-active" : ""} onClick={() => setView("containers")}>
             {t("Containers")}{lists?.containers?.length ? ` (${lists.containers.length})` : ""}
           </button>
-          <button className={view === "images" ? "active" : ""} onClick={() => setView("images")}>
+          <button className={view === "images" ? "ui-active" : ""} onClick={() => setView("images")}>
             {t("Images")}{lists?.images?.length ? ` (${lists.images.length})` : ""}
           </button>
-          <button className={view === "networks" ? "active" : ""} onClick={() => setView("networks")}>
+          <button className={view === "networks" ? "ui-active" : ""} onClick={() => setView("networks")}>
             {t("Networks")}{lists?.networks?.length ? ` (${lists.networks.length})` : ""}
           </button>
-          <button className={view === "volumes" ? "active" : ""} onClick={() => setView("volumes")}>
+          <button className={view === "volumes" ? "ui-active" : ""} onClick={() => setView("volumes")}>
             {t("Volumes")}{lists?.volumes?.length ? ` (${lists.volumes.length})` : ""}
           </button>
-          <button className={view === "events" ? "active" : ""} onClick={() => setView("events")}>
+          <button className={view === "events" ? "ui-active" : ""} onClick={() => setView("events")}>
             {t("Events")}
           </button>
         </div>
@@ -516,7 +517,7 @@ function Declaration({ kind, lists }: {
   const target = entry.summary(payload ?? {}) || t("this object");
 
   return (
-    <div className="hm-section-body">
+    <div className="ui-panel-body">
       <Form>
         {choices.length > 1 && (
           <Fields>
@@ -548,7 +549,7 @@ function Declaration({ kind, lists }: {
               sees the plan and no button to carry it out. */}
           <ActionGuard action="docker.plan" host={host.id}>
             <button
-              className="secondary"
+              className="ui-btn-secondary"
               disabled={!section || problems.length > 0 || plan.busy}
               onClick={() => {
                 setOrdered(null);
@@ -561,7 +562,7 @@ function Declaration({ kind, lists }: {
           </ActionGuard>
           <ActionGuard action={action} host={host.id}>
             <button
-              className={destructive ? "hm-danger" : undefined}
+              className={destructive ? "ui-btn-danger" : undefined}
               disabled={!computed || stale || !computed.digest || apply.isPending ||
                 computed.action === "no_change" || computed.action === "absent"}
               onClick={() => (destructive || needsReason(action) ? setConfirming(true) : order())}
@@ -651,8 +652,8 @@ function PlanView({ plan, stale }: { plan: ComputedPlan; stale: boolean }) {
     return <Message text={plan.unavailable_reason} error />;
   }
   return (
-    <div className="hm-section-body" data-testid="declaration-plan">
-      <p className="widget-subhead">{t(planVerdict(plan.action))}</p>
+    <div className="ui-panel-body" data-testid="declaration-plan">
+      <p className="ui-subhead">{t(planVerdict(plan.action))}</p>
       {stale && (
         <Message
           text={t("The description changed since this plan was computed; compute it again before carrying it out.")}
@@ -660,7 +661,7 @@ function PlanView({ plan, stale }: { plan: ComputedPlan; stale: boolean }) {
         />
       )}
       {plan.pinned_image && (
-        <p className="source">
+        <p className="ui-note">
           {t("The image is bound to {digest} ({source}).", {
             digest: plan.pinned_image, source: plan.digest_source ?? "",
           })}
@@ -672,25 +673,25 @@ function PlanView({ plan, stale }: { plan: ComputedPlan; stale: boolean }) {
           <tbody>
             {plan.changes.map((change) => (
               <tr key={change.field}>
-                <td className="hm-mono hm-primary">{change.field}</td>
-                <td className="hm-mono">{change.current || "—"}</td>
-                <td className="hm-mono">{change.desired || "—"}</td>
+                <td className="ui-mono ui-name">{change.field}</td>
+                <td className="ui-mono">{change.current || "—"}</td>
+                <td className="ui-mono">{change.desired || "—"}</td>
               </tr>
             ))}
           </tbody>
         </Table>
       ) : (
-        <p className="source">{t("No setting differs.")}</p>
+        <p className="ui-note">{t("No setting differs.")}</p>
       )}
       {plan.detaches?.length ? (
-        <p className="source">
+        <p className="ui-note">
           {t("These containers lose the network and are not reattached: {names}", {
             names: plan.detaches.join(", "),
           })}
         </p>
       ) : null}
       {plan.warnings?.map((warning) => (
-        <p key={warning} className="source">{warning}</p>
+        <p key={warning} className="ui-note">{warning}</p>
       ))}
     </div>
   );
@@ -785,7 +786,7 @@ function Events() {
 
   return (
     <>
-      <div className="hm-section-body">
+      <div className="ui-panel-body">
         <Form>
           <Fields>
             <Field label={t("Look back")}>
@@ -808,14 +809,14 @@ function Events() {
             </Field>
             {/* Not a label: a label around buttons would click the first
                 one whenever the caption is clicked. */}
-            <div className="hm-field">
-              <span className="hm-field-label">{t("Kind")}</span>
-              <span className="hm-choices">
+            <div className="ui-field">
+              <span className="ui-field-label">{t("Kind")}</span>
+              <span className="ui-actions">
                 {["container", "image", "network", "volume"].map((kind) => (
                   <button
                     key={kind}
                     type="button"
-                    className={kinds.includes(kind) ? "" : "secondary"}
+                    className={kinds.includes(kind) ? "" : "ui-btn-secondary"}
                     onClick={() => toggle(kind)}
                   >
                     {kind}
@@ -860,9 +861,9 @@ function Events() {
               <tr key={`${event.time}-${index}`}>
                 <td><Time value={event.time} /></td>
                 <td>{event.type}</td>
-                <td className="hm-mono">{event.action}</td>
-                <td className="hm-mono">{event.actor_name || event.actor_id?.slice(0, 12) || "—"}</td>
-                <td className="source hm-mono">
+                <td className="ui-mono">{event.action}</td>
+                <td className="ui-mono">{event.actor_name || event.actor_id?.slice(0, 12) || "—"}</td>
+                <td className="ui-note ui-mono">
                   {Object.entries(event.attributes ?? {})
                     .filter(([key]) => key !== "name")
                     .map(([key, value]) => `${key}=${value}`)
@@ -906,10 +907,10 @@ function ContainerLogs({ container, onClose }: { container: Container; onClose: 
     <Section
       title={t("Log of {name}", { name: container.name })}
       count={read.attempt ? output.length : undefined}
-      tools={<button className="secondary" onClick={onClose}>{t("Close")}</button>}
+      tools={<button className="ui-btn-secondary" onClick={onClose}>{t("Close")}</button>}
       flush
     >
-      <div className="hm-section-body">
+      <div className="ui-panel-body">
         <Form>
           <Fields>
             <Field label={t("Lines from the end")} help={t("Between {min} and {max}; the read is also cut at 1 MiB.", { min: LOG_LINES_MIN, max: LOG_LINES_MAX })} narrow>
@@ -924,8 +925,8 @@ function ContainerLogs({ container, onClose }: { container: Container; onClose: 
             <Field label={t("Since")} help={t("A duration such as 15m, 2h or 1d, or an RFC 3339 timestamp. Empty reads the whole tail.")}>
               <input value={since} placeholder="15m" onChange={(e) => setSince(e.target.value)} />
             </Field>
-            <div className="hm-field">
-              <span className="hm-field-label">{t("Timestamps")}</span>
+            <div className="ui-field">
+              <span className="ui-field-label">{t("Timestamps")}</span>
               <Check checked={timestamps} onChange={setTimestamps}>{t("Prefix every line with the engine's timestamp")}</Check>
             </div>
           </Fields>
@@ -968,8 +969,8 @@ function ContainerLogs({ container, onClose }: { container: Container; onClose: 
         output.length === 0 ? (
           <Empty>{t("The container wrote nothing in that range.")}</Empty>
         ) : (
-          <div className="hm-section-body">
-            <pre className="hm-log">{output.join("\n")}</pre>
+          <div className="ui-panel-body">
+            <pre className="ui-log">{output.join("\n")}</pre>
           </div>
         )
       ) : null}
@@ -1048,32 +1049,32 @@ function ContainerTable({
       <thead>
         <tr>
           <th scope="col">{t("Name")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Image")}</th><th scope="col">{t("Health")}</th>
-          <th scope="col" className="hm-num">{t("Restarts")}</th><th scope="col">{t("Ports")}</th><th scope="col">{t("Networks")}</th><th scope="col">Compose</th><th scope="col">{t("Actions")}</th>
+          <th scope="col" className="ui-numeric">{t("Restarts")}</th><th scope="col">{t("Ports")}</th><th scope="col">{t("Networks")}</th><th scope="col">Compose</th><th scope="col">{t("Actions")}</th>
         </tr>
       </thead>
       <tbody>
         {containers.map((container) => (
           <tr key={container.id}>
-            <td className="hm-mono hm-primary">{container.name}</td>
+            <td className="ui-mono ui-name">{container.name}</td>
             <td>
-              <span className={container.state === "running" ? "badge ok" : "badge"}>
+              <span className={container.state === "running" ? "ui-pill ui-ok" : "ui-pill"}>
                 {container.state}
               </span>
             </td>
-            <td className="hm-mono">{container.image}</td>
+            <td className="ui-mono">{container.image}</td>
             {/* An image without a health check and an unhealthy image are
                 two different things. */}
             <td>
               {!container.health ? (
-                <span className="badge unknown">{t("no check")}</span>
+                <span className="ui-pill ui-unknown">{t("no check")}</span>
               ) : container.health === "healthy" ? (
-                <span className="badge ok">{t("healthy")}</span>
+                <span className="ui-pill ui-ok">{t("healthy")}</span>
               ) : (
-                <span className="badge error">{container.health}</span>
+                <span className="ui-pill ui-error">{container.health}</span>
               )}
             </td>
-            <td className="hm-num">{container.restart_count}</td>
-            <td className="hm-mono">
+            <td className="ui-numeric">{container.restart_count}</td>
+            <td className="ui-mono">
               {(container.ports ?? [])
                 .map((port) =>
                   port.host_port
@@ -1093,7 +1094,7 @@ function ContainerTable({
                   this operator may order on this host: a viewer sees none
                   of them, and a refused order is not the way to learn about
                   a missing permission. */}
-              <div className="operations">
+              <div className="ui-actions">
                 {container.state === "running" ? (
                   <>
                     <ActionGuard action="docker.container.restart" host={hostID}>
@@ -1111,12 +1112,12 @@ function ContainerTable({
                 {/* The log of a stopped container is still there: reading
                     it is often the reason the container is looked at. */}
                 <ActionGuard action="docker.container.logs" host={hostID}>
-                  <button className="secondary" onClick={() => logs(container)}>{t("Logs")}</button>
+                  <button className="ui-btn-secondary" onClick={() => logs(container)}>{t("Logs")}</button>
                 </ActionGuard>
                 {/* Removal is irreversible, so it does not go straight from
                     the click - it opens the target confirmation. */}
                 <ActionGuard action="docker.container.remove" host={hostID}>
-                  <button className="hm-danger" onClick={() => remove(container)}>{t("Remove")}</button>
+                  <button className="ui-btn-danger" onClick={() => remove(container)}>{t("Remove")}</button>
                 </ActionGuard>
               </div>
             </td>
@@ -1142,12 +1143,12 @@ function ImageTable({
   if (!images?.length) return <EmptyList read={read} what={t("images")} />;
   return (
     <Table>
-      <thead><tr><th scope="col">{t("Tags")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col">{t("In use")}</th><th scope="col">{t("Actions")}</th></tr></thead>
+      <thead><tr><th scope="col">{t("Tags")}</th><th scope="col" className="ui-numeric">{t("Size")}</th><th scope="col">{t("In use")}</th><th scope="col">{t("Actions")}</th></tr></thead>
       <tbody>
         {images.map((image) => (
           <tr key={image.id}>
-            <td className="hm-mono">{image.tags?.join(", ") || <span className="badge unknown">{t("untagged")}</span>}</td>
-            <td className="hm-num">{bytes(image.size_bytes)}</td>
+            <td className="ui-mono">{image.tags?.join(", ") || <span className="ui-pill ui-unknown">{t("untagged")}</span>}</td>
+            <td className="ui-numeric">{bytes(image.size_bytes)}</td>
             <td>{image.in_use ? t("yes") : t("no")}</td>
             <td>
               {/* An image in use cannot be removed by mistake: the button is
@@ -1156,7 +1157,7 @@ function ImageTable({
                 "—"
               ) : (
                 <ActionGuard action="docker.prune" host={hostID}>
-                  <button className="hm-danger" onClick={() => remove(image)}>{t("Remove")}</button>
+                  <button className="ui-btn-danger" onClick={() => remove(image)}>{t("Remove")}</button>
                 </ActionGuard>
               )}
             </td>
@@ -1192,7 +1193,7 @@ function PullImage({ hostID, images, busy, onPull }: {
   // the form is not drawn at all.
   return (
     <ActionGuard action="docker.image.pull" host={hostID}>
-      <div className="hm-section-body">
+      <div className="ui-panel-body">
         <Form>
           <Fields>
             <Field
@@ -1214,7 +1215,7 @@ function PullImage({ hostID, images, busy, onPull }: {
             </Field>
           </Fields>
           <FormActions>
-            <button className="secondary" disabled={!valid || busy} onClick={() => onPull(value)}>
+            <button className="ui-btn-secondary" disabled={!valid || busy} onClick={() => onPull(value)}>
               {t("Pull image")}
             </button>
           </FormActions>
@@ -1253,15 +1254,15 @@ function NetworkTable({
         {networks.map((network) => (
           <tr key={network.id}>
             <td>
-              <span className="hm-mono hm-primary">{network.name}</span>
-              {network.predefined && <span className="badge after-name">{t("built-in")}</span>}
+              <span className="ui-mono ui-name">{network.name}</span>
+              {network.predefined && <span className="ui-pill ui-note">{t("built-in")}</span>}
             </td>
             <td>{network.driver}{network.scope && network.scope !== "local" ? ` · ${network.scope}` : ""}</td>
-            <td className="hm-mono">
+            <td className="ui-mono">
               {(network.subnets ?? []).length ? (
                 <>
                   {network.subnets!.join(", ")}
-                  {network.gateways?.length ? <div className="source">gw {network.gateways.join(", ")}</div> : null}
+                  {network.gateways?.length ? <div className="ui-note">gw {network.gateways.join(", ")}</div> : null}
                 </>
               ) : (
                 "—"
@@ -1282,14 +1283,14 @@ function NetworkTable({
                 ? network.containers
                     .map((container) => (container.ipv4 ? `${container.name} ${container.ipv4}` : container.name))
                     .join(", ")
-                : <span className="badge">{t("unused")}</span>}
+                : <span className="ui-pill">{t("unused")}</span>}
             </td>
             <td>
               {network.predefined || network.in_use ? (
                 "—"
               ) : (
                 <ActionGuard action="docker.prune" host={hostID}>
-                  <button className="hm-danger" onClick={() => remove(network)}>{t("Remove")}</button>
+                  <button className="ui-btn-danger" onClick={() => remove(network)}>{t("Remove")}</button>
                 </ActionGuard>
               )}
             </td>
@@ -1320,23 +1321,23 @@ function VolumeTable({
     <Table>
       <thead>
         <tr>
-          <th scope="col">{t("Name")}</th><th scope="col">{t("Driver")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col">{t("Mountpoint")}</th>
+          <th scope="col">{t("Name")}</th><th scope="col">{t("Driver")}</th><th scope="col" className="ui-numeric">{t("Size")}</th><th scope="col">{t("Mountpoint")}</th>
           <th scope="col">Compose</th><th scope="col">{t("Used by")}</th><th scope="col">{t("Actions")}</th>
         </tr>
       </thead>
       <tbody>
         {volumes.map((volume) => (
           <tr key={volume.name}>
-            <td className="hm-mono hm-primary">{volume.name}</td>
+            <td className="ui-mono ui-name">{volume.name}</td>
             <td>{volume.driver}</td>
-            <td className="hm-num">
+            <td className="ui-numeric">
               {volume.size_bytes !== undefined ? (
                 bytes(volume.size_bytes)
               ) : (
-                <span className="badge unknown" title={volume.size_reason || undefined}>{t("unknown")}</span>
+                <span className="ui-pill ui-unknown" title={volume.size_reason || undefined}>{t("unknown")}</span>
               )}
             </td>
-            <td className="hm-mono">{volume.mountpoint || "—"}</td>
+            <td className="ui-mono">{volume.mountpoint || "—"}</td>
             <td>{volume.compose || "—"}</td>
             <td>
               {volume.used_by?.length
@@ -1347,7 +1348,7 @@ function VolumeTable({
                         (use.state && use.state !== "running" ? ` (${use.state})` : ""),
                     )
                     .join(", ")
-                : <span className="badge">{t("unused")}</span>}
+                : <span className="ui-pill">{t("unused")}</span>}
             </td>
             <td>
               {/* A volume in use has no button: removing it means losing
@@ -1356,7 +1357,7 @@ function VolumeTable({
                 "—"
               ) : (
                 <ActionGuard action="docker.prune" host={hostID}>
-                  <button className="hm-danger" onClick={() => remove(volume)}>{t("Remove")}</button>
+                  <button className="ui-btn-danger" onClick={() => remove(volume)}>{t("Remove")}</button>
                 </ActionGuard>
               )}
             </td>

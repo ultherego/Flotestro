@@ -68,13 +68,13 @@ export function FleetCoverage({ coverage }: { coverage?: Coverage }) {
   const breakdown = unknownBreakdown(coverage, t);
   const reason = coverage.partial_reason ?? "";
   return (
-    <p className="source" data-testid="fleet-coverage">
+    <p className="ui-note" data-testid="fleet-coverage">
       <span title={breakdown || undefined}>{coverageSentence(coverage, t)}</span>
       {breakdown && <span>{` (${breakdown})`}</span>}
       {coverage.partial && (
         <>
           {" "}
-          <span className="badge warn" data-testid="fleet-partial">
+          <span className="ui-pill ui-warn" data-testid="fleet-partial">
             {t("partial answer")}
           </span>
           {" "}

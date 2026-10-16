@@ -34,18 +34,18 @@ export function PasswordSignIn() {
   };
 
   return (
-    <form className="login-form" onSubmit={signIn}>
-      <label className="field">
-        <span className="field-label">{t("Identity")}</span>
+    <form className="ui-login-form" onSubmit={signIn}>
+      <label className="ui-field">
+        <span className="ui-field-label">{t("Identity")}</span>
         <input value={subject} onChange={(event) => setSubject(event.target.value)}
                autoComplete="username" data-testid="signin-subject" />
       </label>
-      <label className="field">
-        <span className="field-label">{t("Password")}</span>
+      <label className="ui-field">
+        <span className="ui-field-label">{t("Password")}</span>
         <input type="password" value={password} onChange={(event) => setPassword(event.target.value)}
                autoComplete="current-password" data-testid="signin-password" />
       </label>
-      {refusal !== "" && <p className="page-error" data-testid="signin-refusal">{refusal}</p>}
+      {refusal !== "" && <p className="ui-errorbox" data-testid="signin-refusal">{refusal}</p>}
       <button type="submit" disabled={busy || subject.trim() === "" || password === ""}
               data-testid="signin-submit">
         {busy ? t("signing in…") : t("Sign in")}

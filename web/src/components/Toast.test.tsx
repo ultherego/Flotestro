@@ -42,7 +42,7 @@ describe("ToastProvider", () => {
     expect(toasts()).toHaveLength(0);
     fire("success");
     expect(toasts()).toHaveLength(1);
-    expect(toasts()[0]).toHaveClass("toast", "success");
+    expect(toasts()[0]).toHaveClass("ui-toast", "ui-ok");
     expect(region()).toHaveTextContent("Rule cpu-high is deleted.");
   });
 
@@ -56,7 +56,7 @@ describe("ToastProvider", () => {
     expect(toasts()).toHaveLength(3);
     act(() => { vi.advanceTimersByTime(1); });
     expect(toasts()).toHaveLength(1);
-    expect(toasts()[0]).toHaveClass("error");
+    expect(toasts()[0]).toHaveClass("ui-error");
     act(() => { vi.advanceTimersByTime(10 * TOAST_LIFETIME); });
     expect(toasts()).toHaveLength(1);
   });

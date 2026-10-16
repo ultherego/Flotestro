@@ -24,7 +24,7 @@ describe("StatusBar", () => {
     expect(items).toHaveLength(2);
     expect(within(items[0]).getByTestId("status-bar-value")).toHaveTextContent("3");
     expect(within(items[1]).getByTestId("status-bar-value")).toHaveTextContent("—");
-    expect(items[1]).toHaveClass("unknown");
+    expect(items[1]).toHaveClass("ui-unknown");
   });
 
   it("keeps a zero segment visible and marks it as zero", () => {
@@ -35,9 +35,9 @@ describe("StatusBar", () => {
       ]} />,
     );
     const items = within(getByRole("list")).getAllByRole("listitem");
-    expect(items[0]).not.toHaveClass("zero");
-    expect(items[1]).toHaveClass("zero");
-    expect(items[1]).toHaveClass("warn");
+    expect(items[0]).not.toHaveClass("ui-faint");
+    expect(items[1]).toHaveClass("ui-faint");
+    expect(items[1]).toHaveClass("ui-warn");
     expect(within(items[1]).getByTestId("status-bar-value")).toHaveTextContent("0");
     expect(within(items[1]).getByText("Stale")).toBeInTheDocument();
   });
@@ -87,10 +87,10 @@ describe("StatusBar", () => {
     // Every state is still accounted for, which is what the browser suite
     // asks of this component.
     expect(within(getByRole("list")).getAllByRole("listitem")).toHaveLength(4);
-    expect(container.querySelectorAll(".status-bar-segment")).toHaveLength(0);
-    expect(container.querySelectorAll(".status-bar-quiet-item")).toHaveLength(3);
+    expect(container.querySelectorAll(".ui-statusbar-segment")).toHaveLength(0);
+    expect(container.querySelectorAll(".ui-statusbar-quiet-item")).toHaveLength(3);
     // One state holding everything is the number, not a one-segment bar.
-    const hero = container.querySelector(".status-bar-hero");
+    const hero = container.querySelector(".ui-statusbar-hero");
     expect(hero).not.toBeNull();
     expect(hero).toHaveTextContent("4");
     expect(hero).toHaveTextContent("Online");
@@ -104,13 +104,13 @@ describe("StatusBar", () => {
         { label: "Unknown", value: undefined, tone: "unknown" },
       ]} />,
     );
-    const quiet = container.querySelectorAll(".status-bar-quiet-item");
+    const quiet = container.querySelectorAll(".ui-statusbar-quiet-item");
     expect(quiet).toHaveLength(2);
-    expect(quiet[0]).toHaveClass("zero");
+    expect(quiet[0]).toHaveClass("ui-faint");
     // Unknown is not zero: it carries its own mark and is never folded in
     // with the states that reported nothing there.
-    expect(quiet[1]).toHaveClass("unset");
-    expect(quiet[1]).not.toHaveClass("zero");
+    expect(quiet[1]).toHaveClass("ui-unknown");
+    expect(quiet[1]).not.toHaveClass("ui-faint");
     expect(quiet[1]).toHaveTextContent("\u2014");
   });
 
@@ -131,8 +131,8 @@ describe("StatusBar", () => {
     expect(note).toHaveTextContent("Unreachable");
     expect(note).toHaveTextContent("\u2014");
     // And it is not among the zeros, where it would read as "there is none".
-    expect(container.querySelector(".status-bar-quiet")).toBeNull();
-    expect(container.querySelectorAll(".status-bar-segment")).toHaveLength(2);
+    expect(container.querySelector(".ui-statusbar-quiet")).toBeNull();
+    expect(container.querySelectorAll(".ui-statusbar-segment")).toHaveLength(2);
   });
 
   it("does not claim a share of anything when nothing was counted at all", () => {
@@ -144,8 +144,8 @@ describe("StatusBar", () => {
     );
     expect(getByTestId("status-bar-uncounted")).toHaveTextContent("Not counted:");
     // No bar, no hero: there is no number to draw one from.
-    expect(container.querySelector(".status-bar")).toBeNull();
-    expect(container.querySelector(".status-bar-hero")).toBeNull();
+    expect(container.querySelector(".ui-statusbar")).toBeNull();
+    expect(container.querySelector(".ui-statusbar-hero")).toBeNull();
   });
 
   it("keeps the zeros and the uncounted in rows of their own", () => {
@@ -156,18 +156,18 @@ describe("StatusBar", () => {
         { label: "Unreachable", value: undefined, tone: "unknown" },
       ]} />,
     );
-    const zeros = container.querySelectorAll(".status-bar-quiet .status-bar-quiet-item");
+    const zeros = container.querySelectorAll(".ui-statusbar-quiet .ui-statusbar-quiet-item");
     expect(zeros).toHaveLength(1);
     expect(zeros[0]).toHaveTextContent("Stale");
-    const unset = container.querySelectorAll(".status-bar-uncounted .status-bar-quiet-item");
+    const unset = container.querySelectorAll(".ui-statusbar-uncounted .ui-statusbar-quiet-item");
     expect(unset).toHaveLength(1);
-    expect(unset[0]).toHaveClass("unset");
-    expect(unset[0]).not.toHaveClass("zero");
+    expect(unset[0]).toHaveClass("ui-unknown");
+    expect(unset[0]).not.toHaveClass("ui-faint");
   });
 
   it("takes the compact form on request", () => {
     const { getByRole } = draw(<StatusBar compact segments={[{ label: "Online", value: 1, tone: "ok" }]} />);
-    expect(getByRole("list")).toHaveClass("status-bar-group", "compact");
+    expect(getByRole("list")).toHaveClass("ui-statusbar-group", "ui-compact");
   });
 });
 
@@ -186,14 +186,14 @@ describe("CountRow", () => {
         { label: "Unknown checks", value: undefined, tone: "unknown" },
       ]} />,
     );
-    expect(container.querySelectorAll(".count-tile")).toHaveLength(1);
-    const zeros = container.querySelectorAll(".status-bar-quiet .status-bar-quiet-item");
+    expect(container.querySelectorAll(".ui-count-tile")).toHaveLength(1);
+    const zeros = container.querySelectorAll(".ui-statusbar-quiet .ui-statusbar-quiet-item");
     expect(zeros).toHaveLength(1);
     expect(zeros[0]).toHaveTextContent("Failed jobs");
     const note = getByTestId("status-bar-uncounted");
     expect(note).toHaveTextContent("Not counted:");
     expect(note).toHaveTextContent("Unknown checks");
-    expect(note.querySelector(".status-bar-quiet-item")).toHaveClass("unset");
+    expect(note.querySelector(".ui-statusbar-quiet-item")).toHaveClass("ui-unknown");
   });
 
   it("turns a count with a destination into a link, uncounted or not", () => {
@@ -219,8 +219,8 @@ describe("BarChart", () => {
         series={[{ name: "Succeeded", tone: "ok", values: [1, 0, 2] }]}
       />,
     );
-    expect(container.querySelectorAll("rect.bar")).toHaveLength(2);
-    expect(container.querySelectorAll("rect.bar.ok")).toHaveLength(2);
+    expect(container.querySelectorAll("rect.ui-chartbar")).toHaveLength(2);
+    expect(container.querySelectorAll("rect.ui-chartbar.ui-ok")).toHaveLength(2);
   });
 
   it("stacks several series on one bar and lists them in a legend", () => {
@@ -233,9 +233,9 @@ describe("BarChart", () => {
         ]}
       />,
     );
-    expect(container.querySelectorAll("rect.bar")).toHaveLength(3);
-    expect(container.querySelectorAll("rect.bar.error")).toHaveLength(2);
-    const legend = container.querySelectorAll(".chart-legend li");
+    expect(container.querySelectorAll("rect.ui-chartbar")).toHaveLength(3);
+    expect(container.querySelectorAll("rect.ui-chartbar.ui-error")).toHaveLength(2);
+    const legend = container.querySelectorAll(".ui-chart-legend li");
     expect(legend).toHaveLength(2);
     expect(legend[0]).toHaveTextContent("Succeeded");
     expect(legend[1]).toHaveTextContent("Failed");
@@ -249,7 +249,7 @@ describe("BarChart", () => {
         series={[{ name: "Succeeded", tone: "ok", values: [1, 1, 1, 1, 1, 1] }]}
       />,
     );
-    expect(container.querySelector(".chart-legend")).toBeNull();
+    expect(container.querySelector(".ui-chart-legend")).toBeNull();
     const drawn = [...container.querySelectorAll("svg text")].map((node) => node.textContent);
     expect(drawn).toContain("00");
     expect(drawn).toContain("03");
@@ -264,7 +264,7 @@ describe("BarChart", () => {
         series={[{ name: "Succeeded", tone: "ok", values: [4, 8] }]}
       />,
     );
-    const heights = [...container.querySelectorAll("rect.bar")].map((rect) => Number(rect.getAttribute("height")));
+    const heights = [...container.querySelectorAll("rect.ui-chartbar")].map((rect) => Number(rect.getAttribute("height")));
     expect(heights[1]).toBeCloseTo(heights[0] * 2, 5);
   });
 });
@@ -278,9 +278,9 @@ describe("Breakdown", () => {
         { label: "arch", value: 0 },
       ]} />,
     );
-    const widths = [...container.querySelectorAll(".breakdown-fill")].map((fill) => (fill as HTMLElement).style.width);
+    const widths = [...container.querySelectorAll(".ui-bar-fill")].map((fill) => (fill as HTMLElement).style.width);
     expect(widths).toEqual(["100%", "50%", "0%"]);
-    const counts = [...container.querySelectorAll(".breakdown-count")].map((count) => count.textContent);
+    const counts = [...container.querySelectorAll(".ui-barlist-count")].map((count) => count.textContent);
     expect(counts).toEqual(["4", "2", "0"]);
   });
 
@@ -291,32 +291,32 @@ describe("Breakdown", () => {
         { label: "static", value: 1 },
       ]} />,
     );
-    const fills = container.querySelectorAll(".breakdown-fill");
-    expect(fills[0]).toHaveClass("ok");
-    expect(fills[1]).toHaveClass("neutral");
+    const fills = container.querySelectorAll(".ui-bar-fill");
+    expect(fills[0]).toHaveClass("ui-ok");
+    expect(fills[1]).toHaveClass("ui-neutral");
   });
 
   it("does not divide by zero when every value is zero", () => {
     const { container } = draw(<Breakdown items={[{ label: "none", value: 0 }]} />);
-    expect((container.querySelector(".breakdown-fill") as HTMLElement).style.width).toBe("0%");
+    expect((container.querySelector(".ui-bar-fill") as HTMLElement).style.width).toBe("0%");
   });
 });
 
 describe("Meter", () => {
   it("fills its share of the maximum and shows the number", () => {
     const { container } = draw(<Meter value={5} max={10} tone="warn" />);
-    const fill = container.querySelector(".meter-fill") as HTMLElement;
+    const fill = container.querySelector(".ui-bar-fill") as HTMLElement;
     expect(fill.style.width).toBe("50%");
-    expect(fill).toHaveClass("warn");
-    expect(container.querySelector(".meter-value")).toHaveTextContent("5");
+    expect(fill).toHaveClass("ui-warn");
+    expect(container.querySelector(".ui-meter-value")).toHaveTextContent("5");
   });
 
   it("stays empty without a maximum and never overflows", () => {
     const { container, rerender } = draw(<Meter value={5} max={0} />);
-    expect((container.querySelector(".meter-fill") as HTMLElement).style.width).toBe("0%");
+    expect((container.querySelector(".ui-bar-fill") as HTMLElement).style.width).toBe("0%");
     rerender(<MemoryRouter><Meter value={20} max={10} text="20 of 10" /></MemoryRouter>);
-    expect((container.querySelector(".meter-fill") as HTMLElement).style.width).toBe("100%");
-    expect(container.querySelector(".meter-value")).toHaveTextContent("20 of 10");
+    expect((container.querySelector(".ui-bar-fill") as HTMLElement).style.width).toBe("100%");
+    expect(container.querySelector(".ui-meter-value")).toHaveTextContent("20 of 10");
   });
 });
 
@@ -357,10 +357,10 @@ describe("AreaChart", () => {
         ]}
       />,
     );
-    expect(container.querySelectorAll("path.line")).toHaveLength(2);
-    expect(container.querySelectorAll("path.area")).toHaveLength(1);
-    expect(container.querySelectorAll(":not(.chart-peak) > circle")).toHaveLength(0);
-    expect(getByRole("img")).toHaveClass("chart");
+    expect(container.querySelectorAll("path.ui-chart-line")).toHaveLength(2);
+    expect(container.querySelectorAll("path.ui-chart-area")).toHaveLength(1);
+    expect(container.querySelectorAll(":not(.ui-chart-peak) > circle")).toHaveLength(0);
+    expect(getByRole("img")).toHaveClass("ui-chart");
   });
 
   it("leaves a gap open where a value is missing instead of bridging it", () => {
@@ -369,9 +369,9 @@ describe("AreaChart", () => {
     const { container } = draw(
       <AreaChart times={minutes(4)} series={[{ name: "CPU", tone: "accent", values: [1, undefined, 3, 4] }]} />,
     );
-    expect(container.querySelectorAll("path.area")).toHaveLength(2);
-    expect(container.querySelectorAll(":not(.chart-peak) > circle")).toHaveLength(1);
-    const lines = container.querySelectorAll("path.line");
+    expect(container.querySelectorAll("path.ui-chart-area")).toHaveLength(2);
+    expect(container.querySelectorAll(":not(.ui-chart-peak) > circle")).toHaveLength(1);
+    const lines = container.querySelectorAll("path.ui-chart-line");
     expect(lines).toHaveLength(1);
     // The line starts at the third instant, not at the first: a path that
     // began at x of the first point would have bridged the gap.
@@ -385,8 +385,8 @@ describe("AreaChart", () => {
       <AreaChart times={minutes(3)} series={[{ name: "CPU", tone: "accent", values: [undefined, undefined, undefined] }]} />,
     );
     expect(container.querySelectorAll("path")).toHaveLength(0);
-    expect(container.querySelectorAll(":not(.chart-peak) > circle")).toHaveLength(0);
-    expect(container.querySelector("line.axis")).not.toBeNull();
+    expect(container.querySelectorAll(":not(.ui-chart-peak) > circle")).toHaveLength(0);
+    expect(container.querySelector("line.ui-chart-axis")).not.toBeNull();
   });
 
   it("labels the y axis through the format on a fixed top", () => {
@@ -420,13 +420,13 @@ describe("AreaChart", () => {
         peak={[30, 50]}
       />,
     );
-    const dashed = container.querySelectorAll("path.line[stroke-dasharray]");
+    const dashed = container.querySelectorAll("path.ui-chart-line[stroke-dasharray]");
     expect(dashed).toHaveLength(1);
     expect(dashed[0].getAttribute("style")).toContain("var(--accent)");
     // The mean alone would end the axis at 20; the peak of 50 pushes it to 60.
     expect(yLabels(container)).toEqual(["0", "20", "40", "60"]);
     // The mean line is still there, without the dashes.
-    expect(container.querySelectorAll("path.line:not([stroke-dasharray])")).toHaveLength(1);
+    expect(container.querySelectorAll("path.ui-chart-line:not([stroke-dasharray])")).toHaveLength(1);
   });
 
   it("leaves a gap in the peak line where the peak is unknown", () => {
@@ -439,7 +439,7 @@ describe("AreaChart", () => {
     );
     // One dashed path per run: the lone first peak is a path of one point,
     // the second run a path of two.
-    const dashed = container.querySelectorAll("path.line[stroke-dasharray]");
+    const dashed = container.querySelectorAll("path.ui-chart-line[stroke-dasharray]");
     expect(dashed).toHaveLength(2);
     expect(dashed[0].getAttribute("d")?.split(" ")).toHaveLength(1);
     expect(dashed[1].getAttribute("d")?.split(" ")).toHaveLength(2);
@@ -487,13 +487,13 @@ describe("AreaChart", () => {
     );
     // The colour is a token of the theme, so the inline style names the
     // variable; the theme decides what it is.
-    const lines = container.querySelectorAll("path.line");
+    const lines = container.querySelectorAll("path.ui-chart-line");
     expect(lines[0].getAttribute("style")).toContain("var(--blue)");
     expect(lines[1].getAttribute("style")).toContain("var(--warn)");
     // The band under the line is painted with the gradient of its tone,
     // and the gradient itself is built from that tone's token - so the
     // theme still decides the colour, through one more hop.
-    expect(container.querySelector("path.area")?.getAttribute("style")).toContain("url(#area-info)");
+    expect(container.querySelector("path.ui-chart-area")?.getAttribute("style")).toContain("url(#area-info)");
     const fade = container.querySelector("#area-info");
     expect(fade).not.toBeNull();
     expect(fade?.querySelector("stop")?.getAttribute("stop-color")).toBe("var(--blue)");
@@ -509,11 +509,11 @@ describe("ChartLegend", () => {
     const { container } = draw(
       <ChartLegend items={[{ name: "Memory used", tone: "accent" }, { name: "Swap used", tone: "warn" }]} />,
     );
-    const items = container.querySelectorAll(".chart-legend li");
+    const items = container.querySelectorAll(".ui-chart-legend li");
     expect(items).toHaveLength(2);
     expect(items[0]).toHaveTextContent("Memory used");
     expect(items[1]).toHaveTextContent("Swap used");
-    const swatch = (item: Element) => (item.querySelector(".swatch") as HTMLElement).style;
+    const swatch = (item: Element) => (item.querySelector(".ui-swatch") as HTMLElement).style;
     expect(swatch(items[0]).getPropertyValue("--swatch")).toBe("var(--accent)");
     expect(swatch(items[1]).getPropertyValue("--swatch")).toBe("var(--warn)");
     expect(swatch(items[0]).opacity).toBe("1");
@@ -523,14 +523,14 @@ describe("ChartLegend", () => {
     const { container } = draw(
       <ChartLegend items={[{ name: "mean of the step", tone: "accent" }, { name: "peak of the step", tone: "accent", dashed: true }]} />,
     );
-    const swatches = container.querySelectorAll(".swatch");
+    const swatches = container.querySelectorAll(".ui-swatch");
     expect((swatches[0] as HTMLElement).style.opacity).toBe("1");
     expect((swatches[1] as HTMLElement).style.opacity).toBe("0.55");
   });
 
   it("draws nothing for an empty list, without a bare list element", () => {
     const { container } = draw(<ChartLegend items={[]} />);
-    expect(container.querySelectorAll(".chart-legend li")).toHaveLength(0);
+    expect(container.querySelectorAll(".ui-chart-legend li")).toHaveLength(0);
   });
 });
 
@@ -582,7 +582,7 @@ describe("the peak of an area chart", () => {
     expect(peak).toBeInTheDocument();
     expect(peak.textContent).toBe("68 MB");
     // One label, not one per series: there is room for one.
-    expect(container.querySelectorAll(".chart-peak")).toHaveLength(1);
+    expect(container.querySelectorAll(".ui-chart-peak")).toHaveLength(1);
   });
 
   it("marks nothing on a chart with nothing in it", () => {

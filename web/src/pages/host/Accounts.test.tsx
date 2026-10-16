@@ -195,8 +195,8 @@ describe("the groups of an account", () => {
     render(<AccountGroups groups={["users", "sudo", "docker"]} />);
     const badges = screen.getAllByTestId("privileged-group");
     expect(badges.map((badge) => badge.textContent)).toEqual(["sudo", "docker"]);
-    expect(badges[0]).toHaveClass("badge", "warn");
-    expect(screen.getByText("users")).not.toHaveClass("badge");
+    expect(badges[0]).toHaveClass("ui-pill", "ui-warn");
+    expect(screen.getByText("users")).not.toHaveClass("ui-pill");
   });
 });
 

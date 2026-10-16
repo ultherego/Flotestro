@@ -3,8 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type Collection } from "../../lib/api";
 import type { PolicyResult, PolicyVerdict } from "../../lib/types";
 import { POLICY_VERDICTS } from "../../lib/types";
-import { ErrorBox, Empty, Time } from "../../components/ui";
-import { EmptyState } from "../../components/layout";
+import { ErrorBox, Time } from "../../components/ui";
+import { Empty } from "../../ui/kit";
 import { absoluteTime } from "../../lib/format";
 import { ModuleHeader, ModulePage, Section, Summary, Table, Widgets, useHost } from "./shared";
 import { VerdictChip, ruleSummary, verdictLabel, verdictTone } from "../Policies";
@@ -52,9 +52,9 @@ export function HostPolicies() {
             <Section title={t("Policies")} span={12}>
               {/* The way to a first policy stands where the list would: an
                   empty card does not say what fills it. */}
-              <EmptyState action={<Link className="button" to="/policies">{t("Open the policies")}</Link>}>
+              <Empty action={<Link className="ui-btn" to="/policies">{t("Open the policies")}</Link>}>
                 {t("No policy selects this host, or none has been evaluated yet. A policy selects hosts by tag, site or environment and is evaluated on the next inventory.")}
-              </EmptyState>
+              </Empty>
             </Section>
           ) : byPolicy.map((group) => (
             <Section
@@ -72,10 +72,10 @@ export function HostPolicies() {
                 <tbody>
                   {group.results.map((result) => (
                     <tr key={result.rule_index}>
-                      <td className="mono">{result.rule ? ruleSummary(result.rule) : `#${result.rule_index}`}</td>
+                      <td className="ui-mono">{result.rule ? ruleSummary(result.rule) : `#${result.rule_index}`}</td>
                       <td><VerdictChip verdict={result.verdict} /></td>
                       <td>{result.reason || "—"}</td>
-                      <td className="mono">{result.observed_revision ? result.observed_revision.slice(0, 12) : "—"}</td>
+                      <td className="ui-mono">{result.observed_revision ? result.observed_revision.slice(0, 12) : "—"}</td>
                       <td><Time value={result.evaluated_at} /></td>
                     </tr>
                   ))}

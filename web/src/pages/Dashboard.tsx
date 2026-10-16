@@ -4,8 +4,8 @@ import { REFRESH_INTERVAL } from "../lib/stream";
 import { api, type Collection } from "../lib/api";
 import type { AuditEvent, Campaign, FleetActivity, FleetSummary, Job } from "../lib/types";
 import { relativeTime } from "../lib/format";
-import { ErrorBox, ErrorCode, Time, Empty, JobState } from "../components/ui";
-import { Card, PageHeader } from "../components/layout";
+import { ErrorBox, ErrorCode, Time, JobState } from "../components/ui";
+import { Empty, PageHead, Panel } from "../ui/kit";
 import { MetricTile } from "../components/MetricTile";
 import { BarChart, Breakdown, CountRow, StatusBar, type Segment } from "../components/widgets";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
@@ -97,7 +97,7 @@ export function Dashboard() {
   // A facet the hosts have not reported is a badge, not a value named
   // "unknown" that reads like a system called that.
   const facetLabel = (key: string) => (key === "" || key === "unknown"
-    ? <span className="badge unknown">{t("unknown")}</span>
+    ? <span className="ui-pill ui-unknown">{t("unknown")}</span>
     : key);
 
   // The window the failed-task counter covers, for the link to the list.
@@ -170,7 +170,7 @@ export function Dashboard() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         title={t("Fleet dashboard")}
         description={t("Only what needs a decision.")}
         help={
@@ -235,18 +235,18 @@ export function Dashboard() {
               />
             ),
             attention: needsYou ? (
-              <Card title={t("What needs you")}>
+              <Panel title={t("What needs you")}>
                 <CountRow counts={[...decisions, ...findings].filter((one) => one.value === undefined || (one.value ?? 0) > 0)} />
                 {clear > 0 && (
-                  <p className="source attention-clear">
+                  <p className="ui-note">
                     {t("{n} other checks are clear.", { n: clear })}
                   </p>
                 )}
                 <FleetCoverage coverage={securityCoverage} />
-              </Card>
+              </Panel>
             ) : undefined,
             host_availability: (
-              <Card title={t("Host availability")}>
+              <Panel title={t("Host availability")}>
                 <StatusBar segments={[
                   { label: t("Online"), value: s?.online, tone: "ok", to: "/hosts?connection_state=online" },
                   { label: t("Stale"), value: a ? byConnection("stale") ?? 0 : undefined, tone: "warn", to: "/hosts?connection_state=stale" },
@@ -255,10 +255,10 @@ export function Dashboard() {
                   { label: t("Quarantined"), value: s?.quarantined_hosts, tone: "neutral", to: "/hosts?lifecycle_state=quarantined" },
                   { label: t("In maintenance"), value: s?.in_maintenance, tone: "neutral", to: "/hosts?maintenance=true" },
                 ]} />
-              </Card>
+              </Panel>
             ),
             operations_24h: (
-              <Card title={t("Operations, last 24 h")} description={t("Finished per hour, by outcome.")}>
+              <Panel title={t("Operations, last 24 h")} description={t("Finished per hour, by outcome.")}>
                 {a ? (
                   <BarChart
                     labels={a.hours.map(hourLabel)}
@@ -270,29 +270,29 @@ export function Dashboard() {
                     ]}
                   />
                 ) : <Empty>{t("Loading…")}</Empty>}
-              </Card>
+              </Panel>
             ),
             fleet_composition: (
-              <Card title={t("Fleet composition")} description={t("By system, agent build, site and environment.")}>
+              <Panel title={t("Fleet composition")} description={t("By system, agent build, site and environment.")}>
                 {a ? (
                   <>
                     <Breakdown items={a.by_os_family.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
-                    <h4 className="widget-subhead">{t("Agent builds")}</h4>
+                    <h4 className="ui-subhead">{t("Agent builds")}</h4>
                     <Breakdown tone="neutral" items={a.by_agent_version.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
                     {/* Sites and environments are two dimensions, not one list:
                         "lab 6, test 6" under one heading reads as two sites. */}
-                    <h4 className="widget-subhead">{t("Sites")}</h4>
+                    <h4 className="ui-subhead">{t("Sites")}</h4>
                     <Breakdown tone="ok" items={a.by_site.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
-                    <h4 className="widget-subhead">{t("Environments")}</h4>
+                    <h4 className="ui-subhead">{t("Environments")}</h4>
                     <Breakdown tone="ok" items={a.by_environment.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
                   </>
                 ) : <Empty>{t("Loading…")}</Empty>}
-              </Card>
+              </Panel>
             ),
             campaigns_in_progress: (
-              <Card
+              <Panel
                 title={t("Campaigns in progress")}
-                actions={activeCampaigns.length > 0 && <span className="badge">{activeCampaigns.length}</span>}
+                actions={activeCampaigns.length > 0 && <span className="ui-pill">{activeCampaigns.length}</span>}
                 flush
               >
                 {activeCampaigns.length === 0 ? (
@@ -307,17 +307,17 @@ export function Dashboard() {
                         <tr key={campaign.id}>
                           <td><Link to={`/campaigns/${campaign.id}`}>{campaign.name}</Link></td>
                           <td><JobState state={campaign.state} /></td>
-                          <td className="mono">{campaign.action_type}</td>
+                          <td className="ui-mono">{campaign.action_type}</td>
                           <td>{campaign.pause_reason || ""}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 )}
-              </Card>
+              </Panel>
             ),
             recent_failures: (
-              <Card
+              <Panel
                 title={t("Recent failures")}
                 actions={<Link to="/jobs?state=failed">{t("All jobs")}</Link>}
                 flush
@@ -334,21 +334,21 @@ export function Dashboard() {
                         <tr key={job.id}>
                           <td><Link to={`/jobs/${job.id}`}><Time value={job.finished_at ?? job.created_at} /></Link></td>
                           <td><Link to={`/hosts/${job.host_id}/jobs`}>{job.hostname || job.host_id.slice(0, 8)}</Link></td>
-                          <td className="mono"><Link to={`/jobs/${job.id}`}>{job.action_type}</Link></td>
+                          <td className="ui-mono"><Link to={`/jobs/${job.id}`}>{job.action_type}</Link></td>
                           <td><ErrorCode code={job.result_error_code || "failed"} /></td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 )}
-              </Card>
+              </Panel>
             ),
             access_denials: (
-              <Card
+              <Panel
                 title={t("Recent access denials")}
                 actions={
                   <>
-                    {denied.length > 0 && <span className="badge error">{denied.length}</span>}
+                    {denied.length > 0 && <span className="ui-pill ui-error">{denied.length}</span>}
                     <Link to="/audit?outcome=denied">{t("All denials")}</Link>
                   </>
                 }
@@ -365,8 +365,8 @@ export function Dashboard() {
                           <td><Time value={event.occurred_at} /></td>
                           {/* The actor leads to their trail: one denial is a
                               typo, a run of them is somebody probing. */}
-                          <td className="mono"><Link to={`/audit?actor=${encodeURIComponent(event.actor_id)}`}>{event.actor_id}</Link></td>
-                          <td className="mono">{event.action}</td>
+                          <td className="ui-mono"><Link to={`/audit?actor=${encodeURIComponent(event.actor_id)}`}>{event.actor_id}</Link></td>
+                          <td className="ui-mono">{event.action}</td>
                           {/* The reason is a code with a guide on hover, the
                               way a job's error is: what it means and what to
                               do about it. */}
@@ -376,7 +376,7 @@ export function Dashboard() {
                     </tbody>
                   </table>
                 )}
-              </Card>
+              </Panel>
             ),
       }} />
     </>
@@ -414,12 +414,12 @@ function DenialReason({ reason }: { reason: unknown }) {
 function Refreshed({ at, fetching, onRefresh }: { at: number; fetching: boolean; onRefresh: () => void }) {
   const t = useT();
   return (
-    <span className="source" data-testid="refreshed">
+    <span className="ui-note" data-testid="refreshed">
       {at > 0 ? t("refreshed {when}", { when: relativeTime(new Date(at).toISOString()) }) : t("not yet loaded")}
       {" · "}
       {/* The panel already has a button that reads as a link; this one
           carried its own copy of those declarations inline. */}
-      <button type="button" className="link" onClick={onRefresh} disabled={fetching}>
+      <button type="button" className="ui-btn-link" onClick={onRefresh} disabled={fetching}>
         {fetching ? t("refreshing…") : t("refresh now")}
       </button>
     </span>

@@ -4,8 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import type { Budget, BudgetLimit, Whoami } from "../lib/types";
 import { Board } from "../components/board";
-import { ErrorBox, Empty, Time } from "../components/ui";
-import { Actions, Card, Field, FieldGrid, SectionHead } from "../components/layout";
+import { ErrorBox, Time } from "../components/ui";
+import { Actions, Empty, Field, Fields, Panel, SectionHead } from "../ui/kit";
 import { Breakdown, Meter, StatusBar, type WidgetTone } from "../components/widgets";
 import { useConfirm } from "../components/Modal";
 import { useToast } from "../components/Toast";
@@ -239,7 +239,7 @@ export function Budgets() {
         description={t("How many operations the fleet carries at once.")}
         help={<p>{t("The capacity of the fleet, in tokens: how many operations the fleet, a site or a backup backend carries at once. A campaign or a job that finds no free token waits here, and the free tokens are divided fairly between everyone asking.")}</p>}
         actions={canWrite && (
-          <button className={creating ? "secondary" : ""} onClick={() => setCreating(!creating)}>
+          <button className={creating ? "ui-btn-secondary" : ""} onClick={() => setCreating(!creating)}>
             {creating ? t("Hide the form") : t("New budget")}
           </button>
         )}
@@ -258,32 +258,32 @@ export function Budgets() {
         drawn={{
           capacity: (
             <>
-              <Card className="span-6" title={t("Capacity")} description={t("{n} budgets, {jobs} jobs and {hosts} campaign hosts waiting", { n: budgets.length, jobs: waitingJobs, hosts: waitingTargets })}>
+              <Panel className="ui-col-6" title={t("Capacity")} description={t("{n} budgets, {jobs} jobs and {hosts} campaign hosts waiting", { n: budgets.length, jobs: waitingJobs, hosts: waitingTargets })}>
           <StatusBar segments={[
             { label: t("Keys"), value: loaded ? budgets.length : undefined, tone: "info" },
             { label: t("Saturated"), value: loaded ? full.length : undefined, tone: "error" },
             { label: t("With work waiting"), value: loaded ? waited.length : undefined, tone: "warn", to: waitingJobs > 0 ? "/jobs?state=queued" : waitingTargets > 0 ? "/campaigns" : undefined },
             { label: t("With room"), value: loaded ? free.length : undefined, tone: "ok" },
           ]} />
-        </Card>
+        </Panel>
             </>
           ),
           by_family: (
             <>
-              <Card className="span-3" title={t("By family")} description={t("What the keys guard.")}>
+              <Panel className="ui-col-3" title={t("By family")} description={t("What the keys guard.")}>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : byKind.length === 0 ? (
-            <p className="fp-blank">{t("No budget is configured.")}</p>
+            <p className="ui-empty">{t("No budget is configured.")}</p>
           ) : (
             <Breakdown tone="info" items={byKind.map((entry) => ({ label: <KindLabel kind={entry.kind} />, value: entry.value }))} />
           )}
-        </Card>
+        </Panel>
             </>
           ),
           by_class: (
             <>
-              <Card className="span-3" title={t("By class")} description={t("Tokens in use per class of work, over every budget; the age is how long the class waits before its fair share stops binding.")}>
+              <Panel className="ui-col-3" title={t("By class")} description={t("Tokens in use per class of work, over every budget; the age is how long the class waits before its fair share stops binding.")}>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : (
@@ -295,12 +295,12 @@ export function Budgets() {
               tone: item.name === "unknown" ? "unknown" as WidgetTone : undefined,
             }))} />
           )}
-        </Card>
+        </Panel>
             </>
           ),
           list: (
             <>
-              <Card className="span-12" flush>
+              <Panel className="ui-col-12" flush>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : budgets.length === 0 ? (
@@ -312,7 +312,7 @@ export function Budgets() {
           ) : (
             <BudgetTable budgets={budgets} canWrite={canWrite} />
           )}
-        </Card>
+        </Panel>
             </>
           )
         }}
@@ -372,7 +372,7 @@ function ClassLabel({ name }: { name: string }) {
   return (
     <>
       {classLabel(name, t)}
-      {known && <span className="source" title={t("How long this class waits before its fair share stops binding.")}>{" · "}{promotionLabel(known.promotion, t)}</span>}
+      {known && <span className="ui-note" title={t("How long this class waits before its fair share stops binding.")}>{" · "}{promotionLabel(known.promotion, t)}</span>}
     </>
   );
 }
@@ -388,13 +388,13 @@ function BudgetTable({ budgets, canWrite }: { budgets: BudgetState[]; canWrite: 
       <thead>
         <tr>
           <th scope="col">{t("Key")}</th>
-          <th scope="col" className="num">{t("Capacity")}</th>
+          <th scope="col" className="ui-numeric">{t("Capacity")}</th>
           <th scope="col">{t("In use")}</th>
           <th scope="col" title={t("The campaigns, jobs and reads that hold tokens of this budget right now.")}>{t("Held by")}</th>
-          <th scope="col" className="num" title={t("How many campaigns, jobs and reads ask for tokens of this budget at the moment.")}>{t("Claimants")}</th>
-          <th scope="col" className="num" title={t("The most tokens one claimant may hold while others ask: the capacity split between the claimants, never below one.")}>{t("Share per claimant")}</th>
-          <th scope="col" className="num" title={t("Jobs queued until a token of this budget frees up.")}>{t("Waiting jobs")}</th>
-          <th scope="col" className="num" title={t("Campaign hosts waiting for a token of this budget before they start.")}>{t("Waiting hosts")}</th>
+          <th scope="col" className="ui-numeric" title={t("How many campaigns, jobs and reads ask for tokens of this budget at the moment.")}>{t("Claimants")}</th>
+          <th scope="col" className="ui-numeric" title={t("The most tokens one claimant may hold while others ask: the capacity split between the claimants, never below one.")}>{t("Share per claimant")}</th>
+          <th scope="col" className="ui-numeric" title={t("Jobs queued until a token of this budget frees up.")}>{t("Waiting jobs")}</th>
+          <th scope="col" className="ui-numeric" title={t("Campaign hosts waiting for a token of this budget before they start.")}>{t("Waiting hosts")}</th>
           {canWrite && <th scope="col" />}
         </tr>
       </thead>
@@ -436,42 +436,42 @@ function BudgetRows({ budget, described, tone, canWrite, open, onEdit, onDone }:
     <>
       <tr data-testid="budget-row" data-key={budget.key}>
         <td>
-          <span className="mono">{budget.key}</span>
+          <span className="ui-mono">{budget.key}</span>
           {described.pattern && (
-            <>{" "}<span className="badge unknown" title={t("The default policy of every key of this family nobody described separately.")}>{t("default")}</span></>
+            <>{" "}<span className="ui-pill ui-unknown" title={t("The default policy of every key of this family nobody described separately.")}>{t("default")}</span></>
           )}
-          <div className="source">
+          <div className="ui-note">
             <KindLabel kind={described.kind} />
             {described.scope && !described.pattern && <> · {described.scope}</>}
             {" · "}{described.resource}
           </div>
         </td>
-        <td className="num">{budget.capacity}</td>
+        <td className="ui-numeric">{budget.capacity}</td>
         <td>
           <Meter value={budget.used} max={budget.capacity} tone={tone} text={`${budget.used} / ${budget.capacity}`} />
         </td>
         <td><Holders holders={budget.holders} /></td>
-        <td className="num">{budget.claimants}</td>
-        <td className="num">{share}</td>
-        <td className="num">
+        <td className="ui-numeric">{budget.claimants}</td>
+        <td className="ui-numeric">{share}</td>
+        <td className="ui-numeric">
           {/* The jobs in the queue are the job list's to show; the count
               here leads to them, because a number with nowhere to go only
               raises the question it could answer. */}
           {budget.waiting_jobs > 0
-            ? <Link to="/jobs?state=queued" className="badge warn">{budget.waiting_jobs}</Link>
+            ? <Link to="/jobs?state=queued" className="ui-pill ui-warn">{budget.waiting_jobs}</Link>
             : budget.waiting_jobs}
         </td>
-        <td className="num">
+        <td className="ui-numeric">
           {/* The waiting hosts are each on their campaign's screen; the
               count leads to the campaigns, the running ones among them. */}
           {budget.waiting_targets > 0
-            ? <Link to="/campaigns" className="badge warn">{budget.waiting_targets}</Link>
+            ? <Link to="/campaigns" className="ui-pill ui-warn">{budget.waiting_targets}</Link>
             : budget.waiting_targets}
         </td>
         {canWrite && (
           <td>
             <Actions>
-              <button className="secondary" onClick={onEdit} aria-expanded={open}>{open ? t("Close") : t("Edit")}</button>
+              <button className="ui-btn-secondary" onClick={onEdit} aria-expanded={open}>{open ? t("Close") : t("Edit")}</button>
               <DeleteBudget budget={budget} />
             </Actions>
           </td>
@@ -496,13 +496,13 @@ const HOLDERS_SHOWN = 4;
  */
 function Holders({ holders }: { holders: BudgetHolder[] }) {
   const t = useT();
-  if (holders.length === 0) return <span className="source">{t("nobody")}</span>;
+  if (holders.length === 0) return <span className="ui-note">{t("nobody")}</span>;
   const shown = holders.slice(0, HOLDERS_SHOWN);
   const rest = holders.length - shown.length;
   return (
-    <div className="stack" style={{ gap: 2 }} data-testid="budget-holders">
+    <div className="ui-stack" style={{ gap: 2 }} data-testid="budget-holders">
       {shown.map((holder) => <HolderLine key={holder.owner} holder={holder} />)}
-      {rest > 0 && <span className="source">{t("and {n} more", { n: rest })}</span>}
+      {rest > 0 && <span className="ui-note">{t("and {n} more", { n: rest })}</span>}
     </div>
   );
 }
@@ -511,13 +511,13 @@ function HolderLine({ holder }: { holder: BudgetHolder }) {
   const t = useT();
   const link = holderLink(holder);
   const name = link
-    ? <Link to={link.to} className="mono" title={holder.owner}>{holderName(link.label, t)}</Link>
-    : <span className="mono" title={holder.claimant}>{holder.owner}</span>;
+    ? <Link to={link.to} className="ui-mono" title={holder.owner}>{holderName(link.label, t)}</Link>
+    : <span className="ui-mono" title={holder.claimant}>{holder.owner}</span>;
   return (
-    <span className="source" data-testid="budget-holder" data-owner={holder.owner}>
+    <span className="ui-note" data-testid="budget-holder" data-owner={holder.owner}>
       {name}
       {" · "}
-      <span className={holder.class === "unknown" ? "badge unknown" : "badge"}>{classLabel(holder.class, t)}</span>
+      <span className={holder.class === "unknown" ? "ui-pill ui-unknown" : "ui-pill"}>{classLabel(holder.class, t)}</span>
       {" · "}
       {t("{n} tokens", { n: holder.tokens })}
       {" · "}
@@ -576,7 +576,7 @@ function DeleteBudget({ budget }: { budget: BudgetState }) {
               ? t("The default of this family goes away: a site nobody described separately is then unlimited for this resource.")
               : t("The key falls back to the default of its family, or to no limit at all when no default describes it. A deleted budget is not a budget of zero.")}
           </p>
-          {budget.used > 0 && <p className="page-error">{t("{n} tokens are held right now; the server will refuse until the work finishes.", { n: budget.used })}</p>}
+          {budget.used > 0 && <p className="ui-errorbox">{t("{n} tokens are held right now; the server will refuse until the work finishes.", { n: budget.used })}</p>}
         </>
       ),
       confirmLabel: t("Delete"),
@@ -588,7 +588,7 @@ function DeleteBudget({ budget }: { budget: BudgetState }) {
   // The row button is plain: a column of two dozen red buttons is a wall of
   // alarm where nothing is wrong.
   return (
-    <button className="secondary" onClick={ask} disabled={remove.isPending} data-testid="budget-delete" data-key={budget.key}>
+    <button className="ui-btn-secondary" onClick={ask} disabled={remove.isPending} data-testid="budget-delete" data-key={budget.key}>
       {t("Delete")}
     </button>
   );
@@ -631,18 +631,18 @@ function NewBudget({ existing, onDone }: { existing: string[]; onDone: () => voi
   });
 
   return (
-    <Card
+    <Panel
       title={t("New budget")}
       description={t("A capacity under a key the store reads: global:<resource> for the whole fleet, or site, domain, gateway or backend, a scope or an asterisk for the family's default, and the resource - mutations, reads, packages, reboot, units, backup.")}
       footer={
         <Actions>
           <button onClick={() => create.mutate()} disabled={!ready || create.isPending}>{create.isPending ? t("saving…") : t("Set the capacity")}</button>
-          <button className="secondary" onClick={onDone} disabled={create.isPending}>{t("Cancel")}</button>
-          {message && <span className="page-error">{message}</span>}
+          <button className="ui-btn-secondary" onClick={onDone} disabled={create.isPending}>{t("Cancel")}</button>
+          {message && <span className="ui-errorbox">{message}</span>}
         </Actions>
       }
     >
-      <FieldGrid>
+      <Fields>
         <Field
           label={t("Key")}
           hint={duplicate
@@ -651,7 +651,7 @@ function NewBudget({ existing, onDone }: { existing: string[]; onDone: () => voi
               ? t("Not a budget key: global:mutations, site:warsaw:packages, site:*:reads, domain:rack-1:units, backend:offsite:backup.")
               : t("Exact for one scope, or with an asterisk as the default every scope of the family gets.")}
         >
-          <input className="mono" value={key} placeholder="site:*:packages" onChange={(e) => setKey(e.target.value)} autoFocus aria-invalid={Boolean(trimmed) && (!validKey || duplicate)} data-testid="new-budget-key" />
+          <input className="ui-mono" value={key} placeholder="site:*:packages" onChange={(e) => setKey(e.target.value)} autoFocus aria-invalid={Boolean(trimmed) && (!validKey || duplicate)} data-testid="new-budget-key" />
         </Field>
         <Field label={t("Capacity")} hint={t("Tokens at once under this key; at least 1. To stop the work, pause the campaign instead.")}>
           <input type="number" min={1} step={1} value={capacity} onChange={(e) => setCapacity(e.target.value)} aria-invalid={!validCapacity} data-testid="new-budget-capacity" />
@@ -659,8 +659,8 @@ function NewBudget({ existing, onDone }: { existing: string[]; onDone: () => voi
         <Field label={t("Note (kept in the audit trail)")} hint={t("Why this capacity: the link of the site, the disk of the backend.")} wide>
           <input value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
-      </FieldGrid>
-    </Card>
+      </Fields>
+    </Panel>
   );
 }
 
@@ -714,24 +714,24 @@ function CapacityEditor({ budget, onDone }: { budget: BudgetState; onDone: () =>
 
   return (
     <>
-      <FieldGrid>
+      <Fields>
         <Field label={t("Capacity")} hint={t("Tokens at once under this key; at least 1. To stop the work, pause the campaign instead.")}>
           <input type="number" min={1} step={1} value={capacity} onChange={(e) => setCapacity(e.target.value)} aria-label={t("Capacity")} />
         </Field>
         <Field label={t("Note (kept in the audit trail)")} hint={t("Why this capacity: the link of the site, the disk of the backend.")} wide>
           <input value={note} onChange={(e) => setNote(e.target.value)} aria-label={t("Note")} />
         </Field>
-      </FieldGrid>
+      </Fields>
       <Actions>
         <button onClick={() => save.mutate()} disabled={!ready || save.isPending}>{t("Save")}</button>
-        <button className="secondary" onClick={onDone} disabled={save.isPending}>{t("Cancel")}</button>
-        {record.error && <span className="source">{record.error instanceof Error ? record.error.message : String(record.error)}</span>}
+        <button className="ui-btn-secondary" onClick={onDone} disabled={save.isPending}>{t("Cancel")}</button>
+        {record.error && <span className="ui-note">{record.error instanceof Error ? record.error.message : String(record.error)}</span>}
         {record.data && (
-          <span className="source">
+          <span className="ui-note">
             {t("Last changed")} <Time value={record.data.limit.updated_at} />
           </span>
         )}
-        {message && <span className="source">{message}</span>}
+        {message && <span className="ui-note">{message}</span>}
       </Actions>
     </>
   );

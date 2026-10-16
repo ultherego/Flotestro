@@ -2,8 +2,8 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../../lib/api";
 import type { DirectoryUser } from "../../lib/types";
-import { ErrorBox, Empty } from "../../components/ui";
-import { Actions, Card, Columns, Field, FieldGrid, Toolbar } from "../../components/layout";
+import { ErrorBox } from "../../components/ui";
+import { Actions, Cols, Empty, Field, Fields, Panel, Toolbar } from "../../ui/kit";
 import { useT } from "../../i18n";
 import { Forbidden, PlanImpact, ReasonField, lines, useDirectoryChange } from "./shared";
 
@@ -34,14 +34,14 @@ export function SshKeys() {
 
   return (
     <>
-      <p className="subtitle">
+      <p className="ui-note">
         {t("The public keys the directory hands to every host. The directory records a key and its fingerprint but not the day it was added, so no key age is shown: unknown is not zero. A private key never reaches the system.")}
       </p>
 
       <Toolbar end={<span>{t("{keys} keys on {users} accounts", { keys: total, users: withKeys.length })}</span>} />
 
       {editing && (
-        <Card
+        <Panel
           title={t("SSH keys of the account {uid}", { uid: editing.uid })}
           description={t("The complete set of keys, one per line; the directory replaces what it holds with this list.")}
           tone={typed.length === 0 ? "warn" : undefined}
@@ -54,56 +54,56 @@ export function SshKeys() {
                       }, { onSuccess: () => setEditing(null) })}>
                 {typed.length === 0 ? t("Plan removal of every key") : t("Plan keys")}
               </button>
-              <button className="secondary" onClick={() => setEditing(null)}>{t("Close")}</button>
-              {message && <p className="page-error">{message}</p>}
+              <button className="ui-btn-secondary" onClick={() => setEditing(null)}>{t("Close")}</button>
+              {message && <p className="ui-errorbox">{message}</p>}
             </Actions>
           }
         >
           {typed.length === 0 && (
-            <p className="warning"><span>{t("An empty list removes every key of the account and can cut off its SSH login.")}</span></p>
+            <p className="ui-banner"><span>{t("An empty list removes every key of the account and can cut off its SSH login.")}</span></p>
           )}
-          <p className="source">
+          <p className="ui-note">
             <strong>{t("Fingerprints now ({n})", { n: (editing.ssh_key_fingerprints ?? []).length })}:</strong>{" "}
-            <span className="mono">{(editing.ssh_key_fingerprints ?? []).join("; ") || "—"}</span>
+            <span className="ui-mono">{(editing.ssh_key_fingerprints ?? []).join("; ") || "—"}</span>
           </p>
-          <FieldGrid>
+          <Fields>
             <Field label={t("SSH public keys, one per line")} wide>
               <textarea rows={4} value={keys} onChange={(e) => setKeys(e.target.value)} placeholder="ssh-ed25519 AAAA… user@host" />
             </Field>
             <ReasonField value={reason} onChange={setReason} />
-          </FieldGrid>
-        </Card>
+          </Fields>
+        </Panel>
       )}
 
       {change && <PlanImpact change={change} />}
 
-      <Columns wide>
-        <Card title={t("Accounts with keys")} flush>
+      <Cols wide>
+        <Panel title={t("Accounts with keys")} flush>
           {!withKeys.length ? (
             <Empty>{t("No account has an SSH key in the directory.")}</Empty>
           ) : (
             <table>
-              <thead><tr><th scope="col">{t("Account")}</th><th scope="col" className="num">{t("Keys")}</th><th scope="col">{t("Fingerprints")}</th><th scope="col">{t("State")}</th><th scope="col"></th></tr></thead>
+              <thead><tr><th scope="col">{t("Account")}</th><th scope="col" className="ui-numeric">{t("Keys")}</th><th scope="col">{t("Fingerprints")}</th><th scope="col">{t("State")}</th><th scope="col"></th></tr></thead>
               <tbody>
                 {withKeys.map((user) => (
                   <tr key={user.uid}>
-                    <td className="mono">{user.uid}</td>
-                    <td className="num">{(user.ssh_key_fingerprints ?? []).length}</td>
-                    <td className="mono source">
+                    <td className="ui-mono">{user.uid}</td>
+                    <td className="ui-numeric">{(user.ssh_key_fingerprints ?? []).length}</td>
+                    <td className="ui-mono ui-note">
                       {(user.ssh_key_fingerprints ?? []).map((fingerprint, index) => <div key={index}>{fingerprint}</div>)}
                     </td>
-                    <td>{user.disabled ? <span className="badge error">{t("locked")}</span> : <span className="badge ok">{t("active")}</span>}</td>
-                    <td className="num">
-                      <button className="secondary" onClick={() => { setEditing(user); setKeys(""); }}>{t("Set keys")}</button>
+                    <td>{user.disabled ? <span className="ui-pill ui-error">{t("locked")}</span> : <span className="ui-pill ui-ok">{t("active")}</span>}</td>
+                    <td className="ui-numeric">
+                      <button className="ui-btn-secondary" onClick={() => { setEditing(user); setKeys(""); }}>{t("Set keys")}</button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
 
-        <Card title={t("Accounts without keys")} description={t("These accounts sign in with a password or not at all over SSH.")} flush>
+        <Panel title={t("Accounts without keys")} description={t("These accounts sign in with a password or not at all over SSH.")} flush>
           {!withoutKeys.length ? (
             <Empty>{t("Every account has at least one key.")}</Empty>
           ) : (
@@ -112,18 +112,18 @@ export function SshKeys() {
               <tbody>
                 {withoutKeys.map((user) => (
                   <tr key={user.uid}>
-                    <td className="mono">{user.uid}</td>
-                    <td>{user.disabled ? <span className="badge error">{t("locked")}</span> : <span className="badge ok">{t("active")}</span>}</td>
-                    <td className="num">
-                      <button className="secondary" onClick={() => { setEditing(user); setKeys(""); }}>{t("Set keys")}</button>
+                    <td className="ui-mono">{user.uid}</td>
+                    <td>{user.disabled ? <span className="ui-pill ui-error">{t("locked")}</span> : <span className="ui-pill ui-ok">{t("active")}</span>}</td>
+                    <td className="ui-numeric">
+                      <button className="ui-btn-secondary" onClick={() => { setEditing(user); setKeys(""); }}>{t("Set keys")}</button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-        </Card>
-      </Columns>
+        </Panel>
+      </Cols>
     </>
   );
 }

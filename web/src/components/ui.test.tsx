@@ -53,10 +53,10 @@ describe("ErrorCode", () => {
 
   it("marks a code that does not count as a failure as a source note", () => {
     const { container: quiet } = render(<ErrorCode code="E_LOCK_HELD" />);
-    expect(quiet.querySelector("code")).toHaveClass("source");
+    expect(quiet.querySelector("code")).toHaveClass("ui-note");
     cleanup();
     const { container: failure } = render(<ErrorCode code="E_PRECONDITION" />);
-    expect(failure.querySelector("code")).not.toHaveClass("source");
+    expect(failure.querySelector("code")).not.toHaveClass("ui-note");
     expect(failure.querySelector("code")?.getAttribute("title")).toContain("Retry: retry after the named change");
   });
 
@@ -85,32 +85,32 @@ const JOB_STATES = [
 describe("JobState and its meanings", () => {
   it.each(TARGET_STATES)("explains the target state %s on hover", (state) => {
     const { container } = render(<JobState state={state} />);
-    const badge = container.querySelector(".badge");
+    const badge = container.querySelector(".ui-pill");
     expect(badge).not.toBeNull();
     expect(badge?.getAttribute("title") ?? "").not.toBe("");
   });
 
   it.each(JOB_STATES)("explains the job state %s on hover", (state) => {
     const { container } = render(<JobState state={state} />);
-    const badge = container.querySelector(".badge");
+    const badge = container.querySelector(".ui-pill");
     expect(badge?.getAttribute("title") ?? "").not.toBe("");
   });
 
   it("colours the outcome, not the identifier", () => {
     const tone = (state: string) => {
       const { container } = render(<JobState state={state} />);
-      const className = container.querySelector(".badge")?.className ?? "";
+      const className = container.querySelector(".ui-pill")?.className ?? "";
       cleanup();
       return className.trim();
     };
-    expect(tone("succeeded")).toBe("badge ok");
-    expect(tone("failed")).toBe("badge error");
-    expect(tone("timed_out")).toBe("badge error");
+    expect(tone("succeeded")).toBe("ui-pill ui-ok");
+    expect(tone("failed")).toBe("ui-pill ui-error");
+    expect(tone("timed_out")).toBe("ui-pill ui-error");
     // Incapability and a skip are not failures: no red.
-    expect(tone("ineligible")).toBe("badge unknown");
-    expect(tone("skipped")).toBe("badge unknown");
-    expect(tone("awaiting_approval")).toBe("badge warn");
-    expect(tone("running")).toBe("badge");
+    expect(tone("ineligible")).toBe("ui-pill ui-unknown");
+    expect(tone("skipped")).toBe("ui-pill ui-unknown");
+    expect(tone("awaiting_approval")).toBe("ui-pill ui-warn");
+    expect(tone("running")).toBe("ui-pill ui-neutral");
   });
 
   it("names the state for the operator and keeps an unknown one as it came", () => {
@@ -119,29 +119,29 @@ describe("JobState and its meanings", () => {
     cleanup();
     const { container: unknown } = render(<JobState state="something_new" />);
     expect(unknown).toHaveTextContent("something_new");
-    expect(unknown.querySelector(".badge")).not.toHaveAttribute("title");
+    expect(unknown.querySelector(".ui-pill")).not.toHaveAttribute("title");
   });
 });
 
 describe("the unknown-is-not-zero widgets", () => {
   it("shows a missing number as unknown, a zero as zero", () => {
     const { container: missing } = render(<OptionalNumber value={null} />);
-    expect(missing.querySelector(".badge.unknown")).toHaveTextContent("unknown");
+    expect(missing.querySelector(".ui-pill.ui-unknown")).toHaveTextContent("unknown");
     cleanup();
     const { container: zero } = render(<OptionalNumber value={0} />);
     expect(zero).toHaveTextContent("0");
-    expect(zero.querySelector(".badge")).toBeNull();
+    expect(zero.querySelector(".ui-pill")).toBeNull();
     cleanup();
     const { container: some } = render(<OptionalNumber value={3} warnFrom={1} />);
-    expect(some.querySelector(".badge.warn")).toHaveTextContent("3");
+    expect(some.querySelector(".ui-pill.ui-warn")).toHaveTextContent("3");
   });
 
   it("shows a missing flag as unknown", () => {
     const { container: missing } = render(<OptionalFlag value={undefined} />);
-    expect(missing.querySelector(".badge.unknown")).toHaveTextContent("unknown");
+    expect(missing.querySelector(".ui-pill.ui-unknown")).toHaveTextContent("unknown");
     cleanup();
     const { container: yes } = render(<OptionalFlag value={true} />);
-    expect(yes.querySelector(".badge.warn")).toHaveTextContent("yes");
+    expect(yes.querySelector(".ui-pill.ui-warn")).toHaveTextContent("yes");
     cleanup();
     const { container: no } = render(<OptionalFlag value={false} />);
     expect(no).toHaveTextContent("no");
@@ -149,9 +149,9 @@ describe("the unknown-is-not-zero widgets", () => {
 
   it("gives the unknown connection state a look of its own", () => {
     const { container: unknown } = render(<ConnectionState state="unknown" />);
-    expect(unknown.querySelector(".badge")).toHaveClass("unknown");
+    expect(unknown.querySelector(".ui-pill")).toHaveClass("ui-unknown");
     cleanup();
     const { container: online } = render(<ConnectionState state="online" />);
-    expect(online.querySelector(".badge")).toHaveClass("ok");
+    expect(online.querySelector(".ui-pill")).toHaveClass("ui-ok");
   });
 });

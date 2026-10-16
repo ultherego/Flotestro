@@ -10,6 +10,7 @@ import { DEFAULT_MODULE } from "../lib/modules";
 import { hostPath } from "./HostPicker";
 import { useT } from "../i18n";
 import { Icon } from "./icons";
+import { toneClass } from "../ui/kit";
 
 /** How many hosts of the fleet one answer of the server holds; more is a narrower query away. */
 export const LIMIT = 20;
@@ -265,10 +266,10 @@ export function HostSelect() {
   const label = selected ? selected.hostname : t("Select host…");
 
   return (
-    <div className="host-picker" ref={container}>
+    <div className="ui-menu-anchor" ref={container}>
       <button
         type="button"
-        className={selected ? "host-picker-trigger host-select-trigger on-host" : "host-picker-trigger host-select-trigger"}
+        className={"ui-hostpicker-trigger"}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={t("Select a host")}
@@ -276,13 +277,13 @@ export function HostSelect() {
         onClick={() => (open ? setOpen(false) : show())}
       >
         <Icon name="hosts" />
-        <span className="host-picker-placeholder">{label}</span>
-        <kbd className="host-picker-key">Ctrl ⇧ K</kbd>
+        <span className="ui-faint">{label}</span>
+        <kbd className="ui-key">Ctrl ⇧ K</kbd>
       </button>
 
       {open && (
-        <div className="host-picker-popover">
-          <div className="host-picker-search">
+        <div className="ui-menu ui-hostpicker">
+          <div className="ui-hostpicker-search">
             <Icon name="search" />
             <input
               ref={input}
@@ -296,7 +297,7 @@ export function HostSelect() {
               onKeyDown={onKey}
             />
           </div>
-          <ul id={listID} role="listbox" className="host-picker-list" aria-label={t("Hosts")}>
+          <ul id={listID} role="listbox" className="ui-hostpicker-list" aria-label={t("Hosts")}>
             {rows.map((row, index) => {
               const current = selected?.id === row.host.id;
               const starred = favourites.includes(row.host.id);
@@ -307,9 +308,9 @@ export function HostSelect() {
                   role="option"
                   aria-selected={current}
                   className={[
-                    "host-picker-item",
-                    index === highlight ? "highlighted" : "",
-                    current ? "current" : "",
+                    "ui-hostpicker-item",
+                    index === highlight ? "ui-row-marked" : "",
+                    current ? "ui-active" : "",
                     // The first row of a group carries the heading.
                     index === 0 || rows[index - 1].group !== row.group ? `group-start group-${row.group.toLowerCase()}` : "",
                   ].join(" ").trim()}
@@ -320,12 +321,12 @@ export function HostSelect() {
                   onClick={() => choose(row)}
                 >
                   <ConnectionDot state={row.host.connection_state} />
-                  <span className="host-picker-name">{row.host.hostname}</span>
-                  {row.host.management_address && <span className="host-picker-address">{row.host.management_address}</span>}
-                  <span className="host-picker-meta">{hostMeta(row.host)}</span>
+                  <span className="ui-name">{row.host.hostname}</span>
+                  {row.host.management_address && <span className="ui-twoline-sub">{row.host.management_address}</span>}
+                  <span className="ui-row-s">{hostMeta(row.host)}</span>
                   <button
                     type="button"
-                    className={starred ? "host-picker-star on" : "host-picker-star"}
+                    className={starred ? "ui-star ui-on" : "ui-star"}
                     aria-pressed={starred}
                     title={starred ? t("Remove from favourites") : t("Add to favourites")}
                     onMouseDown={(event) => event.preventDefault()}
@@ -340,17 +341,17 @@ export function HostSelect() {
           {/* The states of the list stand where the rows would: a silent
               empty box does not say whether nothing matched or nothing
               arrived. */}
-          {(loadingRemembered || fleet.isLoading) && <p className="host-picker-note">{t("Loading…")}</p>}
+          {(loadingRemembered || fleet.isLoading) && <p className="ui-note">{t("Loading…")}</p>}
           {fleet.error && (
-            <p className="host-picker-note error">
+            <p className="ui-note ui-error">
               {t("Could not load hosts: {message}", { message: fleet.error instanceof Error ? fleet.error.message : String(fleet.error) })}
             </p>
           )}
           {fleet.data && rows.length === 0 && (
-            <p className="host-picker-note">{settled ? t("No host matches the query.") : t("No host is enrolled yet")}</p>
+            <p className="ui-note">{settled ? t("No host matches the query.") : t("No host is enrolled yet")}</p>
           )}
           {truncated && (
-            <p className="host-picker-note">{t("Showing the first {count} hosts; a longer query narrows the rest.", { count: LIMIT })}</p>
+            <p className="ui-note">{t("Showing the first {count} hosts; a longer query narrows the rest.", { count: LIMIT })}</p>
           )}
         </div>
       )}
@@ -361,5 +362,5 @@ export function HostSelect() {
 /** The connection state as a dot, in the same colours as the badge. */
 function ConnectionDot({ state }: { state: Host["connection_state"] }) {
   const kind = state === "online" ? "ok" : state === "offline" ? "error" : state === "stale" ? "warn" : "unknown";
-  return <span className={`dot ${kind}`} title={state} />;
+  return <span className={`ui-dot ${toneClass(kind)}`} title={state} />;
 }

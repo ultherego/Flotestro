@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { Time, Empty } from "../../components/ui";
+import { Time } from "../../components/ui";
 import { bytes } from "../../lib/format";
 import { Breakdown, Meter } from "../../components/widgets";
 import { ColumnChooser, Td, Th, useColumns, type ColumnDef } from "../../components/SortableTable";
@@ -13,6 +13,7 @@ import {
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 type Process = {
   pid: number;
@@ -68,11 +69,11 @@ export function kernelThread(process: Pick<Process, "pid" | "ppid">): boolean {
  */
 export function processColumns(t: (text: string) => string): ColumnDef[] {
   return [
-    { key: "pid", label: "PID", fixed: true, className: "hm-num" },
+    { key: "pid", label: "PID", fixed: true, className: "ui-numeric" },
     { key: "user", label: t("User") },
     { key: "memory", label: t("Memory") },
     { key: "cpu", label: t("CPU time share"), secondary: true },
-    { key: "threads", label: t("Threads"), secondary: true, className: "hm-num" },
+    { key: "threads", label: t("Threads"), secondary: true, className: "ui-numeric" },
     { key: "state", label: t("State") },
     { key: "managed_by", label: t("Managed by") },
     { key: "command", label: t("Command"), fixed: true },
@@ -200,11 +201,11 @@ export function Processes() {
         {listed ? (
           <Breakdown items={users.map(([user, count]) => ({ label: user, value: count }))} />
         ) : (
-          <p className="source">{t("Known after a read from the host.")}</p>
+          <p className="ui-note">{t("Known after a read from the host.")}</p>
         )}
         {listed && (
           <>
-            <p className="widget-subhead">{t("Managed by")}</p>
+            <p className="ui-subhead">{t("Managed by")}</p>
             <Breakdown
               items={[
                 { label: t("units"), value: countWhere(listed, (p) => !!p.unit && !p.container) ?? 0, tone: "info" },
@@ -229,7 +230,7 @@ export function Processes() {
             />
             {/* The tree nests children under parents; the flat slice
                 sorted by the chosen measure stays the default. */}
-            <label className="toggle">
+            <label className="ui-check">
               <input type="checkbox" checked={tree} onChange={(e) => setTree(e.target.checked)} />
               {t("Tree")}
             </label>
@@ -246,7 +247,7 @@ export function Processes() {
                 processes: without it, it would look like a full picture of
                 the host. */}
             {snapshot.truncated && (
-              <p className="warning">
+              <p className="ui-banner">
                 <span>
                   {t("Showing {shown} of {total} processes. Change the sort order to see a different slice.", {
                     shown: snapshot.processes?.length ?? 0, total: snapshot.total ?? 0,
@@ -273,10 +274,10 @@ export function Processes() {
                 {rows.map(({ process, depth, children }) => (
                   <tr key={process.pid}>
                     <Td columns={columns} name="pid">{process.pid}</Td>
-                    <Td columns={columns} name="user">{process.user || <span className="badge unknown">{t("unknown")}</span>}</Td>
+                    <Td columns={columns} name="user">{process.user || <span className="ui-pill ui-unknown">{t("unknown")}</span>}</Td>
                     <Td columns={columns} name="memory">
                       {kernelThread(process)
-                        ? <span className="source" title={t("A kernel thread has no address space of its own.")}>—</span>
+                        ? <span className="ui-note" title={t("A kernel thread has no address space of its own.")}>—</span>
                         : <Meter value={process.rss_bytes} max={maxRss} tone="info" text={bytes(process.rss_bytes)} />}
                     </Td>
                     <Td columns={columns} name="cpu">
@@ -290,21 +291,21 @@ export function Processes() {
                     <Td columns={columns} name="threads">{process.threads}</Td>
                     <Td columns={columns} name="state" title={process.state}>{t(stateWords(process.state))}</Td>
                     {/* The PID alone says nothing about whose process it is. */}
-                    <Td columns={columns} name="managed_by" className="hm-mono">
+                    <Td columns={columns} name="managed_by" className="ui-mono">
                       {process.container
                         ? `${t("container")} ${process.container.slice(0, 12)}`
-                        : process.unit || (kernelThread(process) ? <span className="source">{t("kernel")}</span> : "—")}
+                        : process.unit || (kernelThread(process) ? <span className="ui-note">{t("kernel")}</span> : "—")}
                     </Td>
                     {/* In the tree the command is indented by its depth and a
                         parent carries the fold; the flat table has neither. */}
-                    <Td columns={columns} name="command" className="hm-mono" title={process.command || process.name}>
+                    <Td columns={columns} name="command" className="ui-mono" title={process.command || process.name}>
                       {tree && depth > 0 && (
                         <span data-testid="process-indent" data-depth={depth} style={{ display: "inline-block", width: depth * 16 }} />
                       )}
                       {tree && children > 0 && (
                         <button
                           type="button"
-                          className="secondary"
+                          className="ui-btn-secondary"
                           onClick={() => toggleNode(process.pid)}
                           aria-expanded={!collapsed.has(process.pid)}
                           title={collapsed.has(process.pid) ? t("Show {n} children", { n: children }) : t("Hide children")}
@@ -323,17 +324,17 @@ export function Processes() {
                         cuts the host off until systemd brings it back. */}
                     <Td columns={columns} name="actions">
                       {process.pid === 1 || kernelThread(process) ? (
-                        <span className="source" title={process.pid === 1
+                        <span className="ui-note" title={process.pid === 1
                           ? t("PID 1 ignores signals it does not handle; a reboot is ordered on the Power tab.")
                           : t("A kernel thread cannot be signalled.")}>
                           {t("no signal")}
                         </span>
                       ) : (
                         <ActionGuard action="process.signal" host={host.id}>
-                          <div className="operations" title={agentProcess(process) ? t("This is the agent that carries out the order: the host goes offline until systemd restarts it.") : undefined}>
+                          <div className="ui-actions" title={agentProcess(process) ? t("This is the agent that carries out the order: the host goes offline until systemd restarts it.") : undefined}>
                             <button onClick={() => setToSignal({ process, signal: "TERM" })}>{t("Term")}</button>
                             <button onClick={() => setToSignal({ process, signal: "HUP" })}>HUP</button>
-                            <button className="hm-danger" onClick={() => setToSignal({ process, signal: "KILL" })}>{t("Kill")}</button>
+                            <button className="ui-btn-danger" onClick={() => setToSignal({ process, signal: "KILL" })}>{t("Kill")}</button>
                           </div>
                         </ActionGuard>
                       )}

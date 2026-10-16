@@ -51,7 +51,7 @@ async function viewerContext(browser: Browser, baseURL: string | undefined): Pro
 
 /** The section of the unit list on the Services page. */
 function unitList(page: Page) {
-  return page.locator(".hm-section").filter({ has: page.locator(".hm-section-head h3", { hasText: /^All units$/ }) });
+  return page.locator(".ui-panel").filter({ has: page.locator(".ui-panel-head h3", { hasText: /^All units$/ }) });
 }
 
 /** The job identifier of the next operation the page orders. */
@@ -97,7 +97,7 @@ test.describe("a viewer sees no mutating control", () => {
     await expect(filter.or(unread).first()).toBeVisible();
     if (await unread.isVisible()) {
       const ordered = nextJob(page, target.id);
-      await page.locator(".hm-header").getByRole("button", { name: "Read from host" }).click();
+      await page.locator(".ui-sectionhead").getByRole("button", { name: "Read from host" }).click();
       const job = await ordered;
       await expect.poll(() => jobState(request, job), { timeout: 60_000 }).toMatch(/^(succeeded|failed|timed_out|canceled|expired)$/);
       const state = await jobState(request, job);
@@ -114,7 +114,7 @@ test.describe("a viewer sees no mutating control", () => {
     const other = await context.newPage();
     const { errors } = watchErrors(other);
     await other.goto(`/hosts/${target.id}/services`);
-    await expect(other.locator(".hm-header").getByRole("heading", { name: "Services", exact: true })).toBeVisible();
+    await expect(other.locator(".ui-sectionhead").getByRole("heading", { name: "Services", exact: true })).toBeVisible();
     const viewerList = unitList(other);
     await expect(viewerList.locator("tbody tr").first()).toBeVisible();
     const notice = other.getByTestId("module-read-only");
@@ -126,10 +126,10 @@ test.describe("a viewer sees no mutating control", () => {
     await expect(other.getByRole("button", { name: "Mask" })).toHaveCount(0);
     // The one read of the page stays on the screen for the viewer, held
     // back and explained: a page whose only button is gone reads as broken.
-    const read = other.locator(".hm-header").getByRole("button", { name: "Read from host" });
+    const read = other.locator(".ui-sectionhead").getByRole("button", { name: "Read from host" });
     await expect(read).toBeVisible();
     await expect(read).toBeDisabled();
-    await expect(other.locator(".hm-header .action-guard-denied")).toHaveAttribute("title", /permission/);
+    await expect(other.locator(".ui-sectionhead .ui-guard-denied")).toHaveAttribute("title", /permission/);
     await expectHealthy(other, errors);
     await other.close();
   });
@@ -170,7 +170,7 @@ test.describe("a viewer sees no mutating control", () => {
       // A module header, the notice of a module the host does not back, or
       // the refusal of a record the viewer may not read: any of them is a
       // page that settled rather than crashed.
-      const settled = other.locator(".hm-header .hm-title").or(other.locator(".empty")).or(other.getByText(/is not available on/));
+      const settled = other.locator(".ui-sectionhead .ui-sectionhead-title").or(other.locator(".ui-empty")).or(other.getByText(/is not available on/));
       await expect(settled.first(), `${segment} did not settle`).toBeVisible();
       await expectHealthy(other, errors);
     }

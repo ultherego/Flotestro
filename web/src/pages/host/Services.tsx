@@ -5,9 +5,9 @@ import { api } from "../../lib/api";
 import { awaitJob, type JobAttempt } from "../../lib/jobs";
 import type { Job } from "../../lib/types";
 import { absoluteTime } from "../../lib/format";
-import { Time, Empty } from "../../components/ui";
+import { Time } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
-import { ColumnChooser, Td, Th, useColumns, type ColumnDef, type Columns } from "../../components/SortableTable";
+import { ColumnChooser, Td, Th, useColumns, type ColumnDef, type Cols } from "../../components/SortableTable";
 import {
   Fact, Facts, Foot, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere,
   registryOrder, useHost, useModule, useModuleRefresh,
@@ -16,6 +16,7 @@ import {
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 /* Every unit operation this page places goes through the operation
    registry, so the host page and the Bulk workspace send one payload and
@@ -281,11 +282,11 @@ export function Services() {
             <tbody>
               {failed.map((unit) => (
                 <tr key={unit}>
-                  <td className="hm-mono">
+                  <td className="ui-mono">
                     <Link to={`?unit=${encodeURIComponent(unit)}`}>{unit}</Link>
                   </td>
                   <td>
-                    <div className="operations">
+                    <div className="ui-actions">
                       <ActionGuard action="unit.restart" host={host.id}>
                         <button onClick={() => operation("unit.restart", unit)}>{t("Restart")}</button>
                       </ActionGuard>
@@ -295,7 +296,7 @@ export function Services() {
                       {/* Clearing the record after a fix: the next failure
                           is then told from the one already seen. */}
                       <ActionGuard action="unit.reset_failed" host={host.id}>
-                        <button className="secondary" onClick={() => operation("unit.reset_failed", unit)}>{t("Reset failed")}</button>
+                        <button className="ui-btn-secondary" onClick={() => operation("unit.reset_failed", unit)}>{t("Reset failed")}</button>
                       </ActionGuard>
                     </div>
                   </td>
@@ -318,7 +319,7 @@ export function Services() {
             ]}
           />
         ) : (
-          <p className="source">{t("Known after a read from the host.")}</p>
+          <p className="ui-note">{t("Known after a read from the host.")}</p>
         )}
       </Section>
 
@@ -334,7 +335,7 @@ export function Services() {
               value={filter}
               onChange={(e) => { setFilter(e.target.value); setLimit(UNIT_PAGE); }}
             />
-            <label className="toggle">
+            <label className="ui-check">
               <input
                 type="checkbox"
                 checked={activeOnly}
@@ -354,8 +355,8 @@ export function Services() {
                 its detail: the detail is its own read, not a row of the
                 list. */}
             {expanded && (
-              <div className="hm-section-body">
-                <p className="widget-subhead hm-mono">{expanded}</p>
+              <div className="ui-panel-body">
+                <p className="ui-subhead ui-mono">{expanded}</p>
                 <UnitDetailPanel
                   unit={{ name: expanded, load_state: "", active_state: "", sub_state: "" }}
                   detail={details[expanded]}
@@ -371,7 +372,7 @@ export function Services() {
             {/* A cut-off listing is marked: a list without that mark would
                 look complete. */}
             {listing.data.payload?.truncated && (
-              <p className="warning">
+              <p className="ui-banner">
                 <span>{t("The list was truncated by the host limit; narrow the filter on the host.")}</span>
               </p>
             )}
@@ -408,7 +409,7 @@ export function Services() {
                 <Time value={listing.data.observed_at} />
               </span>
               {units.length > page.length && (
-                <button className="secondary" onClick={() => setLimit((current) => current + UNIT_PAGE)}>
+                <button className="ui-btn-secondary" onClick={() => setLimit((current) => current + UNIT_PAGE)}>
                   {t("Show {n} more", { n: Math.min(UNIT_PAGE, units.length - page.length) })}
                 </button>
               )}
@@ -443,7 +444,7 @@ function UnitRow({
   hostID, columns, unit, expanded, detail, loading, error, onToggle, onRefresh, onOperation, onEnable, onUnmask, onMask,
 }: {
   hostID: string;
-  columns: Columns;
+  columns: Cols;
   unit: Unit;
   expanded: boolean;
   detail?: UnitDetail;
@@ -460,10 +461,10 @@ function UnitRow({
   return (
     <>
       <tr>
-        <Td columns={columns} name="unit" className="hm-mono">
+        <Td columns={columns} name="unit" className="ui-mono">
           <button
             type="button"
-            className="secondary"
+            className="ui-btn-secondary"
             onClick={onToggle}
             aria-expanded={expanded}
             title={expanded ? t("Hide the detail") : t("Show the detail")}
@@ -473,7 +474,7 @@ function UnitRow({
           {unit.name}
         </Td>
         <Td columns={columns} name="active">
-          <span className={unit.active_state === "active" ? "badge ok" : unit.active_state === "failed" ? "badge error" : "badge"}>
+          <span className={unit.active_state === "active" ? "ui-pill ui-ok" : unit.active_state === "failed" ? "ui-pill ui-error" : "ui-pill"}>
             {unit.active_state}
           </span>
         </Td>
@@ -484,7 +485,7 @@ function UnitRow({
               operator may order on this host: a viewer sees none of them,
               and a refused order is not the way to learn about a missing
               permission. */}
-          <div className="operations">
+          <div className="ui-actions">
             {unit.active_state === "active" ? (
               <>
                 <ActionGuard action="unit.restart" host={hostID}>
@@ -501,7 +502,7 @@ function UnitRow({
             )}
             {unit.active_state === "failed" && (
               <ActionGuard action="unit.reset_failed" host={hostID}>
-                <button className="secondary" onClick={() => onOperation("unit.reset_failed", unit.name)}>{t("Reset failed")}</button>
+                <button className="ui-btn-secondary" onClick={() => onOperation("unit.reset_failed", unit.name)}>{t("Reset failed")}</button>
               </ActionGuard>
             )}
             {/* Enabling changes the host's behaviour after a reboot, so it
@@ -517,7 +518,7 @@ function UnitRow({
               {unit.unit_file_state === "masked" ? (
                 <button onClick={onUnmask}>{t("Unmask")}</button>
               ) : (
-                <button className="hm-danger" onClick={onMask}>{t("Mask")}</button>
+                <button className="ui-btn-danger" onClick={onMask}>{t("Mask")}</button>
               )}
             </ActionGuard>
           </div>
@@ -550,16 +551,16 @@ function UnitDetailPanel({
   const t = useT();
   if (error) {
     return (
-      <div className="hm-section-body">
+      <div className="ui-panel-body">
         <Message text={error} error />
-        <div className="operations"><button className="secondary" onClick={onRefresh}>{t("Read again")}</button></div>
+        <div className="ui-actions"><button className="ui-btn-secondary" onClick={onRefresh}>{t("Read again")}</button></div>
       </div>
     );
   }
   if (!detail) {
     return (
-      <div className="hm-section-body">
-        <p className="source">
+      <div className="ui-panel-body">
+        <p className="ui-note">
           {loading ? t("Reading the unit from the host…") : t("The detail has not been read yet.")}
         </p>
       </div>
@@ -586,22 +587,22 @@ function UnitDetailPanel({
   };
 
   return (
-    <div className="hm-section-body" data-testid="unit-detail">
+    <div className="ui-panel-body" data-testid="unit-detail">
       <Facts>
         <Fact label={t("Description")} wide>{detail.description || "—"}</Fact>
-        <Fact label={t("Unit file")} wide><span className="hm-mono">{detail.fragment_path || "—"}</span></Fact>
+        <Fact label={t("Unit file")} wide><span className="ui-mono">{detail.fragment_path || "—"}</span></Fact>
         <Fact label={t("State")}>
-          <span className={state.active_state === "active" ? "badge ok" : state.active_state === "failed" ? "badge error" : "badge"}>
+          <span className={state.active_state === "active" ? "ui-pill ui-ok" : state.active_state === "failed" ? "ui-pill ui-error" : "ui-pill"}>
             {state.active_state}
           </span>{" "}
           {state.sub_state}
-          {state.result && state.result !== "success" && <span className="badge warn"> {state.result}</span>}
+          {state.result && state.result !== "success" && <span className="ui-pill ui-warn"> {state.result}</span>}
         </Fact>
         <Fact label={t("Main PID")}>{state.main_pid || "—"}</Fact>
         {/* A restart count above zero is the mark of a unit that keeps
             falling over: "active" alone would hide it. */}
         <Fact label={t("Restarts")}>
-          {(state.n_restarts ?? 0) > 0 ? <span className="badge warn">{state.n_restarts}</span> : state.n_restarts ?? "—"}
+          {(state.n_restarts ?? 0) > 0 ? <span className="ui-pill ui-warn">{state.n_restarts}</span> : state.n_restarts ?? "—"}
         </Fact>
         <Fact label={t("Main process started")}>
           {detail.exec_main_start
@@ -615,7 +616,7 @@ function UnitDetailPanel({
           its own detail opens. */}
       {dependencies.length > 0 && (
         <>
-          <p className="widget-subhead">{t("Dependencies")}</p>
+          <p className="ui-subhead">{t("Dependencies")}</p>
           {dependencies.map((group) => (
             <UnitChips key={group.label} label={group.label} units={group.units ?? []} />
           ))}
@@ -623,43 +624,43 @@ function UnitDetailPanel({
       )}
       {activation.length > 0 && (
         <>
-          <p className="widget-subhead">{t("Activation")}</p>
+          <p className="ui-subhead">{t("Activation")}</p>
           {activation.map((group) => (
             <UnitChips key={group.label} label={group.label} units={group.units ?? []} />
           ))}
         </>
       )}
 
-      <p className="widget-subhead">{t("Drop-ins")}</p>
+      <p className="ui-subhead">{t("Drop-ins")}</p>
       {!detail.drop_ins?.length ? (
-        <p className="source">{t("No override files.")}</p>
+        <p className="ui-note">{t("No override files.")}</p>
       ) : (
         (detail.drop_ins ?? []).map((dropIn) => (
           <div key={dropIn.path}>
-            <span className="hm-mono">{dropIn.path}</span>
+            <span className="ui-mono">{dropIn.path}</span>
             {dropIn.error ? (
-              <span className="badge unknown" title={dropIn.error}> {t("not read")}</span>
+              <span className="ui-pill ui-unknown" title={dropIn.error}> {t("not read")}</span>
             ) : (
-              <pre className="hm-log">{dropIn.content}{dropIn.truncated ? `\n… ${t("truncated")}` : ""}</pre>
+              <pre className="ui-log">{dropIn.content}{dropIn.truncated ? `\n… ${t("truncated")}` : ""}</pre>
             )}
           </div>
         ))
       )}
 
-      <p className="widget-subhead">{t("Last journal lines")}</p>
+      <p className="ui-subhead">{t("Last journal lines")}</p>
       {detail.journal_error ? (
-        <p className="warning"><span>{detail.journal_error}</span></p>
+        <p className="ui-banner"><span>{detail.journal_error}</span></p>
       ) : lines.length === 0 ? (
-        <p className="source">{t("The journal has nothing for this unit.")}</p>
+        <p className="ui-note">{t("The journal has nothing for this unit.")}</p>
       ) : (
-        <pre className="hm-log">{lines.join("\n")}</pre>
+        <pre className="ui-log">{lines.join("\n")}</pre>
       )}
-      <div className="operations">
+      <div className="ui-actions">
         {/* The Logs page continues right after the last line shown here:
             the cursor travels in the address. */}
-        <Link className="button" to={logs}>{t("Follow in Logs")}</Link>
-        <button className="secondary" onClick={onRefresh}>{t("Read again")}</button>
-        {detail.journal_truncated && <span className="source">{t("output truncated")}</span>}
+        <Link className="ui-btn" to={logs}>{t("Follow in Logs")}</Link>
+        <button className="ui-btn-secondary" onClick={onRefresh}>{t("Read again")}</button>
+        {detail.journal_truncated && <span className="ui-note">{t("output truncated")}</span>}
       </div>
     </div>
   );
@@ -668,10 +669,10 @@ function UnitDetailPanel({
 /** A labelled row of unit chips, each a link to its unit in the list. */
 function UnitChips({ label, units }: { label: string; units: string[] }) {
   return (
-    <div className="operations" style={{ alignItems: "center" }}>
-      <span className="source">{label}</span>
+    <div className="ui-actions" style={{ alignItems: "center" }}>
+      <span className="ui-note">{label}</span>
       {units.map((name) => (
-        <Link key={name} className="chip chip-mono" to={`?unit=${encodeURIComponent(name)}`}>{name}</Link>
+        <Link key={name} className="ui-tag ui-tag ui-mono" to={`?unit=${encodeURIComponent(name)}`}>{name}</Link>
       ))}
     </div>
   );

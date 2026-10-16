@@ -73,18 +73,98 @@ function everyRule(): string {
   return [...stylesheets, ...injected].join("\n");
 }
 
+/**
+ * A name the markup can produce, and nothing else.
+ *
+ * A template literal is read by standing every value its holes can take in
+ * turn and keeping the names that come out whole. A hole whose values
+ * cannot be read off the source - a variable, a call - stands as UNKNOWN,
+ * and any name it touches is dropped rather than guessed at: `ui-pill-`
+ * followed by a tone is not a name, but the `ui-pill` before it is.
+ *
+ * This was the hole the check had. It read className="..." and nothing
+ * else, so six names written as `` className={`ui-bar-fill ${tone}`} ``
+ * never reached it and had no rule in any stylesheet for weeks.
+ */
+const UNKNOWN = "\u0000";
+
+/** The holes of a template, split off from the text around them. */
+function pieces(template: string): { text: string[]; holes: string[] } {
+  const text: string[] = [];
+  const holes: string[] = [];
+  let at = 0;
+  let plain = "";
+  while (at < template.length) {
+    if (template.startsWith("${", at)) {
+      let depth = 1;
+      let quote = "";
+      let i = at + 2;
+      for (; i < template.length && depth > 0; i++) {
+        const c = template[i];
+        if (quote) {
+          if (c === "\\") i++;
+          else if (c === quote) quote = "";
+        } else if (c === '"' || c === "'" || c === "`") quote = c;
+        else if (c === "{") depth++;
+        else if (c === "}") depth--;
+      }
+      text.push(plain);
+      plain = "";
+      holes.push(template.slice(at + 2, i - 1));
+      at = i;
+      continue;
+    }
+    plain += template[at++];
+  }
+  text.push(plain);
+  return { text, holes };
+}
+
+/**
+ * What a hole can put in the markup.
+ *
+ * The strings an expression names are its candidates, except those being
+ * compared against - `state === "failed" ? "error" : "ok"` says nothing
+ * about a class called failed. UNKNOWN is always among them, because the
+ * expression may just as well return something this cannot see.
+ */
+function values(expression: string): string[] {
+  const compared = expression
+    .replace(/[!=]==?\s*(["'])(?:\\.|(?!\1).)*\1/g, " ")
+    .replace(/(["'])(?:\\.|(?!\1).)*\1\s*[!=]==?/g, " ");
+  const literals = [...compared.matchAll(/(["'])((?:\\.|(?!\1).)*)\1/g)].map((m) => m[2]);
+  return [...new Set([...literals, UNKNOWN])];
+}
+
+/** Every string the template can produce, up to a sane number of them. */
+function outcomes(template: string): string[] {
+  const { text, holes } = pieces(template);
+  let out = [text[0]];
+  holes.forEach((hole, i) => {
+    const next: string[] = [];
+    for (const so_far of out) for (const value of values(hole)) next.push(so_far + value + text[i + 1]);
+    out = next.slice(0, 64);
+  });
+  return out;
+}
+
+/** The class names a source file writes, each with the file it is in. */
+function namesWritten(text: string): string[] {
+  const names: string[] = [];
+  for (const m of text.matchAll(/className="([^"{}]+)"/g)) names.push(...m[1].split(/\s+/));
+  for (const m of text.matchAll(/className=\{`((?:[^`\\]|\\.)*)`\}/g)) {
+    for (const outcome of outcomes(m[1])) names.push(...outcome.split(/\s+/));
+  }
+  return names.filter((name) => name && !name.includes(UNKNOWN));
+}
+
 describe("the class names the panel's markup uses", () => {
   const styles = everyRule();
   const defined = new Set([...styles.matchAll(/\.([a-zA-Z][\w-]*)/g)].map((m) => m[1]));
   const used = new Map<string, string[]>();
   for (const path of sources(SRC, /\.tsx$/)) {
-    const text = readFileSync(path, "utf8");
-    // The literal form only: a name built at runtime is a condition over
-    // names that appear literally somewhere else.
-    for (const m of text.matchAll(/className="([^"{}]+)"/g)) {
-      for (const token of m[1].split(/\s+/).filter(Boolean)) {
-        used.set(token, [...(used.get(token) ?? []), path.slice(SRC.length + 1)]);
-      }
+    for (const token of namesWritten(readFileSync(path, "utf8"))) {
+      used.set(token, [...(used.get(token) ?? []), path.slice(SRC.length + 1)]);
     }
   }
 
@@ -120,6 +200,32 @@ describe("the class names the panel's markup uses", () => {
    * in front of the owner. A grid of tracks is the form; this refuses the
    * other one rather than trusting anybody to remember.
    */
+  /*
+   * The whole of the appearance is one namespace. The screens had grown
+   * three vocabularies for one job - card-, hm-section- and ui-panel- for
+   * the same box - and a rule outside the kit's namespace is how a fourth
+   * starts. The reset and the tokens style elements and nothing else, so
+   * every class selector in the stylesheets is a kit's.
+   *
+   * There are two kits while the panel is written again: `ui-` is the one
+   * being replaced and `fl-` is the one under /next. The pair is the whole
+   * of the transition - when the last screen has moved, `ui-` and its
+   * stylesheet go, and this is left naming one namespace.
+   */
+  it("are written in a kit's namespace and no other", () => {
+    const outside = new Set<string>();
+    for (const path of sources(SRC, /\.css$/)) {
+      for (const line of readFileSync(path, "utf8").split("\n")) {
+        const [head, brace] = [line.split("{")[0], line.includes("{")];
+        if (!brace) continue;
+        for (const found of head.matchAll(/\.([a-zA-Z][\w-]*)/g)) {
+          if (!/^(ui|fl)-/.test(found[1])) outside.add(found[1]);
+        }
+      }
+    }
+    expect([...outside].sort()).toEqual([]);
+  });
+
   it("lay tiles out in a grid, never in CSS columns", () => {
     const offenders: string[] = [];
     for (const path of sources(SRC, /\.css$/)) {

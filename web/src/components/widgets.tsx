@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useT } from "../i18n";
+import { toneClass } from "../ui/kit";
 
 /** The tone of a segment or a bar; it is a state colour, never the accent. */
 export type WidgetTone = "ok" | "warn" | "error" | "unknown" | "info" | "neutral";
@@ -57,10 +58,10 @@ export function StatusBar({ segments, compact = false }: { segments: Segment[]; 
   const draw = (segment: Segment, className: string, style?: React.CSSProperties) => {
     const body = (
       <>
-        <span className="status-bar-value" data-testid="status-bar-value">
+        <span className="ui-statusbar-value" data-testid="status-bar-value">
           {segment.value === undefined ? "\u2014" : segment.value}
         </span>
-        <span className="status-bar-label">{segment.label}</span>
+        <span className="ui-statusbar-label">{segment.label}</span>
       </>
     );
     return segment.to
@@ -75,29 +76,29 @@ export function StatusBar({ segments, compact = false }: { segments: Segment[]; 
   };
 
   return (
-    <div className={compact ? "status-bar-group compact" : "status-bar-group"}
+    <div className={compact ? "ui-statusbar-group ui-compact" : "ui-statusbar-group"}
       role="list" data-testid="status-bar">
-      {counted.length === 1 && draw(counted[0], `status-bar-hero ${counted[0].tone}`)}
+      {counted.length === 1 && draw(counted[0], `ui-statusbar-hero ${toneClass(counted[0].tone)}`)}
       {counted.length > 1 && (
-        <div className="status-bar">
+        <div className="ui-statusbar">
           {counted.map((segment) => draw(
             segment,
-            `status-bar-segment ${segment.tone}`,
+            `ui-statusbar-segment ${toneClass(segment.tone)}`,
             { "--share": (segment.value ?? 0) / total } as React.CSSProperties,
           ))}
         </div>
       )}
       {quiet.length > 0 && (
-        <div className="status-bar-quiet">
+        <div className="ui-statusbar-quiet">
           {/* A few states at zero are worth naming; a dozen are a wall of
               small type saying nothing happened. Past the fourth they are
               one chip, which still names them to anyone who hovers - and a
               state nobody could count is never in here, because unknown is
               not zero and is listed below under its own heading. */}
-          {quiet.slice(0, QUIET_NAMED).map((segment) => draw(segment, `status-bar-quiet-item ${segment.tone} zero`))}
+          {quiet.slice(0, QUIET_NAMED).map((segment) => draw(segment, `ui-statusbar-quiet-item ${toneClass(segment.tone)} ui-faint`))}
           {quiet.length > QUIET_NAMED && (
             <span
-              className="status-bar-quiet-item zero"
+              className="ui-statusbar-quiet-item ui-faint"
               data-testid="status-bar-more-at-zero"
               title={quiet.slice(QUIET_NAMED).map((segment) => segment.label).join(", ")}
             >
@@ -107,13 +108,13 @@ export function StatusBar({ segments, compact = false }: { segments: Segment[]; 
         </div>
       )}
       {uncounted.length > 0 && (
-        <div className="status-bar-uncounted" data-testid="status-bar-uncounted">
-          <span className="status-bar-uncounted-note">
+        <div className="ui-statusbar-uncounted" data-testid="status-bar-uncounted">
+          <span className="ui-note">
             {counted.length > 0
               ? t("Not counted, so what is above is a share of the rest:")
               : t("Not counted:")}
           </span>
-          {uncounted.map((segment) => draw(segment, `status-bar-quiet-item ${segment.tone} unset`))}
+          {uncounted.map((segment) => draw(segment, `ui-statusbar-quiet-item ${toneClass(segment.tone)} ui-unknown`))}
         </div>
       )}
     </div>
@@ -146,10 +147,10 @@ export function CountRow({ counts }: { counts: Segment[] }) {
   const draw = (count: Segment, className: string) => {
     const body = (
       <>
-        <span className="status-bar-value" data-testid="status-bar-value">
+        <span className="ui-statusbar-value" data-testid="status-bar-value">
           {count.value === undefined ? "\u2014" : count.value}
         </span>
-        <span className="status-bar-label">{count.label}</span>
+        <span className="ui-statusbar-label">{count.label}</span>
       </>
     );
     return count.to
@@ -158,21 +159,21 @@ export function CountRow({ counts }: { counts: Segment[] }) {
   };
 
   return (
-    <div className="status-bar-group" role="list" data-testid="status-bar">
+    <div className="ui-statusbar-group" role="list" data-testid="status-bar">
       {present.length > 0 && (
-        <div className="count-row">
-          {present.map((count) => draw(count, `count-tile ${count.tone}`))}
+        <div className="ui-counts">
+          {present.map((count) => draw(count, `ui-count-tile ${toneClass(count.tone)}`))}
         </div>
       )}
       {quiet.length > 0 && (
-        <div className="status-bar-quiet">
-          {quiet.map((count) => draw(count, `status-bar-quiet-item ${count.tone} zero`))}
+        <div className="ui-statusbar-quiet">
+          {quiet.map((count) => draw(count, `ui-statusbar-quiet-item ${toneClass(count.tone)} ui-faint`))}
         </div>
       )}
       {uncounted.length > 0 && (
-        <div className="status-bar-uncounted" data-testid="status-bar-uncounted">
-          <span className="status-bar-uncounted-note">{t("Not counted:")}</span>
-          {uncounted.map((count) => draw(count, `status-bar-quiet-item ${count.tone} unset`))}
+        <div className="ui-statusbar-uncounted" data-testid="status-bar-uncounted">
+          <span className="ui-note">{t("Not counted:")}</span>
+          {uncounted.map((count) => draw(count, `ui-statusbar-quiet-item ${toneClass(count.tone)} ui-unknown`))}
         </div>
       )}
     </div>
@@ -210,14 +211,14 @@ export function BarChart({
   for (let v = 0; v <= top; v += step) ticks.push(v);
   return (
     <>
-      <svg className="chart" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img">
+      <svg className="ui-chart" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img">
         {ticks.map((v) => (
           <g key={v}>
-            <line className="grid" x1={pad.left} x2={width - pad.right} y1={y(v)} y2={y(v)} />
+            <line className="ui-chart-grid" x1={pad.left} x2={width - pad.right} y1={y(v)} y2={y(v)} />
             <text x={pad.left - 6} y={y(v) + 4} textAnchor="end">{v}</text>
           </g>
         ))}
-        <line className="axis" x1={pad.left} x2={width - pad.right} y1={y(0)} y2={y(0)} />
+        <line className="ui-chart-axis" x1={pad.left} x2={width - pad.right} y1={y(0)} y2={y(0)} />
         {labels.map((label, i) => {
           let base = 0;
           const x = pad.left + i * slot + (slot - barW) / 2;
@@ -229,7 +230,7 @@ export function BarChart({
                 const y1 = y(base + value);
                 const h = y(base) - y1;
                 base += value;
-                return <rect key={s.name} className={`bar ${s.tone}`} x={x} y={y1} width={barW} height={h} />;
+                return <rect key={s.name} className={`ui-chartbar ${toneClass(s.tone)}`} x={x} y={y1} width={barW} height={h} />;
               })}
               {i % everyLabel === 0 && (
                 <text x={x + barW / 2} y={height - 6} textAnchor="middle">{label}</text>
@@ -239,8 +240,8 @@ export function BarChart({
         })}
       </svg>
       {series.length > 1 && (
-        <ul className="chart-legend">
-          {series.map((s) => <li key={s.name}><span className={`swatch ${s.tone}`} />{s.name}</li>)}
+        <ul className="ui-chart-legend">
+          {series.map((s) => <li key={s.name}><span className={`ui-swatch ${toneClass(s.tone)}`} />{s.name}</li>)}
         </ul>
       )}
     </>
@@ -331,14 +332,14 @@ export function AreaChart({
     : labelAt.map((i) => (times[i] === undefined ? undefined : { at: x(i), iso: times[i] }));
 
   return (
-    <svg className="chart" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img">
+    <svg className="ui-chart" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img">
       {ticks.map((v) => (
         <g key={v}>
-          <line className="grid" x1={pad.left} x2={width - pad.right} y1={y(v)} y2={y(v)} />
+          <line className="ui-chart-grid" x1={pad.left} x2={width - pad.right} y1={y(v)} y2={y(v)} />
           <text x={pad.left - 6} y={y(v) + 4} textAnchor="end">{format(v)}</text>
         </g>
       ))}
-      <line className="axis" x1={pad.left} x2={width - pad.right} y1={y(0)} y2={y(0)} />
+      <line className="ui-chart-axis" x1={pad.left} x2={width - pad.right} y1={y(0)} y2={y(0)} />
       {/* The band under a line fades out downwards instead of sitting at one
           flat wash. A constant fill competes with the gridlines at the
           bottom of the chart and makes two overlapping series unreadable
@@ -360,7 +361,7 @@ export function AreaChart({
             {!s.line && runs(s.values).map((run, k) => (
               <path
                 key={k}
-                className="area"
+                className="ui-chart-area"
                 style={{ fill: `url(#area-${s.tone})` }}
                 d={`${runPath(run, x, y)} L${x(run[run.length - 1].i).toFixed(1)},${y(0).toFixed(1)} L${x(run[0].i).toFixed(1)},${y(0).toFixed(1)} Z`}
               />
@@ -368,7 +369,7 @@ export function AreaChart({
             {runs(s.values).map((run, k) => (
               run.length === 1
                 ? <circle key={k} cx={x(run[0].i)} cy={y(run[0].value)} r={2} style={{ fill: colour }} />
-                : <path key={k} className="line" vectorEffect="non-scaling-stroke" style={{ stroke: colour }} d={runPath(run, x, y)} />
+                : <path key={k} className="ui-chart-line" vectorEffect="non-scaling-stroke" style={{ stroke: colour }} d={runPath(run, x, y)} />
             ))}
           </g>
         );
@@ -376,7 +377,7 @@ export function AreaChart({
       {peak && series[0] && runs(peak).map((run, k) => (
         <path
           key={k}
-          className="line"
+          className="ui-chart-line"
           vectorEffect="non-scaling-stroke"
           style={{ stroke: `var(${TONE_VAR[series[0].tone]})` }}
           strokeWidth={1}
@@ -389,7 +390,7 @@ export function AreaChart({
           the reader was left to measure it against the axis by eye. The
           label is held inside the frame so it cannot be cut off. */}
       {highest > 0 && topPoint && (
-        <g className="chart-peak" data-testid="chart-peak">
+        <g className="ui-chart-peak" data-testid="chart-peak">
           <circle cx={x(topPoint.i)} cy={y(topPoint.value)} r={3.5} />
           <rect
             x={Math.min(Math.max(x(topPoint.i) - 26, pad.left), width - pad.right - 52)}
@@ -399,7 +400,7 @@ export function AreaChart({
             rx={4}
           />
           <text
-            className="chart-peak-label"
+            className="ui-chart-peaklabel"
             x={Math.min(Math.max(x(topPoint.i), pad.left + 26), width - pad.right - 26)}
             y={Math.max(y(topPoint.value) - 12, 14)}
             textAnchor="middle"
@@ -446,11 +447,11 @@ function shortTime(iso: string): string {
 /** The names of the series under a chart, each with its swatch; a dashed one is a peak line. */
 export function ChartLegend({ items }: { items: { name: string; tone: WidgetTone | "accent"; dashed?: boolean }[] }) {
   return (
-    <ul className="chart-legend">
+    <ul className="ui-chart-legend">
       {items.map((item) => (
         <li key={item.name}>
           <span
-            className="swatch"
+            className="ui-swatch"
             style={{ "--swatch": `var(${TONE_VAR[item.tone]})`, opacity: item.dashed ? 0.55 : 1 } as React.CSSProperties}
           />
           {item.name}
@@ -467,7 +468,7 @@ export function ChartLegend({ items }: { items: { name: string; tone: WidgetTone
 export function Breakdown({ items, tone = "info" }: { items: { label: ReactNode; value: number; tone?: WidgetTone }[]; tone?: WidgetTone }) {
   const max = Math.max(1, ...items.map((item) => item.value));
   return (
-    <dl className="breakdown">
+    <dl className="ui-barlist">
       {items.map((item, i) => (
         <BreakdownRow key={i} label={item.label} value={item.value} share={item.value / max} tone={item.tone ?? tone} />
       ))}
@@ -477,11 +478,11 @@ export function Breakdown({ items, tone = "info" }: { items: { label: ReactNode;
 
 function BreakdownRow({ label, value, share, tone }: { label: ReactNode; value: number; share: number; tone: WidgetTone }) {
   return (
-    <>
+    <div className="ui-barlist-row">
       <dt>{label}</dt>
-      <dd><div className="breakdown-bar"><div className={`breakdown-fill ${tone}`} style={{ width: `${Math.round(share * 100)}%` }} /></div></dd>
-      <dd className="breakdown-count">{value}</dd>
-    </>
+      <dd><div className="ui-bar"><div className={`ui-bar-fill ${toneClass(tone)}`} style={{ width: `${Math.round(share * 100)}%` }} /></div></dd>
+      <dd className="ui-barlist-count">{value}</dd>
+    </div>
   );
 }
 
@@ -489,9 +490,9 @@ function BreakdownRow({ label, value, share, tone }: { label: ReactNode; value: 
 export function Meter({ value, max, tone = "info", text }: { value: number; max: number; tone?: WidgetTone; text?: ReactNode }) {
   const share = max > 0 ? Math.min(1, value / max) : 0;
   return (
-    <span className="meter">
-      <span className="meter-track"><span className={`meter-fill ${tone}`} style={{ width: `${Math.round(share * 100)}%` }} /></span>
-      <span className="meter-value">{text ?? value}</span>
+    <span className="ui-meter">
+      <span className="ui-bar"><span className={`ui-bar-fill ${toneClass(tone)}`} style={{ width: `${Math.round(share * 100)}%` }} /></span>
+      <span className="ui-meter-value">{text ?? value}</span>
     </span>
   );
 }

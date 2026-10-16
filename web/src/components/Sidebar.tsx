@@ -3,36 +3,12 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import { useT } from "../i18n";
 import { useStoredState } from "../lib/storage";
-import { Icon, type IconName } from "./icons";
+import { Icon } from "./icons";
 import { LogoMark } from "./Logo";
+import { toneClass } from "../ui/kit";
 
-export type NavItem = {
-  to: string;
-  /** The English label; it goes through the translation catalogue. */
-  label: string;
-  icon: IconName;
-  /** Overrides the router's prefix match where two items share a prefix. */
-  active?: (pathname: string) => boolean;
-  /** The reason the item has no backing here; it stays listed, dimmed. */
-  unavailable?: string;
-};
-
-export type NavGroup = {
-  /** The storage key of the fold state; it must not change between versions. */
-  key: string;
-  /** The English heading; a group without one is a single top-level item. */
-  label?: string;
-  items: NavItem[];
-};
-
-/**
- * The navigation has two faces, never both at once: the fleet, and one host.
- */
-export type NavFace = {
-  groups: NavGroup[];
-  /** Set on a host page: the address of the fleet view the modules replace. */
-  back?: { to: string; label: string };
-};
+export type { NavItem, NavGroup, NavFace } from "../lib/navigation";
+import type { NavFace } from "../lib/navigation";
 
 const GROUPS_KEY = "flotestro.sidebar.groups";
 
@@ -132,20 +108,20 @@ export function Sidebar({ face, collapsed, open, onClose }: {
     setFolded((current) => ({ ...current, [key]: !current[key] }));
 
   return (
-    <aside className={["sidebar", collapsed ? "collapsed" : "", open ? "open" : ""].join(" ").trim()}>
+    <aside className={["ui-sidebar", collapsed ? "ui-folded" : "", open ? "ui-open" : ""].join(" ").trim()}>
       {/* The brand is a link to the dashboard: the one place every page
           can be left for, and the drawer closes behind it like behind any
           other item. */}
-      <Link to="/dashboard" className="sidebar-brand" onClick={onClose} title={t("Fleet dashboard")}>
-        <span className="sidebar-mark" aria-hidden="true"><LogoMark size={26} ground="color-mix(in srgb, var(--accent) 16%, var(--bg-sidebar))" /></span>
-        <span className="sidebar-title">Flotestro</span>
+      <Link to="/dashboard" className="ui-sidebar-brand" onClick={onClose} title={t("Fleet dashboard")}>
+        <span className="ui-sidebar-mark" aria-hidden="true"><LogoMark size={26} ground="color-mix(in srgb, var(--accent) 16%, var(--bg-sidebar))" /></span>
+        <span className="ui-sidebar-title">Flotestro</span>
       </Link>
 
-      <nav className="sidebar-nav" aria-label={t("Main navigation")}>
+      <nav className="ui-sidebar-nav" aria-label={t("Main navigation")}>
         {face.back && (
-          <NavLink to={face.back.to} className="sidebar-item sidebar-back" onClick={onClose} title={t(face.back.label)}>
+          <NavLink to={face.back.to} className="ui-sidebar-item ui-sidebar-back" onClick={onClose} title={t(face.back.label)}>
             <Icon name="back" />
-            <span className="sidebar-item-label">{t(face.back.label)}</span>
+            <span className="ui-sidebar-item-label">{t(face.back.label)}</span>
           </NavLink>
         )}
         {face.groups.map((group) => {
@@ -154,23 +130,23 @@ export function Sidebar({ face, collapsed, open, onClose }: {
           const holdsActive = group.items.some((item) =>
             item.active ? item.active(location.pathname) : location.pathname.startsWith(item.to));
           return (
-            <div key={group.key} className={["sidebar-group", closed ? "closed" : ""].join(" ").trim()}>
+            <div key={group.key} className={["ui-sidebar-group", closed ? "ui-closed" : ""].join(" ").trim()}>
               {group.label && (
                 <button
                   type="button"
-                  className="sidebar-group-head"
+                  className="ui-sidebar-group-head"
                   onClick={() => toggleGroup(group.key)}
                   aria-expanded={!closed}
                   title={t(group.label)}
                 >
-                  <span className="sidebar-group-label">{t(group.label)}</span>
+                  <span className="ui-sidebar-group-label">{t(group.label)}</span>
                   {/* A closed group with the open page inside keeps a mark,
                       so the operator can still see where they are. */}
-                  {closed && holdsActive && <span className="sidebar-group-dot" aria-hidden="true" />}
-                  <Icon name="chevron" className="sidebar-group-chevron" />
+                  {closed && holdsActive && <span className="ui-sidebar-group-dot" aria-hidden="true" />}
+                  <Icon name="chevron" className="ui-sidebar-group-chevron" />
                 </button>
               )}
-              <ul className="sidebar-items">
+              <ul className="ui-sidebar-items">
                 {group.items.map((item) => {
                   const badge = badgeFor(item.to, counts.data);
                   return (
@@ -179,18 +155,18 @@ export function Sidebar({ face, collapsed, open, onClose }: {
                         to={item.to}
                         className={({ isActive }) => {
                           const on = item.active ? item.active(location.pathname) : isActive;
-                          return ["sidebar-item", on ? "active" : "", item.unavailable ? "unavailable" : ""].join(" ").trim();
+                          return ["ui-sidebar-item", on ? "ui-active" : "", item.unavailable ? "ui-unavailable" : ""].join(" ").trim();
                         }}
                         title={item.unavailable ?? t(item.label)}
                         onClick={onClose}
                       >
                         <Icon name={item.icon} />
-                        <span className="sidebar-item-label">{t(item.label)}</span>
+                        <span className="ui-sidebar-item-label">{t(item.label)}</span>
                         {/* The count of what waits behind the item; the rail
                             of icons has no room for it and drops it. */}
                         {badge && !collapsed && (
                           <span
-                            className={`badge ${badge.tone}`}
+                            className={`ui-pill ${toneClass(badge.tone)}`}
                             style={{ marginLeft: "auto" }}
                             title={t(badge.title)}
                             data-testid="sidebar-badge"

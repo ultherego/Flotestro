@@ -12,6 +12,7 @@ import {
   emptyForm, operationForm, type FormProblem, type FormValue,
 } from "../../lib/operations";
 import { useT } from "../../i18n";
+import { Fact, Facts, Fields, toneClass } from "../../ui/kit";
 
 /** The host context comes from the layout, so a tab does not fetch it again. */
 export function useHost(): Host {
@@ -122,7 +123,7 @@ export function refusalOf(
 
 /** The page wrapper: it spaces the header, the tiles and the sections. */
 export function ModulePage({ children }: { children: ReactNode }) {
-  return <div className="hm-page">{children}</div>;
+  return <div className="ui-stack-l">{children}</div>;
 }
 
 /** How many of the twelve columns of the widget grid a block takes. */
@@ -133,7 +134,7 @@ export type Span = 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12;
  * how many it spans.
  */
 export function Widgets({ children }: { children: ReactNode }) {
-  return <div className="widgets">{children}</div>;
+  return <div className="ui-grid">{children}</div>;
 }
 
 /**
@@ -192,13 +193,13 @@ export function ModuleHeader({
   // The address is /hosts/:id/<segment>; the segment names the module.
   const mark = icon ?? moduleOf(location.pathname.split("/")[3] ?? "")?.icon;
   return (
-    <header className="hm-header">
-      {mark && <span className="hm-mark" aria-hidden="true"><Icon name={mark} /></span>}
-      <div className="hm-header-text">
-        <h2 className="hm-title">{title}</h2>
-        {description && <p className="hm-lede">{description}</p>}
+    <header className="ui-sectionhead">
+      {mark && <span className="ui-sectionhead-mark" aria-hidden="true"><Icon name={mark} /></span>}
+      <div className="ui-sectionhead-text">
+        <h2 className="ui-sectionhead-title">{title}</h2>
+        {description && <p className="ui-lede">{description}</p>}
       </div>
-      {actions && <div className="hm-actions">{actions}</div>}
+      {actions && <div className="ui-actions">{actions}</div>}
     </header>
   );
 }
@@ -220,14 +221,14 @@ export function Section({
   children: ReactNode;
 }) {
   return (
-    <section className={span ? `hm-section span-${span}` : "hm-section"}>
-      <header className="hm-section-head">
-        <h3>{title}</h3>
-        {count !== undefined && <span className="hm-count">{count}</span>}
-        {tools && <div className="hm-tools">{tools}</div>}
+    <section className={span ? `ui-panel ui-col-${span}` : "ui-panel"}>
+      <header className="ui-panel-head">
+        <h3 className="ui-panel-title">{title}</h3>
+        {count !== undefined && <span className="ui-count">{count}</span>}
+        {tools && <div className="ui-panel-actions">{tools}</div>}
       </header>
-      {description && <p className="hm-section-desc">{description}</p>}
-      {flush ? children : <div className="hm-section-body">{children}</div>}
+      {description && <p className="ui-panel-note">{description}</p>}
+      {flush ? children : <div className="ui-panel-body">{children}</div>}
     </section>
   );
 }
@@ -235,34 +236,24 @@ export function Section({
 /** A table inside a section: the wrapper scrolls sideways, the page never does. */
 export function Table({ keyed, children }: { keyed?: boolean; children: ReactNode }) {
   return (
-    <div className={keyed ? "hm-table keyed" : "hm-table"}>
-      <table>{children}</table>
+    <div className={keyed ? "ui-table-holder ui-keyed" : "ui-table-holder"}>
+      <table className="ui-table">{children}</table>
     </div>
   );
 }
 
 /** The quiet line under a table: counts, origin, the observation time. */
 export function Foot({ children }: { children: ReactNode }) {
-  return <p className="hm-foot">{children}</p>;
+  return <p className="ui-panel-foot">{children}</p>;
 }
 
-/** Key/value facts as a grid: the label over the value. */
-export function Facts({ children }: { children: ReactNode }) {
-  return <dl className="hm-facts">{children}</dl>;
-}
-
-export function Fact({ label, wide, children }: { label: ReactNode; wide?: boolean; children: ReactNode }) {
-  return (
-    <div className={wide ? "hm-fact wide" : "hm-fact"}>
-      <dt>{label}</dt>
-      <dd>{children}</dd>
-    </div>
-  );
-}
+/* A fact, a field and a row of tiles are the kit's; a host page draws the
+   same ones every other screen does. */
+export { Facts, Fact, Fields };
 
 /** Summary tiles: the numbers that decide whether the rest is worth reading. */
 export function Stats({ span, children }: { span?: Span; children: ReactNode }) {
-  return <div className={span ? `hm-stats span-${span}` : "hm-stats"}>{children}</div>;
+  return <div className={span ? `ui-stats ui-col-${span}` : "ui-stats"}>{children}</div>;
 }
 
 export function Stat({
@@ -275,10 +266,10 @@ export function Stat({
   tone?: "ok" | "warn" | "error" | "unknown";
 }) {
   return (
-    <div className={tone ? `hm-stat ${tone}` : "hm-stat"}>
-      <span className="hm-stat-label">{label}</span>
-      <span className="hm-stat-value">{value}</span>
-      {hint && <span className="hm-stat-hint">{hint}</span>}
+    <div className={tone ? `ui-stat ui-stat-s ${toneClass(tone)}` : "ui-stat ui-stat-s"}>
+      <div className="ui-stat-value">{value}</div>
+      <div className="ui-stat-foot"><span className="ui-stat-label">{label}</span></div>
+      {hint && <p className="ui-stat-note">{hint}</p>}
     </div>
   );
 }
@@ -286,7 +277,7 @@ export function Stat({
 /** An undetermined number in a tile: unknown is not zero. */
 export function Unknown() {
   const t = useT();
-  return <span className="badge unknown">{t("unknown")}</span>;
+  return <span className="ui-pill ui-unknown">{t("unknown")}</span>;
 }
 
 /**
@@ -295,28 +286,24 @@ export function Unknown() {
  */
 export function Message({ text, error }: { text: string; error?: boolean }) {
   if (!text) return null;
-  return <p className={error ? "hm-message error" : "hm-message"}>{text}</p>;
+  return <p className={error ? "ui-message ui-error" : "ui-message"}>{text}</p>;
 }
 
 /** A form: fields in a grid, then the actions. */
 export function Form({ children }: { children: ReactNode }) {
-  return <div className="hm-form">{children}</div>;
-}
-
-export function Fields({ children }: { children: ReactNode }) {
-  return <div className="hm-fields">{children}</div>;
+  return <div className="ui-form">{children}</div>;
 }
 
 /** A labelled field with optional help text under the control. */
 export function Field({
   label, help, wide, narrow, children,
 }: { label: ReactNode; help?: ReactNode; wide?: boolean; narrow?: boolean; children: ReactNode }) {
-  const className = ["hm-field", wide ? "wide" : "", narrow ? "narrow" : ""].filter(Boolean).join(" ");
+  const className = ["ui-field", wide ? "ui-wide" : "", narrow ? "ui-narrow" : ""].filter(Boolean).join(" ");
   return (
     <label className={className}>
-      <span className="hm-field-label">{label}</span>
+      <span className="ui-field-label">{label}</span>
       {children}
-      {help && <span className="hm-field-help">{help}</span>}
+      {help && <span className="ui-field-hint">{help}</span>}
     </label>
   );
 }
@@ -326,7 +313,7 @@ export function Check({
   checked, onChange, disabled, children,
 }: { checked: boolean; onChange: (value: boolean) => void; disabled?: boolean; children: ReactNode }) {
   return (
-    <label className="hm-check">
+    <label className="ui-check">
       <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       <span>{children}</span>
     </label>
@@ -334,12 +321,12 @@ export function Check({
 }
 
 export function FormActions({ children }: { children: ReactNode }) {
-  return <div className="hm-form-actions">{children}</div>;
+  return <div className="ui-actions">{children}</div>;
 }
 
 /** A sentence under the form that the operator is to read before submitting. */
 export function FormNote({ children }: { children: ReactNode }) {
-  return <p className="hm-form-note">{children}</p>;
+  return <p className="ui-field-hint">{children}</p>;
 }
 
 /**
@@ -349,13 +336,13 @@ export function ModuleFreshness({ fragment }: { fragment?: InventoryFragment<unk
   const t = useT();
   if (!fragment) return null;
   return (
-    <p className="hm-freshness" data-testid="module-freshness">
+    <p className="ui-freshness" data-testid="module-freshness">
       <span>
         {t("Source: {source}, revision {revision}, observed", { source: fragment.source, revision: fragment.revision.slice(0, 12) })}{" "}
         <Time value={fragment.observed_at} />
       </span>
       {fragment.unavailable_reason && (
-        <span className="unread">{t("could not be read: {reason}", { reason: fragment.unavailable_reason })}</span>
+        <span className="ui-warn">{t("could not be read: {reason}", { reason: fragment.unavailable_reason })}</span>
       )}
     </p>
   );
@@ -378,9 +365,9 @@ export function JobNotice({ job, hostID }: { job: Job; hostID: string }) {
     : t("Job {id} has been queued.");
   const [before, after = ""] = sentence.split("{id}");
   return (
-    <p className="hm-message" data-testid="job-notice">
+    <p className="ui-message" data-testid="job-notice">
       {before}
-      <Link to={`/jobs/${job.id}`} className="hm-mono">{job.id.slice(0, 8)}</Link>
+      <Link to={`/jobs/${job.id}`} className="ui-mono">{job.id.slice(0, 8)}</Link>
       {after}
       {" "}
       <Link to={`/hosts/${hostID}/jobs`}>{t("See all jobs")}</Link>
@@ -431,7 +418,7 @@ export function RequestOperation({
     <Section title={t("Request an operation")} description={description} span={span}>
       {/* The target repeated right at the button: the operator approves a
           specific machine, not "the host I think I have open". */}
-      <p className="source">
+      <p className="ui-note">
         {t("Target: {host}", { host: host.hostname })}
         {host.management_address ? ` · ${host.management_address}` : ` · ${t("address unknown")}`}
         {` · ${host.site} / ${host.environment}`}

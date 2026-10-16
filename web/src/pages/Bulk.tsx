@@ -5,8 +5,8 @@ import { api, ApiError, type Collection } from "../lib/api";
 import type {
   Campaign, CampaignTarget, Facet, FleetActivity, OperationContract, ResourceClaim, SelectorExpression,
 } from "../lib/types";
-import { ErrorBox, Empty, JobState, Time } from "../components/ui";
-import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
+import { ErrorBox, JobState, Time } from "../components/ui";
+import { Actions, Empty, Field, Fields, PageHead, Panel, toneClass } from "../ui/kit";
 import { OperationForm } from "../components/OperationForm";
 import {
   operationForm, readPayloadText, startingForm, type FormValue,
@@ -125,21 +125,21 @@ export function Bulk() {
   if (!capabilities.campaign_v2) {
     return (
       <>
-        <PageHeader title={t("Bulk Workspace")}
+        <PageHead title={t("Bulk Workspace")}
         help={<p>{t("A campaign built in steps: what runs, where it runs, when it may run and what is checked afterwards. Nothing leaves this screen until the consent at the end, and the consent covers exactly what the screen shows.")}</p>}
       />
-        <Card>
+        <Panel>
           <Empty>
             {t("This installation runs operations host by host: the backend has no campaign engine, so there is no set of per-host plans to approve.")}
           </Empty>
-        </Card>
+        </Panel>
       </>
     );
   }
 
   return (
     <>
-      <PageHeader
+      <PageHead
         title={t("Bulk Workspace")}
         description={t("Choose the target, read the refusals, run the change.")}
         help={<p>{t("Choose the target, read the refusals, run the change. One host at a time lives in the host workspace; this is where the fleet is changed.")}</p>}
@@ -148,7 +148,7 @@ export function Bulk() {
       <ScopeBar order={order} preview={preview.data} campaign={campaign.data}
         targets={eligible} risk={chosenOperation?.risk} />
 
-      <ol className="bulk-steps">
+      <ol className="ui-tabs ui-tabs-steps">
         {STEPS.map((title, index) => {
           // A step opens once every gate before it is open.
           const closed = gates.slice(0, index).find((gate) => !gate.open);
@@ -156,14 +156,14 @@ export function Bulk() {
           return (
             <li key={title}>
               <button
-                className={index === step ? "step active" : "step"}
+                className={index === step ? "ui-stack ui-active" : "ui-stack"}
                 onClick={() => setStep(index)}
                 disabled={Boolean(closed)}
                 title={closed?.reason}
               >
-                <span className="number">{index + 1}</span>
-                <span className="title">{t(title)}</span>
-                {closed && first && <span className="reason">{closed.reason}</span>}
+                <span className="ui-numeric">{index + 1}</span>
+                <span className="ui-name">{t(title)}</span>
+                {closed && first && <span className="ui-reason">{closed.reason}</span>}
               </button>
             </li>
           );
@@ -244,7 +244,7 @@ function StepNav({ step, setStep, gates }: { step: number; setStep: (step: numbe
   const last = step >= STEPS.length - 1;
   return (
     <Actions>
-      <button type="button" className="secondary" onClick={() => setStep(step - 1)} disabled={step === 0}
+      <button type="button" className="ui-btn-secondary" onClick={() => setStep(step - 1)} disabled={step === 0}
         title={step === 0 ? t("This is the first step.") : undefined}>
         {t("Back")}
       </button>
@@ -254,7 +254,7 @@ function StepNav({ step, setStep, gates }: { step: number; setStep: (step: numbe
           {t("Next: {step}", { step: t(STEPS[step + 1]) })}
         </button>
       )}
-      {!last && !gate.open && <span className="source">{t("Before going on: {reason}.", { reason: gate.reason })}</span>}
+      {!last && !gate.open && <span className="ui-note">{t("Before going on: {reason}.", { reason: gate.reason })}</span>}
     </Actions>
   );
 }
@@ -868,7 +868,7 @@ export function ContractChips({ contract }: { contract: OperationContract }) {
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
       {chips.map(([label, meaning, kind]) => (
-        <span key={label} className={`badge ${kind}`} title={meaning}>{label}</span>
+        <span key={label} className={`ui-pill ${toneClass(kind)}`} title={meaning}>{label}</span>
       ))}
     </div>
   );
@@ -1096,17 +1096,17 @@ function ScopeBar({
 }) {
   const t = useT();
   return (
-    <div className="scope-bar">
-      <div className="identity">
-        <span className="name">{order.name || t("unnamed campaign")}</span>
-        <span className="action">
+    <div className="ui-scopebar">
+      <div className="ui-stack-xs">
+        <span className="ui-name">{order.name || t("unnamed campaign")}</span>
+        <span className="ui-note">
           {order.action || t("no operation")}
           {/* The risk class of the operation decides the approvals and the
               step-up; it stays in view for the whole wizard. */}
-          {risk && <span className={`badge ${risk === "critical" ? "error" : risk === "high" ? "warn" : ""}`}>{risk}</span>}
+          {risk && <span className={`ui-pill ${risk === "critical" ? "ui-error" : risk === "high" ? "ui-warn" : ""}`}>{risk}</span>}
         </span>
       </div>
-      <div className="facts">
+      <div className="ui-facts">
         <span>
           {t("targets")}: <strong>{targets}</strong>
           {order.hostIDs.length > 0
@@ -1132,7 +1132,7 @@ function ScopeBar({
             {/* The fingerprint is what the consent applies to. Without it
                 "approved" does not say what was approved; the snapshot time
                 says which fleet it was taken of. */}
-            <span className="source">
+            <span className="ui-note">
               {t("fingerprint")} {campaign.approval_fingerprint.slice(0, 12)} · {t("snapshot")} <Time value={campaign.created_at} />
             </span>
           </>
@@ -1190,18 +1190,18 @@ function ScopeStep({
   const formed = wizardOperations(bulk);
   const payloadValid = orderPayload(order) !== null;
   return (
-    <Card
-      className="measure"
+    <Panel
+      className="ui-measure"
       title={`1. ${t("Scope")}`}
       description={t("Name the campaign and pick what it does on every host; the next step chooses the hosts. Only operations the registry opens to the fleet are listed - an operation missing here is a deliberate refusal, not a missing screen.")}
     flush
     >
       {refusal && (
-        <p className="page-error">
+        <p className="ui-errorbox">
           {t("{action} does not run as a campaign: {reason}", { action: order.action, reason: refusal })}
         </p>
       )}
-      <FieldGrid>
+      <Fields>
         <Field label={t("Name")} hint={t("How the campaign is listed and searched for, e.g. \"September security updates, web tier\".")}>
           <input
             placeholder={t("campaign name")}
@@ -1265,7 +1265,7 @@ function ScopeStep({
             />
           </Field>
         )}
-      </FieldGrid>
+      </Fields>
       {/* The operation's own fields come from the registry, so the wizard
           and the host page ask for the same things in the same words. The
           key resets the advanced view when another operation is picked. */}
@@ -1283,13 +1283,13 @@ function ScopeStep({
           JSON is one the registry has not reached yet, not a boundary
           somebody drew. */}
       {bulk.length > 0 && formed.length < bulk.length && (
-        <p className="source">
+        <p className="ui-note">
           {t("{formed} of the {n} operations open to the fleet have a form here; the rest are ordered by typing their payload.",
             { formed: formed.length, n: bulk.length })}
         </p>
       )}
       {preview?.requires_plan && (
-        <p className="subtitle">
+        <p className="ui-note">
           {order.action === RENAME_OPERATION
             ? t("The mapping is split host by host: every host's plan is its own new name, and you approve the set of names, not one payload.")
             : t("Every host computes its own plan first. You approve the set of plans, not one payload, and a host whose plan changed in the meantime refuses the change.")}
@@ -1297,7 +1297,7 @@ function ScopeStep({
       )}
       {refusals.length > 0 && (
         <details>
-          <summary className="subtitle">
+          <summary className="ui-note">
             {t("{n} operations change hosts but cannot run as a campaign — with reasons", { n: refusals.length })}
           </summary>
           <table>
@@ -1305,8 +1305,8 @@ function ScopeStep({
             <tbody>
               {refusals.map((item) => (
                 <tr key={item.action}>
-                  <td className="mono">{item.action}</td>
-                  <td className="source">{item.campaign_refusal}</td>
+                  <td className="ui-mono">{item.action}</td>
+                  <td className="ui-note">{item.campaign_refusal}</td>
                 </tr>
               ))}
             </tbody>
@@ -1314,7 +1314,7 @@ function ScopeStep({
         </details>
       )}
       {nav}
-    </Card>
+    </Panel>
   );
 }
 
@@ -1368,8 +1368,8 @@ function MappingEditor({
       {/* A table of inputs is not one field: a label around it would
           send every click to the first input, so the frame is drawn by
           hand with the field classes. */}
-      <div className="field wide">
-        <span className="field-label">{t("New names, one host at a time")}</span>
+      <div className="ui-field ui-wide">
+        <span className="ui-field-label">{t("New names, one host at a time")}</span>
         <table>
           <thead><tr><th scope="col">{t("Current hostname")}</th><th scope="col">{t("New FQDN")}</th><th scope="col"></th></tr></thead>
           <tbody>
@@ -1377,10 +1377,10 @@ function MappingEditor({
               const name = order.mapping[host.id] ?? "";
               return (
                 <tr key={host.id}>
-                  <td className="mono">{host.hostname}</td>
+                  <td className="ui-mono">{host.hostname}</td>
                   <td>
                     <input
-                      className="mono"
+                      className="ui-mono"
                       value={name}
                       placeholder={t("new.fqdn.example")}
                       onChange={(e) => setName(host.id, e.target.value)}
@@ -1389,24 +1389,24 @@ function MappingEditor({
                   </td>
                   <td>
                     {name.trim() === ""
-                      ? <span className="badge error">{t("no new name")}</span>
+                      ? <span className="ui-pill ui-error">{t("no new name")}</span>
                       : name.trim().toLowerCase() === host.hostname.toLowerCase()
-                        ? <span className="badge">{t("unchanged")}</span>
-                        : <span className="badge ok">{t("renames")}</span>}
+                        ? <span className="ui-pill">{t("unchanged")}</span>
+                        : <span className="ui-pill ui-ok">{t("renames")}</span>}
                   </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-        <span className="field-hint">
+        <span className="ui-field-hint">
           {rows.length === 0
             ? t("No host matched yet: the rows come from the hosts the Targets step names, and with nothing set there, from the whole fleet.")
             : t("{named} of {n} matched hosts have a new name. A host without one stays in the snapshot as ineligible; nothing is renamed to a default.", { named, n: rows.length })}
         </span>
       </div>
-      <div className="field wide">
-        <span className="field-label">{t("Paste as CSV")}</span>
+      <div className="ui-field ui-wide">
+        <span className="ui-field-label">{t("Paste as CSV")}</span>
         <textarea
           rows={4}
           value={pasted}
@@ -1414,11 +1414,11 @@ function MappingEditor({
           placeholder={"web01.old.example,web01.new.example\nweb02,web02.new.example"}
           spellCheck={false}
         />
-        <span className="field-hint">
+        <span className="ui-field-hint">
           {t("One host per line: hostname,fqdn. The hostname is matched to the rows above, full or short; a line that matches no host stays in the box.")}
         </span>
         <Actions>
-          <button type="button" className="secondary" onClick={applyPaste} disabled={!pasted.trim()}
+          <button type="button" className="ui-btn-secondary" onClick={applyPaste} disabled={!pasted.trim()}
             title={pasted.trim() ? undefined : t("Paste at least one line first.")}>
             {t("Apply the pasted names")}
           </button>
@@ -1513,8 +1513,8 @@ function TargetsStep({
   const names = selectorNames(order);
   const matched = matchedState(Boolean(names), count, checking);
   return (
-    <Card
-      className="measure"
+    <Panel
+      className="ui-measure"
       title={`2. ${t("Targets")}`}
       description={t("Choose the hosts one of three ways: by site, environment and OS; by groups and tags; or by picking them from a list. The count below is the server's answer; the next step says which of those hosts can run the operation.")}
       footer={
@@ -1547,27 +1547,27 @@ function TargetsStep({
             )}
             {order.targetMode !== "hosts" && "."}
           </p>
-          <div className="source">{(preview?.sample ?? []).join(", ")}</div>
+          <div className="ui-note">{(preview?.sample ?? []).join(", ")}</div>
           <Distribution preview={preview} />
           {nav}
         </div>
       }
     >
-      <FieldGrid>
+      <Fields>
         {TARGET_WAYS.map(([mode, label, meaning]) => (
-          <div key={mode} className="field">
-            <label className="toggle">
+          <div key={mode} className="ui-field">
+            <label className="ui-check">
               <input type="radio" name="bulk-target-mode" value={mode}
                 checked={order.targetMode === mode} onChange={() => chooseMode(mode)} />{" "}
               {t(label)}
             </label>
-            <span className="field-hint">{t(meaning)}</span>
+            <span className="ui-field-hint">{t(meaning)}</span>
           </div>
         ))}
-      </FieldGrid>
+      </Fields>
 
       {order.targetMode === "filters" && (
-        <FieldGrid>
+        <Fields>
           <Field label={t("Site")} hint={t("Pick one the fleet has, or type any; empty means every site.")}>
             <input
               placeholder={t("any site")}
@@ -1595,12 +1595,12 @@ function TargetsStep({
             />
             <FacetList id="bulk-os-families" facets={facets.data?.by_os_family} />
           </Field>
-        </FieldGrid>
+        </Fields>
       )}
 
       {order.targetMode === "expression" && (
         <>
-          <FieldGrid>
+          <Fields>
             <Field label={t("Group")} hint={t("Optional; the rules below narrow it further.")}>
               <select value={order.group} onChange={(e) => change({ group: e.target.value })}>
                 <option value="">{t("no group")}</option>
@@ -1609,7 +1609,7 @@ function TargetsStep({
                 ))}
               </select>
             </Field>
-          </FieldGrid>
+          </Fields>
           <SelectorBuilder
             rules={order.rules}
             combine={order.combine}
@@ -1618,9 +1618,9 @@ function TargetsStep({
           />
           {/* The expression as the campaign will carry it: the structure
               the server compiles, not a sentence the panel made up. */}
-          <p className="source">
+          <p className="ui-note">
             {expression
-              ? <>{t("the campaign will carry")} <span className="mono">{describeExpression(expression)}</span></>
+              ? <>{t("the campaign will carry")} <span className="ui-mono">{describeExpression(expression)}</span></>
               : t("pick a group or give a rule a value; until then the selector names nobody")}
           </p>
         </>
@@ -1639,14 +1639,14 @@ function TargetsStep({
           must not touch, and that host is left out by name, with a reason. */}
       {order.targetMode !== "hosts" && (
         <>
-          <h4 className="widget-subhead">{t("Exclude")}</h4>
-          <p className="subtitle">
+          <h4 className="ui-subhead">{t("Exclude")}</h4>
+          <p className="ui-note">
             {order.exclude.length === 0
               ? t("Optional. A host the selector matches but the change must not touch is left out here by name; it stays in the snapshot as excluded, with the reason and your name next to it.")
               : t("{n} hosts left out by name; each stays in the snapshot as excluded, with the reason and your name next to it.", { n: order.exclude.length })}
           </p>
           {order.exclude.length > 0 && (
-            <FieldGrid>
+            <Fields>
               <Field label={t("Reason for the exclusions")} hint={t("Required; it is what the approver reads next to every excluded host.")} wide>
                 <input
                   placeholder={t("e.g. the database primary; failing over first")}
@@ -1654,28 +1654,28 @@ function TargetsStep({
                   onChange={(e) => change({ excludeReason: e.target.value })}
                 />
               </Field>
-            </FieldGrid>
+            </Fields>
           )}
           {excluding ? (
             <>
               <HostChooser title={t("Hosts to leave out")} selected={new Set(order.exclude)} onChange={(next) => change({ exclude: [...next] })} />
               <Actions>
-                <button type="button" className="secondary" onClick={() => setExcluding(false)}>{t("Done choosing")}</button>
+                <button type="button" className="ui-btn-secondary" onClick={() => setExcluding(false)}>{t("Done choosing")}</button>
               </Actions>
             </>
           ) : (
             <Actions>
-              <button type="button" className="secondary" onClick={() => setExcluding(true)}>
+              <button type="button" className="ui-btn-secondary" onClick={() => setExcluding(true)}>
                 {order.exclude.length === 0 ? t("Exclude hosts by name") : t("Change the excluded hosts")}
               </button>
               {order.exclude.length > 0 && (
-                <button type="button" className="secondary" onClick={() => change({ exclude: [], excludeReason: "" })}>{t("Clear the exclusions")}</button>
+                <button type="button" className="ui-btn-secondary" onClick={() => change({ exclude: [], excludeReason: "" })}>{t("Clear the exclusions")}</button>
               )}
             </Actions>
           )}
         </>
       )}
-    </Card>
+    </Panel>
   );
 }
 
@@ -1696,9 +1696,9 @@ function Distribution({ preview }: { preview?: Preview }) {
     capability: t("capability"),
   };
   return (
-    <div className="distribution">
+    <div className="ui-stack-s">
       {dimensions.map(([dimension, groups]) => (
-        <div key={dimension} className="source">
+        <div key={dimension} className="ui-note">
           {names[dimension] ?? dimension}:{" "}
           {groups.map((group) => `${group.reason} ${group.count}`).join(", ")}
         </div>
@@ -1726,8 +1726,8 @@ function EligibilityStep({ order, preview, checking, nav }: { order: Order; prev
     ? (preview?.hosts ?? []).filter((host) => (order.mapping[host.id] ?? "").trim() !== "").slice(0, 12).map((host) => host.hostname)
     : preview?.sample ?? [];
   return (
-    <Card
-      className="measure"
+    <Panel
+      className="ui-measure"
       title={`3. ${t("Eligibility")}`}
       description={t("Nothing to fill in here: read which of the matched hosts can run the operation and why the rest cannot, then go on to the rollout. A host that cannot run it stays in the snapshot with its reason; dropping it quietly would hide a decision nobody made.")}
       footer={
@@ -1740,19 +1740,19 @@ function EligibilityStep({ order, preview, checking, nav }: { order: Order; prev
     >
       <table>
         <thead>
-          <tr><th scope="col">{t("Bucket")}</th><th scope="col" className="num">{t("Hosts")}</th><th scope="col">{t("Which")}</th></tr>
+          <tr><th scope="col">{t("Bucket")}</th><th scope="col" className="ui-numeric">{t("Hosts")}</th><th scope="col">{t("Which")}</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><span className="badge ok">{t("eligible")}</span></td>
-            <td className="num">{eligible}</td>
-            <td className="source">{sample.join(", ")}</td>
+            <td><span className="ui-pill ui-ok">{t("eligible")}</span></td>
+            <td className="ui-numeric">{eligible}</td>
+            <td className="ui-note">{sample.join(", ")}</td>
           </tr>
           {excluded.map((group) => (
             <tr key={group.reason}>
-              <td><span className="badge error">{reasonName(t, group.reason)}</span></td>
-              <td className="num">{group.count}</td>
-              <td className="source">{group.sample.join(", ")}</td>
+              <td><span className="ui-pill ui-error">{reasonName(t, group.reason)}</span></td>
+              <td className="ui-numeric">{group.count}</td>
+              <td className="ui-note">{group.sample.join(", ")}</td>
             </tr>
           ))}
           {/* A note does not exclude the host. An offline host comes back
@@ -1760,14 +1760,14 @@ function EligibilityStep({ order, preview, checking, nav }: { order: Order; prev
               else's lock. */}
           {notes.map((group) => (
             <tr key={group.reason}>
-              <td><span className="badge warn">{reasonName(t, group.reason)}</span></td>
-              <td className="num">{group.count}</td>
-              <td className="source">{group.sample.join(", ")}</td>
+              <td><span className="ui-pill ui-warn">{reasonName(t, group.reason)}</span></td>
+              <td className="ui-numeric">{group.count}</td>
+              <td className="ui-note">{group.sample.join(", ")}</td>
             </tr>
           ))}
         </tbody>
       </table>
-    </Card>
+    </Panel>
   );
 }
 
@@ -1818,8 +1818,8 @@ function RolloutStep({
   const offered = OFFLINE_POLICIES.filter((policy, index) =>
     index >= declaredIndex && (policy !== "replan_on_reconnect" || declaredPolicy === "replan_on_reconnect"));
   return (
-    <Card
-      className="measure"
+    <Panel
+      className="ui-measure"
       title={`4. ${t("Rollout")}`}
       description={
         <>
@@ -1839,7 +1839,7 @@ function RolloutStep({
         </>
       }
     >
-      <FieldGrid>
+      <Fields>
         <Field label={t("Canary hosts")} hint={t("How many hosts go first, alone, before any wave; 0 skips the canary.")}>
           <input type="number" min={0} value={order.canary}
             onChange={(e) => change({ canary: +e.target.value })} />
@@ -1902,8 +1902,8 @@ function RolloutStep({
         {/* A gate after the canary needs a canary to gate on: with none the
             box is off, and the hint says why rather than leaving a control
             that does nothing. */}
-        <div className="field">
-          <label className="toggle">
+        <div className="ui-field">
+          <label className="ui-check">
             <input
               type="checkbox"
               checked={order.manualGate && order.canary > 0}
@@ -1913,11 +1913,11 @@ function RolloutStep({
             {t("stop after the canary until somebody advances the campaign")}
           </label>
           {order.canary <= 0 && (
-            <span className="field-hint">{t("A manual gate needs a canary: set the canary above 0 to stop after it.")}</span>
+            <span className="ui-field-hint">{t("A manual gate needs a canary: set the canary above 0 to stop after it.")}</span>
           )}
         </div>
-      </FieldGrid>
-    </Card>
+      </Fields>
+    </Panel>
   );
 }
 
@@ -1943,13 +1943,13 @@ function WindowStep({
   const scheduleFault = scheduleWords(t, scheduleProblem(schedule, new Date()));
   const changeSchedule = (delta: Partial<ScheduleChoice>) => change({ schedule: { ...schedule, ...delta } });
   return (
-    <Card
-      className="measure"
+    <Panel
+      className="ui-measure"
       title={`5. ${t("Window and verification")}`}
       description={t("Say when the change may run and what is checked afterwards; everything here is optional, and left empty the campaign runs as soon as it is approved and verifies nothing. Both go into the fingerprint the approver signs; the next step creates the campaign.")}
       footer={nav}
     >
-      <FieldGrid>
+      <Fields>
         <Field label={t("Window opens")}
           hint={problem === "start_past" || problem === "start_invalid"
             ? windowWords(t, problem)
@@ -1969,7 +1969,7 @@ function WindowStep({
             ? t("One unit per line or comma-separated, named as the hosts name them - the same service is called differently on different distributions. Checked on every host right after the change, or after the reboot when one follows; empty means nothing is verified.")
             : t("{n} units will be checked on every host once its change is done.", { n: units.length })}
           wide>
-          <textarea rows={3} className="mono" value={order.healthCheckUnits}
+          <textarea rows={3} className="ui-mono" value={order.healthCheckUnits}
             placeholder={t("A unit of these hosts, one per line")}
             onChange={(e) => change({ healthCheckUnits: e.target.value })} spellCheck={false} />
         </Field>
@@ -1982,23 +1982,23 @@ function WindowStep({
           <input type="number" min={0} max={JOB_TIMEOUT.max} step={30} value={order.jobTimeoutSeconds}
             onChange={(e) => change({ jobTimeoutSeconds: +e.target.value })} />
         </Field>
-        <div className="field wide">
-          <span className="field-hint">
+        <div className="ui-field ui-wide">
+          <span className="ui-field-hint">
             {t("Every campaign waits for an approval before anything runs: the approver signs the operation, the payload, the host list, the rollout policy and the set of plans as one fingerprint.")}
           </span>
         </div>
-      </FieldGrid>
+      </Fields>
       {/* The order kept for a moment instead of placed now. The schedule
           places this same order through the same door at its moments, so
           everything above still applies to each campaign it places - the
           window, the checks, the approval. */}
-      <FieldGrid>
-        <div className="field wide">
-          <label className="toggle">
+      <Fields>
+        <div className="ui-field ui-wide">
+          <label className="ui-check">
             <input type="checkbox" checked={schedule.enabled} onChange={(e) => changeSchedule({ enabled: e.target.checked })} />{" "}
             {t("Schedule instead of ordering now")}
           </label>
-          <span className="field-hint">
+          <span className="ui-field-hint">
             {schedule.enabled
               ? scheduleFault || t("The order is kept and placed at its moments under your rights as they stand then; each campaign waits for its approval. Listed under Campaigns › Schedules.")
               : t("Keep the order for a moment ahead, once or on a monthly or weekly rule, instead of creating the campaign now.")}
@@ -2015,8 +2015,8 @@ function WindowStep({
             <RecurrenceFields value={schedule.recurrence} onChange={(recurrence) => changeSchedule({ recurrence })} />
           </>
         )}
-      </FieldGrid>
-    </Card>
+      </Fields>
+    </Panel>
   );
 }
 
@@ -2075,8 +2075,8 @@ function CreateStep({
   const scheduling = order.schedule.enabled;
 
   return (
-    <Card
-      className="measure"
+    <Panel
+      className="ui-measure"
       title={`6. ${t("Create")}`}
       description={scheduling
         ? t("Give the reason and record the schedule: the order is placed at its moments, and each campaign it places waits for its approval. Nothing changes on any host now.")
@@ -2091,12 +2091,12 @@ function CreateStep({
           {t("Compensates campaign")}{" "}
           {compensates
             ? <Link to={`/campaigns/${compensates.id}`}>{compensates.name}</Link>
-            : <span className="mono">{order.compensates}</span>}
+            : <span className="ui-mono">{order.compensates}</span>}
           {" · "}
           {t("The original is linked, never rewritten; its hosts get a compensate step as the reverse change runs on them.")}
         </p>
       )}
-      <FieldGrid>
+      <Fields>
         {/* The reason is the one sentence the audit trail keeps next to
             the order; the operation name repeated there would say nothing
             the record does not already say. */}
@@ -2112,7 +2112,7 @@ function CreateStep({
             disabled={Boolean(campaignID)}
           />
         </Field>
-      </FieldGrid>
+      </Fields>
       <Actions>
         {scheduling ? (
           <button onClick={() => schedule.mutate()} disabled={schedule.isPending || Boolean(scheduled) || !reasonOK}
@@ -2126,17 +2126,17 @@ function CreateStep({
           </button>
         )}
         {!reasonOK && !campaignID && !scheduled && (
-          <span className="source">{t("The button waits for a reason of at least {n} characters.", { n: MIN_REASON })}</span>
+          <span className="ui-note">{t("The button waits for a reason of at least {n} characters.", { n: MIN_REASON })}</span>
         )}
         {scheduled && (
-          <span className="source">
+          <span className="ui-note">
             {t("The schedule is recorded; the campaign is created at its moment.")}{" "}
             <Link to="/campaigns/schedules">{t("Open the schedules")}</Link>
           </span>
         )}
-        {errorMessage && <p className="page-error">{errorMessage}</p>}
+        {errorMessage && <p className="ui-errorbox">{errorMessage}</p>}
       </Actions>
-    </Card>
+    </Panel>
   );
 }
 
@@ -2157,8 +2157,8 @@ function PlansStep({ campaignID, campaign, nav }: { campaignID: string; campaign
   const planning = campaign?.state === "planning";
   const groups = plans.data?.items ?? [];
   return (
-    <Card
-      className="measure"
+    <Panel
+      className="ui-measure"
       title={`7. ${t("Plans")}`}
       description={planning
         ? t("Wait: each host is computing what it would change, and the page refreshes by itself. Nothing is applied while this runs; the approval opens once every plan is in.")
@@ -2170,14 +2170,14 @@ function PlansStep({ campaignID, campaign, nav }: { campaignID: string; campaign
           expiry in a header line, then the change itself as a table the
           operator can read package by package. */}
       {groups.length > 0 && (
-        <div className="plan-groups">
+        <div className="ui-stack-s">
           {groups.map((group) => (
             <PlanGroupView key={group.plan_hash} group={group} action={campaign?.action_type} />
           ))}
         </div>
       )}
       <TargetTable targets={targets} action={campaign?.action_type ?? ""} />
-    </Card>
+    </Panel>
   );
 }
 
@@ -2211,20 +2211,20 @@ function ApprovalStep({ campaignID, campaign, nav }: { campaignID: string; campa
 
   if (!campaign) return <Empty>{t("No campaign yet.")}</Empty>;
   return (
-    <Card
-      className="measure"
+    <Panel
+      className="ui-measure"
       title={`8. ${t("Approval and run")}`}
       description={t("Give the reason and approve: the campaign starts at once, canary first, and its progress is followed on the campaign page. You are approving this operation, this payload, this list of hosts, this rollout policy and this set of plans - together, as one fingerprint.")}
       footer={nav}
       flush
     >
-      <p className="source mono">{t("fingerprint")} {campaign.approval_fingerprint}</p>
-      {errorMessage && <p className="page-error">{errorMessage}</p>}
+      <p className="ui-note ui-mono">{t("fingerprint")} {campaign.approval_fingerprint}</p>
+      {errorMessage && <p className="ui-errorbox">{errorMessage}</p>}
       {campaign.state === "awaiting_approval" ? (
         // The card is flush for the target table under it; the form
         // keeps the card's own padding so it does not touch the edges.
-        <div className="flush-block">
-          <FieldGrid>
+        <div className="ui-flush">
+          <Fields>
             {/* The consent is what the audit record keeps next to the
                 fingerprint; a consent without a reason is noise there, so
                 the button waits for one whatever the risk class. */}
@@ -2238,14 +2238,14 @@ function ApprovalStep({ campaignID, campaign, nav }: { campaignID: string; campa
             <Field label={t("Change ticket")} hint={t("Optional: the identifier or address of the change request.")}>
               <input value={ticket} onChange={(e) => setTicket(e.target.value)} placeholder="CHG-1234" />
             </Field>
-          </FieldGrid>
+          </Fields>
           <Actions>
             <button onClick={() => approve.mutate()} disabled={approve.isPending || !reasonValid(reason)}
               title={reasonValid(reason) ? undefined : t("Give a reason of at least {n} characters first.", { n: MIN_REASON })}>
               {approve.isPending ? t("Approving…") : t("Approve and start")}
             </button>
             {!reasonValid(reason) && (
-              <span className="source">{t("The button waits for a reason of at least {n} characters.", { n: MIN_REASON })}</span>
+              <span className="ui-note">{t("The button waits for a reason of at least {n} characters.", { n: MIN_REASON })}</span>
             )}
           </Actions>
         </div>
@@ -2259,7 +2259,7 @@ function ApprovalStep({ campaignID, campaign, nav }: { campaignID: string; campa
         </p>
       )}
       <TargetTable targets={targets} action={campaign.action_type} />
-    </Card>
+    </Panel>
   );
 }
 
@@ -2302,12 +2302,12 @@ function TargetTable({ targets, action }: { targets: ReturnType<typeof useTarget
         become the whole fleet in the browser. The button stays next to the
         automatic fetch, so a page that failed to arrive can be asked for by
         hand. */}
-    <p className="source">
+    <p className="ui-note">
       {t("{shown} of {total} shown", { shown: rows.length, total })}
       {targets.hasNextPage && (
         <>
           {" "}
-          <button className="secondary" onClick={() => targets.fetchNextPage()} disabled={targets.isFetchingNextPage}>
+          <button className="ui-btn-secondary" onClick={() => targets.fetchNextPage()} disabled={targets.isFetchingNextPage}>
             {t("Load more ({n} left)", { n: total - rows.length })}
           </button>
         </>

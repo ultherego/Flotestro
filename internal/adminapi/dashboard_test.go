@@ -15,23 +15,25 @@ grid has no class for would silently become a full row, and the same widget
 twice would be two tiles sharing one identity on the screen.
 */
 
-// Every width the server accepts has a class in the stylesheet, and every
-// class the stylesheet has is accepted. The two drifted apart once already -
-// the server allowed five widths because those were the five classes - and a
-// width without a class does not fail: it falls silently back to a full row,
-// which looks like the arrangement was ignored.
+// Every width the server accepts can be drawn, and every width that can be
+// drawn is accepted. The two drifted apart once already - the server allowed
+// five widths because those were the five classes - and a width without a
+// class does not fail: it falls silently back to a full row, which looks
+// like the arrangement was ignored.
+//
+// There are two stylesheets while the panel is being written again: the one
+// being replaced (ui-) and the one under /next (fl-). Both draw the same
+// arrangements, so both are asked.
 func TestEveryAcceptedWidthHasAGridClass(t *testing.T) {
-	stylesheet, err := os.ReadFile(filepath.Join("..", "..", "web", "src", "styles.css"))
-	if err != nil {
-		t.Fatalf("the stylesheet could not be read: %v", err)
-	}
-	for width := 1; width <= dashboardColumns; width++ {
-		class := fmt.Sprintf(".span-%d { grid-column: span %d; }", width, width)
-		if !strings.Contains(string(stylesheet), class) {
-			t.Errorf("the server accepts a width of %d and the stylesheet has no %q", width, class)
-		}
-		if _, err := validateDashboardWidgets([]DashboardWidget{{Key: "a", Width: width}}); err != nil {
-			t.Errorf("the stylesheet has a class for %d columns and the server refuses it: %v", width, err)
+	for _, sheet := range stylesheets(t) {
+		for width := 1; width <= dashboardColumns; width++ {
+			class := fmt.Sprintf(sheet.width, width, width)
+			if !strings.Contains(sheet.text, class) {
+				t.Errorf("%s: the server accepts a width of %d and the stylesheet has no %q", sheet.name, width, class)
+			}
+			if _, err := validateDashboardWidgets([]DashboardWidget{{Key: "a", Width: width}}); err != nil {
+				t.Errorf("the stylesheet has a class for %d columns and the server refuses it: %v", width, err)
+			}
 		}
 	}
 	// And one past the end, so the bound is a bound and not a coincidence.
@@ -40,18 +42,45 @@ func TestEveryAcceptedWidthHasAGridClass(t *testing.T) {
 	}
 }
 
-// A height has to be drawable too: the stylesheet gives each row count a
-// height, and the server must not accept one the grid cannot express.
-func TestEveryAcceptedHeightHasARowHeight(t *testing.T) {
-	stylesheet, err := os.ReadFile(filepath.Join("..", "..", "web", "src", "styles.css"))
-	if err != nil {
-		t.Fatalf("the stylesheet could not be read: %v", err)
+// The stylesheets the panel ships, and how each says "this many columns".
+type panelSheet struct {
+	name  string
+	text  string
+	width string
+}
+
+func stylesheets(t *testing.T) []panelSheet {
+	t.Helper()
+	read := func(parts ...string) string {
+		body, err := os.ReadFile(filepath.Join(append([]string{"..", ".."}, parts...)...))
+		if err != nil {
+			t.Fatalf("the stylesheet could not be read: %v", err)
+		}
+		return string(body)
 	}
+	return []panelSheet{
+		{name: "styles.css", text: read("web", "src", "styles.css"), width: ".ui-col-%d { grid-column: span %d; }"},
+		{name: "next/next.css", text: read("web", "src", "next", "next.css"), width: ".fl-c%d { grid-column: span %d; }"},
+	}
+}
+
+// A height has to be drawable too, and the two panels express one in two
+// ways. The one being replaced gives every row count a height of its own;
+// the one under /next lays its grid on rows of a fixed height and spans
+// them, so one rule covers every count the server takes.
+func TestEveryAcceptedHeightHasARowHeight(t *testing.T) {
+	sheets := stylesheets(t)
 	for rows := 1; rows <= dashboardMaxHeight; rows++ {
-		selector := fmt.Sprintf(`.widgets > [data-rows="%d"]`, rows)
-		if !strings.Contains(string(stylesheet), selector) {
+		selector := fmt.Sprintf(`.ui-grid > [data-rows="%d"]`, rows)
+		if !strings.Contains(sheets[0].text, selector) {
 			t.Errorf("the server accepts a height of %d rows and the stylesheet has no %s", rows, selector)
 		}
+	}
+	if !strings.Contains(sheets[1].text, "grid-auto-rows: var(--row)") {
+		t.Error("the new panel's grid does not lay itself on rows, so a height cannot be drawn there")
+	}
+	if !strings.Contains(sheets[1].text, "--row:") {
+		t.Error("the new panel's stylesheet names no row height")
 	}
 }
 

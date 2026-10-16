@@ -5,8 +5,8 @@ import { api, ApiError } from "../lib/api";
 import type { Relay, RelayDetail, RelayHost, RelayState, Whoami } from "../lib/types";
 import { bytes } from "../lib/format";
 import { Board } from "../components/board";
-import { ErrorBox, Time, Empty, Pairs, Pair } from "../components/ui";
-import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
+import { ErrorBox, Time, Pairs, Pair } from "../components/ui";
+import { Actions, Empty, Field, Fields, PageHead, Panel } from "../ui/kit";
 import { AreaChart, Breakdown, ChartLegend, StatusBar, type AreaSeries } from "../components/widgets";
 import { useT } from "../i18n";
 
@@ -17,20 +17,20 @@ function StateBadge({ state }: { state: RelayState }) {
   const t = useT();
   switch (state) {
     case "active":
-      return <span className="badge ok">{t("active")}</span>;
+      return <span className="ui-pill ui-ok">{t("active")}</span>;
     case "silent":
-      return <span className="badge error">{t("silent")}</span>;
+      return <span className="ui-pill ui-error">{t("silent")}</span>;
     case "never_seen":
-      return <span className="badge unknown">{t("never seen")}</span>;
+      return <span className="ui-pill ui-unknown">{t("never seen")}</span>;
     default:
-      return <span className="badge error">{t("revoked")}</span>;
+      return <span className="ui-pill ui-error">{t("revoked")}</span>;
   }
 }
 
 /** The end of the certificate, with a warning when the renewal is late. */
 function Expiry({ value, revoked }: { value?: string; revoked: boolean }) {
   const t = useT();
-  if (!value) return <span className="badge unknown">{t("unknown")}</span>;
+  if (!value) return <span className="ui-pill ui-unknown">{t("unknown")}</span>;
   const left = new Date(value).getTime() - Date.now();
   const cls = revoked ? "source" : left < 0 ? "badge error" : left < EXPIRY_WARNING_MS ? "badge warn" : "";
   return (
@@ -46,7 +46,7 @@ function Expiry({ value, revoked }: { value?: string; revoked: boolean }) {
 function BufferCell({ relay }: { relay: Relay }) {
   const t = useT();
   const buffer = relay.buffer;
-  if (!buffer) return <span className="source">{t("not reported")}</span>;
+  if (!buffer) return <span className="ui-note">{t("not reported")}</span>;
   const share = buffer.buffer_max_bytes > 0 ? buffer.buffer_bytes / buffer.buffer_max_bytes : 0;
   const cls = buffer.buffer_dropped > 0 ? "badge error" : share > 0.7 ? "badge warn" : "";
   return (
@@ -54,7 +54,7 @@ function BufferCell({ relay }: { relay: Relay }) {
       <span className={cls}>
         {bytes(buffer.buffer_bytes)} / {bytes(buffer.buffer_max_bytes)}
       </span>
-      <div className="source">
+      <div className="ui-note">
         {t("{n} items", { n: buffer.buffered_items })}
         {buffer.buffer_dropped > 0 && <> · {t("{n} dropped", { n: buffer.buffer_dropped })}</>}
       </div>
@@ -84,7 +84,7 @@ export function Relays() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         icon="relays"
         title={t("Relays")}
         description={t("One connection upwards per site.")}
@@ -101,32 +101,32 @@ export function Relays() {
         drawn={{
           state: (
             <>
-              <Card className="span-8" title={t("State")} description={t("{n} relays, {hosts} hosts attested", { n: relays.length, hosts: attested })}>
+              <Panel className="ui-col-8" title={t("State")} description={t("{n} relays, {hosts} hosts attested", { n: relays.length, hosts: attested })}>
           <StatusBar segments={[
             { label: t("Active"), value: count("active"), tone: "ok" },
             { label: t("Silent"), value: count("silent"), tone: "error" },
             { label: t("Never seen"), value: count("never_seen"), tone: "unknown" },
             { label: t("Revoked"), value: count("revoked"), tone: "neutral" },
           ]} />
-        </Card>
+        </Panel>
             </>
           ),
           by_site: (
             <>
-              <Card className="span-4" title={t("By site")} description={t("Where the relays stand.")}>
+              <Panel className="ui-col-4" title={t("By site")} description={t("Where the relays stand.")}>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : bySite.length === 0 ? (
-            <p className="fp-blank">{t("No relay is registered in this installation.")}</p>
+            <p className="ui-empty">{t("No relay is registered in this installation.")}</p>
           ) : (
-            <Breakdown tone="info" items={bySite.map(([site, n]) => ({ label: <span className="mono">{site}</span>, value: n }))} />
+            <Breakdown tone="info" items={bySite.map(([site, n]) => ({ label: <span className="ui-mono">{site}</span>, value: n }))} />
           )}
-        </Card>
+        </Panel>
             </>
           ),
           list: (
             <>
-              <Card className="span-12" flush>
+              <Panel className="ui-col-12" flush>
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : relays.length === 0 ? (
@@ -138,7 +138,7 @@ export function Relays() {
               <thead>
                 <tr>
                   <th scope="col">{t("Name")}</th><th scope="col">{t("Site")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Last seen")}</th>
-                  <th scope="col" className="num">{t("Hosts attested")}</th><th scope="col">{t("Buffer")}</th><th scope="col">{t("Certificate expires")}</th>
+                  <th scope="col" className="ui-numeric">{t("Hosts attested")}</th><th scope="col">{t("Buffer")}</th><th scope="col">{t("Certificate expires")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -147,16 +147,16 @@ export function Relays() {
                     <td>
                       <Link to={`/relays/${relay.id}`}>{relay.name}</Link>
                       {relay.advertised_names && relay.advertised_names.length > 0 && (
-                        <div className="source mono">{relay.advertised_names.join(", ")}</div>
+                        <div className="ui-note ui-mono">{relay.advertised_names.join(", ")}</div>
                       )}
                     </td>
                     <td>
                       {relay.site}
-                      {relay.environment && <div className="source">{relay.environment}</div>}
+                      {relay.environment && <div className="ui-note">{relay.environment}</div>}
                     </td>
                     <td><StateBadge state={relay.state} /></td>
                     <td><Time value={relay.last_seen_at} /></td>
-                    <td className="num">{relay.hosts_attested}</td>
+                    <td className="ui-numeric">{relay.hosts_attested}</td>
                     <td><BufferCell relay={relay} /></td>
                     <td><Expiry value={relay.certificate_not_after ?? relay.not_after} revoked={!!relay.revoked_at} /></td>
                   </tr>
@@ -164,7 +164,7 @@ export function Relays() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
             </>
           )
         }}
@@ -295,17 +295,17 @@ function BufferHistory({ relay }: { relay: Relay }) {
   ];
 
   return (
-    <Card
-      className="span-12"
+    <Panel
+      className="ui-col-12"
       title={t("Buffer history")}
       description={t("What the relay reported about its spool over the window. The raw reports are kept for {raw} h and the quarter-hour rollups for {rollup} days; a window reaching further back shows nothing because nothing is kept, not because the relay was quiet.", {
         raw: data?.raw_retention_hours ?? 0, rollup: data?.rollup_retention_days ?? 0,
       })}
       footer={
         <Actions>
-          <div className="segmented" role="group" aria-label={t("Window")} data-testid="buffer-range">
+          <div className="ui-segmented" role="group" aria-label={t("Window")} data-testid="buffer-range">
             {BUFFER_RANGES.map((name) => (
-              <button key={name} className={range === name ? "active" : ""} onClick={() => setRange(name)}>
+              <button key={name} className={range === name ? "ui-active" : ""} onClick={() => setRange(name)}>
                 {name}
               </button>
             ))}
@@ -318,7 +318,7 @@ function BufferHistory({ relay }: { relay: Relay }) {
       ) : !data ? (
         <Empty>{t("Loading…")}</Empty>
       ) : points.length === 0 ? (
-        <p className="fp-blank">
+        <p className="ui-empty">
           {t("The relay reported nothing in this window. A relay reports every minute while it reaches the centre; a silent relay is on the state above, not here.")}
         </p>
       ) : (
@@ -355,11 +355,11 @@ function BufferHistory({ relay }: { relay: Relay }) {
             <Pairs>
               {data.alerts.map((alert) => (
                 <Pair key={alert.id} label={alert.rule_name}>
-                  <span className={alert.severity === "critical" ? "badge error" : "badge warn"}>
+                  <span className={alert.severity === "critical" ? "ui-pill ui-error" : "ui-pill ui-warn"}>
                     {alert.severity}
                   </span>
-                  {alert.detail && <div className="source">{alert.detail}</div>}
-                  <div className="source">
+                  {alert.detail && <div className="ui-note">{alert.detail}</div>}
+                  <div className="ui-note">
                     {t("since")} <Time value={alert.fired_at ?? alert.started_at} />
                   </div>
                 </Pair>
@@ -368,7 +368,7 @@ function BufferHistory({ relay }: { relay: Relay }) {
           )}
         </>
       )}
-    </Card>
+    </Panel>
   );
 }
 
@@ -398,7 +398,7 @@ export function RelayPage() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         icon="relays"
         breadcrumb={[{ label: t("Relays"), to: "/relays" }]}
         title={relay.name}
@@ -406,42 +406,42 @@ export function RelayPage() {
         help={<p>{t("Site {site}. A relay attests the identity of the hosts behind it to the panel, so what it reports about itself is what the panel knows about the site.", { site: relay.site })}</p>}
       />
 
-      <div className="widgets">
-        <Card className="span-12" title={t("State")}>
+      <div className="ui-grid">
+        <Panel className="ui-col-12" title={t("State")}>
           <StatusBar segments={[
             { label: t("Hosts attested"), value: hosts.length, tone: "info" },
             { label: t("Sessions reported"), value: buffer?.sessions, tone: "neutral" },
             { label: t("Buffered items"), value: buffer?.buffered_items, tone: buffer && buffer.buffered_items > 0 ? "warn" : "ok" },
             { label: t("Dropped results"), value: buffer?.buffer_dropped, tone: buffer && buffer.buffer_dropped > 0 ? "error" : "ok" },
           ]} />
-        </Card>
+        </Panel>
 
-        <Card className="span-6" title={t("Details")}>
+        <Panel className="ui-col-6" title={t("Details")}>
           <Pairs>
             <Pair label={t("State")}><StateBadge state={relay.state} /></Pair>
             <Pair label={t("Site")}>{relay.site}{relay.environment ? ` / ${relay.environment}` : ""}</Pair>
             <Pair label={t("Network names")}>
               {relay.advertised_names && relay.advertised_names.length > 0
-                ? <span className="mono">{relay.advertised_names.join(", ")}</span>
+                ? <span className="ui-mono">{relay.advertised_names.join(", ")}</span>
                 : "—"}
             </Pair>
             <Pair label={t("Enrolled")}><Time value={relay.enrolled_at} /></Pair>
             <Pair label={t("Last seen")}><Time value={relay.last_seen_at} /></Pair>
             <Pair label={t("Certificate expires")}>
               <Expiry value={relay.certificate_not_after ?? relay.not_after} revoked={!!relay.revoked_at} />
-              {relay.serial && <div className="source mono">{t("serial {serial}", { serial: relay.serial })}</div>}
+              {relay.serial && <div className="ui-note ui-mono">{t("serial {serial}", { serial: relay.serial })}</div>}
             </Pair>
             {relay.revoked_at && (
               <Pair label={t("Revoked")}>
                 <Time value={relay.revoked_at} />
-                {relay.revocation_reason && <div className="source">{relay.revocation_reason}</div>}
+                {relay.revocation_reason && <div className="ui-note">{relay.revocation_reason}</div>}
               </Pair>
             )}
           </Pairs>
-        </Card>
-        <Card className="span-6" title={t("Last report")} description={t("What the relay said about itself at its last heartbeat.")}>
+        </Panel>
+        <Panel className="ui-col-6" title={t("Last report")} description={t("What the relay said about itself at its last heartbeat.")}>
           {!buffer ? (
-            <p className="fp-blank">{t("The relay has not reported since the panel started. A relay reports every minute while it reaches the centre.")}</p>
+            <p className="ui-empty">{t("The relay has not reported since the panel started. A relay reports every minute while it reaches the centre.")}</p>
           ) : (
             <Pairs>
               <Pair label={t("Reported")}><Time value={buffer.reported_at} /></Pair>
@@ -450,13 +450,13 @@ export function RelayPage() {
               <Pair label={t("Relay version")}>{buffer.relay_version || "—"}</Pair>
             </Pairs>
           )}
-        </Card>
+        </Panel>
 
         <BufferHistory relay={relay} />
 
-        <Card className="span-12" title={t("Hosts attested")} description={t("The hosts whose open session came through this relay. A host connects directly one day and through the relay the next; only the open session says which is true now.")} flush>
+        <Panel className="ui-col-12" title={t("Hosts attested")} description={t("The hosts whose open session came through this relay. A host connects directly one day and through the relay the next; only the open session says which is true now.")} flush>
           <HostsTable hosts={hosts} />
-        </Card>
+        </Panel>
 
         {canManage && !relay.revoked_at && <RevokeRelay relay={relay} hosts={hosts.length} />}
       </div>
@@ -483,7 +483,7 @@ function HostsTable({ hosts }: { hosts: RelayHost[] }) {
             <td><Link to={`/hosts/${host.host_id}`}>{host.hostname}</Link></td>
             <td>{host.site}{host.environment ? ` / ${host.environment}` : ""}</td>
             <td>{host.lifecycle_state}</td>
-            <td className="source mono">{host.agent_version || "—"}</td>
+            <td className="ui-note ui-mono">{host.agent_version || "—"}</td>
             <td><Time value={host.connected_at} /></td>
             <td><Time value={host.last_heartbeat_at} /></td>
           </tr>
@@ -521,33 +521,33 @@ function RevokeRelay({ relay, hosts }: { relay: Relay; hosts: number }) {
   });
 
   return (
-    <Card
-      className="span-12"
+    <Panel
+      className="ui-col-12"
       title={t("Revoke the relay")}
       description={t("The relay stops being recognised at once and cannot renew its certificate. The {n} hosts behind it lose their sessions and reconnect over the paths they still have.", { n: hosts })}
       footer={
         <Actions>
           {!open ? (
-            <button className="danger" onClick={() => setOpen(true)}>{t("Revoke…")}</button>
+            <button className="ui-btn-danger" onClick={() => setOpen(true)}>{t("Revoke…")}</button>
           ) : (
             <>
-              <button className="danger" onClick={() => revoke.mutate()} disabled={reason.trim().length < 8 || revoke.isPending}>
+              <button className="ui-btn-danger" onClick={() => revoke.mutate()} disabled={reason.trim().length < 8 || revoke.isPending}>
                 {t("Revoke {name}", { name: relay.name })}
               </button>
-              <button className="secondary" onClick={() => { setOpen(false); setReason(""); }}>{t("Cancel")}</button>
+              <button className="ui-btn-secondary" onClick={() => { setOpen(false); setReason(""); }}>{t("Cancel")}</button>
             </>
           )}
-          {message && <span className="source">{message}</span>}
+          {message && <span className="ui-note">{message}</span>}
         </Actions>
       }
     >
       {open && (
-        <FieldGrid>
+        <Fields>
           <Field label={t("Reason (kept in the audit trail)")} hint={t("At least 8 characters. A host in an isolated site has no other path: it stays offline until a new relay is enrolled.")} wide>
             <input value={reason} onChange={(e) => setReason(e.target.value)} />
           </Field>
-        </FieldGrid>
+        </Fields>
       )}
-    </Card>
+    </Panel>
   );
 }

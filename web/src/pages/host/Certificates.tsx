@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Host, Job } from "../../lib/types";
-import { ErrorBox, Time, Empty } from "../../components/ui";
+import { ErrorBox, Time } from "../../components/ui";
 import { absoluteTime } from "../../lib/format";
 import { Breakdown } from "../../components/widgets";
 import {
@@ -14,6 +14,7 @@ import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { PlanSummary, type HostPlan } from "../../components/plan";
 import { useT } from "../../i18n";
+import { Empty, toneClass } from "../../ui/kit";
 
 type KeyMetadata = {
   path: string;
@@ -138,7 +139,7 @@ function StatusBadge({ status, days }: { status: string; days?: number }) {
       : status === "unknown"
         ? t("unknown")
         : days === undefined ? status : t("{n} d left", { n: days });
-  return <span className={`badge ${cls}`}>{caption}</span>;
+  return <span className={`ui-pill ${toneClass(cls)}`}>{caption}</span>;
 }
 
 /**
@@ -223,7 +224,7 @@ export function Certificates() {
   const sourceName = (source: string) =>
     source === "flotestro" ? t("panel") : source === "certmonger" ? "certmonger" : source === "external" ? t("outside the panel") : source;
   const targets = data?.targets ?? [];
-  const unknown = <span className="badge unknown">{t("unknown")}</span>;
+  const unknown = <span className="ui-pill ui-unknown">{t("unknown")}</span>;
   // The list is unknown until the report loads; the bar shows dashes then.
   const known = data ? list : undefined;
   const byStatus = (status: string) => countWhere(known, (certificate) => certificate.status === status);
@@ -241,11 +242,11 @@ export function Certificates() {
         description={t("Certificates on the paths the panel watches, plus everything certmonger tracks on this host. Nothing here comes from walking the filesystem, and the private key is never read — only its location and permissions.")}
         actions={
           <>
-            <button className="secondary" onClick={() => setForm(form === "watch" ? "" : "watch")}>
+            <button className="ui-btn-secondary" onClick={() => setForm(form === "watch" ? "" : "watch")}>
               {form === "watch" ? t("Cancel") : t("Watch a path")}
             </button>
             <ActionGuard action="certificate.deploy" host={host.id}>
-              <button className="secondary" onClick={() => setForm(form === "deploy" ? "" : "deploy")}>
+              <button className="ui-btn-secondary" onClick={() => setForm(form === "deploy" ? "" : "deploy")}>
                 {form === "deploy" ? t("Cancel") : t("Deploy a certificate")}
               </button>
             </ActionGuard>
@@ -279,14 +280,14 @@ export function Certificates() {
       {ordered && <JobNotice job={ordered} hostID={host.id} />}
 
       {data?.stale && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>
             {t("This picture is older than a day and a half. Scan the host to see what is on disk now.")}
           </span>
         </p>
       )}
       {data && !data.tracking_known && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>
             {t("The panel could not tell what renews these certificates")}
             {data.tracking_reason ? `: ${data.tracking_reason}` : "."}
@@ -311,9 +312,9 @@ export function Certificates() {
       />
       <Section title={t("Renewal")} span={4} description={t("What renews each certificate, and where the panel learnt of it.")}>
         {!known ? (
-          <p className="source">{t("Loading…")}</p>
+          <p className="ui-note">{t("Loading…")}</p>
         ) : !list.length ? (
-          <p className="source">{t("No certificate is watched on this host yet.")}</p>
+          <p className="ui-note">{t("No certificate is watched on this host yet.")}</p>
         ) : (
           <>
             <Breakdown
@@ -321,7 +322,7 @@ export function Certificates() {
                 label: renewalName(renewal), value: count, tone: renewal === "manual" ? "warn" as const : renewal === "tracked" ? "ok" as const : "unknown" as const,
               }))}
             />
-            <p className="widget-subhead">{t("Source")}</p>
+            <p className="ui-subhead">{t("Source")}</p>
             <Breakdown items={tally((c) => c.source).map(([source, count]) => ({ label: sourceName(source), value: count }))} />
           </>
         )}
@@ -355,29 +356,29 @@ export function Certificates() {
             </thead>
             <tbody>
               {list.map((certificate) => (
-                <tr key={certificate.path} className={selected === certificate.path ? "selected" : undefined}>
+                <tr key={certificate.path} className={selected === certificate.path ? "ui-row-marked" : undefined}>
                   <td>
                     <button
                       type="button"
-                      className="hm-link hm-mono"
+                      className="ui-btn-link ui-mono"
                       onClick={() => setSelected(selected === certificate.path ? "" : certificate.path)}
                     >
                       {certificate.path}
                     </button>
                     {certificate.owner_service && (
-                      <div className="source">{certificate.owner_service}</div>
+                      <div className="ui-note">{certificate.owner_service}</div>
                     )}
                   </td>
                   <td>
                     {certificate.unavailable_reason ? (
-                      <span className="badge unknown">{certificate.unavailable_reason}</span>
+                      <span className="ui-pill ui-unknown">{certificate.unavailable_reason}</span>
                     ) : (
                       <>
                         {certificate.subject}
                         {/* The names beyond the common name; a SAN that only
                             repeats the CN says nothing new. */}
                         {certificate.sans?.some((san) => san !== commonName(certificate.subject)) ? (
-                          <div className="source">
+                          <div className="ui-note">
                             {t("also")} {certificate.sans.filter((san) => san !== commonName(certificate.subject)).join(", ")}
                           </div>
                         ) : null}
@@ -389,7 +390,7 @@ export function Certificates() {
                     {/* The date itself under the countdown: "37 d left"
                         says how urgent, the date says when. */}
                     {certificate.not_after && (
-                      <div className="source">{absoluteTime(certificate.not_after).slice(0, 10)}</div>
+                      <div className="ui-note">{absoluteTime(certificate.not_after).slice(0, 10)}</div>
                     )}
                   </td>
                   <td>
@@ -397,13 +398,13 @@ export function Certificates() {
                         not watch this file. "Unknown" is a missing answer. */}
                     {certificate.renewal === "tracked" ? (
                       <>
-                        <span className="badge ok">certmonger</span>
+                        <span className="ui-pill ui-ok">certmonger</span>
                         {certificate.tracking?.status && (
-                          <div className="source">{certificate.tracking.status}</div>
+                          <div className="ui-note">{certificate.tracking.status}</div>
                         )}
                       </>
                     ) : certificate.renewal === "manual" ? (
-                      <span className="badge warn">{t("manual")}</span>
+                      <span className="ui-pill ui-warn">{t("manual")}</span>
                     ) : (
                       unknown
                     )}
@@ -411,39 +412,39 @@ export function Certificates() {
                   <td>
                     {certificate.managed ? (
                       <>
-                        <span className="badge ok">{t("panel")}</span>
+                        <span className="ui-pill ui-ok">{t("panel")}</span>
                         {certificate.deployed_at && (
-                          <div className="source">
+                          <div className="ui-note">
                             <Time value={certificate.deployed_at} /> · {certificate.deployed_by}
                           </div>
                         )}
                       </>
                     ) : certificate.source === "certmonger" ? (
-                      <span className="badge">certmonger</span>
+                      <span className="ui-pill">certmonger</span>
                     ) : (
-                      <span className="badge">{t("outside the panel")}</span>
+                      <span className="ui-pill">{t("outside the panel")}</span>
                     )}
                   </td>
                   <td>
                     {!certificate.key ? (
-                      <span className="source">—</span>
+                      <span className="ui-note">—</span>
                     ) : certificate.key.reason ? (
-                      <span className="badge unknown">{certificate.key.reason}</span>
+                      <span className="ui-pill ui-unknown">{certificate.key.reason}</span>
                     ) : !certificate.key.exists ? (
-                      <span className="badge error">{t("missing")}</span>
+                      <span className="ui-pill ui-error">{t("missing")}</span>
                     ) : certificate.key.world_readable ? (
-                      <span className="badge error">{t("mode {mode}, world-readable", { mode: certificate.key.mode ?? "" })}</span>
+                      <span className="ui-pill ui-error">{t("mode {mode}, world-readable", { mode: certificate.key.mode ?? "" })}</span>
                     ) : (
-                      <span className="source hm-mono">
+                      <span className="ui-note ui-mono">
                         {certificate.key.mode} {certificate.key.owner}
                       </span>
                     )}
                     {certificate.key_secret && (
-                      <div className="source">{t("secret")} {certificate.key_secret}</div>
+                      <div className="ui-note">{t("secret")} {certificate.key_secret}</div>
                     )}
                   </td>
                   <td>
-                    <div className="operations">
+                    <div className="ui-actions">
                       {/* Only certmonger renews from the panel; a manual
                           certificate has no button, not a dead one. */}
                       {certificate.renewal === "tracked" && certificate.tracking?.request && (
@@ -455,12 +456,12 @@ export function Certificates() {
                       </ActionGuard>
                       )}
                       {certificate.watched && (
-                        <button className="secondary" title={t("The panel stops reading this path; the file on the host stays as it is.")} onClick={() => forget.mutate(certificate.path)}>
+                        <button className="ui-btn-secondary" title={t("The panel stops reading this path; the file on the host stays as it is.")} onClick={() => forget.mutate(certificate.path)}>
                           {t("Stop watching")}
                         </button>
                       )}
                       {!certificate.watched && !(certificate.renewal === "tracked" && certificate.tracking?.request) && (
-                        <span className="source" title={t("Renewed outside the panel; certmonger does not track this file and the panel does not watch it.")}>
+                        <span className="ui-note" title={t("Renewed outside the panel; certmonger does not track this file and the panel does not watch it.")}>
                           —
                         </span>
                       )}
@@ -487,7 +488,7 @@ export function Certificates() {
             <thead><tr><th scope="col">{t("Fact")}</th><th scope="col">{t("Reason")}</th></tr></thead>
             <tbody>
               {Object.entries(data.missing).map(([fact, reason]) => (
-                <tr key={fact}><td className="hm-mono">{fact}</td><td className="source">{reason}</td></tr>
+                <tr key={fact}><td className="ui-mono">{fact}</td><td className="ui-note">{reason}</td></tr>
               ))}
             </tbody>
           </Table>
@@ -522,16 +523,16 @@ function Details({ hostID, certificate }: { hostID: string; certificate?: Certif
     enabled: !!certificate,
   });
   if (!certificate) return null;
-  const unknown = <span className="badge unknown">{t("unknown")}</span>;
+  const unknown = <span className="ui-pill ui-unknown">{t("unknown")}</span>;
 
   // The facts of the file beside its deployment history: one row for the
   // chosen certificate, not two blocks under the list.
   return (
-    <div className="columns">
-      <Section title={<span className="hm-mono">{certificate.path}</span>} flush>
+    <div className="ui-cols">
+      <Section title={<span className="ui-mono">{certificate.path}</span>} flush>
         <Facts>
           <Fact label={t("Issuer")}>{certificate.issuer || unknown}</Fact>
-          <Fact label={t("Serial")}><span className="hm-mono">{certificate.serial || "—"}</span></Fact>
+          <Fact label={t("Serial")}><span className="ui-mono">{certificate.serial || "—"}</span></Fact>
           <Fact label={t("Key")}>
             {certificate.key_algorithm
               ? `${certificate.key_algorithm} ${certificate.key_bits}`
@@ -549,11 +550,11 @@ function Details({ hostID, certificate }: { hostID: string; certificate?: Certif
           <Fact label={t("Valid from")}><Time value={certificate.not_before} /></Fact>
           <Fact label={t("Valid until")}><Time value={certificate.not_after} /></Fact>
           <Fact label={t("Fingerprint")} wide>
-            <span className="hm-mono">{certificate.fingerprint_sha256 || "—"}</span>
+            <span className="ui-mono">{certificate.fingerprint_sha256 || "—"}</span>
           </Fact>
           {certificate.tracking?.request && (
             <Fact label="certmonger" wide>
-              <span className="source">
+              <span className="ui-note">
                 {t("request")} {certificate.tracking.request} · CA {certificate.tracking.ca} ·{" "}
                 {t("auto-renew")} {certificate.tracking.auto_renew ? t("yes") : t("no")}
               </span>
@@ -573,14 +574,14 @@ function Details({ hostID, certificate }: { hostID: string; certificate?: Certif
             <tbody>
               {(history.data?.items ?? []).map((deployment) => (
                 <tr key={`${deployment.fingerprint_sha256}-${deployment.deployed_at}`}>
-                  <td className="hm-mono">
+                  <td className="ui-mono">
                     {deployment.fingerprint_sha256.slice(0, 16)}
                     {deployment.fingerprint_sha256 === certificate.fingerprint_sha256 && (
-                      <span className="badge"> {t("on host")}</span>
+                      <span className="ui-pill"> {t("on host")}</span>
                     )}
                   </td>
                   <td><Time value={deployment.not_after} /></td>
-                  <td className="source hm-mono">
+                  <td className="ui-note ui-mono">
                     {deployment.key_secret
                       ? `${deployment.key_secret}@v${deployment.key_secret_version}`
                       : "—"}
@@ -732,7 +733,7 @@ function DeployForm({
           t("The host refused to plan the deployment.")} />}
         {/* What the host says it would replace, and the digest the change is
             bound to; without it the order is refused on the host. */}
-        <div className="source">
+        <div className="ui-note">
           {binding
             ? <PlanSummary plan={binding.plan} />
             : plan.busy
@@ -742,7 +743,7 @@ function DeployForm({
         <FormActions>
           <ActionGuard action="certificate.plan" host={host.id} explain>
             <button
-              className="secondary"
+              className="ui-btn-secondary"
               disabled={!path || !content.includes("BEGIN CERTIFICATE") || plan.busy ||
                 host.connection_state !== "online"}
               onClick={() => {
@@ -814,7 +815,7 @@ function RenewButton({ host, certificate, onIntent }: {
   );
   return (
     <button
-      className="secondary"
+      className="ui-btn-secondary"
       disabled={!orderReady(order)}
       title={refusalOf(t, order)}
       onClick={() =>

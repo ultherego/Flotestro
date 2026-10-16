@@ -25,11 +25,11 @@ export function ActionGuard({
   // under the control for whoever does not hover.
   const reason = verdict.reason || t("This action is not available.");
   return (
-    <span className="action-guard action-guard-denied" title={reason} data-reason-code={verdict.reason_code}>
+    <span className="ui-guard ui-guard-denied" title={reason} data-reason-code={verdict.reason_code}>
       <fieldset disabled aria-disabled="true" style={{ display: "contents" }}>
         {children}
       </fieldset>
-      <span className="source action-guard-hint">{reason}</span>
+      <span className="ui-note">{reason}</span>
     </span>
   );
 }
@@ -51,6 +51,6 @@ export function ReadOnlyModuleNotice({ host, actions }: { host: string; actions:
       reasons: [...access.reasons, ...access.permissions.map((permission) => t("missing permission {permission}", { permission }))].join("; "),
     });
   return (
-    <p className="hm-message" data-testid="module-read-only">{text}</p>
+    <p className="ui-message" data-testid="module-read-only">{text}</p>
   );
 }

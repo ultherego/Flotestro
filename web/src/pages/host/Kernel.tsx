@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { Time, Empty } from "../../components/ui";
+import { Time } from "../../components/ui";
 import { bytes } from "../../lib/format";
 import { Breakdown } from "../../components/widgets";
 import {
@@ -15,6 +15,7 @@ import { OperationForm } from "../../components/OperationForm";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { operationForm, startingForm, type FormValue } from "../../lib/operations";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 type Setting = {
   key: string;
@@ -125,7 +126,7 @@ export function Kernel() {
       <Message text={message} />
 
       {snapshot?.unavailable_reason && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>{t("Kernel settings could not be read: {reason}", { reason: snapshot.unavailable_reason })}</span>
         </p>
       )}
@@ -151,11 +152,11 @@ export function Kernel() {
 
       <Section title={t("Kernel")} span={4} flush>
         <Facts>
-          <Fact label={t("Kernel")}><span className="hm-mono">{snapshot?.release || "—"}</span></Fact>
-          <Fact label={t("Managed file")}><span className="hm-mono">{snapshot?.managed_path}</span></Fact>
+          <Fact label={t("Kernel")}><span className="ui-mono">{snapshot?.release || "—"}</span></Fact>
+          <Fact label={t("Managed file")}><span className="ui-mono">{snapshot?.managed_path}</span></Fact>
           {/* Some settings can only be changed on the kernel command line
               and only after a reboot - that is why it is visible. */}
-          <Fact label={t("Command line")} wide><span className="source hm-mono">{snapshot?.command_line || "—"}</span></Fact>
+          <Fact label={t("Command line")} wide><span className="ui-note ui-mono">{snapshot?.command_line || "—"}</span></Fact>
           <Fact label={t("Modules")} wide>
             {knownModules ? (
               <Breakdown
@@ -177,20 +178,20 @@ export function Kernel() {
           <tbody>
             {settings.map((setting) => (
               <tr key={setting.key}>
-                <td className="hm-mono hm-primary">{setting.key}</td>
-                <td className="hm-mono">{setting.current ?? <span className="badge unknown">{t("unknown")}</span>}</td>
+                <td className="ui-mono ui-name">{setting.key}</td>
+                <td className="ui-mono">{setting.current ?? <span className="ui-pill ui-unknown">{t("unknown")}</span>}</td>
                 {/* Differing values mark a setting that waits for a reboot or
                     was changed outside the panel. */}
-                <td className="hm-mono">
-                  {setting.desired ?? <span className="source" title={t("No value was asked for; the key is watched as the host has it.")}>{t("none")}</span>}
+                <td className="ui-mono">
+                  {setting.desired ?? <span className="ui-note" title={t("No value was asked for; the key is watched as the host has it.")}>{t("none")}</span>}
                   {setting.desired && setting.desired !== setting.current && (
-                    <span className="badge warn"> {t("not applied yet")}</span>
+                    <span className="ui-pill ui-warn"> {t("not applied yet")}</span>
                   )}
                 </td>
                 <td>
                   {setting.managed
-                    ? <span className="badge ok">{t("panel")}</span>
-                    : <span className="source">{t("kernel default or host admin")}</span>}
+                    ? <span className="ui-pill ui-ok">{t("panel")}</span>
+                    : <span className="ui-note">{t("kernel default or host admin")}</span>}
                 </td>
               </tr>
             ))}
@@ -198,7 +199,7 @@ export function Kernel() {
         </Table>
         {settingsEntry && (
           <ActionGuard action="sysctl.ensure" host={host.id}>
-            <div className="hm-section-body">
+            <div className="ui-panel-body">
               {/* The fields come from the operation registry, so this form and
                   the Bulk wizard ask for the same things and refuse the same
                   values - a key outside the panel's branches among them. */}
@@ -244,7 +245,7 @@ export function Kernel() {
         tools={
           <>
             <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("Filter modules")} />
-            <span className="source">
+            <span className="ui-note">
               {t("{loaded} loaded · {blocked} blocked", { loaded: (snapshot?.modules ?? []).length, blocked: (snapshot?.blacklist ?? []).length })}
             </span>
           </>
@@ -253,15 +254,15 @@ export function Kernel() {
       >
         <Table>
           <thead>
-            <tr><th scope="col">{t("Module")}</th><th scope="col" className="hm-num">{t("Size")}</th><th scope="col">{t("Used by")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Actions")}</th></tr>
+            <tr><th scope="col">{t("Module")}</th><th scope="col" className="ui-numeric">{t("Size")}</th><th scope="col">{t("Used by")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Actions")}</th></tr>
           </thead>
           <tbody>
             {modules.slice(0, 60).map((entry) => (
               <tr key={entry.name}>
-                <td className="hm-mono hm-primary">{entry.name}</td>
-                <td className="hm-num">{bytes(entry.size_bytes)}</td>
-                <td className="hm-mono">{(entry.used_by ?? []).join(", ") || "—"}</td>
-                <td>{entry.blacklisted ? <span className="badge warn">{t("blocked by Flotestro")}</span> : t("loaded")}</td>
+                <td className="ui-mono ui-name">{entry.name}</td>
+                <td className="ui-numeric">{bytes(entry.size_bytes)}</td>
+                <td className="ui-mono">{(entry.used_by ?? []).join(", ") || "—"}</td>
+                <td>{entry.blacklisted ? <span className="ui-pill ui-warn">{t("blocked by Flotestro")}</span> : t("loaded")}</td>
                 <td>
                   <ActionGuard action="kernel.module.blacklist" host={host.id}>
                     {/* The registry keeps the list of modules the panel will
@@ -281,7 +282,7 @@ export function Kernel() {
             module is not loaded by this - modprobe honours the blacklist
             file the panel wrote - so the form says so first. */}
         <ActionGuard action="kernel.module.load" host={host.id}>
-          <div className="hm-section-body">
+          <div className="ui-panel-body">
             <Form>
               <Fields>
                 <Field label={t("Module to load")} help={t("The name as modprobe takes it, e.g. br_netfilter. A module blocked by the panel has to be unblocked first.")}>
@@ -290,7 +291,7 @@ export function Kernel() {
               </Fields>
               <FormActions>
                 <button
-                  className="secondary"
+                  className="ui-btn-secondary"
                   // The blocked list is what this host reports, so it stays
                   // here: the registry knows the operation, not the host.
                   disabled={!orderReady(loadRequest) || (snapshot?.blacklist ?? []).includes(moduleName.trim())}
@@ -316,7 +317,7 @@ export function Kernel() {
       </Widgets>
 
       {snapshot?.observed_at && (
-        <p className="hm-freshness">
+        <p className="ui-freshness">
           <span>{t("Kernel state read")} <Time value={snapshot.observed_at} /></span>
         </p>
       )}
@@ -347,7 +348,7 @@ function BlockButton({ entry, onIntent }: { entry: KernelModule; onIntent: (inte
   const order = moduleBlockOrder(entry.name, entry.blacklisted);
   return (
     <button
-      className={entry.blacklisted ? "secondary" : "hm-danger"}
+      className={entry.blacklisted ? "ui-btn-secondary" : "ui-btn-danger"}
       disabled={!orderReady(order)}
       title={refusalOf(t, order)}
       onClick={() =>

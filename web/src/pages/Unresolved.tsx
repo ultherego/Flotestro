@@ -10,8 +10,8 @@ import type {
   UnresolvedRulingKind,
   UnresolvedRulings,
 } from "../lib/types";
-import { ErrorBox, Empty, Time } from "../components/ui";
-import { Actions, Card, Field, FieldGrid, PageHeader, Toolbar, Pager} from "../components/layout";
+import { ErrorBox, Time } from "../components/ui";
+import { Actions, Empty, Field, Fields, PageHead, Pager, Panel, Toolbar } from "../ui/kit";
 import { Icon } from "../components/icons";
 import { useT } from "../i18n";
 
@@ -209,7 +209,7 @@ export default function Unresolved() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         title={t("Needs confirmation")}
         description={t("Operations the fleet could not confirm.")}
         help={<p>{t("Operations the fleet could not confirm. Nothing here disappears with time: an item leaves this list when somebody rules on it, and the ruling is recorded beside the task rather than in place of its outcome.")}</p>}
@@ -223,10 +223,10 @@ export default function Unresolved() {
           // navigation does add them, because that one is the length of a
           // queue - a different question from this one.
           <>
-          <div className="segmented" role="group" aria-label={t("Which question to show")}>
+          <div className="ui-segmented" role="group" aria-label={t("Which question to show")}>
             <button
               type="button"
-              className={kind === "" ? "active" : ""}
+              className={kind === "" ? "ui-active" : ""}
               onClick={() => show("")}
               aria-pressed={kind === ""}
               data-testid="filter-both"
@@ -247,18 +247,18 @@ export default function Unresolved() {
                 <button
                   key={one}
                   type="button"
-                  className={kind === one ? "active" : ""}
+                  className={kind === one ? "ui-active" : ""}
                   onClick={() => show(one)}
                   aria-pressed={kind === one}
                   data-testid={`filter-${one}`}
                   title={t(described.title)}
                 >
                   {t(described.question)}{" "}
-                  <span className="fp-chips" data-testid={`count-${one}`}>
-                    <span className={operations > 0 ? "badge warn" : "badge"}>
+                  <span className="ui-tags" data-testid={`count-${one}`}>
+                    <span className={operations > 0 ? "ui-pill ui-warn" : "ui-pill"}>
                       {t("{n} operations", { n: operations })}
                     </span>
-                    <span className={hosts > 0 ? "badge warn" : "badge"}>
+                    <span className={hosts > 0 ? "ui-pill ui-warn" : "ui-pill"}>
                       {t("on {n} hosts", { n: hosts })}
                     </span>
                   </span>
@@ -273,7 +273,7 @@ export default function Unresolved() {
               conclusion, the second is the absence of one. Each gets its own
               number and its own way in, which is what the owner asked for
               when he said "readably". */}
-          <div className="segmented" role="group" aria-label={t("Which reading to show")}>
+          <div className="ui-segmented" role="group" aria-label={t("Which reading to show")}>
             {([
               ["did_not_hold", counts.did_not_hold_operations, counts.did_not_hold_hosts],
               ["could_not_read", counts.could_not_read_operations, counts.could_not_read_hosts],
@@ -281,7 +281,7 @@ export default function Unresolved() {
               <button
                 key={which}
                 type="button"
-                className={reading === which ? "active" : ""}
+                className={reading === which ? "ui-active" : ""}
                 onClick={() => showReading(reading === which ? "" : which)}
                 aria-pressed={reading === which}
                 data-testid={`reading-${which}`}
@@ -290,11 +290,11 @@ export default function Unresolved() {
                   : t("The verifier could not read the host, so the state is unknown.")}
               >
                 {which === "did_not_hold" ? t("Did not hold") : t("Could not be read")}{" "}
-                <span className="fp-chips">
-                  <span className={(operations ?? 0) > 0 ? "badge warn" : "badge"}>
+                <span className="ui-tags">
+                  <span className={(operations ?? 0) > 0 ? "ui-pill ui-warn" : "ui-pill"}>
                     {t("{n} operations", { n: operations ?? 0 })}
                   </span>
-                  <span className={(hosts ?? 0) > 0 ? "badge warn" : "badge"}>
+                  <span className={(hosts ?? 0) > 0 ? "ui-pill ui-warn" : "ui-pill"}>
                     {t("on {n} hosts", { n: hosts ?? 0 })}
                   </span>
                 </span>
@@ -304,7 +304,7 @@ export default function Unresolved() {
           {total > 0 && (
             <button
               type="button"
-              className="secondary"
+              className="ui-btn-secondary"
               onClick={() => { setBatch(true); setRuling(null); }}
               data-testid="rule-on-all"
             >
@@ -330,7 +330,7 @@ export default function Unresolved() {
         />
       )}
 
-      <Card className="span-12" flush>
+      <Panel className="ui-col-12" flush>
         <Toolbar
           end={
             <>
@@ -339,7 +339,7 @@ export default function Unresolved() {
             </>
           }
         >
-          <div className="search-field">
+          <div className="ui-search">
             <Icon name="search" />
             <input
               type="search"
@@ -394,13 +394,13 @@ export default function Unresolved() {
                     ) : (
                       /* Not "never": nobody has tried again since, which is a
                          fact about the panel and not about the host. */
-                      <span className="badge unknown">{t("not since")}</span>
+                      <span className="ui-pill ui-unknown">{t("not since")}</span>
                     )}
                   </td>
                   <td>
                     <button
                       type="button"
-                      className="secondary"
+                      className="ui-btn-secondary"
                       onClick={() => setRuling(ruling === item.attempt_id ? null : item.attempt_id)}
                       aria-expanded={ruling === item.attempt_id}
                     >
@@ -413,7 +413,7 @@ export default function Unresolved() {
                     which host it means in its heading and the eye does not
                     join the two. The panel opens an approval the same way. */}
                 {ruling === item.attempt_id && (
-                  <tr className="detail-row">
+                  <tr className="ui-detailrow">
                     <td colSpan={7}>
                       <RulingForm
                         item={item}
@@ -432,7 +432,7 @@ export default function Unresolved() {
         </table>
       )}
 
-      </Card>
+      </Panel>
     </>
   );
 }
@@ -457,27 +457,27 @@ function ReasonCell({ item }: { item: UnresolvedItem }) {
   const reading = verifierReading(item.verification);
   const sort = readingKind(item.kind, reading, item.reading);
   return (
-    <div className="reason">
+    <div className="ui-reason">
       {sort === "did_not_hold" && (
         <>
-          <p className="reason-verdict">{t("The change did not hold.")}</p>
-          <p className="reason-reading">
-            <span className="reason-label">{t("Ordered")}:</span> <code>{reading?.expected}</code>
+          <p className="ui-reason-verdict">{t("The change did not hold.")}</p>
+          <p className="ui-reason-reading">
+            <span className="ui-faint">{t("Ordered")}:</span> <code>{reading?.expected}</code>
             {" · "}
-            <span className="reason-label">{t("On the host")}:</span> <code>{reading?.observed}</code>
+            <span className="ui-faint">{t("On the host")}:</span> <code>{reading?.observed}</code>
           </p>
         </>
       )}
       {sort === "could_not_read" && (
-        <p className="reason-verdict">{t("The host could not be read, so the state is unknown.")}</p>
+        <p className="ui-reason-verdict">{t("The host could not be read, so the state is unknown.")}</p>
       )}
       {sort === "outcome_unknown" && (
-        <p className="reason-verdict">
+        <p className="ui-reason-verdict">
           {t("The agent restarted while the host was carrying this operation, so whether it finished is unknown.")}
         </p>
       )}
       {item.reason ? (
-        <p className="source" data-testid="reason-host-words">
+        <p className="ui-note" data-testid="reason-host-words">
           {t("what the host itself said")}: {item.reason}
         </p>
       ) : null}
@@ -542,7 +542,7 @@ function BatchRulingForm({
   });
 
   return (
-    <Card
+    <Panel
       title={t("Rule on all {n} of them", { n: Math.min(total, BATCH_LIMIT) })}
       description={
         total > BATCH_LIMIT
@@ -553,7 +553,7 @@ function BatchRulingForm({
       {done ? (
         <>
           <p>{t("{n} of {attempts} were ruled on.", { n: done.ruled, attempts: done.attempts })}</p>
-          <p className="source">{t("These were not, and are still on the list:")}</p>
+          <p className="ui-note">{t("These were not, and are still on the list:")}</p>
           <ul>
             {done.refused?.map((one) => (
               <li key={one.attempt_id}>
@@ -567,7 +567,7 @@ function BatchRulingForm({
         </>
       ) : (
         <>
-          <FieldGrid>
+          <Fields>
             <Field label={t("What did you find?")}>
               <select
                 value={verdict}
@@ -593,7 +593,7 @@ function BatchRulingForm({
                 data-testid="batch-basis"
               />
             </Field>
-          </FieldGrid>
+          </Fields>
 
           {record.error ? <ErrorBox error={record.error} /> : null}
 
@@ -606,13 +606,13 @@ function BatchRulingForm({
             >
               {t("Record the ruling for all of them")}
             </button>
-            <button type="button" className="secondary" onClick={onClose}>
+            <button type="button" className="ui-btn-secondary" onClick={onClose}>
               {t("Cancel")}
             </button>
           </Actions>
         </>
       )}
-    </Card>
+    </Panel>
   );
 }
 
@@ -650,10 +650,10 @@ function RulingForm({
 
   return (
     <>
-      <p className="source">
+      <p className="ui-note">
         {t("The task keeps the outcome the fleet reported. What you write here is recorded beside it, with your name and the time.")}
       </p>
-      <FieldGrid>
+      <Fields>
         <Field label={t("What did you find?")}>
           <select
             value={verdict}
@@ -679,7 +679,7 @@ function RulingForm({
             data-testid="ruling-basis"
           />
         </Field>
-      </FieldGrid>
+      </Fields>
 
       {record.error ? <ErrorBox error={record.error} /> : null}
 
@@ -692,7 +692,7 @@ function RulingForm({
         >
           {t("Record the ruling")}
         </button>
-        <button type="button" className="secondary" onClick={onClose}>
+        <button type="button" className="ui-btn-secondary" onClick={onClose}>
           {t("Cancel")}
         </button>
       </Actions>

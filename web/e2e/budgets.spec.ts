@@ -22,7 +22,7 @@ test.beforeAll(async ({ request }) => {
 /** The page header of a fleet page, with its title. */
 /** The head of a section inside a page: what a tab of the settings area has. */
 function section(page: Page, title: string) {
-  return page.locator(".parts-head").getByRole("heading", { name: title });
+  return page.locator(".ui-sectionhead").getByRole("heading", { name: title });
 }
 
 /** A whole-text match: "Capacity" must not find "Capacity of the fleet". */
@@ -37,7 +37,7 @@ function heading(text: string): RegExp {
 
 /** The card of a fleet page by its title. */
 function card(page: Page, title: string) {
-  return page.locator(".card").filter({ has: page.locator(".card-title", { hasText: exact(title) }) });
+  return page.locator(".ui-panel").filter({ has: page.locator(".ui-panel-title", { hasText: exact(title) }) });
 }
 
 /** Every value of a status bar has settled on a number. */
@@ -76,7 +76,7 @@ async function restore(request: APIRequestContext, key: string, capacity: number
 
 /** The row of a budget in the table, found by its key. */
 function rowOf(page: Page, key: string) {
-  return page.locator("tr[data-testid='budget-row']").filter({ has: page.locator("td .mono", { hasText: exact(key) }) });
+  return page.locator("tr[data-testid='budget-row']").filter({ has: page.locator("td .ui-mono", { hasText: exact(key) }) });
 }
 
 test.describe("budgets", () => {
@@ -132,18 +132,18 @@ test.describe("budgets", () => {
       // The capacity is a policy and does not move under the test; the
       // tokens in use do, so only their shape is checked.
       await expect(row.getByRole("cell").nth(1)).toHaveText(String(item.capacity));
-      await expect(row.locator(".meter-value")).toHaveText(new RegExp(`^\\d+ / ${item.capacity}$`));
+      await expect(row.locator(".ui-meter-value")).toHaveText(new RegExp(`^\\d+ / ${item.capacity}$`));
       // The holders come and go with the tokens: the cell either names
       // nobody or names holders, each with its class and its tokens.
       const holders = row.getByRole("cell").nth(3);
       await expect(holders).toHaveText(/nobody|tokens/);
       for (const holder of await holders.getByTestId("budget-holder").all()) {
         await expect(holder).toContainText(/\d+ tokens/);
-        await expect(holder.locator(".badge")).toHaveCount(1);
+        await expect(holder.locator(".ui-pill")).toHaveCount(1);
       }
       // A pattern row is the default of its family and says so.
       const pattern = item.key.split(":")[1] === "*";
-      await expect(row.locator(".badge", { hasText: "default" })).toHaveCount(pattern ? 1 : 0);
+      await expect(row.locator(".ui-pill", { hasText: "default" })).toHaveCount(pattern ? 1 : 0);
     }
 
     // The status bar counts the keys of the table; the tokens in use may

@@ -2,8 +2,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
-import { Empty, ErrorBox, Pair, Pairs, Time } from "../components/ui";
-import { Actions, Card, EmptyState, FieldGrid, PageHeader } from "../components/layout";
+import { ErrorBox, Pair, Pairs, Time } from "../components/ui";
+import { Actions, Empty, Fields, PageHead, Panel } from "../ui/kit";
 import { useT } from "../i18n";
 import {
   ReasonField, destroyable, errorText, reasonGiven, secretReference, useCopy, usePermissions,
@@ -46,12 +46,12 @@ export function SecretPage() {
     if (secret.error instanceof ApiError && secret.error.status === 404) {
       return (
         <>
-          <PageHeader title={name} breadcrumb={[{ label: t("Secrets"), to: "/secrets" }]}
+          <PageHead title={name} breadcrumb={[{ label: t("Secrets"), to: "/secrets" }]}
         help={<p>{t("Every version of this secret, newest first. The panel holds the ciphertext and the key it was sealed with; the value itself is shown only on request and is never written into a task.")}</p>}
       />
-          <EmptyState action={<Link to="/secrets">{t("Back to the secrets")}</Link>}>
+          <Empty action={<Link to="/secrets">{t("Back to the secrets")}</Link>}>
             {t("No secret named {name} exists in this installation.", { name })}
-          </EmptyState>
+          </Empty>
         </>
       );
     }
@@ -60,7 +60,7 @@ export function SecretPage() {
   if (!secret.data) {
     return (
       <>
-        <PageHeader title={name} breadcrumb={[{ label: t("Secrets"), to: "/secrets" }]} />
+        <PageHead title={name} breadcrumb={[{ label: t("Secrets"), to: "/secrets" }]} />
         <Empty>{t("Loading…")}</Empty>
       </>
     );
@@ -74,55 +74,55 @@ export function SecretPage() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         title={data.name}
         description={data.description || t("No description was given.")}
         breadcrumb={[{ label: t("Secrets"), to: "/secrets" }]}
         actions={
           data.retired_at
-            ? <span className="badge error">{t("retired")}</span>
-            : <span className="badge ok">{t("issuable")}</span>
+            ? <span className="ui-pill ui-error">{t("retired")}</span>
+            : <span className="ui-pill ui-ok">{t("issuable")}</span>
         }
       />
 
-      <div className="widgets">
-        <Card className="span-7" title={t("Secret")} description={t("The metadata; the value is not here and cannot be read back.")}>
+      <div className="ui-grid">
+        <Panel className="ui-col-7" title={t("Secret")} description={t("The metadata; the value is not here and cannot be read back.")}>
           <Pairs>
-            <Pair label={t("Name")}><span className="mono">{data.name}</span></Pair>
+            <Pair label={t("Name")}><span className="ui-mono">{data.name}</span></Pair>
             <Pair label={t("Current version")}>{data.current_version}</Pair>
-            <Pair label={t("Created by")}><span className="mono">{data.created_by}</span></Pair>
+            <Pair label={t("Created by")}><span className="ui-mono">{data.created_by}</span></Pair>
             <Pair label={t("Created")}><Time value={data.created_at} /></Pair>
             <Pair label={t("Last change")}><Time value={data.updated_at} /></Pair>
             <Pair label={t("Retired")}>
-              {data.retired_at ? <Time value={data.retired_at} /> : <span className="source">{t("no")}</span>}
+              {data.retired_at ? <Time value={data.retired_at} /> : <span className="ui-note">{t("no")}</span>}
             </Pair>
             <Pair label={t("Versions")}>{t("{live} with content of {n}", { live, n: versions.length })}</Pair>
           </Pairs>
-        </Card>
+        </Panel>
 
-        <Card
-          className="span-5"
+        <Panel
+          className="ui-col-5"
           title={t("Reference")}
           description={t("What a job payload names. Without a version the host gets the one current at delivery; with a version it gets that one and no other, also after a rotation.")}
         >
-          <div className="stack" style={{ gap: 8 }}>
-            <code className="mono">{reference}</code>
+          <div className="ui-stack" style={{ gap: 8 }}>
+            <code className="ui-mono">{reference}</code>
             <Actions>
-              <button className="secondary" onClick={() => copy("current", reference)}>
+              <button className="ui-btn-secondary" onClick={() => copy("current", reference)}>
                 {copied === "current" ? t("Copied") : t("Copy the reference")}
               </button>
-              <button className="secondary" onClick={() => copy("pinned", pinned)} title={pinned}>
+              <button className="ui-btn-secondary" onClick={() => copy("pinned", pinned)} title={pinned}>
                 {copied === "pinned" ? t("Copied") : t("Copy pinned to version {version}", { version: data.current_version })}
               </button>
             </Actions>
           </div>
-        </Card>
+        </Panel>
 
-        <Card
-          className="span-12"
+        <Panel
+          className="ui-col-12"
           title={t("Versions")}
           description={t("Every version that ever existed, newest first. Destroying one erases its content, not the row.")}
-          actions={notice ? <span className="source">{notice}</span> : undefined}
+          actions={notice ? <span className="ui-note">{notice}</span> : undefined}
           flush
         >
           {versions.length === 0 ? (
@@ -131,8 +131,8 @@ export function SecretPage() {
             <table>
               <thead>
                 <tr>
-                  <th scope="col" className="num">{t("Version")}</th>
-                  <th scope="col" className="num">{t("Size")}</th>
+                  <th scope="col" className="ui-numeric">{t("Version")}</th>
+                  <th scope="col" className="ui-numeric">{t("Size")}</th>
                   <th scope="col">{t("Created by")}</th>
                   <th scope="col">{t("Created")}</th>
                   <th scope="col">{t("State")}</th>
@@ -159,7 +159,7 @@ export function SecretPage() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   );
@@ -189,27 +189,27 @@ function VersionRow({
   return (
     <>
       <tr>
-        <td className="num">
+        <td className="ui-numeric">
           {version.version}
-          {current && <> <span className="badge">{t("current")}</span></>}
+          {current && <> <span className="ui-pill">{t("current")}</span></>}
         </td>
-        <td className="num">{t("{n} B", { n: version.size_bytes })}</td>
-        <td><span className="mono">{version.created_by}</span></td>
+        <td className="ui-numeric">{t("{n} B", { n: version.size_bytes })}</td>
+        <td><span className="ui-mono">{version.created_by}</span></td>
         <td><Time value={version.created_at} /></td>
         <td>
           {version.destroyed_at ? (
-            <><span className="badge error">{t("destroyed")}</span> <Time value={version.destroyed_at} /></>
+            <><span className="ui-pill ui-error">{t("destroyed")}</span> <Time value={version.destroyed_at} /></>
           ) : (
-            <span className="badge ok">{t("kept")}</span>
+            <span className="ui-pill ui-ok">{t("kept")}</span>
           )}
         </td>
-        <td className="actions-cell">
-          <div className="row-actions">
-            <button className="secondary" onClick={onCopy} title={secretReference(secret.name, version.version)}>
+        <td className="ui-actioncell">
+          <div className="ui-rowactions">
+            <button className="ui-btn-secondary" onClick={onCopy} title={secretReference(secret.name, version.version)}>
               {copied ? t("Copied") : t("Copy reference")}
             </button>
             {canDestroy && destroyable(secret, version) && (
-              <button className="secondary" aria-expanded={open} onClick={onToggle} disabled={destroying}>
+              <button className="ui-btn-secondary" aria-expanded={open} onClick={onToggle} disabled={destroying}>
                 {open ? t("Close") : t("Destroy")}
               </button>
             )}
@@ -217,7 +217,7 @@ function VersionRow({
         </td>
       </tr>
       {open && (
-        <tr className="detail-row" data-testid="secret-destroy" data-version={version.version}>
+        <tr className="ui-detailrow" data-testid="secret-destroy" data-version={version.version}>
           <td colSpan={6}>
             <DestroyForm key={version.version} secret={secret} version={version} busy={destroying} error={error} onDestroy={onDestroy} onClose={onClose} />
           </td>
@@ -246,23 +246,23 @@ function DestroyForm({
   const [reason, setReason] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   return (
-    <div className="stack">
-      <p className="source">
+    <div className="ui-stack">
+      <p className="ui-note">
         {t("The content of version {version} of {name} is erased now, from the store and from every backup of the database; a job with a lease on it is refused instead of served. The row stays as the record that the version existed.", { version: version.version, name: secret.name })}
       </p>
-      <FieldGrid>
+      <Fields>
         <ReasonField value={reason} onChange={setReason} />
-        <label className="toggle">
+        <label className="ui-check">
           <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
           {t("I understand that version {version} cannot be recovered afterwards.", { version: version.version })}
         </label>
-      </FieldGrid>
+      </Fields>
       <Actions>
-        <button className="danger" onClick={() => onDestroy(reason)} disabled={!confirmed || !reasonGiven(reason) || busy}>
+        <button className="ui-btn-danger" onClick={() => onDestroy(reason)} disabled={!confirmed || !reasonGiven(reason) || busy}>
           {busy ? t("Destroying…") : t("Destroy version {version}", { version: version.version })}
         </button>
-        <button className="secondary" onClick={onClose} disabled={busy}>{t("Cancel")}</button>
-        {error && <span className="page-error">{error}</span>}
+        <button className="ui-btn-secondary" onClick={onClose} disabled={busy}>{t("Cancel")}</button>
+        {error && <span className="ui-errorbox">{error}</span>}
       </Actions>
     </div>
   );

@@ -5,8 +5,8 @@ import { api, ApiError, loadedItems, LIST_PAGE, type Collection, type Page } fro
 import { useDebounced } from "../lib/debounce";
 import type { Host, HostGroup, SelectorExpression, Whoami } from "../lib/types";
 import { REFRESH_INTERVAL } from "../lib/stream";
-import { ConnectionState, Empty, ErrorBox, Time } from "../components/ui";
-import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
+import { ConnectionState, ErrorBox, Time } from "../components/ui";
+import { Actions, Empty, Field, Fields, PageHead, Panel, Toolbar } from "../ui/kit";
 import { useConfirm } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
@@ -152,7 +152,7 @@ function useDeleteGroup(): (group: Pick<HostGroup, "id" | "name">) => Promise<bo
       body: (
         <>
           <p>{t("A selector that names it will stop resolving; a campaign already ordered keeps its snapshot.")}</p>
-          {named && <p className="page-error">{named}</p>}
+          {named && <p className="ui-errorbox">{named}</p>}
         </>
       ),
       confirmLabel: t("Delete"),
@@ -191,24 +191,24 @@ function GroupList() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         icon="groups"
         title={t("Groups")}
         description={t("A saved answer to “which hosts”.")}
         help={<p>{t("A group is a saved answer to “which hosts”: a list kept by hand, or a selector the server resolves every time it is read.")}</p>}
         actions={canWrite && !creating && (
-          <button className="primary" onClick={() => setCreating(true)}>{t("New group")}</button>
+          <button className="ui-btn-primary" onClick={() => setCreating(true)}>{t("New group")}</button>
         )}
       />
 
-      <div className="widgets">
+      <div className="ui-grid">
         {creating && (
-          <div className="span-12">
+          <div className="ui-col-12">
             <CreateGroup onDone={() => setCreating(false)} />
           </div>
         )}
 
-        <Card className="span-12" flush>
+        <Panel className="ui-col-12" flush>
           {items.length > 0 && (
             <Toolbar end={<span>{t("{n} of {total} groups", { n: shown.length, total: items.length })}</span>}>
               <input placeholder={t("Search by name or description")} aria-label={t("Search by name or description")} value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -221,17 +221,17 @@ function GroupList() {
           {groups.isLoading ? (
             <Empty>{t("Loading…")}</Empty>
           ) : items.length === 0 ? (
-            <EmptyState action={canWrite && !creating && <button className="secondary" onClick={() => setCreating(true)}>{t("New group")}</button>}>
+            <Empty action={canWrite && !creating && <button className="ui-btn-secondary" onClick={() => setCreating(true)}>{t("New group")}</button>}>
               {t("No groups yet. A campaign can still name hosts by site, environment, tags or a list.")}
-            </EmptyState>
+            </Empty>
           ) : shown.length === 0 ? (
-            <EmptyState>{t("No group matches the search.")}</EmptyState>
+            <Empty>{t("No group matches the search.")}</Empty>
           ) : (
             <table>
               <thead>
                 <tr>
                   <th scope="col">{t("Group")}</th><th scope="col">{t("Kind")}</th><th scope="col">{t("Selector")}</th>
-                  <th scope="col" className="num">{t("Hosts")}</th><th scope="col">{t("Created by")}</th><th scope="col">{t("Updated")}</th>
+                  <th scope="col" className="ui-numeric">{t("Hosts")}</th><th scope="col">{t("Created by")}</th><th scope="col">{t("Updated")}</th>
                   {canWrite && <th scope="col"></th>}
                 </tr>
               </thead>
@@ -239,28 +239,28 @@ function GroupList() {
                 {shown.map((group) => (
                   <tr key={group.id}>
                     <td>
-                      <div className="fp-host-cell">
+                      <div className="ui-twoline">
                         <Link to={`/groups/${group.id}`}>{group.name}</Link>
-                        {group.description && <span className="source">{group.description}</span>}
+                        {group.description && <span className="ui-note">{group.description}</span>}
                       </div>
                     </td>
                     <td><KindBadge kind={group.kind} /></td>
-                    <td className="source">{group.kind === "dynamic" ? describeExpression(group.selector) : t("member list")}</td>
+                    <td className="ui-note">{group.kind === "dynamic" ? describeExpression(group.selector) : t("member list")}</td>
                     {/* A count the server could not give is shown as
                         unknown, not as zero: an unresolvable selector
                         names nobody only because nobody could ask. */}
-                    <td className="num">
+                    <td className="ui-numeric">
                       {group.unresolvable
-                        ? <span className="badge error" title={group.unresolvable}>{t("unresolvable")}</span>
+                        ? <span className="ui-pill ui-error" title={group.unresolvable}>{t("unresolvable")}</span>
                         : group.member_count === undefined
-                          ? <span className="badge unknown">{t("unknown")}</span>
+                          ? <span className="ui-pill ui-unknown">{t("unknown")}</span>
                           : group.member_count}
                     </td>
                     <td>{group.created_by}</td>
                     <td><Time value={group.updated_at} /></td>
                     {canWrite && (
-                      <td className="num">
-                        <button type="button" className="danger" onClick={() => deleteGroup(group)}>{t("Delete")}</button>
+                      <td className="ui-numeric">
+                        <button type="button" className="ui-btn-danger" onClick={() => deleteGroup(group)}>{t("Delete")}</button>
                       </td>
                     )}
                   </tr>
@@ -268,7 +268,7 @@ function GroupList() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   );
@@ -277,8 +277,8 @@ function GroupList() {
 function KindBadge({ kind }: { kind: HostGroup["kind"] }) {
   const t = useT();
   return kind === "dynamic"
-    ? <span className="badge ok" title={t("resolved from its selector every time it is read")}>{t("dynamic")}</span>
-    : <span className="badge" title={t("a member list kept by hand")}>{t("static")}</span>;
+    ? <span className="ui-pill ui-ok" title={t("resolved from its selector every time it is read")}>{t("dynamic")}</span>
+    : <span className="ui-pill" title={t("a member list kept by hand")}>{t("static")}</span>;
 }
 
 /**
@@ -319,11 +319,11 @@ function CreateGroup({ onDone }: { onDone: () => void }) {
   const ready = name.trim() !== "" && (kind === "static" ? members.size > 0 : expression !== null);
 
   return (
-    <Card
+    <Panel
       title={t("New group")}
       description={t("The name is what a campaign selector will use; keep it short and without spaces.")}
     >
-      <FieldGrid>
+      <Fields>
         <Field label={t("Name")}>
           <input placeholder={t("e.g. databases-gold")} value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
@@ -338,7 +338,7 @@ function CreateGroup({ onDone }: { onDone: () => void }) {
             <option value="dynamic">{t("dynamic: a selector")}</option>
           </select>
         </Field>
-      </FieldGrid>
+      </Fields>
 
       {kind === "static" ? (
         <HostChooser selected={members} onChange={setMembers} />
@@ -353,10 +353,10 @@ function CreateGroup({ onDone }: { onDone: () => void }) {
         <button onClick={() => create.mutate()} disabled={!ready || create.isPending}>
           {create.isPending ? t("Creating…") : t("Create group")}
         </button>
-        <button className="secondary" onClick={onDone} disabled={create.isPending}>{t("Cancel")}</button>
-        {errorMessage && <p className="page-error">{errorMessage}</p>}
+        <button className="ui-btn-secondary" onClick={onDone} disabled={create.isPending}>{t("Cancel")}</button>
+        {errorMessage && <p className="ui-errorbox">{errorMessage}</p>}
       </Actions>
-    </Card>
+    </Panel>
   );
 }
 
@@ -395,13 +395,13 @@ export function HostChooser({ selected, onChange, title }: {
 
   return (
     <>
-      <h4 className="widget-subhead">{title ?? t("Members")}</h4>
+      <h4 className="ui-subhead">{title ?? t("Members")}</h4>
       <Toolbar end={<span>{t("{n} chosen", { n: selected.size })}</span>}>
         <input placeholder={t("Search hostname, address, machine ID or owner")} aria-label={t("Search hostname, address, machine ID or owner")} value={search} onChange={(e) => setSearch(e.target.value)} />
-        <button type="button" className="secondary" onClick={() => onChange(new Set([...selected, ...rows.map((host) => host.id)]))}>
+        <button type="button" className="ui-btn-secondary" onClick={() => onChange(new Set([...selected, ...rows.map((host) => host.id)]))}>
           {t("Choose every listed host")}
         </button>
-        <button type="button" className="secondary" onClick={() => onChange(new Set())} disabled={selected.size === 0}>
+        <button type="button" className="ui-btn-secondary" onClick={() => onChange(new Set())} disabled={selected.size === 0}>
           {t("Clear")}
         </button>
       </Toolbar>
@@ -420,7 +420,7 @@ export function HostChooser({ selected, onChange, title }: {
                 <td><ConnectionState state={host.connection_state} /></td>
                 <td>{host.site}</td>
                 <td>{host.environment}</td>
-                <td className="source">{host.tags.join(" ")}</td>
+                <td className="ui-note">{host.tags.join(" ")}</td>
               </tr>
             ))}
           </tbody>
@@ -428,7 +428,7 @@ export function HostChooser({ selected, onChange, title }: {
       )}
       {hosts.hasNextPage && (
         <p>
-          <button type="button" className="secondary" onClick={() => hosts.fetchNextPage()} disabled={hosts.isFetchingNextPage}>
+          <button type="button" className="ui-btn-secondary" onClick={() => hosts.fetchNextPage()} disabled={hosts.isFetchingNextPage}>
             {t("Load more ({n} left)", { n: total - rows.length })}
           </button>
         </p>
@@ -508,7 +508,7 @@ export function SelectorBuilder({ rules, combine, onRules, onCombine }: {
   };
   return (
     <>
-      <h4 className="widget-subhead">{t("Selector")}</h4>
+      <h4 className="ui-subhead">{t("Selector")}</h4>
       <Toolbar>
         <span>{t("the host has to match")}</span>
         <select value={combine} onChange={(e) => onCombine(e.target.value as "all" | "any")}>
@@ -518,7 +518,7 @@ export function SelectorBuilder({ rules, combine, onRules, onCombine }: {
       </Toolbar>
       {rules.map((rule, index) => (
         <Toolbar key={index}>
-          <label className="toggle" title={t("the rule holds when the fact is not on the host")}>
+          <label className="ui-check" title={t("the rule holds when the fact is not on the host")}>
             <input type="checkbox" checked={rule.negated} onChange={(e) => update(index, { negated: e.target.checked })} />{" "}
             {t("not")}
           </label>
@@ -526,16 +526,16 @@ export function SelectorBuilder({ rules, combine, onRules, onCombine }: {
             {RULE_FIELDS.map((field) => <option key={field} value={field}>{names[field]}</option>)}
           </select>
           <RuleValue rule={rule} onChange={(value) => update(index, { value })} />
-          <button type="button" className="secondary" onClick={() => onRules(rules.filter((_, i) => i !== index))} disabled={rules.length === 1}>
+          <button type="button" className="ui-btn-secondary" onClick={() => onRules(rules.filter((_, i) => i !== index))} disabled={rules.length === 1}>
             {t("Remove")}
           </button>
         </Toolbar>
       ))}
       <Actions>
-        <button type="button" className="secondary" onClick={() => onRules([...rules, { field: "tag", value: "", negated: false }])}>
+        <button type="button" className="ui-btn-secondary" onClick={() => onRules([...rules, { field: "tag", value: "", negated: false }])}>
           {t("Add a rule")}
         </button>
-        <span className="source">
+        <span className="ui-note">
           {expression ? describeExpression(expression) : t("no rule has a value yet")}
         </span>
       </Actions>
@@ -621,20 +621,20 @@ export function SelectorPreview({ expression }: { expression: SelectorExpression
   const stale = encoded !== JSON.stringify(expression);
   return (
     <div data-testid="selector-preview">
-      <h4 className="widget-subhead">{t("Matches now")}</h4>
+      <h4 className="ui-subhead">{t("Matches now")}</h4>
       {preview.error ? (
-        <p className="page-error">{preview.error instanceof ApiError ? preview.error.message : String(preview.error)}</p>
+        <p className="ui-errorbox">{preview.error instanceof ApiError ? preview.error.message : String(preview.error)}</p>
       ) : preview.isLoading || stale || !preview.data ? (
-        <p className="source">{t("Counting…")}</p>
+        <p className="ui-note">{t("Counting…")}</p>
       ) : (
         <>
           <p>
             <strong>{t("{n} hosts", { n: preview.data.count })}</strong>
             {preview.data.count > preview.data.sample.length && (
-              <span className="source"> {t("first {n} shown", { n: preview.data.sample.length })}</span>
+              <span className="ui-note"> {t("first {n} shown", { n: preview.data.sample.length })}</span>
             )}
           </p>
-          {preview.data.sample.length > 0 && <p className="mono">{preview.data.sample.join(", ")}</p>}
+          {preview.data.sample.length > 0 && <p className="ui-mono">{preview.data.sample.join(", ")}</p>}
         </>
       )}
     </div>
@@ -699,30 +699,30 @@ function EditGroup({ group, etag, onDone }: { group: GroupDetail; etag: string; 
   });
 
   return (
-    <Card className="span-12" title={t("Edit group")} description={dynamic
+    <Panel className="ui-col-12" title={t("Edit group")} description={dynamic
       ? t("The name a selector names it by, the description, and the rule the server compiles.")
       : t("The name a selector names it by and the description; the members are edited on their own.")}>
-      <FieldGrid>
+      <Fields>
         <Field label={t("Name")}>
           <input value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
         <Field label={t("Description")}>
           <input value={description} onChange={(e) => setDescription(e.target.value)} />
         </Field>
-      </FieldGrid>
+      </Fields>
       {dynamic && (
         <>
           {asJSON ? (
             <>
-              <h4 className="widget-subhead">{t("Selector")}</h4>
+              <h4 className="ui-subhead">{t("Selector")}</h4>
               {!saved.exact && (
-                <p className="source">{t("The saved selector is deeper than the builder's rows can say, so it is edited as written.")}</p>
+                <p className="ui-note">{t("The saved selector is deeper than the builder's rows can say, so it is edited as written.")}</p>
               )}
               <textarea rows={10} style={{ width: "100%", fontFamily: "var(--font-mono)", fontSize: 12 }} value={jsonText} onChange={(e) => setJsonText(e.target.value)} />
-              {parsed.error && <p className="page-error">{parsed.error}</p>}
+              {parsed.error && <p className="ui-errorbox">{parsed.error}</p>}
               {saved.exact && (
                 <p>
-                  <button type="button" className="secondary" onClick={() => {
+                  <button type="button" className="ui-btn-secondary" onClick={() => {
                     // The rows take the JSON back when it still fits
                     // them; otherwise they stay as they were.
                     const back = rulesOf(parsed.expression);
@@ -741,7 +741,7 @@ function EditGroup({ group, etag, onDone }: { group: GroupDetail; etag: string; 
             <>
               <SelectorBuilder rules={rules} combine={combine} onRules={setRules} onCombine={setCombine} />
               <p>
-                <button type="button" className="secondary" onClick={() => {
+                <button type="button" className="ui-btn-secondary" onClick={() => {
                   setJsonText(JSON.stringify(parsed.expression ?? group.selector ?? {}, null, 2));
                   setAsJSON(true);
                 }}>
@@ -757,10 +757,10 @@ function EditGroup({ group, etag, onDone }: { group: GroupDetail; etag: string; 
         <button onClick={() => { setErrorMessage(""); save.mutate(); }} disabled={!ready || save.isPending}>
           {save.isPending ? t("Saving…") : t("Save changes")}
         </button>
-        <button className="secondary" onClick={onDone} disabled={save.isPending}>{t("Cancel")}</button>
-        {errorMessage && <p className="page-error">{errorMessage}</p>}
+        <button className="ui-btn-secondary" onClick={onDone} disabled={save.isPending}>{t("Cancel")}</button>
+        {errorMessage && <p className="ui-errorbox">{errorMessage}</p>}
       </Actions>
-    </Card>
+    </Panel>
   );
 }
 
@@ -771,7 +771,7 @@ function UsedBy({ usage, kind }: { usage: GroupUsage; kind: HostGroup["kind"] })
   const t = useT();
   const total = usage.campaigns.length + usage.policies.length;
   return (
-    <Card className="span-12" title={t("Used by")} description={total === 0
+    <Panel className="ui-col-12" title={t("Used by")} description={total === 0
       ? t("No campaign or policy names this group in its selector.")
       : kind === "dynamic"
         ? t("A change of the selector reaches every policy listed at its next check; a campaign keeps the snapshot it froze.")
@@ -786,20 +786,20 @@ function UsedBy({ usage, kind }: { usage: GroupUsage; kind: HostGroup["kind"] })
               <tr key={`campaign-${campaign.id}`}>
                 <td>{t("campaign")}</td>
                 <td><Link to={`/campaigns/${campaign.id}`}>{campaign.name}</Link></td>
-                <td><span className="badge">{t(campaign.state)}</span></td>
+                <td><span className="ui-pill">{t(campaign.state)}</span></td>
               </tr>
             ))}
             {usage.policies.map((policy) => (
               <tr key={`policy-${policy.id}`}>
                 <td>{t("policy")}</td>
                 <td><Link to={`/policies/${policy.id}`}>{policy.name}</Link></td>
-                <td><span className="badge">{t(policy.state)}</span></td>
+                <td><span className="ui-pill">{t(policy.state)}</span></td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-    </Card>
+    </Panel>
   );
 }
 
@@ -876,7 +876,7 @@ function GroupPage({ id }: { id: string }) {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         icon="groups"
         breadcrumb={[{ label: t("Groups"), to: "/groups" }]}
         title={<>{g.name} <KindBadge kind={g.kind} /></>}
@@ -887,14 +887,14 @@ function GroupPage({ id }: { id: string }) {
                 target; whoever cannot order a campaign is not shown the
                 door to it. */}
             {seesCampaigns && (
-              <button className="secondary" onClick={() => navigate(bulkAddress(g.name))}>{t("Start a campaign on this group")}</button>
+              <button className="ui-btn-secondary" onClick={() => navigate(bulkAddress(g.name))}>{t("Start a campaign on this group")}</button>
             )}
-            <button className="secondary" onClick={() => navigate(readsAddress(g.name))}>{t("Run a read on this group")}</button>
+            <button className="ui-btn-secondary" onClick={() => navigate(readsAddress(g.name))}>{t("Run a read on this group")}</button>
             {canWrite && !editing && (
-              <button className="secondary" onClick={() => { setMessage(""); setEditing(true); }}>{t("Edit")}</button>
+              <button className="ui-btn-secondary" onClick={() => { setMessage(""); setEditing(true); }}>{t("Edit")}</button>
             )}
             {canWrite && g.kind === "static" && !editingMembers && (
-              <button className="secondary" onClick={() => {
+              <button className="ui-btn-secondary" onClick={() => {
                 // The editor starts from what the group resolves to now,
                 // so a save without a change changes nothing.
                 setMembers(new Set(rows.map((host) => host.id)));
@@ -905,7 +905,7 @@ function GroupPage({ id }: { id: string }) {
               </button>
             )}
             {canWrite && (
-              <button className="danger" onClick={async () => { if (await deleteGroup(g)) navigate("/groups"); }}>
+              <button className="ui-btn-danger" onClick={async () => { if (await deleteGroup(g)) navigate("/groups"); }}>
                 {t("Delete")}
               </button>
             )}
@@ -913,43 +913,43 @@ function GroupPage({ id }: { id: string }) {
         )}
       />
 
-      <div className="widgets">
+      <div className="ui-grid">
         {editing && (
           <EditGroup key={etag} group={g} etag={etag} onDone={() => setEditing(false)} />
         )}
 
         {g.kind === "dynamic" && !editing && (
-          <Card className="span-12" title={t("Selector")} description={t("The rule the server compiles into the host query; the list below is today's answer.")}>
-            <p className="mono">{describeExpression(g.selector)}</p>
+          <Panel className="ui-col-12" title={t("Selector")} description={t("The rule the server compiles into the host query; the list below is today's answer.")}>
+            <p className="ui-mono">{describeExpression(g.selector)}</p>
             <pre>{JSON.stringify(g.selector, null, 2)}</pre>
-            {g.unresolvable && <p className="page-error">{t("The selector does not resolve: {reason}", { reason: g.unresolvable })}</p>}
-          </Card>
+            {g.unresolvable && <p className="ui-errorbox">{t("The selector does not resolve: {reason}", { reason: g.unresolvable })}</p>}
+          </Panel>
         )}
 
         {g.used_by && <UsedBy usage={g.used_by} kind={g.kind} />}
 
         {editingMembers && (
-          <Card className="span-12" title={t("Members")} description={t("The list is replaced whole: a host left unchecked leaves the group.")}>
+          <Panel className="ui-col-12" title={t("Members")} description={t("The list is replaced whole: a host left unchecked leaves the group.")}>
             <HostChooser selected={members} onChange={setMembers} />
             <Actions>
               <button onClick={() => saveMembers.mutate()} disabled={saveMembers.isPending}>
                 {saveMembers.isPending ? t("Saving…") : t("Save members ({n})", { n: members.size })}
               </button>
-              <button className="secondary" onClick={() => setEditingMembers(false)} disabled={saveMembers.isPending}>{t("Cancel")}</button>
-              {message && <p className="page-error">{message}</p>}
+              <button className="ui-btn-secondary" onClick={() => setEditingMembers(false)} disabled={saveMembers.isPending}>{t("Cancel")}</button>
+              {message && <p className="ui-errorbox">{message}</p>}
             </Actions>
-          </Card>
+          </Panel>
         )}
 
-        <Card className="span-12" flush>
+        <Panel className="ui-col-12" flush>
           <Toolbar end={hosts.data && <span>{t("{n} hosts", { n: total })}</span>}>
             <input placeholder={t("Search hostname, address, machine ID or owner")} aria-label={t("Search hostname, address, machine ID or owner")} value={search} onChange={(e) => setSearch(e.target.value)} />
-            {message && !editingMembers && <span className="page-error">{message}</span>}
+            {message && !editingMembers && <span className="ui-errorbox">{message}</span>}
           </Toolbar>
           {hosts.error ? <ErrorBox error={hosts.error} /> : hosts.isLoading ? (
             <Empty>{t("Loading…")}</Empty>
           ) : rows.length === 0 ? (
-            <EmptyState>{t("The group resolves to no host you can see.")}</EmptyState>
+            <Empty>{t("The group resolves to no host you can see.")}</Empty>
           ) : (
             <table>
               <thead>
@@ -979,7 +979,7 @@ function GroupPage({ id }: { id: string }) {
                     <td>{host.os_distribution || host.os_family || "—"} {host.os_version}</td>
                     <td>{host.site}</td>
                     <td>{host.environment}</td>
-                    <td className="source">{host.tags.join(" ")}</td>
+                    <td className="ui-note">{host.tags.join(" ")}</td>
                     <td><Time value={host.last_seen_at} /></td>
                   </tr>
                 ))}
@@ -988,21 +988,21 @@ function GroupPage({ id }: { id: string }) {
           )}
           {hosts.hasNextPage && (
             <p>
-              <button className="secondary" onClick={() => hosts.fetchNextPage()} disabled={hosts.isFetchingNextPage}>
+              <button className="ui-btn-secondary" onClick={() => hosts.fetchNextPage()} disabled={hosts.isFetchingNextPage}>
                 {t("Load more ({n} left)", { n: total - rows.length })}
               </button>
             </p>
           )}
           {selected.size > 0 && (
-            <div className="selection-bar" data-testid="selection-bar">
+            <div className="ui-selectionbar" data-testid="selection-bar">
               <span>{t("{n} selected", { n: selected.size })}</span>
-              <button type="button" className="primary" onClick={() => navigate(bulkAddress(g.name, [...selected]))}>
+              <button type="button" className="ui-btn-primary" onClick={() => navigate(bulkAddress(g.name, [...selected]))}>
                 {t("Open in Bulk workspace ({n})", { n: selected.size })}
               </button>
-              <button type="button" className="secondary" onClick={() => setSelected(new Set())}>{t("Clear selection")}</button>
+              <button type="button" className="ui-btn-secondary" onClick={() => setSelected(new Set())}>{t("Clear selection")}</button>
             </div>
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   );

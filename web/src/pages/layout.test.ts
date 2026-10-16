@@ -18,17 +18,17 @@ import ts from "typescript";
  *
  * The norm:
  *
- *   <Card flush title=…>        a data table lives in a card, and the card is
+ *   <Panel flush title=…>        a data table lives in a card, and the card is
  *     <Toolbar end={count}>…    flush, so the table meets its edges
  *     <table>…</table>          the controls above it, in the toolbar
- *   </Card>
+ *   </Panel>
  *
  * and spacing comes from the stylesheet. A page that sets a margin or a
  * padding in a style attribute is a page deciding for itself what the gap
  * between two things is, which is how thirty-odd screens drift apart.
  *
  * This reads the JSX tree with the TypeScript parser, not the text: "is this
- * table inside a flush Card" is a question about nesting, and a regular
+ * table inside a flush Panel" is a question about nesting, and a regular
  * expression that answers it is answering a different question.
  *
  * What it does not see: a table in a component that some other file places
@@ -178,8 +178,8 @@ describe("the shape of a screen", () => {
    */
   it("lets the stylesheet decide how a table meets its card", () => {
     const stylesheet = readFileSync(join(dirname(PAGES), "styles.css"), "utf8");
-    expect(stylesheet).toMatch(/\.card-body:not\(\.flush\) > table/);
-    expect(stylesheet).toMatch(/\.card-body:not\(\.flush\) > \* > table/);
+    expect(stylesheet).toMatch(/\.ui-panel-body:not\(\.ui-flush\) > \.ui-table-holder/);
+    expect(stylesheet).toMatch(/\.ui-panel-body:not\(\.ui-flush\) > \* > \.ui-table-holder/);
   });
 
   it("draws its tables with the panel's own table, or is on the list of those that do not yet", () => {

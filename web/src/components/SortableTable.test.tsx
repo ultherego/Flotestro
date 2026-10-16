@@ -106,7 +106,7 @@ describe("useSort", () => {
 const columns: ColumnDef[] = [
   { key: "name", label: "Host", sort: "hostname", fixed: true },
   { key: "site", label: "Site", sort: "site", secondary: true },
-  { key: "count", label: "Updates", className: "num" },
+  { key: "count", label: "Updates", className: "ui-numeric" },
 ];
 
 describe("useColumns", () => {
@@ -227,9 +227,9 @@ describe("the header cells", () => {
     render(<Table onSort={(next, column) => sorts.push([next, column])} />);
     const headers = screen.getAllByRole("columnheader");
     expect(headers.map((header) => header.getAttribute("aria-sort"))).toEqual(["none", "descending", null]);
-    expect(headers[1]).toHaveClass("col-secondary");
-    expect(screen.getByTestId("site-cell")).toHaveClass("col-secondary");
-    expect(headers[2]).toHaveClass("num");
+    expect(headers[1]).toHaveClass("ui-minor");
+    expect(screen.getByTestId("site-cell")).toHaveClass("ui-minor");
+    expect(headers[2]).toHaveClass("ui-numeric");
     // Every cell names its column, so a chooser that moves the columns
     // around cannot make a test read the wrong one.
     expect(screen.getAllByRole("cell").map((cell) => cell.getAttribute("data-column")))

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Field, FieldGrid } from "./layout";
+import { Field, Fields } from "../ui/kit";
 import { useT } from "../i18n";
 import {
   body, count, flag, payloadTextOf, readPayloadText, text,
@@ -66,8 +66,8 @@ export function OperationForm({
 
   return (
     <>
-      <div className="actions">
-        <label className="toggle">
+      <div className="ui-actions">
+        <label className="ui-check">
           <input
             type="checkbox"
             checked={advanced}
@@ -75,14 +75,14 @@ export function OperationForm({
           />{" "}
           {t("Advanced (JSON)")}
         </label>
-        <span className="source">{t(entry.title)}</span>
+        <span className="ui-note">{t(entry.title)}</span>
       </div>
 
-      {entry.note && <p className="subtitle">{t(entry.note)}</p>}
-      {entry.plan && <p className="subtitle">{t(entry.plan)}</p>}
+      {entry.note && <p className="ui-note">{t(entry.note)}</p>}
+      {entry.plan && <p className="ui-note">{t(entry.plan)}</p>}
 
       {advanced ? (
-        <FieldGrid>
+        <Fields>
           <Field
             label={t("Payload (JSON, the same shape as a single-host operation)")}
             hint={advancedWords(t, entry, draft)}
@@ -95,10 +95,10 @@ export function OperationForm({
               spellCheck={false}
             />
           </Field>
-        </FieldGrid>
+        </Fields>
       ) : (
         <>
-          <FieldGrid>
+          <Fields>
             {entry.fields.map((field) => (
               <FormField
                 key={field.name}
@@ -109,9 +109,9 @@ export function OperationForm({
                 suggestions={suggestions?.[field.name]}
               />
             ))}
-          </FieldGrid>
+          </Fields>
           {entry.fields.length === 0 && (
-            <p className="subtitle">{t("This operation takes no settings.")}</p>
+            <p className="ui-note">{t("This operation takes no settings.")}</p>
           )}
           {problems.length > 0 && (
             // Not "page-error": a form that has not been filled in yet is not a
@@ -119,7 +119,7 @@ export function OperationForm({
             // a failure - to the operator, who saw "Error:" beside a field they
             // had not touched, and to the end-to-end suite, which takes that
             // class as the sign of a page that did not load.
-            <p className="form-problem">
+            <p className="ui-formproblem">
               {problems.map((problem) => t(problem.message, problem.params)).join(" ")}
             </p>
           )}
@@ -170,8 +170,8 @@ function FormField({
 
   if (field.kind === "boolean") {
     return (
-      <div className={field.wide ? "field wide" : "field"}>
-        <label className="toggle">
+      <div className={field.wide ? "ui-field ui-wide" : "ui-field"}>
+        <label className="ui-check">
           <input
             type="checkbox"
             checked={flag(value, field.name)}
@@ -179,7 +179,7 @@ function FormField({
           />{" "}
           {t(field.label)}
         </label>
-        {hint && <span className="field-hint">{hint}</span>}
+        {hint && <span className="ui-field-hint">{hint}</span>}
       </div>
     );
   }

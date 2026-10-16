@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { Time as Timestamp, Empty } from "../../components/ui";
+import { Time as Timestamp } from "../../components/ui";
 import { absoluteTime } from "../../lib/format";
 import { Meter } from "../../components/widgets";
 import {
@@ -13,6 +13,7 @@ import {
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 /* The two changes this page offers go through the operation registry, so
    the host page and the Bulk workspace send one payload and refuse one set
@@ -111,7 +112,7 @@ export function Time() {
   const [allowStep, setAllowStep] = useState(false);
   const [allowDropin, setAllowDropin] = useState(false);
   const [testJob, setTestJob] = useState("");
-  const unknown = <span className="badge unknown">{t("unknown")}</span>;
+  const unknown = <span className="ui-pill ui-unknown">{t("unknown")}</span>;
 
   /** A missing measurement is not zero: an empty value stays a label, not a number. */
   const seconds = (value?: number | null, digits = 6) =>
@@ -183,21 +184,21 @@ export function Time() {
       <Message text={message} />
 
       {snapshot?.unavailable_reason && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>{t("Clock state could not be read: {reason}", { reason: snapshot.unavailable_reason })}</span>
         </p>
       )}
       {/* The write reason repeats the read reason on a host without a
           daemon; one sentence is enough. */}
       {snapshot?.write_reason && snapshot.write_reason !== snapshot.unavailable_reason && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>{snapshot.write_reason}</span>
         </p>
       )}
       {/* A drifted clock looks from the outside like a broken directory or
           broken certificates, so the tab names it plainly. */}
       {drifted && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>
             {t("This host is {offset} away from its time source. Expect Kerberos and mTLS failures before anything else looks wrong.", { offset: `${offset.toFixed(3)} s` })}
           </span>
@@ -222,17 +223,17 @@ export function Time() {
       <Section title={t("Clock")} span={4} flush>
         <Facts>
           <Fact label={t("Synchronized")}>
-            <span className={snapshot?.synchronized === true ? "badge ok" : snapshot?.synchronized === false ? "badge error" : "badge unknown"}>
+            <span className={snapshot?.synchronized === true ? "ui-pill ui-ok" : snapshot?.synchronized === false ? "ui-pill ui-error" : "ui-pill ui-unknown"}>
               {flag(snapshot?.synchronized)}
             </span>
           </Fact>
           <Fact label={t("Stratum")}>{snapshot?.stratum ?? unknown}</Fact>
           <Fact label={t("Daemon")}>
             {snapshot?.service
-              ? <span className={snapshot.service_active === false ? "badge error" : "badge ok"}>{snapshot.service}</span>
+              ? <span className={snapshot.service_active === false ? "ui-pill ui-error" : "ui-pill ui-ok"}>{snapshot.service}</span>
               : unknown}
-            {snapshot?.unit && <span className="source"> · <span className="hm-mono">{snapshot.unit}</span></span>}
-            {snapshot?.service_active === false && <span className="source"> · {t("not running")}</span>}
+            {snapshot?.unit && <span className="ui-note"> · <span className="ui-mono">{snapshot.unit}</span></span>}
+            {snapshot?.service_active === false && <span className="ui-note"> · {t("not running")}</span>}
           </Fact>
           {/* The offset against the step threshold: the bar fills as the
               clock drifts towards the point where Kerberos gives up. */}
@@ -259,8 +260,8 @@ export function Time() {
           <Fact label={t("Host time")}>
             {snapshot?.now ? (
               <>
-                <span className="hm-mono">{absoluteTime(snapshot.now)}</span>
-                {snapshot.observed_at && <span className="source"> · {t("read")} <Timestamp value={snapshot.observed_at} /></span>}
+                <span className="ui-mono">{absoluteTime(snapshot.now)}</span>
+                {snapshot.observed_at && <span className="ui-note"> · {t("read")} <Timestamp value={snapshot.observed_at} /></span>}
               </>
             ) : unknown}
           </Fact>
@@ -282,11 +283,11 @@ export function Time() {
           <Fact label={t("Root dispersion")}>{seconds(snapshot?.root_dispersion_seconds)}</Fact>
           <Fact label={t("Leap status")}>{snapshot?.leap_status || unknown}</Fact>
           <Fact label={t("Last sync")}>{snapshot?.last_sync_at ? <Timestamp value={snapshot.last_sync_at} /> : unknown}</Fact>
-          <Fact label={t("Managed file")}><span className="hm-mono">{snapshot?.managed_path || "—"}</span></Fact>
+          <Fact label={t("Managed file")}><span className="ui-mono">{snapshot?.managed_path || "—"}</span></Fact>
           {/* The daemon's main file belongs to the distribution. It is shown
               so that it is visible what the panel's change does not touch. */}
           {snapshot?.config_path && (
-            <Fact label={t("Daemon config")}><span className="hm-mono">{snapshot.config_path}</span></Fact>
+            <Fact label={t("Daemon config")}><span className="ui-mono">{snapshot.config_path}</span></Fact>
           )}
         </Facts>
       </Section>
@@ -303,18 +304,18 @@ export function Time() {
         ) : (
           <Table>
             <thead>
-              <tr><th scope="col">{t("Address")}</th><th scope="col">{t("Mode")}</th><th scope="col">{t("State")}</th><th scope="col" className="hm-num">{t("Stratum")}</th><th scope="col" className="hm-num">{t("Poll")}</th><th scope="col">{t("Reach")}</th><th scope="col" className="hm-num">{t("Offset")}</th></tr>
+              <tr><th scope="col">{t("Address")}</th><th scope="col">{t("Mode")}</th><th scope="col">{t("State")}</th><th scope="col" className="ui-numeric">{t("Stratum")}</th><th scope="col" className="ui-numeric">{t("Poll")}</th><th scope="col">{t("Reach")}</th><th scope="col" className="ui-numeric">{t("Offset")}</th></tr>
             </thead>
             <tbody>
               {snapshot.sources.map((source) => (
                 <tr key={source.address}>
-                  <td className="hm-mono hm-primary">{source.address}</td>
+                  <td className="ui-mono ui-name">{source.address}</td>
                   <td>{source.mode || "—"}</td>
                   <td>{source.state || "—"}</td>
-                  <td className="hm-num">{source.stratum ?? unknown}</td>
-                  <td className="hm-num">{source.poll_seconds ? `${source.poll_seconds} s` : unknown}</td>
-                  <td className="hm-mono">{source.reachability || "—"}</td>
-                  <td className="hm-num">{seconds(source.offset_seconds)}</td>
+                  <td className="ui-numeric">{source.stratum ?? unknown}</td>
+                  <td className="ui-numeric">{source.poll_seconds ? `${source.poll_seconds} s` : unknown}</td>
+                  <td className="ui-mono">{source.reachability || "—"}</td>
+                  <td className="ui-numeric">{seconds(source.offset_seconds)}</td>
                 </tr>
               ))}
             </tbody>
@@ -337,8 +338,8 @@ export function Time() {
             <tbody>
               {snapshot.configured_servers.map((server, i) => (
                 <tr key={`${server.address}-${i}`}>
-                  <td className="hm-mono hm-primary">{server.address}</td>
-                  <td className="hm-mono">{server.source || "—"}</td>
+                  <td className="ui-mono ui-name">{server.address}</td>
+                  <td className="ui-mono">{server.source || "—"}</td>
                   <td>{server.pool ? "pool" : "server"}</td>
                   <td>{server.managed ? "Flotestro" : t("host admin")}</td>
                 </tr>
@@ -354,7 +355,7 @@ export function Time() {
         span={7}
         flush
       >
-        <div className="hm-section-body">
+        <div className="ui-panel-body">
           <Form>
             <Fields>
               <Field label={t("Servers, comma separated (optional)")} wide>
@@ -393,7 +394,7 @@ export function Time() {
               </ActionGuard>
               <ActionGuard action="time.config.apply" host={host.id}>
               <button
-                className="secondary"
+                className="ui-btn-secondary"
                 onClick={() =>
                   setIntent({
                     action: "time.config.apply",
@@ -427,20 +428,20 @@ export function Time() {
         {testJob && (
           <Table>
             <thead>
-              <tr><th scope="col">{t("Server")}</th><th scope="col">{t("Answered from")}</th><th scope="col" className="hm-num">{t("Stratum")}</th><th scope="col" className="hm-num">{t("Offset")}</th><th scope="col" className="hm-num">{t("Round trip")}</th></tr>
+              <tr><th scope="col">{t("Server")}</th><th scope="col">{t("Answered from")}</th><th scope="col" className="ui-numeric">{t("Stratum")}</th><th scope="col" className="ui-numeric">{t("Offset")}</th><th scope="col" className="ui-numeric">{t("Round trip")}</th></tr>
             </thead>
             <tbody>
               {probes.map((probe) => (
                 <tr key={probe.server}>
-                  <td className="hm-mono hm-primary">{probe.server}</td>
-                  <td className="hm-mono">
+                  <td className="ui-mono ui-name">{probe.server}</td>
+                  <td className="ui-mono">
                     {probe.reachable
                       ? probe.address || "—"
-                      : <span className="badge unknown">{probe.error || t("no answer")}</span>}
+                      : <span className="ui-pill ui-unknown">{probe.error || t("no answer")}</span>}
                   </td>
-                  <td className="hm-num">{probe.stratum ?? unknown}</td>
-                  <td className="hm-num">{seconds(probe.offset_seconds)}</td>
-                  <td className="hm-num">{seconds(probe.delay_seconds, 3)}</td>
+                  <td className="ui-numeric">{probe.stratum ?? unknown}</td>
+                  <td className="ui-numeric">{seconds(probe.offset_seconds)}</td>
+                  <td className="ui-numeric">{seconds(probe.delay_seconds, 3)}</td>
                 </tr>
               ))}
               {!probes.length && (
@@ -492,7 +493,7 @@ export function Time() {
       </Widgets>
 
       {snapshot?.observed_at && (
-        <p className="hm-freshness">
+        <p className="ui-freshness">
           <span>{t("Clock read")} <Timestamp value={snapshot.observed_at} /></span>
         </p>
       )}

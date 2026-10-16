@@ -1,0 +1,2655 @@
+/* =====================================================================
+   The panel's appearance.
+
+   Written 16.10 against what operations boards look like now rather than
+   against what this panel looked like before. Four things separate the
+   two, and each has a section here:
+
+   1. A ladder of type. A page title is nearly three times a label, so
+      the eye lands before it reads. The panel this replaces set almost
+      everything at 13px, which is why it read as a wall.
+   2. Depth. The page is the floor, a card is a step above it with a
+      light along its top edge, and what the pointer is on lifts. A flat
+      screen has no foreground, so there is nothing to look at first.
+   3. Movement. Anything that changes state crosses to it in 140ms, and
+      what has not arrived yet breathes instead of saying "Loading…".
+   4. Drawings rather than lists: a filled gradient under a line, a ring
+      with the number inside it, a reading under the pointer.
+
+   The rules of the house:
+
+   - Every colour is a token of the product. Not one hex is written here,
+     so peach, green and the light theme all come out right.
+   - Every rule is `.fl-app .fl-thing`, never `.fl-thing` alone. One
+     class loses to `.fl-app a`, and every kit element that is a link
+     then comes out in the link's colour. That cost an afternoon once.
+   - Spacing is a step of --s1..--s8 and nothing else.
+   - No screen carries an appearance of its own: a screen is a <Screen>
+     and cards from the kit, and the test beside this file refuses one
+     that reaches for a grid, a colour or a margin itself.
+   ===================================================================== */
+
+/* ---------------------------------------------------------------------
+   0. What this adds to the product's tokens
+
+   Surfaces, state and spacing come from the product. Depth, timing and
+   the two measurements of the frame are here, derived from the tokens so
+   that a theme which moves a surface moves these with it.
+   ------------------------------------------------------------------ */
+
+.fl-app {
+  --fl-rail: 260px;
+  --fl-rail-folded: 68px;
+  --fl-bar: 60px;
+  --fl-gutter: var(--s5);
+  --fl-pad: var(--s7);
+  --row: 152px;
+
+  --fl-card: color-mix(in srgb, var(--bg-panel) 94%, var(--text) 6%);
+  /* The light falls from the top left, as it does on the headline tile
+     the owner pointed at. It is three parts in a hundred: enough that a
+     card has a face, little enough that twenty of them on a screen do
+     not shimmer. */
+  --fl-face: linear-gradient(152deg,
+    color-mix(in srgb, var(--text) 4%, var(--fl-card)),
+    var(--fl-card) 58%);
+  --fl-edge: color-mix(in srgb, var(--text) 9%, transparent);
+  --fl-lift: 0 1px 2px rgba(0, 0, 0, 0.18), 0 8px 24px -12px rgba(0, 0, 0, 0.45);
+  --fl-lift-high: 0 2px 4px rgba(0, 0, 0, 0.2), 0 18px 40px -16px rgba(0, 0, 0, 0.55);
+  /* The brand does not follow the theme.
+   *
+   * A mark that changes colour with the reader's preference is not a
+   * mark - the three host dots inside it are fixed for the same reason,
+   * and have been since it was drawn. These two are the only values in
+   * this file that are not a token of the product, and they are here
+   * because a brand colour is not a theme's. */
+  --fl-brand: #fab387;
+  --fl-brand-ink: #11111b;
+
+  --fl-quick: 140ms cubic-bezier(0.2, 0, 0.1, 1);
+  --fl-slow: 600ms cubic-bezier(0.2, 0, 0.1, 1);
+
+  /* The type ladder. The product's scale stops at 22px because the old
+     panel never went above it; a board needs a title and a measurement
+     that carry across a 4k screen. */
+  --fl-title: 30px;
+  --fl-card-title: 15px;
+  --fl-metric: 36px;
+  --fl-metric-big: 46px;
+  --fl-metric-small: 26px;
+
+  font-family: var(--font);
+  font-size: var(--t-body);
+  color: var(--text);
+}
+
+.fl-app button,
+.fl-app input,
+.fl-app select,
+.fl-app textarea {
+  min-height: 0;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  white-space: normal;
+}
+
+/* How a thing is going, as one class that sets one pair of variables.
+   Everything below reads --tone for a fill and --tone-text for a word,
+   so no piece of the kit ever names a state colour itself. */
+.fl-app .fl-ok { --tone: var(--ok); --tone-text: var(--ok-text); }
+.fl-app .fl-warn { --tone: var(--warn); --tone-text: var(--warn-text); }
+.fl-app .fl-error { --tone: var(--error); --tone-text: var(--error-text); }
+.fl-app .fl-unknown { --tone: var(--unknown); --tone-text: var(--unknown-text); }
+.fl-app .fl-info { --tone: var(--blue); --tone-text: var(--blue); }
+.fl-app .fl-accent { --tone: var(--accent); --tone-text: var(--accent-text); }
+.fl-app .fl-neutral { --tone: var(--text-faint); --tone-text: var(--text-muted); }
+
+/* ---------------------------------------------------------------------
+   1. The frame
+
+   A rail against the window's edge and everything else to the right of
+   it. The rail is fixed: a board scrolls for a long time, and the way
+   out must not scroll away with it.
+   ------------------------------------------------------------------ */
+
+.fl-app { min-height: 100vh; background: var(--bg); }
+
+.fl-app .fl-shell { min-height: 100vh; }
+
+.fl-app .fl-skip {
+  position: absolute;
+  left: -9999px;
+  top: var(--s2);
+  z-index: 100;
+  padding: var(--s2) var(--s4);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 650;
+}
+
+.fl-app .fl-skip:focus { left: var(--s4); }
+
+.fl-app .fl-page {
+  margin-left: var(--fl-rail);
+  min-height: 100vh;
+  min-width: 0;
+  transition: margin-left var(--fl-quick);
+}
+
+.fl-app .fl-folded .fl-page { margin-left: var(--fl-rail-folded); }
+
+/* The screen keeps its distance from the rail and from the window. The
+   owner's words, and the first thing anybody sees. */
+.fl-app .fl-screen {
+  padding: var(--s6) var(--fl-pad) var(--s8);
+  min-width: 0;
+}
+
+/* ---------------------------------------------------------------------
+   2. The rail
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-rail {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: var(--fl-rail);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  z-index: 30;
+  transition: width var(--fl-quick), transform var(--fl-quick);
+}
+
+.fl-app .fl-folded .fl-rail { width: var(--fl-rail-folded); }
+
+.fl-app .fl-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  height: var(--fl-bar);
+  padding: 0 var(--s4);
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.fl-app .fl-brand:hover { text-decoration: none; }
+
+.fl-app .fl-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  background: var(--fl-brand);
+  color: var(--fl-brand-ink);
+  font-size: var(--t-small);
+}
+
+.fl-app .fl-brand-name {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.fl-app .fl-folded .fl-brand-name { display: none; }
+.fl-app .fl-folded .fl-brand { justify-content: center; padding-inline: 0; }
+
+/* The rail scrolls without saying so: a bar down the side of a list of
+   places is chrome nobody reads, and the list is plainly cut off when
+   there is more of it. */
+.fl-app .fl-nav {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--s3) 0 var(--s5);
+  scrollbar-width: none;
+}
+
+.fl-app .fl-nav::-webkit-scrollbar { display: none; }
+
+/* A hairline between groups, so the rail reads as sections of places
+   rather than one long list. */
+.fl-app .fl-navgroup + .fl-navgroup {
+  margin-top: var(--s3);
+  padding-top: var(--s3);
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+/* The group's heading names the section and folds it: its mark and its
+   word in the accent, so the eye finds a section before it reads one. */
+.fl-app .fl-navgroup-label {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  width: 100%;
+  padding: var(--s2) var(--s4) var(--s2);
+  border: 0;
+  background: none;
+  font-size: var(--t-small);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+  text-align: left;
+  transition: opacity var(--fl-quick);
+}
+
+.fl-app .fl-navgroup-label:hover { opacity: 0.8; }
+.fl-app .fl-navgroup-label span { flex: 1 1 auto; min-width: 0; }
+.fl-app .fl-navgroup-label > svg { flex: 0 0 auto; width: 16px; height: 16px; }
+
+.fl-app .fl-navgroup-fold { display: inline-flex; opacity: 0.6; transition: transform var(--fl-quick); }
+.fl-app .fl-navgroup-fold svg { width: 11px; height: 11px; }
+.fl-app .fl-navgroup-shut .fl-navgroup-fold { transform: rotate(-90deg); }
+
+.fl-app .fl-folded .fl-navgroup-label {
+  font-size: 0;
+  padding: var(--s2) var(--s4);
+}
+
+.fl-app .fl-folded .fl-navgroup-label::after {
+  content: "";
+  display: block;
+  height: 1px;
+  background: var(--border);
+}
+
+/* A place is a line across the rail, not a pill inside it: the band of
+   the one the reader is standing on reaches both edges, with an arrow
+   at the left pointing into the page. */
+.fl-app .fl-navitem {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 0 var(--s4) 0 var(--s5);
+  height: 38px;
+  color: var(--text-muted);
+  font-size: var(--t-body);
+  text-decoration: none;
+  transition: background var(--fl-quick), color var(--fl-quick);
+}
+
+.fl-app .fl-navitem:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
+.fl-app .fl-navitem > svg { flex: 0 0 auto; width: 16px; height: 16px; opacity: 0.85; }
+
+.fl-app .fl-navitem.fl-on {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--accent) 22%, transparent),
+    color-mix(in srgb, var(--accent) 8%, transparent));
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+/* The arrow says "here" without colour, so it survives a theme and a
+   reader who cannot tell the colours apart. */
+.fl-app .fl-navitem.fl-on::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 7px solid var(--accent);
+  border-top: 19px solid transparent;
+  border-bottom: 19px solid transparent;
+}
+
+.fl-app .fl-navitem.fl-off { opacity: 0.45; cursor: not-allowed; }
+.fl-app .fl-navitem.fl-back { color: var(--text-faint); }
+
+.fl-app .fl-navitem-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fl-app .fl-folded .fl-navitem { justify-content: center; padding-inline: 0; }
+.fl-app .fl-folded .fl-navitem-label { display: none; }
+
+/* The person stands at the foot of the rail, the way every board in the
+   look puts them, and their menu opens upward from there. */
+.fl-app .fl-whoami {
+  flex: 0 0 auto;
+  padding: var(--s3);
+  border-top: 1px solid var(--border);
+}
+
+.fl-app .fl-whoami .fl-menu-anchor { width: 100%; }
+.fl-app .fl-whoami .fl-user { width: 100%; border-radius: var(--radius); }
+.fl-app .fl-whoami .fl-user-name { flex: 1 1 auto; max-width: none; text-align: left; }
+.fl-app .fl-user-name small { display: block; font-weight: 400; font-size: var(--t-label); color: var(--text-faint); }
+.fl-app .fl-whoami .fl-user svg { flex: 0 0 auto; width: 12px; height: 12px; opacity: 0.7; }
+.fl-app .fl-folded .fl-whoami .fl-user-name, .fl-app .fl-folded .fl-whoami .fl-user svg { display: none; }
+.fl-app .fl-folded .fl-whoami .fl-user { justify-content: center; }
+
+.fl-app .fl-menu-up .fl-menu { top: auto; bottom: calc(100% + var(--s2)); left: 0; right: auto; }
+
+/* The chevron rides the rail's outer edge, half over the page. */
+.fl-app .fl-fold {
+  position: absolute;
+  top: calc(var(--fl-bar) + var(--s5));
+  right: -11px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  transition: background var(--fl-quick), color var(--fl-quick);
+}
+
+.fl-app .fl-fold:hover { background: var(--bg-hover); color: var(--text); }
+.fl-app .fl-fold svg { width: 11px; height: 11px; }
+
+.fl-app .fl-rail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  background: color-mix(in srgb, var(--bg-sunken) 60%, transparent);
+}
+
+/* ---------------------------------------------------------------------
+   3. The bar across the top
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  height: var(--fl-bar);
+  padding: 0 var(--fl-pad);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+
+.fl-app .fl-bar-spacer { flex: 1 1 auto; }
+
+.fl-app .fl-crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+  font-size: var(--t-small);
+  color: var(--text-faint);
+}
+
+.fl-app .fl-crumbs svg { width: 12px; height: 12px; opacity: 0.6; }
+.fl-app .fl-crumbs a { color: var(--text-faint); }
+.fl-app .fl-crumbs a:hover { color: var(--text); }
+.fl-app .fl-crumbs-here { color: var(--text); font-weight: 600; }
+
+.fl-app .fl-search {
+  position: relative;
+  flex: 0 1 300px;
+  display: flex;
+  align-items: center;
+}
+
+.fl-app .fl-search svg {
+  position: absolute;
+  left: var(--s3);
+  width: 14px;
+  height: 14px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.fl-app .fl-search {
+  height: 34px;
+  padding: 0 var(--s2) 0 var(--s7);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-faint);
+  font-size: var(--t-small);
+  text-align: left;
+  transition: border-color var(--fl-quick), background var(--fl-quick);
+}
+
+.fl-app .fl-search:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+.fl-app .fl-search-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.fl-app .fl-search-key {
+  position: absolute;
+  right: var(--s2);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text-faint);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  pointer-events: none;
+}
+
+.fl-app .fl-iconbtn {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--fl-quick), color var(--fl-quick), border-color var(--fl-quick);
+}
+
+.fl-app .fl-iconbtn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border); text-decoration: none; }
+.fl-app .fl-iconbtn svg { width: 16px; height: 16px; }
+
+/* ---------------------------------------------------------------------
+   4. Who is signed in, and what they can set
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-menu-anchor { position: relative; flex: 0 0 auto; }
+
+.fl-app .fl-user {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s2) var(--s1) var(--s1);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  cursor: pointer;
+  transition: background var(--fl-quick), border-color var(--fl-quick);
+}
+
+.fl-app .fl-user:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+
+.fl-app .fl-avatar {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: var(--t-small);
+  font-weight: 700;
+}
+
+.fl-app .fl-user-name {
+  max-width: 160px;
+  font-size: var(--t-small);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fl-app .fl-menu {
+  position: absolute;
+  top: calc(100% + var(--s2));
+  right: 0;
+  z-index: 50;
+  min-width: 268px;
+  padding: var(--s2);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  box-shadow: var(--fl-lift-high);
+  animation: fl-rise 140ms cubic-bezier(0.2, 0, 0.1, 1);
+}
+
+.fl-app .fl-menu-who {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  padding: var(--s3);
+  margin-bottom: var(--s2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+}
+
+.fl-app .fl-menu-who .fl-name { font-weight: 650; }
+.fl-app .fl-menu-subject { font-size: var(--t-label); color: var(--text-faint); font-family: var(--font-mono); overflow-wrap: anywhere; }
+.fl-app .fl-menu-set { padding: var(--s2) var(--s1); }
+
+.fl-app .fl-menu-label {
+  display: block;
+  padding-bottom: var(--s2);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  padding: var(--s2) var(--s3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--t-small);
+  text-align: left;
+  text-decoration: none;
+  transition: background var(--fl-quick), color var(--fl-quick);
+}
+
+.fl-app .fl-menu-item:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
+.fl-app .fl-menu-item svg { width: 15px; height: 15px; }
+.fl-app .fl-menu-out { width: 100%; justify-content: center; margin-top: var(--s2); }
+
+/* A line of a menu that cannot be taken says so rather than disappearing. */
+.fl-app .fl-menu-item:disabled { color: var(--text-faint); cursor: not-allowed; }
+.fl-app .fl-menu-item:disabled:hover { background: none; color: var(--text-faint); }
+
+/* ---------------------------------------------------------------------
+   5. The head of a screen
+
+   Its mark, its name, one sentence on what it answers, and a question
+   mark that opens the long version. A paragraph at the top of a screen
+   is read once and stepped over every day after that.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s4);
+  margin-bottom: 0;
+}
+
+.fl-app .fl-head-mark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  margin-top: 2px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.fl-app .fl-head-mark svg { width: 18px; height: 18px; }
+.fl-app .fl-head-text { flex: 1 1 auto; min-width: 0; }
+
+/* The way back to the work a screen was opened from, above its name. */
+.fl-app .fl-head-crumb {
+  margin-bottom: var(--s2);
+  font-size: var(--t-small);
+  color: var(--text-muted);
+}
+
+.fl-app .fl-head-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  font-size: var(--fl-title);
+  line-height: 1.15;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.fl-app .fl-helpmark {
+  flex: 0 0 auto;
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  aspect-ratio: 1;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  line-height: 1;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-faint);
+  font-size: var(--t-label);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--fl-quick), color var(--fl-quick), border-color var(--fl-quick);
+}
+
+.fl-app .fl-helpmark:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-strong); }
+
+.fl-app .fl-head-lead {
+  margin-top: var(--s2);
+  max-width: 80ch;
+  font-size: var(--t-body);
+  color: var(--text-muted);
+}
+
+.fl-app .fl-help {
+  margin-top: var(--s3);
+  padding: var(--s4);
+  max-width: 80ch;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  font-size: var(--t-small);
+  color: var(--text-muted);
+  animation: fl-rise 160ms cubic-bezier(0.2, 0, 0.1, 1);
+}
+
+.fl-app .fl-help p + p { margin-top: var(--s3); }
+
+.fl-app .fl-head-slot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.fl-app .fl-head-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  padding-top: var(--s1);
+}
+
+/* ---------------------------------------------------------------------
+   6. The grid every screen stands on
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--fl-gutter);
+  /* Cards in one row end where the tallest of them ends. Left to their
+     own heights they read as blocks thrown down - the owner's words,
+     twice - and on a wide screen there are four of them in a row to
+     disagree about where the bottom is. */
+  align-items: stretch;
+}
+
+/* Every block a screen puts down stands the same distance from the one
+   before it - a grid, a stack, a banner, a table of its own. Said here
+   once, no screen can hold a different opinion. */
+.fl-app .fl-screen > * + * { margin-top: var(--fl-gutter); }
+.fl-app .fl-stack { gap: var(--fl-gutter); }
+.fl-app .fl-stack-l { gap: var(--s6); }
+
+/* A block takes the number of columns it was given, and that number and
+   no other: the arranging mode measures the pointer in twelfths, so a
+   container sized to seven that drew as eight would make the grid lie
+   about itself. Below the breakpoint there is no room to divide and
+   everything takes the row. */
+.fl-app .fl-c1, .fl-app .fl-c2, .fl-app .fl-c3, .fl-app .fl-c4,
+.fl-app .fl-c5, .fl-app .fl-c6, .fl-app .fl-c7, .fl-app .fl-c8,
+.fl-app .fl-c9, .fl-app .fl-c10, .fl-app .fl-c11, .fl-app .fl-c12 {
+  grid-column: span 12;
+  min-width: 0;
+}
+
+@media (min-width: 1000px) {
+  .fl-app .fl-c1 { grid-column: span 1; }
+  .fl-app .fl-c2 { grid-column: span 2; }
+  .fl-app .fl-c3 { grid-column: span 3; }
+  .fl-app .fl-c4 { grid-column: span 4; }
+  .fl-app .fl-c5 { grid-column: span 5; }
+  .fl-app .fl-c6 { grid-column: span 6; }
+  .fl-app .fl-c7 { grid-column: span 7; }
+  .fl-app .fl-c8 { grid-column: span 8; }
+  .fl-app .fl-c9 { grid-column: span 9; }
+  .fl-app .fl-c10 { grid-column: span 10; }
+  .fl-app .fl-c11 { grid-column: span 11; }
+  .fl-app .fl-c12 { grid-column: span 12; }
+}
+
+/* A row of equal tiles that steps down on its own rather than by a
+   breakpoint written on each screen. */
+.fl-app .fl-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--fl-gutter);
+}
+
+/* As many cards across as there is room for. The window decides how
+   many, not the screen: the card says how narrow it may get and the
+   grid fits what it can. */
+.fl-app .fl-flow { display: grid; gap: var(--fl-gutter); align-items: stretch; }
+.fl-app .fl-flow-320 { grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
+.fl-app .fl-flow-420 { grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); }
+.fl-app .fl-flow-520 { grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr)); }
+
+.fl-app .fl-stack { display: flex; flex-direction: column; min-width: 0; }
+.fl-app .fl-stack-l { display: flex; flex-direction: column; min-width: 0; }
+.fl-app .fl-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); min-width: 0; }
+
+/* ---------------------------------------------------------------------
+   7. The card - the only container on any screen
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border);
+  background: var(--fl-face);
+  box-shadow: var(--fl-lift);
+  overflow: hidden;
+  transition: box-shadow var(--fl-quick), border-color var(--fl-quick);
+}
+
+/* One pixel of light along the top edge: the difference between a box
+   drawn on the page and a thing lying on it. */
+.fl-app .fl-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--fl-edge) 20%, var(--fl-edge) 80%, transparent);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.fl-app .fl-card:hover { box-shadow: var(--fl-lift-high); border-color: var(--border-strong); }
+
+.fl-app .fl-card-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--s1) var(--s3);
+  padding: var(--s4) var(--s5) 0;
+}
+
+.fl-app .fl-card-title {
+  grid-column: 1;
+  font-size: var(--fl-card-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  min-width: 0;
+}
+
+.fl-app .fl-card-tools {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: start;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--t-small);
+}
+
+.fl-app .fl-card-note {
+  grid-column: 1;
+  font-size: var(--t-small);
+  color: var(--text-faint);
+  min-width: 0;
+}
+
+.fl-app .fl-card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--s4) var(--s5) var(--s5);
+}
+
+/* Only a card whose height was fixed for it scrolls inside itself; one
+   that fits never takes the wheel, so the page moves under the pointer
+   wherever it happens to be.
+ 
+   And a card that does scroll hands the wheel back when its own content
+   ends - the browser's own chaining, which an earlier "contain" here
+   took away. Holding the gesture meant the pointer resting on a long
+   table trapped the page, which is the thing the owner could not do. */
+.fl-app .fl-placed .fl-card-body,
+.fl-app .fl-card-body > .fl-tablewrap {
+  overflow: auto;
+  overscroll-behavior: auto;
+}
+
+/* A drawing fills the card it was put in: a chart stands on its floor,
+   and a ring sits in the middle of the room rather than at the ceiling
+   with a hole under it. */
+.fl-app .fl-card-body > .fl-chart { flex: 1 1 auto; min-height: 0; }
+
+.fl-app .fl-card-body > .fl-pie,
+.fl-app .fl-card-body > .fl-ring,
+.fl-app .fl-card-body > .fl-arcs { flex: 1 1 auto; min-height: 0; }
+
+.fl-app .fl-flush .fl-card-body { padding: var(--s3) 0 0; }
+.fl-app .fl-flush .fl-card-head { padding-bottom: var(--s1); }
+
+.fl-app .fl-card-foot {
+  flex: 0 0 auto;
+  padding: var(--s3) var(--s5);
+  border-top: 1px solid var(--border);
+  font-size: var(--t-small);
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------
+   8. One number as a widget
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-kpi {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  height: 100%;
+  padding: var(--s5);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border);
+  background: var(--fl-face);
+  box-shadow: var(--fl-lift);
+  color: inherit;
+  text-decoration: none;
+  overflow: hidden;
+  transition: transform var(--fl-quick), box-shadow var(--fl-quick), border-color var(--fl-quick);
+}
+
+.fl-app .fl-kpi::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--fl-edge) 20%, var(--fl-edge) 80%, transparent);
+  pointer-events: none;
+}
+
+.fl-app a.fl-kpi:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--fl-lift-high);
+  border-color: var(--border-strong);
+  text-decoration: none;
+}
+
+/* The one filled tile. It wears the accent, which carries no state. */
+.fl-app .fl-kpi.fl-hero {
+  background: linear-gradient(145deg,
+    color-mix(in srgb, var(--accent) 16%, var(--fl-card)),
+    var(--fl-card) 70%);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
+.fl-app .fl-kpi-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+
+.fl-app .fl-kpi-label {
+  font-size: var(--t-label);
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* The round tinted mark in the corner: what stops a tile reading as a
+   paragraph. */
+.fl-app .fl-kpi-mark {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--tone, var(--accent)) 16%, transparent);
+  color: var(--tone-text, var(--accent-text));
+}
+
+.fl-app .fl-kpi-mark svg { width: 16px; height: 16px; }
+
+.fl-app .fl-kpi-value {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  font-size: var(--fl-metric);
+  line-height: 1.05;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--tone-text, var(--text));
+}
+
+.fl-app .fl-hero .fl-kpi-value { font-size: var(--fl-metric-big); }
+.fl-app .fl-kpi-unit { font-size: var(--t-lead); font-weight: 500; color: var(--text-faint); letter-spacing: 0; }
+.fl-app .fl-kpi-dash { color: var(--unknown-text); }
+.fl-app .fl-kpi-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s2); }
+.fl-app .fl-kpi-note {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--t-small);
+  color: var(--text-faint);
+}
+
+.fl-app .fl-kpi-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  font-size: var(--t-small);
+  font-weight: 650;
+  color: var(--text-muted);
+}
+
+.fl-app .fl-kpi-delta.fl-up { color: var(--ok-text); }
+.fl-app .fl-kpi-delta.fl-down { color: var(--error-text); }
+
+/* The sparkline bleeds to the tile's bottom edge rather than sitting in
+   a box of its own. */
+.fl-app .fl-kpi-spark {
+  margin: var(--s2) calc(var(--s5) * -1) calc(var(--s5) * -1);
+  height: 46px;
+}
+
+.fl-app .fl-kpi-spark svg { width: 100%; height: 100%; display: block; }
+
+.fl-app .fl-figs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: var(--s3);
+}
+
+.fl-app .fl-fig {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  padding: var(--s3);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+}
+
+.fl-app .fl-fig-label {
+  font-size: var(--t-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-fig-value {
+  font-size: var(--fl-metric-small);
+  font-weight: 600;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--tone-text, var(--text));
+}
+
+/* ---------------------------------------------------------------------
+   9. Drawings
+
+   A ring with the number inside it, arcs for one measure across several
+   hosts, bars, a band, a grid of squares, and a series with a reading
+   under the pointer. Every one is an <svg> the kit draws: no charting
+   library is in the panel and none is wanted.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-ring { display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap; }
+.fl-app .fl-ring-plot { position: relative; flex: 0 0 auto; width: 150px; height: 150px; }
+.fl-app .fl-ring-plot svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.fl-app .fl-ring-track { fill: none; stroke: var(--bg-sunken); }
+
+.fl-app .fl-ring-arc {
+  fill: none;
+  stroke: var(--tone, var(--accent));
+  stroke-linecap: round;
+  transition: stroke-dasharray var(--fl-slow);
+}
+
+.fl-app .fl-ring-face { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+
+.fl-app .fl-ring-value {
+  display: block;
+  font-size: var(--fl-metric-small);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--tone-text, var(--text));
+}
+
+.fl-app .fl-ring-label {
+  display: block;
+  font-size: var(--t-label);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-ring-legend { flex: 1 1 170px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.fl-app .fl-ring-legend-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s2);
+  border-radius: var(--radius-sm);
+  font-size: var(--t-small);
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: background var(--fl-quick);
+}
+
+.fl-app .fl-ring-legend-row:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
+.fl-app .fl-ring-legend-row dt { flex: 1 1 auto; min-width: 0; }
+.fl-app .fl-ring-legend-row dd { flex: 0 0 auto; font-variant-numeric: tabular-nums; color: var(--text); }
+.fl-app .fl-ring-legend-row b { font-weight: 650; }
+
+.fl-app .fl-ring-key {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  background: var(--tone, var(--text-faint));
+}
+
+/* The pie: a whole divided, with the total inside it. The slices are one
+   circle dashed and turned, so the gaps are dashes and not shapes. */
+.fl-app .fl-pie { display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap; }
+.fl-app .fl-pie-plot { position: relative; flex: 0 0 auto; width: 170px; height: 170px; }
+.fl-app .fl-pie-plot svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.fl-app .fl-pie-track { fill: none; stroke: var(--bg-sunken); }
+
+.fl-app .fl-pie-slice {
+  fill: none;
+  stroke: var(--tone, var(--accent));
+  transition: stroke-dasharray var(--fl-slow), filter var(--fl-quick);
+}
+
+.fl-app .fl-pie-slice:hover { filter: brightness(1.2); }
+.fl-app .fl-pie-face { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+
+.fl-app .fl-pie-total {
+  display: block;
+  font-size: var(--fl-metric-small);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.fl-app .fl-pie-label {
+  display: block;
+  font-size: var(--t-label);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+
+/* Concentric arcs: one measure, one ring per host. */
+.fl-app .fl-arcs { display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap; }
+.fl-app .fl-arcs-plot { flex: 0 0 auto; width: 170px; height: 170px; }
+.fl-app .fl-arcs-plot svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.fl-app .fl-arcs-track { fill: none; stroke: var(--bg-sunken); }
+.fl-app .fl-arcs-arc { fill: none; stroke-linecap: round; stroke: var(--tone, var(--accent)); transition: stroke-dasharray var(--fl-slow); }
+
+/* A bar per row, the number at its end, the label never under the bar. */
+.fl-app .fl-bars { display: flex; flex-direction: column; gap: var(--s3); margin: 0; }
+
+.fl-app .fl-bars-row {
+  display: grid;
+  grid-template-columns: minmax(70px, 150px) 1fr auto;
+  gap: var(--s3);
+  align-items: center;
+  font-size: var(--t-small);
+}
+
+.fl-app .fl-bars-row dt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.fl-app .fl-bars-row dd { margin: 0; min-width: 0; }
+.fl-app .fl-bars-count { font-variant-numeric: tabular-nums; font-weight: 650; color: var(--text); }
+
+.fl-app .fl-bar-track {
+  display: block;
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+
+.fl-app .fl-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--tone, var(--accent)) 50%, transparent), var(--tone, var(--accent)));
+  transition: width var(--fl-slow);
+}
+
+.fl-app .fl-meter { display: flex; align-items: center; gap: var(--s3); font-size: var(--t-small); }
+.fl-app .fl-meter .fl-bar-track { flex: 1 1 auto; min-width: 60px; }
+.fl-app .fl-meter-value { flex: 0 0 auto; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+
+/* The band: one line that is the whole fleet, cut by condition. */
+.fl-app .fl-band {
+  display: flex;
+  gap: 3px;
+  height: 40px;
+  margin-bottom: var(--s3);
+}
+
+.fl-app .fl-band-seg {
+  flex: var(--fl-share, 1) 1 0;
+  min-width: 34px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 var(--s2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--tone, var(--accent)) 20%, transparent);
+  border-left: 3px solid var(--tone, var(--accent));
+  color: var(--text);
+  text-decoration: none;
+  overflow: hidden;
+  transition: background var(--fl-quick), flex-grow var(--fl-slow);
+}
+
+.fl-app a.fl-band-seg:hover { background: color-mix(in srgb, var(--tone, var(--accent)) 34%, transparent); text-decoration: none; }
+.fl-app .fl-band-value { font-size: var(--t-lead); font-weight: 650; line-height: 1.1; font-variant-numeric: tabular-nums; }
+
+.fl-app .fl-band-label {
+  font-size: var(--t-label);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* What is at zero, and what nobody counted, go under the band as words:
+   a sliver two pixels wide is not a reading. */
+.fl-app .fl-quiet-row { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); }
+
+.fl-app .fl-quiet-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s2);
+  font-size: var(--t-small);
+  color: var(--text-faint);
+}
+
+.fl-app .fl-quiet-item b { font-weight: 650; color: var(--tone-text, var(--text-muted)); font-variant-numeric: tabular-nums; }
+
+/* A square per host: the whole fleet's condition at one glance. */
+.fl-app .fl-squares { display: flex; flex-direction: column; gap: var(--s4); }
+.fl-app .fl-squares-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16px, 20px));
+  justify-content: start;
+  gap: 5px;
+}
+
+.fl-app .fl-square {
+  aspect-ratio: 1;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--tone, var(--unknown)) 85%, transparent);
+  transition: transform var(--fl-quick), box-shadow var(--fl-quick);
+}
+
+.fl-app a.fl-square:hover {
+  transform: scale(1.3);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--tone, var(--unknown));
+}
+
+/* The series chart. The reading sits in the chart's own header rather
+   than in a bubble over the drawing - the owner's complaint on 16.10
+   was that the bubble covered the numbers it was explaining. */
+.fl-app .fl-chart { display: flex; flex-direction: column; gap: var(--s3); margin: 0; }
+
+.fl-app .fl-chart-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s4);
+  flex-wrap: wrap;
+  min-height: 18px;
+}
+
+.fl-app .fl-chart-legend { display: flex; flex-wrap: wrap; gap: var(--s3); font-size: var(--t-small); }
+
+.fl-app .fl-chart-legend span,
+.fl-app .fl-chart-legend button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+}
+
+.fl-app .fl-chart-key { width: 9px; height: 9px; border-radius: 3px; background: var(--tone, var(--accent)); }
+
+.fl-app .fl-chart-read {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  font-size: var(--t-small);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.fl-app .fl-chart-read b { color: var(--text); font-weight: 650; }
+.fl-app .fl-chart-read em { font-style: normal; color: var(--tone-text, var(--text-muted)); font-weight: 650; }
+.fl-app .fl-chart-plot { position: relative; flex: 1 1 auto; width: 100%; min-width: 0; min-height: 120px; }
+.fl-app .fl-chart-plot svg { width: 100%; display: block; }
+.fl-app .fl-chart-rule { stroke: var(--border); stroke-dasharray: 2 4; }
+.fl-app .fl-chart-axis { fill: var(--text-faint); font-size: 9px; }
+.fl-app .fl-chart-scale { fill: var(--text-faint); font-size: 9px; }
+.fl-app .fl-chart-line { fill: none; stroke: var(--tone, var(--accent)); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.fl-app .fl-chart-area { stroke: none; }
+.fl-app .fl-chart-bar { fill: var(--tone, var(--accent)); }
+.fl-app .fl-chart-cross { stroke: var(--border-strong); stroke-width: 1; }
+.fl-app .fl-chart-knot { fill: var(--bg); stroke: var(--tone, var(--accent)); stroke-width: 2; }
+.fl-app .fl-chart-hit { fill: transparent; cursor: crosshair; }
+
+/* ---------------------------------------------------------------------
+   10. The table
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-tablewrap { width: 100%; overflow-x: auto; }
+.fl-app .fl-table { width: 100%; border-collapse: collapse; font-size: var(--t-body); }
+
+.fl-app .fl-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--s2) var(--s5);
+  text-align: left;
+  font-size: var(--t-label);
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  background: var(--fl-card);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+/* A heading that orders the list is the heading, not a button drawn
+   beside it: it inherits every one of the head's own letters and only
+   adds the arrow that says which way the rows run. */
+.fl-app .fl-table th .fl-head-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+}
+.fl-app .fl-table th .fl-head-sort:hover { color: var(--text); }
+.fl-app .fl-table th[aria-sort="ascending"] .fl-head-sort,
+.fl-app .fl-table th[aria-sort="descending"] .fl-head-sort { color: var(--text); }
+
+.fl-app .fl-table td {
+  padding: var(--s3) var(--s5);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  vertical-align: middle;
+  min-width: 0;
+}
+
+.fl-app .fl-table tbody tr { transition: background var(--fl-quick); }
+.fl-app .fl-table tbody tr:hover { background: var(--bg-hover); }
+.fl-app .fl-table tbody tr:last-child td { border-bottom: 0; }
+.fl-app .fl-table .fl-minor { color: var(--text-muted); }
+.fl-app .fl-table .fl-num { text-align: right; font-variant-numeric: tabular-nums; }
+.fl-app .fl-table .fl-cell-actions { text-align: right; white-space: nowrap; }
+
+.fl-app .fl-table .fl-cell-top { vertical-align: top; }
+
+.fl-app .fl-table .fl-tight {
+  white-space: nowrap;
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fl-app .fl-table code { font-family: var(--font-mono); font-size: var(--t-small); color: var(--text-muted); }
+.fl-app .fl-twoline { min-width: 0; }
+.fl-app .fl-twoline-sub { display: block; font-size: var(--t-small); color: var(--text-faint); }
+
+@media (max-width: 900px) {
+  .fl-app .fl-table .fl-minor { display: none; }
+}
+
+/* ---------------------------------------------------------------------
+   11. A fleet of things as a grid of identical tiles
+
+   One host is one tile: its name, its condition, three measurements and
+   a line of its recent past. They are all one size, so a wide screen is
+   a grid rather than the thrown-down blocks the owner threw the last
+   attempt out for. A tile that cannot answer says so on itself while
+   its neighbours carry on.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(276px, 1fr)); gap: var(--fl-gutter); }
+
+.fl-app .fl-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s4);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border);
+  background: var(--fl-face);
+  box-shadow: var(--fl-lift);
+  color: inherit;
+  text-decoration: none;
+  overflow: hidden;
+  transition: transform var(--fl-quick), box-shadow var(--fl-quick), border-color var(--fl-quick);
+}
+
+.fl-app a.fl-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--fl-lift-high);
+  border-color: var(--border-strong);
+  text-decoration: none;
+}
+
+.fl-app .fl-tile-top { display: flex; align-items: flex-start; gap: var(--s3); }
+.fl-app .fl-tile-names { flex: 1 1 auto; min-width: 0; }
+
+.fl-app .fl-tile-name {
+  display: block;
+  font-weight: 620;
+  font-size: var(--t-lead);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fl-app .fl-tile-sub {
+  display: block;
+  font-size: var(--t-small);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fl-app .fl-tile-figs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s3); }
+.fl-app .fl-tile-fig { min-width: 0; }
+
+.fl-app .fl-tile-fig-label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-tile-fig-value {
+  display: block;
+  font-size: var(--t-lead);
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+  color: var(--tone-text, var(--text));
+}
+
+.fl-app .fl-tile-spark { height: 34px; margin: 0 calc(var(--s4) * -1) calc(var(--s4) * -1); }
+.fl-app .fl-tile-spark svg { width: 100%; height: 100%; display: block; }
+.fl-app .fl-tile-mute .fl-tile-figs, .fl-app .fl-tile-mute .fl-tile-spark { opacity: 0.4; }
+
+.fl-app .fl-tile-veil {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--tone, var(--warn)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone, var(--warn)) 30%, transparent);
+  font-size: var(--t-small);
+  color: var(--tone-text, var(--warn-text));
+}
+
+/* ---------------------------------------------------------------------
+   12. A feed: what happened, newest first
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-feed { display: flex; flex-direction: column; }
+
+.fl-app .fl-feed-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  padding: var(--s3) var(--s5);
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  transition: background var(--fl-quick);
+}
+
+.fl-app .fl-feed-row:last-child { border-bottom: 0; }
+.fl-app .fl-feed-row:hover { background: var(--bg-hover); text-decoration: none; }
+
+.fl-app .fl-feed-mark {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--tone, var(--text-faint)) 16%, transparent);
+  color: var(--tone-text, var(--text-muted));
+}
+
+.fl-app .fl-feed-mark svg { width: 14px; height: 14px; }
+.fl-app .fl-feed-text { flex: 1 1 auto; min-width: 0; }
+.fl-app .fl-feed-what { display: block; font-size: var(--t-body); overflow-wrap: anywhere; }
+.fl-app .fl-feed-who { display: block; margin-top: 1px; font-size: var(--t-small); color: var(--text-faint); }
+.fl-app .fl-feed-when { flex: 0 0 auto; font-size: var(--t-small); color: var(--text-faint); white-space: nowrap; }
+
+/* A list of things that need somebody, inside a card. */
+.fl-app .fl-needs { display: flex; flex-direction: column; }
+
+.fl-app .fl-needs-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s5);
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  transition: background var(--fl-quick);
+}
+
+.fl-app .fl-needs-row:last-child { border-bottom: 0; }
+.fl-app .fl-needs-row:hover { background: var(--bg-hover); text-decoration: none; }
+.fl-app .fl-needs-label { flex: 1 1 auto; min-width: 0; font-size: var(--t-body); }
+
+.fl-app .fl-needs-count {
+  flex: 0 0 auto;
+  min-width: 32px;
+  text-align: right;
+  font-size: var(--t-lead);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--tone-text, var(--text));
+}
+
+/* ---------------------------------------------------------------------
+   13. Small things that say a state
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  padding: 2px var(--s2);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tone, var(--text-faint)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone, var(--text-faint)) 26%, transparent);
+  color: var(--tone-text, var(--text-muted));
+  font-size: var(--t-label);
+  font-weight: 650;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.fl-app .fl-pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tone, var(--text-faint));
+}
+
+.fl-app .fl-pill.fl-nodot::before { display: none; }
+.fl-app .fl-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--tone, var(--unknown)); }
+.fl-app .fl-tags { display: flex; flex-wrap: wrap; gap: var(--s1); }
+
+.fl-app .fl-tag {
+  padding: 1px var(--s2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  font-size: var(--t-label);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+/* The words a screen may use, and the only ones. */
+.fl-app .fl-note { font-size: var(--t-small); color: var(--text-faint); }
+.fl-app .fl-faint { color: var(--text-faint); }
+.fl-app .fl-small { font-size: var(--t-small); }
+.fl-app .fl-mono { font-family: var(--font-mono); font-size: var(--t-small); overflow-wrap: anywhere; }
+
+/* A block of verbatim text looks the same wherever it is written, so a
+   screen that reached for a bare <pre> rather than a Readout still
+   inherits the appearance rather than drawing unstyled text on the
+   page. */
+.fl-app pre.fl-mono,
+.fl-app .fl-card-body > pre {
+  margin: 0;
+  padding: var(--s3) var(--s4);
+  max-height: 24em;
+  overflow: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--t-small);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+.fl-app .fl-nowrap { white-space: nowrap; }
+.fl-app .fl-truncate { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.fl-app .fl-subhead {
+  display: block;
+  margin-bottom: var(--s2);
+  font-size: var(--t-label);
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------
+   14. Nothing here, something wrong, not yet arrived
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s7) var(--s5);
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--t-small);
+}
+
+.fl-app .fl-empty-mark {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+}
+
+.fl-app .fl-empty-mark svg { width: 18px; height: 18px; }
+.fl-app .fl-empty-actions { display: flex; gap: var(--s2); }
+
+.fl-app .fl-problem {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  padding: var(--s4);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--error) 34%, transparent);
+  color: var(--error-text);
+  font-size: var(--t-body);
+}
+
+.fl-app .fl-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--tone, var(--warn)) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone, var(--warn)) 30%, transparent);
+  color: var(--tone-text, var(--warn-text));
+  font-size: var(--t-body);
+}
+
+.fl-app .fl-banner-text { flex: 1 1 auto; min-width: 0; }
+
+/* What has not arrived breathes. "Loading…" is a word where a shape is
+   wanted, and the shape is what tells the reader the page is the right
+   one before the numbers land. */
+.fl-app .fl-bone {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--bg-sunken) 25%, var(--bg-hover) 37%, var(--bg-sunken) 63%);
+  background-size: 400% 100%;
+  animation: fl-shimmer 1.4s ease-in-out infinite;
+}
+
+.fl-app .fl-bones { display: flex; flex-direction: column; gap: var(--s3); }
+
+@keyframes fl-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+@keyframes fl-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes fl-fade { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .fl-app *, .fl-app *::before, .fl-app *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   15. Things to press and things to fill in
+   ------------------------------------------------------------------ */
+
+.fl-app button { font: inherit; cursor: pointer; }
+.fl-app button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* The button that does the thing. Anything that is not one of the named
+   quieter kinds is this, so a screen cannot accidentally ship a button
+   with no appearance at all. */
+.fl-app .fl-screen button:not(.fl-quiet):not(.fl-plain):not(.fl-word):not(.fl-iconbtn):not(.fl-helpmark):not(.fl-tab):not(.fl-corner):not(.fl-seg button),
+.fl-app .fl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 34px;
+  padding: 0 var(--s4);
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: var(--t-small);
+  font-weight: 650;
+  text-decoration: none;
+  transition: filter var(--fl-quick);
+}
+
+.fl-app .fl-screen button:not(.fl-quiet):not(.fl-plain):not(.fl-word):not(.fl-iconbtn):not(.fl-helpmark):not(.fl-tab):not(.fl-corner):not(.fl-seg button):hover,
+.fl-app .fl-btn:hover { filter: brightness(1.08); text-decoration: none; }
+
+.fl-app .fl-quiet {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  height: 34px;
+  padding: 0 var(--s4);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: var(--t-small);
+  font-weight: 600;
+  text-decoration: none;
+  transition: background var(--fl-quick), border-color var(--fl-quick);
+}
+
+.fl-app .fl-quiet:hover { background: var(--bg-hover); border-color: var(--border-strong); text-decoration: none; }
+.fl-app .fl-quiet.fl-small { height: 28px; padding: 0 var(--s3); }
+
+.fl-app .fl-plain {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 30px;
+  padding: 0 var(--s3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--t-small);
+  transition: background var(--fl-quick), color var(--fl-quick);
+}
+
+.fl-app .fl-plain:hover { background: var(--bg-hover); color: var(--text); }
+
+.fl-app .fl-word {
+  height: auto;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--accent-text);
+  font-size: var(--t-small);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.fl-app .fl-danger { background: var(--error) !important; color: var(--error-contrast) !important; border-color: transparent !important; }
+
+.fl-app .fl-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); margin-bottom: var(--s4); }
+
+/* The bar that steers a list stands between the card's head and the part
+   that scrolls, so neither it nor the table's head can scroll away -
+   however many lines it wraps onto. */
+.fl-app .fl-card-bar {
+  flex: 0 0 auto;
+  padding: var(--s3) var(--s5);
+  border-bottom: 1px solid var(--border);
+  background: var(--fl-card);
+}
+
+.fl-app .fl-card-bar .fl-toolbar { margin-bottom: 0; }
+.fl-app .fl-toolbar-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+
+.fl-app .fl-find { position: relative; flex: 0 1 280px; display: flex; align-items: center; }
+
+.fl-app .fl-find svg {
+  position: absolute;
+  left: var(--s3);
+  width: 14px;
+  height: 14px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.fl-app .fl-toolbar select,
+.fl-app .fl-card-bar select { width: auto; min-width: 140px; max-width: 320px; }
+
+/* The same for a box somebody types in. Without this it keeps the full
+   width every field inside a screen has, and a bar of four filters comes
+   out as four lines stacked down the card - which is what the jobs list
+   looked like until this rule. The search box sizes itself and is left
+   alone. */
+.fl-app .fl-toolbar input:not([type="checkbox"]):not([type="radio"]):not(.fl-find input),
+.fl-app .fl-card-bar input:not([type="checkbox"]):not([type="radio"]):not(.fl-find input) {
+  width: auto;
+  flex: 0 1 200px;
+  min-width: 120px;
+  max-width: 320px;
+}
+
+.fl-app .fl-find input,
+.fl-app .fl-toolbar .fl-find input {
+  width: 100%;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 var(--s3) 0 var(--s7);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: var(--t-small);
+  transition: border-color var(--fl-quick);
+}
+
+.fl-app .fl-find input:focus { border-color: var(--accent); outline: none; }
+
+.fl-app .fl-seg { display: inline-flex; padding: 2px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-sunken); }
+
+.fl-app .fl-seg button {
+  height: 26px;
+  padding: 0 var(--s3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--t-small);
+  font-weight: 600;
+  transition: background var(--fl-quick), color var(--fl-quick);
+}
+
+.fl-app .fl-seg button:hover { color: var(--text); }
+.fl-app .fl-seg button.fl-on { background: var(--bg-raised); color: var(--text); box-shadow: var(--shadow-soft); }
+
+/* The tabs wrap where there is no room; they do not scroll. A row of
+   nine that fits in a third of the window still drew a scrollbar under
+   itself on a desktop that shows them always. Below the breakpoint,
+   where wrapping would take four lines, they scroll - without the bar,
+   because the row is plainly cut off and the bar says nothing. */
+.fl-app .fl-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--s5);
+}
+
+@media (max-width: 860px) {
+  .fl-app .fl-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .fl-app .fl-tabs::-webkit-scrollbar { display: none; }
+}
+
+.fl-app .fl-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 38px;
+  padding: 0 var(--s4);
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--t-body);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: color var(--fl-quick);
+}
+
+.fl-app .fl-tab:hover { color: var(--text); }
+.fl-app .fl-tab.fl-on { color: var(--accent-text); }
+
+.fl-app .fl-tab.fl-on::after {
+  content: "";
+  position: absolute;
+  left: var(--s3);
+  right: var(--s3);
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+}
+
+.fl-app .fl-tab-count {
+  min-width: 18px;
+  padding: 0 5px;
+  height: 17px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.fl-app .fl-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--s4); }
+.fl-app .fl-field { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+.fl-app .fl-field.fl-wide { grid-column: 1 / -1; }
+
+.fl-app .fl-field-label {
+  font-size: var(--t-label);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-field-hint { font-size: var(--t-small); color: var(--text-faint); }
+
+.fl-app .fl-screen input:not([type="checkbox"]):not([type="radio"]):not(.fl-find input):not(.fl-finder-field input),
+.fl-app .fl-screen select,
+.fl-app .fl-screen textarea {
+  width: 100%;
+  min-height: 34px;
+  padding: var(--s2) var(--s3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: var(--t-small);
+  transition: border-color var(--fl-quick);
+}
+
+.fl-app .fl-screen input:focus,
+.fl-app .fl-screen select:focus,
+.fl-app .fl-screen textarea:focus { border-color: var(--accent); outline: none; }
+
+.fl-app .fl-check { display: flex; align-items: center; gap: var(--s2); font-size: var(--t-small); cursor: pointer; }
+.fl-app .fl-check input { width: 15px; height: 15px; min-height: 0; accent-color: var(--accent); cursor: pointer; }
+
+.fl-app .fl-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.fl-app .fl-actions.fl-right { justify-content: flex-end; }
+
+.fl-app .fl-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--s4) var(--s5); margin: 0; }
+.fl-app .fl-fact { min-width: 0; }
+
+.fl-app .fl-fact dt {
+  font-size: var(--t-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-fact dd { margin: 2px 0 0; font-size: var(--t-body); overflow-wrap: anywhere; }
+
+.fl-app .fl-rows { display: inline-flex; align-items: center; gap: var(--s2); font-size: var(--t-small); color: var(--text-faint); }
+.fl-app .fl-rows select { width: auto; min-width: 70px; }
+
+.fl-app .fl-pager { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s1); }
+.fl-app .fl-pager button { min-width: 32px; height: 30px; padding: 0 var(--s2); font-variant-numeric: tabular-nums; }
+.fl-app .fl-pager button.fl-on { background: var(--accent-soft); color: var(--accent-text); border: 1px solid transparent; font-weight: 700; }
+.fl-app .fl-pager-gap { color: var(--text-faint); padding: 0 var(--s1); }
+
+/* ---------------------------------------------------------------------
+   16. A window over the page
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: var(--s5);
+  background: color-mix(in srgb, var(--bg-sunken) 72%, transparent);
+  backdrop-filter: blur(3px);
+  animation: fl-fade 160ms ease-out;
+}
+
+.fl-app .fl-modal {
+  width: min(620px, 100%);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  box-shadow: var(--fl-lift-high);
+  animation: fl-rise 180ms cubic-bezier(0.2, 0, 0.1, 1);
+}
+
+.fl-app .fl-modal-title {
+  padding: var(--s4) var(--s5);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fl-card-title);
+  font-weight: 650;
+}
+
+.fl-app .fl-modal-body { flex: 1 1 auto; overflow: auto; padding: var(--s5); }
+.fl-app .fl-modal > .fl-actions { padding: var(--s4) var(--s5); border-top: 1px solid var(--border); }
+
+/* ---------------------------------------------------------------------
+   17. Arranging the screen
+
+   The bar that turns it on, the handle a container is moved by and the
+   corner it is sized by. Nothing moves until the mode is on, so a board
+   is a board the rest of the time.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-arrange {
+  position: sticky;
+  top: var(--fl-bar);
+  z-index: 15;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s4);
+  padding: var(--s2);
+  border-radius: var(--radius);
+  border: 1px dashed var(--border-strong);
+  background: var(--bg-raised);
+  box-shadow: var(--fl-lift);
+}
+
+.fl-app .fl-arrange-what { flex: 1 1 auto; min-width: 0; font-size: var(--t-small); color: var(--text-faint); }
+.fl-app .fl-arrange select { width: auto; }
+.fl-app .fl-placed { grid-auto-rows: var(--row); align-items: stretch; }
+.fl-app .fl-held { position: relative; min-width: 0; min-height: 0; }
+.fl-app .fl-held > * { height: 100%; }
+
+/* A notice is a line, not a box the height of its cell. Stretched to
+   fill one it read as a tall empty frame with a sentence floating in
+   the middle of it. */
+.fl-app .fl-held > .fl-banner,
+.fl-app .fl-held > .fl-problem { height: auto; }
+
+.fl-app .fl-editing .fl-held {
+  padding-top: 26px;
+  outline: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent);
+  outline-offset: 2px;
+  border-radius: var(--radius-card);
+}
+
+.fl-app .fl-dragging { z-index: 5; }
+.fl-app .fl-dragging > * { box-shadow: var(--fl-lift-high); }
+.fl-app .fl-holding { user-select: none; cursor: grabbing; }
+
+.fl-app .fl-grip {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  font-size: var(--t-label);
+  color: var(--text-muted);
+  cursor: grab;
+  z-index: 6;
+}
+
+.fl-app .fl-grip-dots { color: var(--text-faint); }
+.fl-app .fl-grip-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-app .fl-grip-size { font-variant-numeric: tabular-nums; color: var(--text-faint); }
+
+.fl-app .fl-corner {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 0 0 var(--radius-card) 0;
+  background: linear-gradient(135deg, transparent 50%, var(--accent) 50%);
+  opacity: 0.7;
+  cursor: nwse-resize;
+  z-index: 6;
+}
+
+.fl-app .fl-corner:hover { opacity: 1; }
+
+/* What a screen may group inside a card without inventing a layout. */
+.fl-app .fl-zones { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--s4); }
+
+/* ---------------------------------------------------------------------
+   18. Narrow screens
+
+   The rail leaves the flow and opens over the page. Everything else is
+   already told to reflow by the grid above, so nothing here names a
+   screen of the panel.
+   ------------------------------------------------------------------ */
+
+@media (max-width: 860px) {
+  .fl-app { --fl-pad: var(--s4); }
+  .fl-app .fl-page { margin-left: 0; }
+  .fl-app .fl-rail { transform: translateX(-100%); box-shadow: var(--fl-lift-high); }
+  .fl-app .fl-rail.fl-open { transform: none; }
+  .fl-app .fl-head-title { font-size: 24px; }
+  .fl-app .fl-search { flex: 1 1 auto; }
+  .fl-app .fl-search-key, .fl-app .fl-crumbs { display: none; }
+  .fl-app .fl-user-name { display: none; }
+}
+
+@media (min-width: 861px) {
+  .fl-app .fl-bar > .fl-iconbtn:first-child { display: none; }
+}
+
+/* ---------------------------------------------------------------------
+   19. The finder
+
+   One key reaches anywhere: the places of the panel and the hosts of the
+   fleet in one list. It sits high on the screen rather than in the
+   middle, because the eye is already at the bar when it opens.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-finder-backdrop { place-items: start center; padding-top: 12vh; }
+
+.fl-app .fl-finder {
+  width: min(620px, 100%);
+  max-height: 64vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  box-shadow: var(--fl-lift-high);
+  overflow: hidden;
+  animation: fl-rise 160ms cubic-bezier(0.2, 0, 0.1, 1);
+}
+
+.fl-app .fl-finder-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 0 var(--s4);
+  border-bottom: 1px solid var(--border);
+}
+
+.fl-app .fl-finder-field svg { flex: 0 0 auto; width: 16px; height: 16px; color: var(--text-faint); }
+
+.fl-app .fl-finder-field input {
+  flex: 1 1 auto;
+  height: 52px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: var(--t-lead);
+  outline: none;
+}
+
+.fl-app .fl-finder-field input::placeholder { color: var(--text-faint); }
+.fl-app .fl-finder-field .fl-search-key { position: static; }
+.fl-app .fl-finder-found { flex: 1 1 auto; overflow-y: auto; padding: var(--s2); }
+.fl-app .fl-finder-none { padding: var(--s6); text-align: center; font-size: var(--t-small); color: var(--text-faint); }
+
+.fl-app .fl-finder-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding-right: var(--s2);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition: background var(--fl-quick), color var(--fl-quick);
+}
+
+.fl-app .fl-finder-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  color: inherit;
+  text-decoration: none;
+}
+
+.fl-app .fl-finder-keep { height: 26px; padding: 0 var(--s2); opacity: 0.55; }
+.fl-app .fl-finder-keep:hover { opacity: 1; }
+.fl-app .fl-finder-keep[aria-pressed="true"] { opacity: 1; color: var(--accent-text); }
+.fl-app .fl-finder-keep svg { width: 13px; height: 13px; }
+
+.fl-app .fl-finder-row svg { flex: 0 0 auto; width: 15px; height: 15px; }
+.fl-app .fl-finder-row.fl-on { background: var(--accent-soft); color: var(--accent-text); }
+.fl-app .fl-finder-row:hover { text-decoration: none; }
+.fl-app .fl-finder-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-body); }
+.fl-app .fl-finder-note { flex: 0 0 auto; font-size: var(--t-small); color: var(--text-faint); }
+
+/* ---------------------------------------------------------------------
+   20. Something to copy, and one of several
+
+   A command, a configuration, a fingerprint: read-only, keeping its own
+   line breaks, scrolling rather than wrapping - a command broken across
+   two lines reads as two commands - and carrying the way to take it.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-readout { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+.fl-app .fl-readout-head { display: flex; align-items: center; gap: var(--s3); }
+
+.fl-app .fl-readout-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--t-label);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-readout-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.fl-app .fl-readout-body mark.fl-mark-now {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.fl-app .fl-readout-body mark {
+  background: color-mix(in srgb, var(--accent) 34%, transparent);
+  color: var(--text);
+  border-radius: 2px;
+}
+
+.fl-app .fl-readout-body {
+  margin: 0;
+  padding: var(--s3) var(--s4);
+  max-height: 18em;
+  overflow: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--t-small);
+  line-height: 1.6;
+  white-space: pre;
+  tab-size: 2;
+}
+
+/* One of several, each with its own sentence: a choice made once and
+   understood first, where a Seg is one changed back and forth. */
+.fl-app .fl-choice { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+
+.fl-app .fl-choice-one {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  padding: var(--s3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  cursor: pointer;
+  transition: border-color var(--fl-quick), background var(--fl-quick);
+}
+
+.fl-app .fl-choice-one:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+.fl-app .fl-choice-one:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.fl-app .fl-choice-one.fl-off { opacity: 0.5; cursor: not-allowed; }
+
+.fl-app .fl-choice-one input {
+  width: 15px;
+  height: 15px;
+  min-height: 0;
+  margin-top: 2px;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.fl-app .fl-choice-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fl-app .fl-choice-name { font-size: var(--t-body); font-weight: 600; }
+
+/* ---------------------------------------------------------------------
+   21. The way in
+
+   The first thing anybody sees of this product. It is set a size larger
+   than the panel behind it, because a person typing a password reads one
+   line at a time rather than scanning a board, and it stands on a ground
+   lit from two corners instead of on an empty page.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-door {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--s6);
+  font-size: var(--t-lead);
+  background:
+    radial-gradient(70rem 46rem at 10% -14%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 58%),
+    radial-gradient(56rem 40rem at 108% 112%, color-mix(in srgb, var(--blue) 24%, transparent), transparent 60%),
+    radial-gradient(40rem 30rem at 86% 4%, color-mix(in srgb, var(--lavender) 14%, transparent), transparent 64%),
+    var(--bg);
+}
+
+.fl-app .fl-door-card {
+  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  padding: var(--s7) var(--s6) var(--s6);
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--fl-face);
+  box-shadow: var(--fl-lift-high);
+}
+
+.fl-app .fl-door-head { display: flex; flex-direction: column; align-items: center; gap: var(--s2); text-align: center; }
+
+.fl-app .fl-door-mark {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  background: var(--fl-brand);
+  color: var(--fl-brand-ink);
+}
+
+.fl-app .fl-door-name { font-size: 26px; font-weight: 650; letter-spacing: -0.02em; }
+.fl-app .fl-door-lead { font-size: var(--t-body); color: var(--text-faint); }
+.fl-app .fl-door-form { display: flex; flex-direction: column; gap: var(--s4); }
+.fl-app .fl-door-wide { width: 100%; justify-content: center; height: 42px; font-size: var(--t-body); }
+
+/* The door is outside the screen, so the rule that makes a bare button
+   the filled one does not reach it. The one that signs a person in says
+   so for itself. */
+.fl-app .fl-door button[type="submit"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 650;
+  transition: filter var(--fl-quick), opacity var(--fl-quick);
+}
+
+.fl-app .fl-door button[type="submit"]:hover { filter: brightness(1.08); }
+.fl-app .fl-door button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* A field on this screen is a size larger than one inside the panel. */
+.fl-app .fl-door input {
+  width: 100%;
+  height: 42px;
+  padding: 0 var(--s4);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: var(--t-lead);
+  transition: border-color var(--fl-quick);
+}
+
+.fl-app .fl-door input:focus { border-color: var(--accent); outline: none; }
+.fl-app .fl-door .fl-field-label { font-size: var(--t-small); }
+
+.fl-app .fl-door-or {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  color: var(--text-faint);
+  font-size: var(--t-small);
+}
+
+.fl-app .fl-door-or::before,
+.fl-app .fl-door-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--border); }
+
+.fl-app .fl-door-more { display: flex; flex-direction: column; gap: var(--s3); font-size: var(--t-small); }
+
+.fl-app .fl-door-more summary {
+  cursor: pointer;
+  color: var(--text-faint);
+  transition: color var(--fl-quick);
+}
+
+.fl-app .fl-door-more summary:hover { color: var(--text); }
+.fl-app .fl-door-more[open] summary { margin-bottom: var(--s1); }
+
+/* ---------------------------------------------------------------------
+   22. The selector of machines
+
+   The box in the bar that lists hosts and nothing else. The finder
+   reaches anything and is opened from the keyboard; this is for the hand
+   and for the question an operator asks twenty times a day - the same
+   thing, on that other machine.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 34px;
+  max-width: 220px;
+  padding: 0 var(--s2) 0 var(--s3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-size: var(--t-small);
+  transition: border-color var(--fl-quick), background var(--fl-quick), color var(--fl-quick);
+}
+
+.fl-app .fl-pick:hover { border-color: var(--border-strong); background: var(--bg-hover); color: var(--text); }
+.fl-app .fl-pick > svg { flex: 0 0 auto; width: 14px; height: 14px; }
+.fl-app .fl-pick > svg:last-child { opacity: 0.6; width: 11px; height: 11px; }
+
+.fl-app .fl-pick-current {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.fl-app .fl-pick-menu { min-width: 320px; padding: 0; overflow: hidden; }
+.fl-app .fl-pick-field { border-bottom: 1px solid var(--border); padding: 0 var(--s3); }
+.fl-app .fl-pick-field input { height: 40px; font-size: var(--t-body); }
+.fl-app .fl-pick-list { max-height: 52vh; overflow-y: auto; padding: var(--s2); }
+.fl-app .fl-pick-group + .fl-pick-group { margin-top: var(--s2); }
+
+.fl-app .fl-pick-head {
+  display: block;
+  padding: var(--s2) var(--s3) var(--s1);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-pick-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  border-radius: var(--radius-sm);
+  transition: background var(--fl-quick);
+}
+
+.fl-app .fl-pick-row:hover { background: var(--bg-hover); }
+
+.fl-app .fl-pick-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  color: var(--text-muted);
+  font-size: var(--t-body);
+  text-align: left;
+}
+
+.fl-app .fl-pick-row:hover .fl-pick-open { color: var(--text); }
+.fl-app .fl-pick-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-app .fl-pick-keep { height: 26px; padding: 0 var(--s2); opacity: 0.5; }
+.fl-app .fl-pick-keep:hover { opacity: 1; }
+.fl-app .fl-pick-keep[aria-pressed="true"] { opacity: 1; color: var(--accent-text); }
+.fl-app .fl-pick-keep svg { width: 13px; height: 13px; }
+
+/* The machine in the trail, with how it is answering and the address. */
+.fl-app .fl-crumbs-host {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+  padding: 2px var(--s2);
+  border-radius: var(--radius-sm);
+  transition: background var(--fl-quick);
+}
+
+.fl-app .fl-crumbs-host:hover { background: var(--bg-hover); text-decoration: none; }
+.fl-app .fl-crumbs-name { color: var(--text); font-weight: 600; }
+.fl-app .fl-crumbs-where { font-family: var(--font-mono); font-size: var(--t-label); color: var(--text-faint); }
+
+@media (max-width: 1200px) {
+  .fl-app .fl-crumbs-where { display: none; }
+}
+
+/* The control that stays, shut, with the reason it would be refused. */
+.fl-app .fl-guard { display: inline-flex; flex-direction: column; gap: var(--s1); min-width: 0; }
+
+/* A value the server will not say twice. */
+.fl-app .fl-shownonce {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s4);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--tone, var(--warn)) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone, var(--warn)) 32%, transparent);
+}
+
+.fl-app .fl-shownonce-head { display: flex; align-items: center; gap: var(--s3); }
+
+.fl-app .fl-shownonce-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--t-body);
+  font-weight: 650;
+  color: var(--tone-text, var(--warn-text));
+}
+
+/* ---------------------------------------------------------------------
+   23. What a table can do besides list
+
+   A row that opens under itself, a row the cards beside it are about,
+   a tree of rows, and the columns a reader folds away. All four are
+   things the panel being replaced could do, and a table that cannot do
+   them sends the reader somewhere else to read what belongs here.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-row-marked > td { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.fl-app .fl-row-open > td { border-bottom-color: transparent; }
+
+.fl-app .fl-row-detail > td {
+  padding: 0 var(--s5) var(--s4);
+  background: color-mix(in srgb, var(--bg-sunken) 60%, transparent);
+}
+
+/* What a row says without being asked: quieter than the row above it,
+   because it is read on the way past rather than looked up. */
+.fl-app .fl-row-under > td {
+  padding: 0 var(--s5) var(--s3);
+  font-size: var(--t-small);
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border);
+}
+
+/* A tree inside a table: the depth is a width, not an indentation
+   character, so a name still reads as a name when it is copied. */
+.fl-app .fl-indent { display: inline-block; vertical-align: middle; }
+.fl-app .fl-indent[data-depth="1"] { width: 16px; }
+.fl-app .fl-indent[data-depth="2"] { width: 32px; }
+.fl-app .fl-indent[data-depth="3"] { width: 48px; }
+.fl-app .fl-indent[data-depth="4"] { width: 64px; }
+.fl-app .fl-indent[data-depth="5"] { width: 80px; }
+.fl-app .fl-indent[data-depth="6"] { width: 96px; }
+.fl-app .fl-indent[data-depth="7"] { width: 112px; }
+.fl-app .fl-indent[data-depth="8"] { width: 128px; }
+
+.fl-app .fl-columns { position: relative; display: flex; justify-content: flex-end; padding: 0 var(--s5) var(--s2); }
+
+.fl-app .fl-columns-list {
+  position: absolute;
+  top: calc(100% + var(--s1));
+  right: var(--s5);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  box-shadow: var(--fl-lift-high);
+}
+
+/* What a change would do to a file: the eye finds the two lines that
+   differ without reading the rest. */
+.fl-app .fl-diff { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+
+.fl-app .fl-diff-body {
+  margin: 0;
+  padding: var(--s3) 0;
+  max-height: 24em;
+  overflow: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  font-family: var(--font-mono);
+  font-size: var(--t-small);
+  line-height: 1.6;
+}
+
+.fl-app .fl-diff-line { display: block; padding: 0 var(--s4); white-space: pre; color: var(--text-muted); }
+.fl-app .fl-diff-in { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok-text); }
+.fl-app .fl-diff-out { background: color-mix(in srgb, var(--error) 14%, transparent); color: var(--error-text); }
+.fl-app .fl-diff-where { color: var(--text-faint); }
+
+/* ---------------------------------------------------------------------
+   N. The panel on paper
+
+   The Reports screen is printed. What the reader prints is the panel,
+   not a document: the rail, the top bar, the buttons and every scroller
+   are the screen's furniture and none of it belongs on the sheet.
+
+   One of these rules matters more than the rest. A card's body and a
+   table's wrapper scroll on screen, and a scroller prints only what
+   happens to be in view - so a report of two hundred rows comes out as
+   the first fifteen with nothing on the sheet to say the rest existed.
+   That is the failure this block is here to stop.
+   ------------------------------------------------------------------ */
+
+@media print {
+  /* Where the reader is, and what they could do from here: neither is
+     part of the report. */
+  .fl-app .fl-rail,
+  .fl-app .fl-rail-backdrop,
+  .fl-app .fl-bar,
+  .fl-app .fl-skip,
+  .fl-app .fl-arrange,
+  .fl-app .fl-grip,
+  .fl-app .fl-finder,
+  .fl-app .fl-finder-backdrop,
+  .fl-app .fl-modal-backdrop,
+  .fl-app .fl-menu,
+  .fl-app .fl-head-actions,
+  .fl-app .fl-helpmark,
+  .fl-app .fl-card-tools,
+  .fl-app .fl-card-bar,
+  .fl-app .fl-toolbar,
+  .fl-app .fl-columns,
+  .fl-app .fl-pager,
+  .fl-app .fl-rows,
+  .fl-app .fl-seg,
+  .fl-app .fl-actions,
+  .ui-toasts { display: none !important; }
+
+  /* The page is the sheet: no rail to leave room for, no viewport to be
+     as tall as, no window padding. */
+  .fl-app,
+  .fl-app .fl-page { min-height: 0; }
+  .fl-app .fl-page,
+  .fl-app .fl-folded .fl-page { margin-left: 0; }
+  .fl-app .fl-screen { padding: 0; }
+
+  /* The board is a grid of fixed rows on screen; on paper it is one
+     card after another, each as tall as what is in it. */
+  .fl-app .fl-placed { display: block; }
+  .fl-app .fl-held,
+  .fl-app .fl-held > * { height: auto; }
+  .fl-app .fl-held + .fl-held { margin-top: var(--s5); }
+
+  /* Nothing scrolls on paper, and nothing is cut off by a height that
+     was there to make a card fit a screen. */
+  .fl-app .fl-card-body,
+  .fl-app .fl-placed .fl-card-body,
+  .fl-app .fl-tablewrap,
+  .fl-app .fl-card-body > .fl-tablewrap,
+  .fl-app .fl-readout-body {
+    overflow: visible;
+    max-height: none;
+  }
+
+  /* A sticky head lands in the middle of the rows on the second sheet;
+     a real table head repeats at the top of each instead. */
+  .fl-app .fl-table th { position: static; }
+  .fl-app .fl-table thead { display: table-header-group; }
+  .fl-app .fl-table tr { break-inside: avoid; }
+
+  /* A card is a step above the floor on screen; on paper it is a block
+     that is not broken across two sheets. */
+  .fl-app .fl-card {
+    break-inside: avoid;
+    box-shadow: none;
+    margin-bottom: var(--s5);
+  }
+  .fl-app .fl-card::before { display: none; }
+
+  /* An address nobody can click is text; the colour of a link says
+     nothing on a sheet of paper. */
+  .fl-app a { color: inherit; text-decoration: none; }
+}

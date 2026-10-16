@@ -6,8 +6,8 @@ import type {
   Alert, AlertRule, AlertRuleInput, AlertSeverity, AlertState, FleetFootprint, FleetMonitoring as FleetView,
   RuleCatalogue, RuleOperator, RuleSelector, Silence, Whoami,
 } from "../lib/types";
-import { ErrorBox, Time, Empty } from "../components/ui";
-import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Stat, StatGrid, Toolbar, Verdict } from "../components/layout";
+import { ErrorBox, Time } from "../components/ui";
+import { Actions, Empty, Field, Fields, PageHead, Panel, Stat, Stats, toneClass, Toolbar, Verdict } from "../ui/kit";
 import { ExportButton } from "../components/ExportButton";
 import { PARTIAL_REASONS } from "../components/FleetCoverage";
 import { SeverityBar } from "../components/SeverityBar";
@@ -136,26 +136,26 @@ export function severityTone(severity: AlertSeverity): "error" | "warn" | "info"
 export function SeverityBadge({ severity }: { severity: AlertSeverity }) {
   const t = useT();
   const names: Record<AlertSeverity, string> = { critical: t("critical"), warning: t("warning"), info: t("info") };
-  return <span className={`badge ${severityTone(severity)}`}>{names[severity] ?? severity}</span>;
+  return <span className={`ui-pill ${toneClass(severityTone(severity))}`}>{names[severity] ?? severity}</span>;
 }
 
 /** The state of an alert; a silenced one is still firing, only nobody is told. */
 export function AlertStateBadge({ state, silenced }: { state: AlertState; silenced: boolean }) {
   const t = useT();
-  if (state === "resolved") return <span className="badge ok">{t("resolved")}</span>;
-  if (state === "pending") return <span className="badge unknown">{t("pending")}</span>;
+  if (state === "resolved") return <span className="ui-pill ui-ok">{t("resolved")}</span>;
+  if (state === "pending") return <span className="ui-pill ui-unknown">{t("pending")}</span>;
   // The readings stopped: the condition may well still hold, and saying it
   // ended because the host went quiet is the one thing the panel must not do.
   if (state === "no_data") {
     return (
-      <span className="badge warn" title={t("The host stopped reporting the metric; the panel does not know whether the condition holds.")}>
+      <span className="ui-pill ui-warn" title={t("The host stopped reporting the metric; the panel does not know whether the condition holds.")}>
         {t("no data")}
       </span>
     );
   }
   return silenced
-    ? <span className="badge">{t("firing, silenced")}</span>
-    : <span className="badge error">{t("firing")}</span>;
+    ? <span className="ui-pill">{t("firing, silenced")}</span>
+    : <span className="ui-pill ui-error">{t("firing")}</span>;
 }
 
 /**
@@ -196,12 +196,12 @@ export function SilenceBadges({ silence }: { silence: ScopedSilence }) {
   return (
     <>
       {silence.global && (
-        <span className="badge warn" title={t("Keeps back the security alerts of the whole installation.")}>
+        <span className="ui-pill ui-warn" title={t("Keeps back the security alerts of the whole installation.")}>
           {t("global")}
         </span>
       )}
       {silence.send_summary && (
-        <span className="badge" title={t("When it ends, every channel gets one message naming what it kept back.")}>
+        <span className="ui-pill" title={t("When it ends, every channel gets one message naming what it kept back.")}>
           {t("summary")}
         </span>
       )}
@@ -236,7 +236,7 @@ export function AcknowledgedChip({ alert }: { alert: NotedAlert }) {
   const t = useT();
   if (!alert.acknowledged_at) return null;
   return (
-    <span className="badge ok" title={alert.acknowledged_by ? t("taken by {who}", { who: alert.acknowledged_by }) : undefined}>
+    <span className="ui-pill ui-ok" title={alert.acknowledged_by ? t("taken by {who}", { who: alert.acknowledged_by }) : undefined}>
       {t("acknowledged")}
     </span>
   );
@@ -377,14 +377,14 @@ export function FleetMonitoring() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         title={t("Monitoring")}
         description={t("What the agents' samples turned into alerts.")}
         help={
           <p>{t("Every agent samples its host once a minute; the rules on this page turn the samples into alerts. Nothing fires without a rule an operator can read here. A rule fires when a metric stays past its threshold for the given minutes on every host its scope selects, and a disabled rule is listed because it would apply the moment somebody enables it.")}</p>
         }
         actions={canWrite && editing === null && (
-          <button className="primary" onClick={() => setEditing("new")}>{t("New rule")}</button>
+          <button className="ui-btn-primary" onClick={() => setEditing("new")}>{t("New rule")}</button>
         )}
       />
 
@@ -399,7 +399,7 @@ export function FleetMonitoring() {
         <span>{t("{n} hosts reporting", { n: data?.hosts_reporting ?? 0 })}</span>
         {/* An enrolled host with no recent sample is the failure this screen
             exists to show: it is not a host with nothing wrong. */}
-        <span className={(data?.hosts_silent ?? 0) > 0 ? "verdict-fact warn" : undefined}>
+        <span className={(data?.hosts_silent ?? 0) > 0 ? "ui-verdict-fact ui-warn" : undefined}>
           {t("{n} gone quiet", { n: data?.hosts_silent ?? 0 })}
         </span>
         <span>{t("{n} rules enabled", { n: data?.rules ?? 0 })}</span>
@@ -420,8 +420,8 @@ export function FleetMonitoring() {
         drawn={{
           firing_now: (
             <>
-              <Card
-          className="span-12"
+              <Panel
+          className="ui-col-12"
           title={t("Firing now")}
           description={t("By severity, across the hosts you can see.")}
         >
@@ -437,29 +437,29 @@ export function FleetMonitoring() {
             warning: counts?.warning,
             info: counts?.info,
           }} />
-          <p className="source monitoring-handled">
+          <p className="ui-note ui-attention-handled">
             {t("{n} acknowledged", { n: counts?.acknowledged ?? 0 })}
             {" · "}
             {t("{n} pending", { n: counts?.pending ?? 0 })}
             {" · "}
             {t("{n} silenced", { n: counts?.silenced ?? 0 })}
           </p>
-        </Card>
+        </Panel>
             </>
           ),
           message: (
             <>
               {message && (
-          <div className="span-12">
-            <p className="hm-message">{message}</p>
+          <div className="ui-col-12">
+            <p className="ui-message">{message}</p>
           </div>
         )}
             </>
           ),
           firing_alerts: (
             <>
-              <Card
-          className="span-12"
+              <Panel
+          className="ui-col-12"
           title={t("Firing alerts")}
           description={t("What tripped, where, and whether somebody has it.")}
           actions={
@@ -481,18 +481,18 @@ export function FleetMonitoring() {
           {/* The board stops at its cap; the counts above are taken over
               every firing alert, so the two do not have to agree. */}
           {boardShown && (
-            <p className="fp-note" data-testid="board-partial">
+            <p className="ui-note" data-testid="board-partial">
               {t("{shown} of {total} shown", boardShown)}
               {" "}
-              <span className="badge warn">{t("partial answer")}</span>
+              <span className="ui-pill ui-warn">{t("partial answer")}</span>
               {" "}
               {PARTIAL_REASONS[boardReason] ? t(PARTIAL_REASONS[boardReason]) : boardReason}
             </p>
           )}
-        </Card>
+        </Panel>
 
         {editing !== null && (
-          <div className="span-12">
+          <div className="ui-col-12">
             <RuleForm
               rule={editing === "new" ? undefined : editing}
               catalogue={rules.data}
@@ -508,11 +508,11 @@ export function FleetMonitoring() {
           ),
           rules: (
             <>
-              <Card
-          className="span-12"
+              <Panel
+          className="ui-col-12"
           title={t("Rules")}
           description={t("What turns a sample into an alert.")}
-          actions={<span className="source">{t("{n} rules", { n: ruleItems.length })}</span>}
+          actions={<span className="ui-note">{t("{n} rules", { n: ruleItems.length })}</span>}
           flush
         >
           {rules.error ? (
@@ -520,11 +520,11 @@ export function FleetMonitoring() {
           ) : !rules.data ? (
             <Empty>{t("Loading…")}</Empty>
           ) : ruleItems.length === 0 ? (
-            <EmptyState action={canWrite && editing === null && (
-              <button className="secondary" onClick={() => setEditing("new")}>{t("New rule")}</button>
+            <Empty action={canWrite && editing === null && (
+              <button className="ui-btn-secondary" onClick={() => setEditing("new")}>{t("New rule")}</button>
             )}>
               {t("No rules yet: the agents sample, but nothing turns the samples into alerts.")}
-            </EmptyState>
+            </Empty>
           ) : (
             <table>
               <thead>
@@ -538,27 +538,27 @@ export function FleetMonitoring() {
                 {ruleItems.map((rule) => (
                   <tr key={rule.id}>
                     <td>
-                      <div className="fp-host-cell">
+                      <div className="ui-twoline">
                         <span>{rule.name}</span>
-                        <span className="source">{metricLabel(rule.metric)}</span>
+                        <span className="ui-note">{metricLabel(rule.metric)}</span>
                       </div>
                     </td>
-                    <td className="hm-mono">{describeCondition(rule)}</td>
+                    <td className="ui-mono">{describeCondition(rule)}</td>
                     {/* A rule that waits no minutes fires on the first
                         sample past the threshold; "0 min" reads as a gap. */}
                     <td>{rule.for_minutes > 0 ? t("{n} min", { n: rule.for_minutes }) : t("at once")}</td>
                     {/* What the rule makes of its readings stopping, and the
                         hole in them it still reads as one run. */}
                     <td>
-                      <div className="fp-host-cell">
+                      <div className="ui-twoline">
                         <span>{policyLabel(rule.no_data_policy)}</span>
-                        <span className="source">{t("gap ≤ {gap}", { gap: everySeconds(rule.max_gap_seconds || 120) })}</span>
+                        <span className="ui-note">{t("gap ≤ {gap}", { gap: everySeconds(rule.max_gap_seconds || 120) })}</span>
                       </div>
                     </td>
                     <td><SeverityBadge severity={rule.severity} /></td>
-                    <td className="source">{describeSelector(rule.selector)}</td>
+                    <td className="ui-note">{describeSelector(rule.selector)}</td>
                     <td>
-                      <label className="toggle">
+                      <label className="ui-check">
                         <input
                           type="checkbox"
                           checked={rule.enabled}
@@ -572,9 +572,9 @@ export function FleetMonitoring() {
                     {canWrite && (
                       <td>
                         <Actions>
-                          <button className="secondary" onClick={() => setEditing(rule)}>{t("Edit")}</button>
+                          <button className="ui-btn-secondary" onClick={() => setEditing(rule)}>{t("Edit")}</button>
                           <button
-                            className="secondary"
+                            className="ui-btn-secondary"
                             disabled={removeRule.isPending}
                             onClick={() => askToDeleteRule(rule)}
                           >
@@ -588,13 +588,13 @@ export function FleetMonitoring() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
             </>
           ),
           recent_alerts: (
             <>
-              <Card
-          className="span-8"
+              <Panel
+          className="ui-col-8"
           title={t("Recent alerts")}
           description={t("The last fifty, newest first.")}
           flush
@@ -625,7 +625,7 @@ export function FleetMonitoring() {
           ) : (
             <table>
               <thead>
-                <tr><th scope="col">{t("Host")}</th><th scope="col">{t("Rule")}</th><th scope="col">{t("Severity")}</th><th scope="col">{t("State")}</th><th scope="col" className="num">{t("Value")}</th><th scope="col">{t("Started")}</th><th scope="col">{t("Resolved")}</th><th scope="col">{t("Note")}</th></tr>
+                <tr><th scope="col">{t("Host")}</th><th scope="col">{t("Rule")}</th><th scope="col">{t("Severity")}</th><th scope="col">{t("State")}</th><th scope="col" className="ui-numeric">{t("Value")}</th><th scope="col">{t("Started")}</th><th scope="col">{t("Resolved")}</th><th scope="col">{t("Note")}</th></tr>
               </thead>
               <tbody>
                 {history.data.items.map((alert) => (
@@ -633,16 +633,16 @@ export function FleetMonitoring() {
                     {/* A host name, a value and a moment are read as one
                         word each; broken over two lines they read as
                         two rows. The note is what may wrap. */}
-                    <td className="fp-nowrap"><Link to={`/hosts/${alert.host_id}/monitoring`}>{alert.hostname || alert.host_id.slice(0, 8)}</Link></td>
+                    <td className="ui-nowrap"><Link to={`/hosts/${alert.host_id}/monitoring`}>{alert.hostname || alert.host_id.slice(0, 8)}</Link></td>
                     <td>{alert.rule_name}</td>
                     <td><SeverityBadge severity={alert.severity} /></td>
                     <td><AlertStateBadge state={alert.state} silenced={alert.silenced} /> <AcknowledgedChip alert={alert} /></td>
-                    <td className="num fp-nowrap">
-                      {alert.state === "no_data" ? <span className="source">{t("unknown")}</span> : metricValue(alert.metric, alert.value)}
+                    <td className="ui-numeric ui-nowrap">
+                      {alert.state === "no_data" ? <span className="ui-note">{t("unknown")}</span> : metricValue(alert.metric, alert.value)}
                     </td>
-                    <td className="fp-nowrap"><Time value={alert.started_at} /></td>
-                    <td className="fp-nowrap">{alert.resolved_at ? <Time value={alert.resolved_at} /> : <span className="source">—</span>}</td>
-                    <td className="source">{alert.note || "—"}</td>
+                    <td className="ui-nowrap"><Time value={alert.started_at} /></td>
+                    <td className="ui-nowrap">{alert.resolved_at ? <Time value={alert.resolved_at} /> : <span className="ui-note">—</span>}</td>
+                    <td className="ui-note">{alert.note || "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -651,17 +651,17 @@ export function FleetMonitoring() {
           {/* The table is a page of the history; the file the button fetches
               pages on to the end, or says in its last row where it stopped. */}
           {historyShown && (
-            <p className="fp-note" data-testid="history-shown">
+            <p className="ui-note" data-testid="history-shown">
               {t("{shown} of {total} shown", historyShown)}
             </p>
           )}
-        </Card>
+        </Panel>
             </>
           ),
           silences: (
             <>
-              <Card
-          className="span-4"
+              <Panel
+          className="ui-col-4"
           title={t("Silences in force")}
           description={t("Every silence ends by itself.")}
           flush
@@ -684,24 +684,24 @@ export function FleetMonitoring() {
                       {silence.host_id ? (
                         <Link to={`/hosts/${silence.host_id}/monitoring`}>{silence.hostname || silence.host_id.slice(0, 8)}</Link>
                       ) : (
-                        <span className="source">{t("every host")}</span>
+                        <span className="ui-note">{t("every host")}</span>
                       )}
                     </td>
                     <td>
-                      <div className="fp-host-cell">
-                        <span>{silence.rule_name || <span className="source">{t("every rule")}</span>}</span>
+                      <div className="ui-twoline">
+                        <span>{silence.rule_name || <span className="ui-note">{t("every rule")}</span>}</span>
                         <span><SilenceBadges silence={silence} /></span>
                       </div>
                     </td>
                     <td><Time value={silence.until} /></td>
                     <td>
-                      <div className="fp-host-cell">
+                      <div className="ui-twoline">
                         <span>{silence.reason}</span>
-                        <span className="source">{silence.created_by}</span>
+                        <span className="ui-note">{silence.created_by}</span>
                       </div>
                     </td>
                     <td>
-                      <button className="secondary" disabled={endSilence.isPending} onClick={() => endSilence.mutate(silence)}>
+                      <button className="ui-btn-secondary" disabled={endSilence.isPending} onClick={() => endSilence.mutate(silence)}>
                         {t("End now")}
                       </button>
                     </td>
@@ -715,7 +715,7 @@ export function FleetMonitoring() {
           {canSilenceFleet && (
             <FleetSilenceForm canSilenceGlobal={canSilenceGlobal} onDone={refresh} onMessage={setMessage} />
           )}
-        </Card>
+        </Panel>
             </>
           ),
           agent_footprint: (
@@ -747,21 +747,21 @@ function AgentFootprintCard({ footprint, loaded }: { footprint?: FleetFootprint;
   const overRSS = footprint?.rss_bytes_max !== undefined && footprint.rss_bytes_max > footprint.rss_budget_bytes;
   const overCPU = footprint?.cpu_percent_max !== undefined && footprint.cpu_percent_max > footprint.cpu_budget_percent;
   return (
-    <Card
-      className="span-12"
+    <Panel
+      className="ui-col-12"
       title={t("Agent footprint")}
       description={t("What the agents cost the hosts they run on.")}
       tone={overRSS || overCPU ? "warn" : undefined}
-      actions={budget && <span className="source">{budget}</span>}
+      actions={budget && <span className="ui-note">{budget}</span>}
     >
-      <StatGrid compact>
+      <Stats compact>
         <Stat label={t("Hosts measured")} value={footprint ? measured : "—"} hint={t("reporting hosts whose agent sends its footprint")} />
         <Stat label={t("Median RSS")} value={size(footprint?.rss_bytes_median)} hint={t("what an agent costs")} />
         <Stat label={t("Max RSS")} value={size(footprint?.rss_bytes_max)} tone={overRSS ? "warn" : undefined} hint={t("the heaviest agent")} />
         <Stat label={t("Median CPU")} value={share(footprint?.cpu_percent_median)} hint={t("of one core, last minute")} />
         <Stat label={t("Max CPU")} value={share(footprint?.cpu_percent_max)} tone={overCPU ? "warn" : undefined} hint={t("the busiest agent")} />
         <Stat label={t("Helper RSS, max")} value={size(footprint?.helper_rss_bytes_max)} hint={t("only while a helper is running")} />
-      </StatGrid>
+      </Stats>
       {!loaded ? (
         <Empty>{t("Loading…")}</Empty>
       ) : !footprint || measured === 0 ? (
@@ -771,20 +771,20 @@ function AgentFootprintCard({ footprint, loaded }: { footprint?: FleetFootprint;
       ) : (
         <table>
           <thead>
-            <tr><th scope="col">{t("Host")}</th><th scope="col" className="num">{t("Agent RSS")}</th><th scope="col" className="num">{t("Agent CPU")}</th></tr>
+            <tr><th scope="col">{t("Host")}</th><th scope="col" className="ui-numeric">{t("Agent RSS")}</th><th scope="col" className="ui-numeric">{t("Agent CPU")}</th></tr>
           </thead>
           <tbody>
             {over.map((host) => (
               <tr key={host.host_id}>
                 <td><Link to={`/hosts/${host.host_id}/monitoring`}>{host.hostname || host.host_id.slice(0, 8)}</Link></td>
-                <td className="num">{host.agent_rss_bytes === undefined ? <span className="source">—</span> : bytes(host.agent_rss_bytes)}</td>
-                <td className="num">{host.agent_cpu_percent === undefined ? <span className="source">—</span> : share(host.agent_cpu_percent)}</td>
+                <td className="ui-numeric">{host.agent_rss_bytes === undefined ? <span className="ui-note">—</span> : bytes(host.agent_rss_bytes)}</td>
+                <td className="ui-numeric">{host.agent_cpu_percent === undefined ? <span className="ui-note">—</span> : share(host.agent_cpu_percent)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-    </Card>
+    </Panel>
   );
 }
 
@@ -831,7 +831,7 @@ function FleetSilenceForm({ canSilenceGlobal, onDone, onMessage }: {
   const ready = reason.trim().length >= 8 && Number(minutes) > 0 && Number(minutes) <= 1440;
   return (
     <>
-      <FieldGrid>
+      <Fields>
         <Field label={t("Silence every host")} hint={t("The reason stays on the silence and in the audit trail.")} wide>
           <input
             value={reason}
@@ -842,17 +842,17 @@ function FleetSilenceForm({ canSilenceGlobal, onDone, onMessage }: {
         <Field label={t("Minutes")} hint={t("At most 1440: a silence always ends.")}>
           <input type="number" min={1} max={1440} value={minutes} onChange={(e) => setMinutes(e.target.value)} />
         </Field>
-        <label className="toggle">
+        <label className="ui-check">
           <input type="checkbox" checked={sendSummary} onChange={(e) => setSendSummary(e.target.checked)} />
           <span>{t("Send one summary per channel when it ends")}</span>
         </label>
         {canSilenceGlobal && (
-          <label className="toggle">
+          <label className="ui-check">
             <input type="checkbox" checked={blindSecurity} onChange={(e) => setBlindSecurity(e.target.checked)} />
             <span>{t("Keep back the security alerts of the installation too")}</span>
           </label>
         )}
-      </FieldGrid>
+      </Fields>
       <Actions>
         <button disabled={!ready || create.isPending} onClick={() => create.mutate()}>
           {create.isPending ? t("Silencing…") : t("Silence every host")}
@@ -944,7 +944,7 @@ function FiringTable({ alerts, canAcknowledge, onChanged, onMessage }: {
       <thead>
         <tr>
           <th scope="col">{t("Host")}</th><th scope="col">{t("Rule")}</th><th scope="col">{t("State")}</th><th scope="col">{t("Severity")}</th>
-          <th scope="col" className="num">{t("Value")}</th><th scope="col">{t("Detail")}</th><th scope="col">{t("Since")}</th>
+          <th scope="col" className="ui-numeric">{t("Value")}</th><th scope="col">{t("Detail")}</th><th scope="col">{t("Since")}</th>
           <th scope="col">{t("Silenced")}</th><th scope="col">{t("Taken")}</th><th scope="col"></th>
         </tr>
       </thead>
@@ -965,7 +965,7 @@ function FiringTable({ alerts, canAcknowledge, onChanged, onMessage }: {
                 <button disabled={!ready || silence.isPending} onClick={() => silence.mutate(alert)}>
                   {silence.isPending ? t("Silencing…") : t("Silence {rule} on {host}", { rule: alert.rule_name, host: alert.hostname })}
                 </button>
-                <button className="secondary" onClick={() => setSilencing(null)}>{t("Cancel")}</button>
+                <button className="ui-btn-secondary" onClick={() => setSilencing(null)}>{t("Cancel")}</button>
               </>
             }>
               <input
@@ -984,7 +984,7 @@ function FiringTable({ alerts, canAcknowledge, onChanged, onMessage }: {
                 style={{ width: 90 }}
               />
               <span>{t("minutes")}</span>
-              <label className="toggle">
+              <label className="ui-check">
                 <input type="checkbox" checked={sendSummary} onChange={(e) => setSendSummary(e.target.checked)} />
                 <span>{t("summary when it ends")}</span>
               </label>
@@ -1006,41 +1006,41 @@ function FiringRow({ alert, open, onOpen, canAcknowledge, busy, onAcknowledge, o
       <tr>
         <td><Link to={`/hosts/${alert.host_id}/monitoring`}>{alert.hostname || alert.host_id.slice(0, 8)}</Link></td>
         <td>
-          <div className="fp-host-cell">
+          <div className="ui-twoline">
             <span>{alert.rule_name}</span>
-            <span className="source hm-mono">{alert.metric}</span>
+            <span className="ui-note ui-mono">{alert.metric}</span>
           </div>
         </td>
         <td><AlertStateBadge state={alert.state} silenced={alert.silenced} /></td>
         <td><SeverityBadge severity={alert.severity} /></td>
         {/* A no-data episode has no current reading; the last one it stood on
             is not the value now, so the cell says so. */}
-        <td className="num">
-          {alert.state === "no_data" ? <span className="source">{t("unknown")}</span> : metricValue(alert.metric, alert.value)}
+        <td className="ui-numeric">
+          {alert.state === "no_data" ? <span className="ui-note">{t("unknown")}</span> : metricValue(alert.metric, alert.value)}
         </td>
-        <td className="source">
+        <td className="ui-note">
           {alert.detail}
-          {alert.note && <div className="source">{t("note:")} {alert.note}</div>}
+          {alert.note && <div className="ui-note">{t("note:")} {alert.note}</div>}
         </td>
         <td><Time value={alert.fired_at || alert.started_at} /></td>
-        <td>{alert.silenced ? <span className="badge">{t("silenced")}</span> : <span className="source">{t("no")}</span>}</td>
+        <td>{alert.silenced ? <span className="ui-pill">{t("silenced")}</span> : <span className="ui-note">{t("no")}</span>}</td>
         <td>
           {alert.acknowledged_at ? (
-            <div className="fp-host-cell">
+            <div className="ui-twoline">
               <AcknowledgedChip alert={alert} />
-              <span className="source">{alert.acknowledged_by} · <Time value={alert.acknowledged_at} /></span>
+              <span className="ui-note">{alert.acknowledged_by} · <Time value={alert.acknowledged_at} /></span>
             </div>
-          ) : <span className="source">{t("no")}</span>}
+          ) : <span className="ui-note">{t("no")}</span>}
         </td>
         <td>
           <Actions>
-            <button className="secondary" onClick={onOpen} disabled={alert.silenced}>{open ? t("Close") : t("Silence")}</button>
+            <button className="ui-btn-secondary" onClick={onOpen} disabled={alert.silenced}>{open ? t("Close") : t("Silence")}</button>
             {canAcknowledge && (
               <>
-                <button className="secondary" onClick={onAcknowledge} disabled={busy}>
+                <button className="ui-btn-secondary" onClick={onAcknowledge} disabled={busy}>
                   {alert.acknowledged_at ? t("Take over") : t("Acknowledge")}
                 </button>
-                <button className="secondary" onClick={onAnnotate} disabled={busy}>{t("Note")}</button>
+                <button className="ui-btn-secondary" onClick={onAnnotate} disabled={busy}>{t("Note")}</button>
               </>
             )}
           </Actions>
@@ -1168,11 +1168,11 @@ function RuleForm({ rule, catalogue, onDone }: { rule?: AlertRule; catalogue?: R
     && (expressionCheck === undefined || expressionCheck.ok);
 
   return (
-    <Card
+    <Panel
       title={rule ? t("Edit rule {name}", { name: rule.name }) : t("New rule")}
       description={t("The condition must hold for the whole of “for” before the alert fires; zero fires on the first sample past the threshold.")}
     >
-      <FieldGrid>
+      <Fields>
         <Field label={t("Name")}>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("e.g. root filesystem nearly full")} />
         </Field>
@@ -1202,7 +1202,7 @@ function RuleForm({ rule, catalogue, onDone }: { rule?: AlertRule; catalogue?: R
         <Field
           label={t("Expects a reading every (seconds)")}
           hint={cadenceError
-            ? <span className="page-error">{cadenceError}</span>
+            ? <span className="ui-errorbox">{cadenceError}</span>
             : t("Every {every}; the agents sample once a minute.", { every: everySeconds(cadenceNumber) })}
         >
           <input type="number" min={60} max={86400} step={1} value={cadence} onChange={(e) => setCadence(e.target.value)} />
@@ -1210,7 +1210,7 @@ function RuleForm({ rule, catalogue, onDone }: { rule?: AlertRule; catalogue?: R
         <Field
           label={t("Widest gap (seconds)")}
           hint={gapError
-            ? <span className="page-error">{gapError}</span>
+            ? <span className="ui-errorbox">{gapError}</span>
             : t("A hole of up to {gap} still counts as one continuous run, so “for” is not filled by silence.", { gap: everySeconds(gapNumber) })}
         >
           <input type="number" min={60} max={86400} step={1} value={maxGap} onChange={(e) => setMaxGap(e.target.value)} />
@@ -1249,11 +1249,11 @@ function RuleForm({ rule, catalogue, onDone }: { rule?: AlertRule; catalogue?: R
           label={t("Expression")}
           wide
           hint={expressionCheck && !expressionCheck.ok
-            ? <span className="page-error">{expressionCheck.error}</span>
+            ? <span className="ui-errorbox">{expressionCheck.error}</span>
             : t("Selector text for what the fields cannot say, e.g. agent_version < 0.49.0 or reboot_required = true; and, or, not and parentheses combine conditions.")}
         >
           <input
-            className="mono"
+            className="ui-mono"
             value={expression}
             onChange={(e) => setExpression(e.target.value)}
             list="alert-rule-expression-words"
@@ -1266,18 +1266,18 @@ function RuleForm({ rule, catalogue, onDone }: { rule?: AlertRule; catalogue?: R
             ))}
           </datalist>
         </Field>
-        <label className="toggle">
+        <label className="ui-check">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
           <span>{t("Enabled")}</span>
         </label>
-      </FieldGrid>
+      </Fields>
       <Actions>
         <button onClick={() => save.mutate()} disabled={!ready || save.isPending}>
           {save.isPending ? t("Saving…") : rule ? t("Save rule") : t("Create rule")}
         </button>
-        <button className="secondary" onClick={() => onDone()} disabled={save.isPending}>{t("Cancel")}</button>
-        {errorMessage && <p className="page-error">{errorMessage}</p>}
+        <button className="ui-btn-secondary" onClick={() => onDone()} disabled={save.isPending}>{t("Cancel")}</button>
+        {errorMessage && <p className="ui-errorbox">{errorMessage}</p>}
       </Actions>
-    </Card>
+    </Panel>
   );
 }

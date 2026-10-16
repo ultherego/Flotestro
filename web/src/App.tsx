@@ -2,16 +2,17 @@ import { useEffect, useState, type MouseEvent } from "react";
 import { Navigate, Route, Routes, useLocation, useMatch } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, BEARER_TOKEN_KEY, ApiError } from "./lib/api";
-import { PasswordSignIn } from "./pages/SignIn";
+import { Door } from "./next/Door";
 import type { Host, Whoami } from "./lib/types";
 import { useCapabilities } from "./lib/capabilities";
 import { useTheme } from "./lib/theme";
 import { useScale } from "./lib/scale";
 import { isBoolean, useStoredState } from "./lib/storage";
 import { useT } from "./i18n";
-import { Sidebar, type NavFace, type NavGroup } from "./components/Sidebar";
+import { Sidebar } from "./components/Sidebar";
+import { NextPanel } from "./next/Panel";
+import { fleetNavigation, visibility, type NavFace, type NavGroup } from "./lib/navigation";
 import { Topbar, type Trail } from "./components/Topbar";
-import { Logo } from "./components/Logo";
 import { Dashboard } from "./pages/Dashboard";
 import { Hosts } from "./pages/Hosts";
 import { AddHost } from "./pages/AddHost";
@@ -108,14 +109,14 @@ export function App() {
     refetchInterval: false,
   });
 
-  if (isLoading) return <div className="empty" style={{ padding: 40 }}>{t("Loading…")}</div>;
+  if (isLoading) return <div className="ui-empty" style={{ padding: 40 }}>{t("Loading…")}</div>;
 
   // A missing session leads to the login at the identity provider. The
   // panel collects no passwords: the credentials go only to Keycloak.
   if (error instanceof ApiError && error.unauthenticated) {
     return <LoginScreen provider={capabilities.identity_provider} />;
   }
-  if (error) return <div className="empty" style={{ padding: 40 }}>{t("Error: {message}", { message: String(error) })}</div>;
+  if (error) return <div className="ui-empty" style={{ padding: 40 }}>{t("Error: {message}", { message: String(error) })}</div>;
 
   // Sections without backing in the permissions are hidden: a navigation
   // item that leads only to a refusal is an interface defect, not a
@@ -128,147 +129,36 @@ export function App() {
   // the person who had just signed in was not told.
   if (!isLoading && !error && permissions.size === 0) {
     return (
-      <div className="empty" style={{ padding: 40, maxWidth: 760 }}>
+      <div className="ui-empty" style={{ padding: 40, maxWidth: 760 }}>
         <h1>{t("Signed in, with nothing granted")}</h1>
-        <p className="prose">
+        <p className="ui-prose">
           {t("You are signed in as {name}, and this sign-in carries no role. The panel shows only what a role allows, so there is nothing here to show - this is not an error and nothing is broken.", {
             name: data?.display_name || data?.subject || t("an unnamed principal"),
           })}
         </p>
-        <p className="prose">
+        <p className="ui-prose">
           {t("Whoever administers this installation grants it: under Settings, a group of the identity provider is mapped to a role, or a role is bound to this principal directly. Until then every page refuses, which is the panel working as intended.")}
         </p>
       </div>
     );
   }
-  const managesAccess = permissions.has("principal.manage");
-  const seesAudit = permissions.has("audit.read");
-  const seesCampaigns = permissions.has("campaign.read");
-  const seesSecurity = permissions.has("security.read");
-  const seesSecrets = permissions.has("secret.read");
-  const seesCertificates = permissions.has("certificate.read");
-  const seesBackups = permissions.has("backup.read");
-  const seesMonitoring = permissions.has("monitoring.read");
-  const seesNotifications = permissions.has("notification.read");
-  const seesVulnerabilities = permissions.has("vulnerability.read");
-  const addsHosts = permissions.has("host.enroll.create");
-  // The settings screen is read by whoever administers the panel: the
-  // permission of its own, or the one to decide who may do what.
-  const seesSettings = permissions.has("settings.read") || managesAccess;
-  // A support bundle reads the whole panel, so the section shows only for
-  // whoever may ask for one.
-  const seesSupport = permissions.has("support.bundle.read");
-  // The relays are read with the right that reads the installations: the
-  // list is the same one the add-host wizard picks a route from.
-  const seesRelays = permissions.has("host.enroll.read");
-  // The budgets are the reason a job or a campaign stands in the queue, so
-  // they stand with the operations they hold back.
-  const seesBudgets = permissions.has("budget.read");
-  // The declared state stands with the operations: a policy is the third
-  // model of change, next to the job and the campaign.
-  const seesPolicies = permissions.has("policy.read");
+  // The panel being written again lives under /next until it is finished;
+  // the shell below is the one it replaces, and the two share nothing but
+  // the navigation model and the API.
+  if (location.pathname.startsWith("/next")) {
+    return (
+      <ToastProvider>
+        <ModalProvider>
+          <PreferencesProvider applyTheme={setTheme}>
+            <NextPanel look={{ theme, setTheme, scale, setScale }} />
+          </PreferencesProvider>
+        </ModalProvider>
+      </ToastProvider>
+    );
+  }
 
-  // The navigation, grouped by what the operator is doing rather than by
-  // backend module.
-  const groups: NavGroup[] = [
-    {
-      key: "fleet",
-      label: "Fleet",
-      items: [
-        { to: "/dashboard", label: "Dashboard", icon: "dashboard" },
-        // The host list stays lit on a host page, but not on the enrolment
-        // screen, which has an item of its own under the same prefix.
-        { to: "/hosts", label: "Hosts", icon: "hosts", active: (path) => path.startsWith("/hosts") && !path.startsWith("/hosts/new") },
-        ...(addsHosts ? [{ to: "/hosts/new", label: "Add host", icon: "add-host" as const }] : []),
-        // A group is a saved answer to "which hosts"; it lives with the
-        // fleet, because that is what it describes, not with the campaigns
-        // that use it.
-        { to: "/groups", label: "Groups", icon: "groups" },
-        { to: "/tags", label: "Tags", icon: "groups" },
-        // A relay is a piece of the fleet's plumbing rather than a host: it
-        // stands with the fleet, because a silent one is a site cut off.
-        ...(seesRelays ? [{ to: "/relays", label: "Relays", icon: "relays" as const }] : []),
-        { to: "/reports", label: "Reports", icon: "audit" as const },
-      ],
-    },
-    {
-      key: "operations",
-      label: "Operations",
-      items: [
-        { to: "/jobs", label: "Jobs", icon: "jobs" },
-        // What the fleet could not confirm. Beside the jobs because that is
-        // what these are, and before the rest of the operations because an
-        // operator who has unconfirmed changes should read them before
-        // ordering more.
-        { to: "/unresolved", label: "Needs confirmation", icon: "jobs" },
-        // What the fleet cannot be asked to do, and why. It stands at the head
-        // of the operations because it is the question before any of them:
-        // ordering work a host cannot carry out is refused, and this is where
-        // that is read once rather than one refusal at a time.
-        { to: "/readiness", label: "Readiness", icon: "overview" },
-        // A read on a handful of hosts at once: a diagnostic, not a change,
-        // so it stands next to the jobs it is made of rather than with the
-        // campaigns.
-        { to: "/reads", label: "Reads", icon: "reads" },
-        // A campaign is the main mechanism of change, not a shortcut on the
-        // host list: it has its own place in the navigation, next to the
-        // work on a single host.
-        ...(seesCampaigns ? [
-          { to: "/bulk", label: "Bulk Workspace", icon: "bulk" as const },
-          { to: "/campaigns", label: "Campaigns", icon: "campaigns" as const },
-        ] : []),
-        // A policy declares what is to be true and orders campaigns for
-        // the rest, so it stands after the campaigns it orders.
-        // The capacity the jobs and the campaigns draw on: the gauge stands
-        // last in the group, after the work it meters.
-      ],
-    },
-    {
-      key: "security",
-      label: "Security",
-      items: [
-        ...(seesSecurity ? [{ to: "/security", label: "Security", icon: "security" as const }] : []),
-        ...(seesVulnerabilities ? [{ to: "/vulnerabilities", label: "Vulnerabilities", icon: "vulnerabilities" as const }] : []),
-        ...(seesCertificates ? [{ to: "/certificates", label: "Certificates", icon: "certificates" as const }] : []),
-        ...(seesSecrets ? [{ to: "/secrets", label: "Secrets", icon: "secrets" as const }] : []),
-      ],
-    },
-    {
-      key: "continuity",
-      label: "Continuity",
-      items: [
-        ...(seesBackups ? [{ to: "/backups", label: "Backups", icon: "backups" as const }] : []),
-        ...(seesMonitoring ? [{ to: "/monitoring", label: "Monitoring", icon: "monitoring" as const }] : []),
-      ],
-    },
-    {
-      key: "identity",
-      label: "Identity",
-      items: [
-        ...(capabilities.directory ? [{ to: "/directory", label: "Directory", icon: "directory" as const }] : []),
-        // Access management is seen only by whoever can change anything in
-        // it; for the rest the item would lead to a bare refusal.
-        // A team is a boundary of authority rather than a label, so it
-        // stands with the access rules and not with the groups and the tags,
-        // which only choose hosts inside what somebody may touch.
-        { to: "/teams", label: "Teams", icon: "accounts" as const },
-      ],
-    },
-    {
-      key: "audit",
-      items: seesAudit ? [{ to: "/audit", label: "Audit", icon: "audit" as const }] : [],
-    },
-    // The settings stand last: they describe the panel itself rather than
-    // the fleet, and they are read rarely.
-    {
-      key: "settings",
-      items: seesSettings
-        ? [{ to: "/status", label: "Status", icon: "settings" as const },
-           { to: "/settings", label: "Settings", icon: "settings" as const },
-           ...(seesSupport ? [{ to: "/support", label: "Support bundle", icon: "logs" as const }] : [])]
-        : [],
-    },
-  ];
+  const v = visibility(permissions, capabilities);
+  const groups = fleetNavigation(permissions, capabilities);
 
   const face: NavFace = onHost?.face ?? { groups };
   const trail: Trail = { ...sectionOf(groups, location.pathname), host: onHost?.host, module: onHost?.module };
@@ -277,8 +167,8 @@ export function App() {
     <ToastProvider>
       <ModalProvider>
         <PreferencesProvider applyTheme={setTheme}>
-        <div className={collapsed ? "layout sidebar-collapsed" : "layout"}>
-          <a href="#main-content" className="skip-link">{t("Skip to content")}</a>
+        <div className={collapsed ? "ui-shell ui-folded" : "ui-shell"}>
+          <a href="#main-content" className="ui-skip">{t("Skip to content")}</a>
           {/* The shell is two panels: the sidebar down the left edge with the
               places to go, and the top bar across the rest with where the
               operator is and who they are. On a narrow screen the sidebar
@@ -289,7 +179,7 @@ export function App() {
             open={drawer}
             onClose={() => setDrawer(false)}
           />
-          {drawer && <div className="sidebar-backdrop" onClick={() => setDrawer(false)} />}
+          {drawer && <div className="ui-sidebar-backdrop" onClick={() => setDrawer(false)} />}
           <Topbar
             trail={trail}
             user={data}
@@ -302,11 +192,11 @@ export function App() {
             scale={scale}
             setScale={setScale}
           />
-          <main className="content" id="main-content" tabIndex={-1}>
+          <main className="ui-content" id="main-content" tabIndex={-1}>
             {/* The page keeps a reading width and sits in the middle of the
                 content area: on a wide screen a full-width page hugs the left
                 edge and leaves the rest empty. */}
-            <div className="page">
+            <div className="ui-page">
             <Routes>
               <Route path="/" element={<Landing />} />
               <Route path="/profile" element={<Profile theme={theme} setTheme={setTheme} />} />
@@ -320,20 +210,20 @@ export function App() {
               <Route path="/hosts/new" element={<AddHost />} />
               <Route path="/groups" element={<Groups />} />
               <Route path="/groups/:id" element={<Groups />} />
-              {seesRelays && <Route path="/relays" element={<Relays />} />}
-              {seesRelays && <Route path="/relays/:id" element={<RelayPage />} />}
+              {v.seesRelays && <Route path="/relays" element={<Relays />} />}
+              {v.seesRelays && <Route path="/relays/:id" element={<RelayPage />} />}
               <Route path="/readiness" element={<Readiness />} />
               <Route path="/security" element={<FleetSecurity />} />
               {/* The six screens of an installation's configuration live in
                   the settings area since 15.10. Their old addresses are kept
                   and send the reader there: they are in bookmarks, in the
                   manual and in the panel's own links. */}
-              {seesPolicies && <Route path="/policies" element={<Navigate to="/settings?tab=policies" replace />} />}
-              {seesPolicies && <Route path="/policies/:id" element={<PolicyPage />} />}
+              {v.seesPolicies && <Route path="/policies" element={<Navigate to="/settings?tab=policies" replace />} />}
+              {v.seesPolicies && <Route path="/policies/:id" element={<PolicyPage />} />}
               <Route path="/certificates" element={<FleetCertificates />} />
               <Route path="/backups" element={<FleetBackups />} />
               <Route path="/monitoring" element={<FleetMonitoring />} />
-              {seesNotifications && <Route path="/notifications" element={<Navigate to="/settings?tab=channels" replace />} />}
+              {v.seesNotifications && <Route path="/notifications" element={<Navigate to="/settings?tab=channels" replace />} />}
               <Route path="/vulnerabilities" element={<FleetVulnerabilities />} />
               <Route path="/vulnerabilities/:cve" element={<Vulnerability />} />
               <Route path="/secrets" element={<Secrets />} />
@@ -377,21 +267,21 @@ export function App() {
               <Route path="/unresolved" element={<Unresolved />} />
               <Route path="/reads" element={<Reads />} />
               <Route path="/reads/:id" element={<Reads />} />
-              {seesCampaigns && <Route path="/bulk" element={<Bulk />} />}
-              {seesCampaigns && <Route path="/campaigns" element={<Campaigns />} />}
-              {seesCampaigns && <Route path="/campaigns/schedules" element={<CampaignSchedules />} />}
-              {seesCampaigns && <Route path="/campaigns/:id" element={<Campaign />} />}
-              {seesBudgets && <Route path="/budgets" element={<Navigate to="/settings?tab=budgets" replace />} />}
+              {v.seesCampaigns && <Route path="/bulk" element={<Bulk />} />}
+              {v.seesCampaigns && <Route path="/campaigns" element={<Campaigns />} />}
+              {v.seesCampaigns && <Route path="/campaigns/schedules" element={<CampaignSchedules />} />}
+              {v.seesCampaigns && <Route path="/campaigns/:id" element={<Campaign />} />}
+              {v.seesBudgets && <Route path="/budgets" element={<Navigate to="/settings?tab=budgets" replace />} />}
               {capabilities.directory && <Route path="/directory" element={<Directory />} />}
               {/* The access screen became four tabs of the settings area on
                   15.10, where the roles and the mappings had already gone.
                   The address answers and leads to the right one. */}
-              {managesAccess && <Route path="/access" element={<AccessRedirect />} />}
-              {seesAudit && <Route path="/audit" element={<Audit />} />}
-              {seesSettings && <Route path="/settings" element={<Settings />} />}
-              {seesSupport && <Route path="/support" element={<Support />} />}
-              {seesSettings && <Route path="/status" element={<Status />} />}
-              <Route path="*" element={<div className="empty">{t("Page not found.")}</div>} />
+              {v.managesAccess && <Route path="/access" element={<AccessRedirect />} />}
+              {v.seesAudit && <Route path="/audit" element={<Audit />} />}
+              {v.seesSettings && <Route path="/settings" element={<Settings />} />}
+              {v.seesSupport && <Route path="/support" element={<Support />} />}
+              {v.seesSettings && <Route path="/status" element={<Status />} />}
+              <Route path="*" element={<div className="ui-empty">{t("Page not found.")}</div>} />
             </Routes>
             </div>
           </main>
@@ -411,38 +301,13 @@ async function signOut(event: MouseEvent) {
   window.location.href = result.logout_url || "/";
 }
 
+/**
+ * The way in. It is the new panel's, because it is the first thing
+ * anybody sees and there is only one of it: the old shell and the new
+ * one are both reached through this door.
+ */
 export function LoginScreen({ provider }: { provider: boolean }) {
-  const t = useT();
-  return (
-    <div className="login-screen">
-      <div>
-        <h1 className="login-brand"><Logo size={40} /></h1>
-        <p className="subtitle">{t("Linux fleet management")}</p>
-
-        {/* The password door. An installation with no identity provider had
-            none until 16.10: the panel had roles and tokens and no way for a
-            person to sign in. It stands first because where there is no
-            provider it is the only way in, and where there is one an
-            administrator still keeps a local account for the day the
-            provider is the thing that is down. */}
-        <PasswordSignIn />
-
-        {provider && (
-          <>
-            <div className="login-or"><span>{t("or")}</span></div>
-            <button className="secondary" onClick={() => (window.location.href = "/auth/login?redirect=/dashboard")}>
-              {t("Sign in with identity provider")}
-            </button>
-            <p className="subtitle">
-              {t("Your identity provider may sign you in with an account you already have an open session for.")}{" "}
-              <a href="/auth/login?force=1&redirect=/dashboard">{t("Sign in as a different user")}</a>
-            </p>
-          </>
-        )}
-        <BootstrapTokenEntry />
-      </div>
-    </div>
-  );
+  return <Door provider={provider} />;
 }
 
 /** The first page: the one the operator chose, the dashboard until then. */
@@ -456,27 +321,6 @@ function Landing() {
  * The way in before the identity provider lets anybody in: the bootstrap
  * token from the state directory.
  */
-function BootstrapTokenEntry() {
-  const t = useT();
-  const [token, setToken] = useState("");
-  return (
-    <details style={{ marginTop: 18, textAlign: "left" }}>
-      <summary className="subtitle" style={{ cursor: "pointer" }}>{t("Sign in with a bootstrap token")}</summary>
-      <p className="source">
-        {t("The bootstrap token is printed at the first start and lies in the state directory. It is for the first group mapping only: the first-run checklist warns while it still works.")}
-      </p>
-      <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="flta…" autoComplete="off"
-             data-testid="bootstrap-token" style={{ width: "100%", marginBottom: 8 }} />
-      <button className="secondary" disabled={token.trim() === ""} onClick={() => {
-        try { sessionStorage.setItem(BEARER_TOKEN_KEY, token.trim()); } catch { /* a window without storage: the token is simply not kept */ }
-        window.location.href = "/setup";
-      }}>
-        {t("Continue to the first run")}
-      </button>
-    </details>
-  );
-}
-
 /**
  * The section the address belongs to, for the trail in the top bar.
  */

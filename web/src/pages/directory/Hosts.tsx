@@ -3,8 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, ApiError, type Collection } from "../../lib/api";
 import type { DirectoryHost, Host } from "../../lib/types";
-import { ErrorBox, Empty } from "../../components/ui";
-import { Card, Toolbar } from "../../components/layout";
+import { ErrorBox } from "../../components/ui";
+import { Empty, Panel, Toolbar } from "../../ui/kit";
 import { useT } from "../../i18n";
 import { Forbidden } from "./shared";
 
@@ -43,7 +43,7 @@ export function Hosts() {
 
   return (
     <>
-      <p className="subtitle">
+      <p className="ui-note">
         {t("The host entries of the directory. An enrolled entry holds a host key; the fleet host of the same name, when there is one, is linked - the two records have separate lifecycles and the name is the only bridge.")}
       </p>
 
@@ -51,7 +51,7 @@ export function Hosts() {
         <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("filter by name")} aria-label={t("Filter by name")} />
       </Toolbar>
 
-      <Card flush>
+      <Panel flush>
         {!items.length ? (
           <Empty>{data?.items.length ? t("No host matches the filter.") : t("The directory has no host entries.")}</Empty>
         ) : (
@@ -66,25 +66,25 @@ export function Hosts() {
                 const panelHost = linked(host.fqdn);
                 return (
                   <tr key={host.fqdn}>
-                    <td className="mono">
+                    <td className="ui-mono">
                       {host.fqdn}
-                      {host.description && <div className="source">{host.description}</div>}
+                      {host.description && <div className="ui-note">{host.description}</div>}
                     </td>
                     <td>
                       {host.enrolled
-                        ? <span className="badge ok" title={host.enrolled_at}>{t("enrolled")}</span>
-                        : <span className="badge">{t("entry only")}</span>}
-                      {host.enrolled_at && <div className="source mono">{host.enrolled_at}</div>}
+                        ? <span className="ui-pill ui-ok" title={host.enrolled_at}>{t("enrolled")}</span>
+                        : <span className="ui-pill">{t("entry only")}</span>}
+                      {host.enrolled_at && <div className="ui-note ui-mono">{host.enrolled_at}</div>}
                     </td>
                     <td>{(host.member_of ?? []).join(", ") || "—"}</td>
-                    <td className="mono">{(host.managed_by ?? []).join(", ") || "—"}</td>
+                    <td className="ui-mono">{(host.managed_by ?? []).join(", ") || "—"}</td>
                     <td>
                       {panelHost
                         ? <Link to={`/hosts/${panelHost.id}`}>{panelHost.hostname}</Link>
-                        : fleet.isPending ? t("Checking…") : <span className="source">{t("not in the fleet")}</span>}
+                        : fleet.isPending ? t("Checking…") : <span className="ui-note">{t("not in the fleet")}</span>}
                     </td>
-                    <td className="num">
-                      {panelHost && <Link className="button" to={`/hosts/${panelHost.id}/identity`}>{t("Join")}</Link>}
+                    <td className="ui-numeric">
+                      {panelHost && <Link className="ui-btn" to={`/hosts/${panelHost.id}/identity`}>{t("Join")}</Link>}
                     </td>
                   </tr>
                 );
@@ -92,7 +92,7 @@ export function Hosts() {
             </tbody>
           </table>
         )}
-      </Card>
+      </Panel>
     </>
   );
 }

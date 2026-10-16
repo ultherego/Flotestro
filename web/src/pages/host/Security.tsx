@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { Time, Empty, JobState } from "../../components/ui";
+import { Time, JobState } from "../../components/ui";
 import { Link } from "react-router-dom";
 import { Breakdown } from "../../components/widgets";
 import {
@@ -13,6 +13,7 @@ import { capability } from "../../lib/modules";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+import { Empty, toneClass } from "../../ui/kit";
 
 /**
  * One listening socket, with its reach as the host names it: on the
@@ -34,10 +35,10 @@ function beyondLoopback(socket: Listener): boolean {
 /** The reach of a socket as a badge: every interface is the loud one. */
 function ReachBadge({ reach }: { reach: string }) {
   const t = useT();
-  if (reach === "all-interfaces") return <span className="badge warn">{t("every interface")}</span>;
-  if (reach === "host-network") return <span className="badge">{t("host address")}</span>;
-  if (reach === "loopback") return <span className="source">{t("loopback")}</span>;
-  return <span className="badge unknown">{reach || t("unknown")}</span>;
+  if (reach === "all-interfaces") return <span className="ui-pill ui-warn">{t("every interface")}</span>;
+  if (reach === "host-network") return <span className="ui-pill">{t("host address")}</span>;
+  if (reach === "loopback") return <span className="ui-note">{t("loopback")}</span>;
+  return <span className="ui-pill ui-unknown">{reach || t("unknown")}</span>;
 }
 
 type Snapshot = {
@@ -155,11 +156,11 @@ function SeverityBadge({ finding }: { finding: Finding }) {
   const t = useT();
   // "Not applicable" is a separate answer: a host without SELinux does not
   // fail a check that requires it, and does not pass it quietly either.
-  if (!finding.applicable) return <span className="badge unknown">{t("n/a")}</span>;
-  if (finding.unknown) return <span className="badge unknown">{t("unknown")}</span>;
-  if (finding.passed) return <span className="badge ok">{t("passed")}</span>;
+  if (!finding.applicable) return <span className="ui-pill ui-unknown">{t("n/a")}</span>;
+  if (finding.unknown) return <span className="ui-pill ui-unknown">{t("unknown")}</span>;
+  if (finding.passed) return <span className="ui-pill ui-ok">{t("passed")}</span>;
   const cls = finding.severity === "high" ? "error" : finding.severity === "info" ? "unknown" : "warn";
-  return <span className={`badge ${cls}`}>{severityLabel(finding.severity, t)}</span>;
+  return <span className={`ui-pill ${toneClass(cls)}`}>{severityLabel(finding.severity, t)}</span>;
 }
 
 /**
@@ -181,7 +182,7 @@ export function Security() {
   // ordered through the same confirmation as everything else critical.
   const [operation, setOperation] = useState<Operation | null>(null);
   const [ordered, setOrdered] = useState<Job | null>(null);
-  const unknown = <span className="badge unknown">{t("unknown")}</span>;
+  const unknown = <span className="ui-pill ui-unknown">{t("unknown")}</span>;
   const flag = (value?: boolean | null) =>
     value === undefined || value === null ? unknown : value ? t("yes") : t("no");
 
@@ -308,13 +309,13 @@ export function Security() {
       {ordered && <JobNotice job={ordered} hostID={host.id} />}
 
       {snapshot?.unavailable_reason && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>{t("Security state could not be read: {reason}", { reason: snapshot.unavailable_reason })}</span>
         </p>
       )}
 
       {sudoersRefused && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>
             {t("The host's own checker refuses the sudoers files, so sudo loads none of them: {observed}",
               { observed: sudoersRefused.observed })}
@@ -348,9 +349,9 @@ export function Security() {
             }))}
           />
         ) : (
-          <p className="source">{t("Computing findings…")}</p>
+          <p className="ui-note">{t("Computing findings…")}</p>
         )}
-        <p className="widget-subhead">{t("Listening sockets")}</p>
+        <p className="ui-subhead">{t("Listening sockets")}</p>
         {/* By reach, as the host names it; an unread list is a sentence,
             not a row of zeros. */}
         {snapshot?.listening_known ? (
@@ -362,7 +363,7 @@ export function Security() {
             ]}
           />
         ) : (
-          <p className="source">{t("This host did not report its listening sockets.")}</p>
+          <p className="ui-note">{t("This host did not report its listening sockets.")}</p>
         )}
       </Section>
 
@@ -374,17 +375,17 @@ export function Security() {
             {snapshot?.mac?.system
               ? `${snapshot.mac.system}: ${snapshot.mac.mode || t("unknown")}`
               : snapshot?.mac?.reason || unknown}
-            {snapshot?.mac?.policy && <span className="source"> · {snapshot.mac.policy}</span>}
+            {snapshot?.mac?.policy && <span className="ui-note"> · {snapshot.mac.policy}</span>}
             {/* The running mode and the configured mode may differ - and
                 that is the whole difference between protection and
                 protection until the reboot. */}
             {snapshot?.mac?.configured_mode &&
               snapshot.mac.configured_mode !== snapshot.mac.mode && (
-                <span className="badge warn"> {t("after reboot: {mode}", { mode: snapshot.mac.configured_mode })}</span>
+                <span className="ui-pill ui-warn"> {t("after reboot: {mode}", { mode: snapshot.mac.configured_mode })}</span>
               )}
             {snapshot?.mac?.profiles_enforcing !== undefined &&
               snapshot?.mac?.profiles_enforcing !== null && (
-                <span className="source">
+                <span className="ui-note">
                   {" "}· {t("{enforcing} enforcing, {complaining} complaining", {
                     enforcing: snapshot.mac.profiles_enforcing, complaining: snapshot.mac.profiles_complain ?? 0,
                   })}
@@ -395,7 +396,7 @@ export function Security() {
                 {" "}
                 <button
                   type="button"
-                  className="hm-link"
+                  className="ui-btn-link"
                   disabled={operation !== null}
                   onClick={() =>
                     setOperation({
@@ -423,14 +424,14 @@ export function Security() {
                     : ""}
                   {snapshot.audit.rules_configured !== undefined && snapshot.audit.rules_configured !== null
                     && snapshot.audit.rules_configured !== snapshot.audit.rules_loaded && (
-                      <span className="badge warn"> {t("{n} in files", { n: snapshot.audit.rules_configured })}</span>
+                      <span className="ui-pill ui-warn"> {t("{n} in files", { n: snapshot.audit.rules_configured })}</span>
                     )}
                   {auditWritable && (
                     <ActionGuard action="security.audit.reload" host={host.id}>
                       {" "}
                       <button
                         type="button"
-                        className="hm-link"
+                        className="ui-btn-link"
                         disabled={operation !== null}
                         onClick={() =>
                           setOperation({
@@ -452,7 +453,7 @@ export function Security() {
               <>
                 {unknown}
                 {snapshot?.secure_boot_reason && (
-                  <span className="source"> · {snapshot.secure_boot_reason}</span>
+                  <span className="ui-note"> · {snapshot.secure_boot_reason}</span>
                 )}
               </>
             ) : (
@@ -475,7 +476,7 @@ export function Security() {
           <Empty>{t("This host did not report its listening sockets.")}</Empty>
         ) : (
           <Table>
-            <thead><tr><th scope="col">{t("Proto")}</th><th scope="col">{t("Address")}</th><th scope="col" className="hm-num">{t("Port")}</th><th scope="col">{t("Process")}</th><th scope="col">{t("Reach")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("Proto")}</th><th scope="col">{t("Address")}</th><th scope="col" className="ui-numeric">{t("Port")}</th><th scope="col">{t("Process")}</th><th scope="col">{t("Reach")}</th></tr></thead>
             <tbody>
               {sockets
                 .slice()
@@ -483,10 +484,10 @@ export function Security() {
                 .map((socket, i) => (
                   <tr key={`${socket.protocol}-${socket.address}-${socket.port}-${i}`}>
                     <td>{socket.protocol}</td>
-                    <td className="hm-mono">{socket.address}</td>
-                    <td className="hm-num">{socket.port}</td>
-                    <td className="hm-mono">
-                      {socket.process || <span className="source">{snapshot.owners_known === false ? t("not readable") : "—"}</span>}
+                    <td className="ui-mono">{socket.address}</td>
+                    <td className="ui-numeric">{socket.port}</td>
+                    <td className="ui-mono">
+                      {socket.process || <span className="ui-note">{snapshot.owners_known === false ? t("not readable") : "—"}</span>}
                     </td>
                     <td><ReachBadge reach={socket.reach} /></td>
                   </tr>
@@ -504,7 +505,7 @@ export function Security() {
         count={report.data ? findings.length : undefined}
         span={12}
         tools={
-          <span className="source">
+          <span className="ui-note">
             {report.data
               ? t("{failed} need action · {passed} passed · {unknown} unknown · {na} n/a", {
                   failed: report.data.counts.failed ?? 0, passed: report.data.counts.passed ?? 0,
@@ -551,8 +552,8 @@ export function Security() {
                     />
                   </td>
                   <td>
-                    <span className="hm-primary">{finding.title}</span>
-                    <div className="source">
+                    <span className="ui-name">{finding.title}</span>
+                    <div className="ui-note">
                       {finding.check_id} v{finding.check_version} · {finding.rationale}
                     </div>
                   </td>
@@ -563,13 +564,13 @@ export function Security() {
                     {/* The reason code says what to do about it: wait for a
                         read, fix the agent or grant permissions. */}
                     {finding.reason_code && (
-                      <div className="source" title={finding.reason_code}>{t("reason")}: {reasonText(finding.reason_code, t)}</div>
+                      <div className="ui-note" title={finding.reason_code}>{t("reason")}: {reasonText(finding.reason_code, t)}</div>
                     )}
-                    {finding.evidence && <div className="source">{finding.evidence}</div>}
+                    {finding.evidence && <div className="ui-note">{finding.evidence}</div>}
                     {/* The evidence carries the module and the revision the
                         result came from. */}
                     {finding.revision && (
-                      <div className="source">
+                      <div className="ui-note">
                         {finding.module} @ {finding.revision.slice(0, 8)}
                         {finding.observed_at && (
                           <>
@@ -583,13 +584,13 @@ export function Security() {
                   <td>
                     {finding.remediation?.action ? (
                       <>
-                        <span className="source">{t("operation")} </span><code>{finding.remediation.action}</code>
+                        <span className="ui-note">{t("operation")} </span><code>{finding.remediation.action}</code>
                         {finding.remediation.note && (
-                          <div className="source">{finding.remediation.note}</div>
+                          <div className="ui-note">{finding.remediation.note}</div>
                         )}
                       </>
                     ) : (
-                      <span className="source">{finding.remediation?.note || "—"}</span>
+                      <span className="ui-note">{finding.remediation?.note || "—"}</span>
                     )}
                   </td>
                 </tr>
@@ -624,7 +625,7 @@ export function Security() {
           {report.data?.generated_at && (
             <span title={t("The fingerprint of this set of findings; a remediation is bound to it and refused when the host changed meanwhile.") + ` ${report.data.plan_hash} (${t("canonical form v{n}", { n: report.data.plan_hash_version })})`}>
               {t("Findings computed")} <Time value={report.data.generated_at} /> · {t("fingerprint")}{" "}
-              <span className="hm-mono">{report.data.plan_hash.slice(0, 12)}</span>
+              <span className="ui-mono">{report.data.plan_hash.slice(0, 12)}</span>
             </span>
           )}
         </Foot>
@@ -644,18 +645,18 @@ export function Security() {
           <Empty>{t("No remediation has been planned on this host.")}</Empty>
         ) : (
           (plans.data?.items ?? []).map((plan) => (
-            <div key={plan.id} className="hm-plan">
-              <div className="hm-section-head">
-                <strong className="hm-mono">{plan.id.slice(0, 8)}</strong>
+            <div key={plan.id} className="ui-group">
+              <div className="ui-panel-head">
+                <strong className="ui-mono">{plan.id.slice(0, 8)}</strong>
                 <JobState state={plan.state} />
-                <span className="source">
+                <span className="ui-note">
                   {plan.created_by} · <Time value={plan.created_at} />
                   {plan.stop_on_failure ? ` · ${t("stops on failure")}` : ` · ${t("continues after failure")}`}
                 </span>
                 {plan.state === "running" && (
                   <ActionGuard action="security.remediate" host={host.id}>
-                    <div className="hm-tools">
-                      <button className="hm-danger" onClick={() => stop.mutate(plan.id)} disabled={stop.isPending}>
+                    <div className="ui-panel-actions">
+                      <button className="ui-btn-danger" onClick={() => stop.mutate(plan.id)} disabled={stop.isPending}>
                         {t("Stop")}
                       </button>
                     </div>
@@ -664,27 +665,27 @@ export function Security() {
               </div>
               <Table>
                 <thead>
-                  <tr><th scope="col" className="hm-num">#</th><th scope="col">{t("Check")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Lock")}</th><th scope="col">{t("Job")}</th><th scope="col">{t("State")}</th></tr>
+                  <tr><th scope="col" className="ui-numeric">#</th><th scope="col">{t("Check")}</th><th scope="col">{t("Operation")}</th><th scope="col">{t("Lock")}</th><th scope="col">{t("Job")}</th><th scope="col">{t("State")}</th></tr>
                 </thead>
                 <tbody>
                   {(plan.steps ?? []).map((step) => (
                     <tr key={step.position}>
-                      <td className="hm-num">{step.position}</td>
-                      <td className="hm-mono">{step.check_id}</td>
+                      <td className="ui-numeric">{step.position}</td>
+                      <td className="ui-mono">{step.check_id}</td>
                       <td>
                         <code>{step.action_type}</code>
-                        {step.requires_reboot && <span className="badge warn"> {t("reboot")}</span>}
+                        {step.requires_reboot && <span className="ui-pill ui-warn"> {t("reboot")}</span>}
                       </td>
                       {/* The lock class says which host resource the step
                           reaches for - two steps of the same class do not run
                           at once. */}
-                      <td>{step.lock_class || <span className="source">—</span>}</td>
-                      <td className="hm-mono">
+                      <td>{step.lock_class || <span className="ui-note">—</span>}</td>
+                      <td className="ui-mono">
                         {step.job_id ? <Link to={`/jobs/${step.job_id}`}>{step.job_id.slice(0, 8)}</Link> : "—"}
                       </td>
                       <td>
                         <JobState state={step.state} />
-                        {step.reason && <div className="source">{step.reason}</div>}
+                        {step.reason && <div className="ui-note">{step.reason}</div>}
                       </td>
                     </tr>
                   ))}

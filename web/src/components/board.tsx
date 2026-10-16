@@ -85,8 +85,13 @@ export type StoredBoard = {
   reason?: string;
 };
 
-/** One widget the screen can draw: how it is named when picked, and its own width. */
-export type BoardEntry = { key: string; title: string; width: number };
+/**
+ * One widget the screen can draw: how it is named when picked, and the
+ * shape it ships with. The height is optional, because a screen arranged
+ * by ordering alone never had one; a screen laid out on the grid says
+ * what each container is worth in rows.
+ */
+export type BoardEntry = { key: string; title: string; width: number; height?: number };
 
 /**
  * The widths the twelve-column grid has a class for: every one of them.
@@ -121,7 +126,7 @@ export function boardToDraw(
   stored: StoredBoard | undefined, catalogue: BoardEntry[], known: Set<string>,
 ): BoardWidget[] {
   if (!stored || !stored.present || stored.widgets.length === 0) {
-    return catalogue.filter((one) => known.has(one.key)).map((one) => ({ key: one.key, width: one.width }));
+    return catalogue.filter((one) => known.has(one.key)).map((one) => ({ key: one.key, width: one.width, height: one.height }));
   }
   const placed = stored.widgets.filter((one) => known.has(one.key) && !one.hidden);
   const decided = new Set(stored.widgets.map((one) => one.key));
@@ -151,7 +156,7 @@ export function boardToDraw(
       const neighbour = result.findIndex((one) => one.key === catalogue[before].key);
       if (neighbour !== -1 && neighbour + 1 > at) at = neighbour + 1;
     }
-    result.splice(at, 0, { key: entry.key, width: entry.width });
+    result.splice(at, 0, { key: entry.key, width: entry.width, height: entry.height });
   }
   return result;
 }
@@ -172,7 +177,7 @@ export function Board({
   // What this screen has to draw right now. A panel that renders nothing -
   // because the condition behind it is false, as a form that is not open -
   // is not placed at all, rather than placed as an empty cell. `false` is
-  // among those: `{open && <Card/>}` yields false, not undefined, and a
+  // among those: `{open && <Panel/>}` yields false, not undefined, and a
   // board that took it for a node left a hole in the row where a closed
   // form used to be.
   const known = new Set(Object.keys(drawn).filter((key) => {
@@ -339,13 +344,13 @@ export function Board({
   return (
     <>
       {layout.data !== undefined && (
-        <div className="layout-bar">
+        <div className="ui-boardbar">
           {editing === null ? (
             /* Quiet and at the right edge, level with the cards: arranging
                is something somebody does once in a while, and a filled
                button floating between two cards reads as the thing the
                screen is for. */
-            <button className="ghost layout-arrange" onClick={() => setEditing(current)}>
+            <button className="ui-btn-ghost ui-boardbar-note" onClick={() => setEditing(current)}>
               {t("Arrange this screen")}
             </button>
           ) : (
@@ -353,7 +358,7 @@ export function Board({
               {/* A reason, because the trail keeps one for every change that
                   reaches other people, and this one reaches all of them. */}
               <input
-                className="layout-reason"
+                className="ui-boardbar-reason"
                 placeholder={t("why this arrangement (for the trail)")}
                 value={reason}
                 onChange={(event) => setReason(event.target.value)}
@@ -366,10 +371,10 @@ export function Board({
               >
                 {save.isPending ? t("storing…") : t("Store this arrangement for everybody")}
               </button>
-              <button className="secondary" onClick={() => { setEditing(null); setReason(""); }}>{t("Back")}</button>
+              <button className="ui-btn-secondary" onClick={() => { setEditing(null); setReason(""); }}>{t("Back")}</button>
               {layout.data?.present && (
                 <button
-                  className="danger"
+                  className="ui-btn-danger"
                   disabled={reset.isPending || reason.trim().length < 8}
                   onClick={() => reset.mutate()}
                   data-testid="board-reset"
@@ -396,10 +401,10 @@ export function Board({
                   {absent.map((one) => <option key={one.key} value={one.key}>{t(one.title)}</option>)}
                 </select>
               )}
-              <button className="secondary" onClick={() => setShowEarlier(!showEarlier)} data-testid="board-earlier">
+              <button className="ui-btn-secondary" onClick={() => setShowEarlier(!showEarlier)} data-testid="board-earlier">
                 {t("Earlier arrangements")}
               </button>
-              <span className="source">{t("Drag a tile by its bar to move it. The arrangement is the installation's: everybody sees it.")}</span>
+              <span className="ui-note">{t("Drag a tile by its bar to move it. The arrangement is the installation's: everybody sees it.")}</span>
             </>
           )}
         </div>
@@ -410,7 +415,7 @@ export function Board({
         onPointerUp={letGo}
         onPointerCancel={letGo}
         style={placedNow ? { gridAutoRows: `${BOARD_ROW}px` } : undefined}
-        className={["widgets", "arranged", placedNow ? "placed" : "", dragging !== null || grab !== null ? "dragging-over" : ""].join(" ").trim()}
+        className={["ui-grid", "ui-arranged", placedNow ? "ui-placed" : "", dragging !== null || grab !== null ? "ui-dragging-over" : ""].join(" ").trim()}
         /* The empty part of the board is a place to drop a tile too: dropped
            where nothing is, it goes to the end of the order, and the dense
            flow then pulls it into the first hole it fits. Without this a
@@ -439,9 +444,9 @@ export function Board({
                gave a height to is still as tall as what it holds. */
             data-rows={placed.height ? placed.height : undefined}
             className={[
-              `span-${placed.width}`,
-              dragging === index ? "dragging" : "",
-              over === index && dragging !== null && dragging !== index ? "drop-here" : "",
+              `ui-col-${placed.width}`,
+              dragging === index ? "ui-dragging" : "",
+              over === index && dragging !== null && dragging !== index ? "ui-drophere" : "",
             ].join(" ").trim()}
             draggable={editing !== null}
             onDragStart={(event) => {
@@ -469,37 +474,37 @@ export function Board({
           >
             {editing !== null && (
               <div
-                className="widget-handle"
+                className="ui-handle"
                 data-testid="widget-handle"
                 onPointerDown={(event) => takeHold(event, placed.key, "move")}
               >
-                <span className="widget-grip" aria-hidden="true">⠿</span>
+                <span className="ui-handle-grip" aria-hidden="true">⠿</span>
                 <span>{t(titleOf(placed.key))}</span>
                 {/* Wider and narrower, taller and shorter. A tile that holds
                     little is given one row, and two of them stand one under
                     another in the space a taller neighbour leaves. */}
-                <span className="widget-size">
+                <span className="ui-handle-size">
                   <button
-                    className="secondary" aria-label={t("Narrower")} title={t("Narrower")}
+                    className="ui-btn-secondary" aria-label={t("Narrower")} title={t("Narrower")}
                     disabled={placed.width === BOARD_WIDTHS[0]}
                     onClick={() => resize(index, { width: widthStep(placed.width, -1) })}
                   >←</button>
-                  <span className="widget-size-value">{t("{n} of 12", { n: placed.width })}</span>
+                  <span className="ui-handle-value">{t("{n} of 12", { n: placed.width })}</span>
                   <button
-                    className="secondary" aria-label={t("Wider")} title={t("Wider")}
+                    className="ui-btn-secondary" aria-label={t("Wider")} title={t("Wider")}
                     disabled={placed.width === BOARD_WIDTHS[BOARD_WIDTHS.length - 1]}
                     onClick={() => resize(index, { width: widthStep(placed.width, 1) })}
                   >→</button>
                 </span>
-                <span className="widget-size">
+                <span className="ui-handle-size">
                   <button
-                    className="secondary" aria-label={t("Shorter")} title={t("Shorter")}
+                    className="ui-btn-secondary" aria-label={t("Shorter")} title={t("Shorter")}
                     disabled={(placed.height ?? 1) <= BOARD_HEIGHTS.min}
                     onClick={() => resize(index, { height: heightStep(placed.height, -1) })}
                   >↑</button>
-                  <span className="widget-size-value">{t("{n} rows", { n: placed.height ?? 1 })}</span>
+                  <span className="ui-handle-value">{t("{n} rows", { n: placed.height ?? 1 })}</span>
                   <button
-                    className="secondary" aria-label={t("Taller")} title={t("Taller")}
+                    className="ui-btn-secondary" aria-label={t("Taller")} title={t("Taller")}
                     disabled={(placed.height ?? 1) >= BOARD_HEIGHTS.max}
                     onClick={() => resize(index, { height: heightStep(placed.height, 1) })}
                   >↓</button>
@@ -507,7 +512,7 @@ export function Board({
                 {/* The mouse drags; the keyboard still has to be able to
                     move a tile, so the handle answers the arrow keys. */}
                 <span
-                  className="widget-keys"
+                  className="ui-handle-keys"
                   tabIndex={0}
                   role="button"
                   aria-label={t("Move with the arrow keys")}
@@ -520,7 +525,7 @@ export function Board({
                   ← →
                 </span>
                 <button
-                  className="secondary"
+                  className="ui-btn-secondary"
                   onClick={() => setEditing(current.map((one) =>
                     one.key === placed.key ? { ...one, hidden: true } : one))}
                 >
@@ -533,7 +538,7 @@ export function Board({
               /* The corner. Taking hold of it sets the width and the height
                  together, which is how anybody expects to resize a box. */
               <span
-                className="widget-corner"
+                className="ui-corner"
                 data-testid={`widget-corner-${placed.key}`}
                 role="button"
                 tabIndex={0}

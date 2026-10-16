@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import type { Host } from "../lib/types";
-import { Actions, Card, Field, FieldGrid } from "../components/layout";
+import { Actions, Field, Fields, Panel } from "../ui/kit";
 import { FacetList, useFleetFacets } from "./Bulk";
 import { useT } from "../i18n";
 
@@ -99,12 +99,12 @@ export function HostsMetadata({ hosts, permissions, onClose }: {
   const result = submit.data;
 
   return (
-    <Card
+    <Panel
       title={t("Set metadata on {n} hosts", { n: hosts.length })}
       description={t("What the panel records about these hosts by hand. A field left empty changes nothing; every host is judged in its own scope and answered on its own.")}
-      actions={<button type="button" className="secondary" onClick={onClose}>{t("Close")}</button>}
+      actions={<button type="button" className="ui-btn-secondary" onClick={onClose}>{t("Close")}</button>}
     >
-      <FieldGrid>
+      <Fields>
         {canTag && (
           <>
             <Field label={t("Add tags")} hint={t("key or key=value, separated by commas; added to what each host already carries.")}>
@@ -159,19 +159,19 @@ export function HostsMetadata({ hosts, permissions, onClose }: {
         <Field label={t("Reason")} wide hint={t("Required, at least 8 characters; kept in the audit trail with every host.")}>
           <input value={draft.reason} onChange={(e) => change({ reason: e.target.value })} placeholder={t("change ticket, handover")} data-testid="bulk-reason" />
         </Field>
-      </FieldGrid>
+      </Fields>
       {moves && (
-        <p className="source">
+        <p className="ui-note">
           {t("A move changes who may manage the host, which budgets its changes load and which groups it stands in, from the next order on; nothing already planned is re-evaluated.")}
         </p>
       )}
       <Actions>
-        <button type="button" className="primary" onClick={() => submit.mutate()} disabled={!ready || submit.isPending} data-testid="bulk-apply">
+        <button type="button" className="ui-btn-primary" onClick={() => submit.mutate()} disabled={!ready || submit.isPending} data-testid="bulk-apply">
           {submit.isPending ? t("applying…") : t("Apply to {n} hosts", { n: hosts.length })}
         </button>
       </Actions>
       {submit.isError && (
-        <p className="page-error">{t("Error: {message}", { message: submit.error instanceof Error ? submit.error.message : String(submit.error) })}</p>
+        <p className="ui-errorbox">{t("Error: {message}", { message: submit.error instanceof Error ? submit.error.message : String(submit.error) })}</p>
       )}
       {result && (
         <>
@@ -188,10 +188,10 @@ export function HostsMetadata({ hosts, permissions, onClose }: {
                 return (
                   <tr key={outcome.host_id} data-testid={`bulk-outcome-${outcome.host_id}`}>
                     <td>
-                      {host ? <Link to={`/hosts/${host.id}/overview`}>{host.hostname}</Link> : <span className="hm-mono">{outcome.host_id}</span>}
+                      {host ? <Link to={`/hosts/${host.id}/overview`}>{host.hostname}</Link> : <span className="ui-mono">{outcome.host_id}</span>}
                     </td>
                     <td>
-                      <span className={outcome.ok ? "badge ok" : "badge error"}>{outcome.ok ? t("applied") : outcome.code}</span>
+                      <span className={outcome.ok ? "ui-pill ui-ok" : "ui-pill ui-error"}>{outcome.ok ? t("applied") : outcome.code}</span>
                     </td>
                     <td>{outcome.detail || ""}</td>
                   </tr>
@@ -201,6 +201,6 @@ export function HostsMetadata({ hosts, permissions, onClose }: {
           </table>
         </>
       )}
-    </Card>
+    </Panel>
   );
 }

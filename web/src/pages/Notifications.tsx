@@ -2,8 +2,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Collection } from "../lib/api";
 import type { Whoami } from "../lib/types";
-import { ErrorBox, Empty, Time } from "../components/ui";
-import { Actions, Card, EmptyState, Field, FieldGrid, SectionHead } from "../components/layout";
+import { ErrorBox, Time } from "../components/ui";
+import { Actions, Empty, Field, Fields, Panel, SectionHead, toneClass } from "../ui/kit";
 import { ExportButton } from "../components/ExportButton";
 import { useConfirm } from "../components/Modal";
 import { useToast } from "../components/Toast";
@@ -509,16 +509,16 @@ export function Notifications() {
         description={t("Where the fleet reports when nobody is watching the panel.")}
         help={<p>{t("Where the fleet reports to when nobody is looking at the panel: a webhook, a mailbox, a chat room. Every attempt is in the log below with its reason.")}</p>}
         actions={canManage && (
-          <button className="primary" onClick={() => { setEditing(emptyForm()); setEditingID(""); setErrorMessage(""); }} disabled={Boolean(editing)}>
+          <button className="ui-btn-primary" onClick={() => { setEditing(emptyForm()); setEditingID(""); setErrorMessage(""); }} disabled={Boolean(editing)}>
             {t("New channel")}
           </button>
         )}
       />
 
-      {errorMessage && <p className="page-error">{errorMessage}</p>}
+      {errorMessage && <p className="ui-errorbox">{errorMessage}</p>}
 
       {editing && (
-        <Card
+        <Panel
           title={editingID ? t("Edit the channel") : t("New channel")}
           description={t("No credential lies in the channel: the address of an incoming webhook, the key a webhook is signed with and a mail password go to the secret store the moment they are typed and are never shown back. The form says only whether one is configured and when it was last rotated; an empty field keeps the stored one.")}
         >
@@ -527,23 +527,23 @@ export function Notifications() {
             <button onClick={() => check?.body && save.mutate(check.body)} disabled={save.isPending || !check?.body}>
               {save.isPending ? t("Saving…") : editingID ? t("Save the channel") : t("Create the channel")}
             </button>
-            <button className="secondary" onClick={() => { setEditing(null); setEditingID(""); }}>{t("Cancel")}</button>
-            {check?.problem && <span className="source">{problemWords(t, check.problem)}</span>}
+            <button className="ui-btn-secondary" onClick={() => { setEditing(null); setEditingID(""); }}>{t("Cancel")}</button>
+            {check?.problem && <span className="ui-note">{problemWords(t, check.problem)}</span>}
           </Actions>
-        </Card>
+        </Panel>
       )}
 
-      <div className="widgets">
-        <Card className="span-12" title={t("Channels")} flush
+      <div className="ui-grid">
+        <Panel className="ui-col-12" title={t("Channels")} flush
           description={t("Each channel carries the events it names for the part of the fleet its filter keeps; a disabled one is listed because it would carry again the moment somebody enables it.")}>
           {!channels.data ? (
             <Empty>{t("Loading…")}</Empty>
           ) : items.length === 0 ? (
-            <EmptyState action={canManage && !editing && (
-              <button className="secondary" onClick={() => { setEditing(emptyForm()); setEditingID(""); }}>{t("New channel")}</button>
+            <Empty action={canManage && !editing && (
+              <button className="ui-btn-secondary" onClick={() => { setEditing(emptyForm()); setEditingID(""); }}>{t("New channel")}</button>
             )}>
               {t("No channels: the alerts fire and the campaigns end, but nobody is told outside the panel.")}
-            </EmptyState>
+            </Empty>
           ) : (
             <table>
               <thead>
@@ -569,17 +569,17 @@ export function Notifications() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
 
-        <Card
-          className="span-12"
+        <Panel
+          className="ui-col-12"
           title={
             <>
               {t("Delivery queue")}
               {deadLetters > 0 && (
                 <>
                   {" "}
-                  <span className="badge error" title={t("Messages nobody received: the attempts ran out or the receiver refused the credentials. They wait here until an operator sends them again.")}>
+                  <span className="ui-pill ui-error" title={t("Messages nobody received: the attempts ran out or the receiver refused the credentials. They wait here until an operator sends them again.")}>
                     {t("{n} dead letters", { n: deadLetters })}
                   </span>
                 </>
@@ -621,7 +621,7 @@ export function Notifications() {
               <thead>
                 <tr>
                   <th scope="col">{t("When")}</th><th scope="col">{t("Channel")}</th><th scope="col">{t("Event")}</th>
-                  <th scope="col">{t("State")}</th><th scope="col" className="num">{t("Attempt")}</th><th scope="col">{t("Next attempt")}</th>
+                  <th scope="col">{t("State")}</th><th scope="col" className="ui-numeric">{t("Attempt")}</th><th scope="col">{t("Next attempt")}</th>
                   <th scope="col">{t("Last error")}</th>{canManage && <th scope="col">{t("Actions")}</th>}
                 </tr>
               </thead>
@@ -633,29 +633,29 @@ export function Notifications() {
                       <td><Time value={delivery.updated_at || delivery.sent_at} /></td>
                       <td>{delivery.channel_name || delivery.channel_id.slice(0, 8)}</td>
                       <td>
-                        <div className="fp-host-cell">
-                          <span className="hm-mono">{delivery.event_type}</span>
-                          {delivery.title && <span className="source">{delivery.title}</span>}
-                          {!delivery.title && delivery.event_id > 0 && <span className="source">#{delivery.event_id}</span>}
+                        <div className="ui-twoline">
+                          <span className="ui-mono">{delivery.event_type}</span>
+                          {delivery.title && <span className="ui-note">{delivery.title}</span>}
+                          {!delivery.title && delivery.event_id > 0 && <span className="ui-note">#{delivery.event_id}</span>}
                         </div>
                       </td>
                       <td>
-                        <span className={`badge ${stateTone(delivery.state)}`}>{stateWords(t, delivery.state)}</span>
+                        <span className={`ui-pill ${toneClass(stateTone(delivery.state))}`}>{stateWords(t, delivery.state)}</span>
                       </td>
-                      <td className="num">{delivery.attempt}</td>
-                      <td>{next ? <Time value={next} /> : <span className="source">—</span>}</td>
+                      <td className="ui-numeric">{delivery.attempt}</td>
+                      <td>{next ? <Time value={next} /> : <span className="ui-note">—</span>}</td>
                       <td>
                         {delivery.last_error_code
-                          ? <div className="fp-host-cell">
-                              <span className="hm-mono">{delivery.last_error_code}</span>
-                              {delivery.last_error && <span className="source">{delivery.last_error}</span>}
+                          ? <div className="ui-twoline">
+                              <span className="ui-mono">{delivery.last_error_code}</span>
+                              {delivery.last_error && <span className="ui-note">{delivery.last_error}</span>}
                             </div>
-                          : <span className="source">{deliveryWords(t, delivery)}</span>}
+                          : <span className="ui-note">{deliveryWords(t, delivery)}</span>}
                       </td>
                       {canManage && (
                         <td>
                           {canRetry(delivery) && (
-                            <button className="secondary" disabled={retry.isPending}
+                            <button className="ui-btn-secondary" disabled={retry.isPending}
                               onClick={() => retry.mutate(delivery.id)}>
                               {t("Retry")}
                             </button>
@@ -668,7 +668,7 @@ export function Notifications() {
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   );
@@ -684,33 +684,33 @@ function ChannelRow({ channel, canManage, busy, outcome, onTest, onEdit, onToggl
     <>
       <tr>
         <td>
-          <div className="fp-host-cell">
-            <span>{channel.name}{!channel.enabled && <> <span className="badge unknown">{t("disabled")}</span></>}</span>
-            <span className="source">{channel.created_by}</span>
+          <div className="ui-twoline">
+            <span>{channel.name}{!channel.enabled && <> <span className="ui-pill ui-unknown">{t("disabled")}</span></>}</span>
+            <span className="ui-note">{channel.created_by}</span>
           </div>
         </td>
         <td>{kindLabel(t, channel.kind)}</td>
-        <td className="hm-mono">{addressWithheld(channel) ? t("URL is set") : describeChannel(channel)}</td>
-        <td className="source">{channel.events.length ? channel.events.join(", ") : t("nothing")}</td>
-        <td className="source">{describeFilter(t, channel.filter)}</td>
+        <td className="ui-mono">{addressWithheld(channel) ? t("URL is set") : describeChannel(channel)}</td>
+        <td className="ui-note">{channel.events.length ? channel.events.join(", ") : t("nothing")}</td>
+        <td className="ui-note">{describeFilter(t, channel.filter)}</td>
         <td>
           {last ? (
-            <div className="fp-host-cell">
+            <div className="ui-twoline">
               <span>
-                <span className={`badge ${stateTone(last.state)}`}>{stateWords(t, last.state)}</span>
+                <span className={`ui-pill ${toneClass(stateTone(last.state))}`}>{stateWords(t, last.state)}</span>
                 {" "}<Time value={last.at || last.sent_at || ""} />
               </span>
-              {last.error_code && <span className="source">{last.error_code}</span>}
+              {last.error_code && <span className="ui-note">{last.error_code}</span>}
             </div>
-          ) : <span className="source">{t("nothing sent yet")}</span>}
+          ) : <span className="ui-note">{t("nothing sent yet")}</span>}
         </td>
         {canManage && (
           <td>
             <Actions>
-              <button className="secondary" onClick={onTest} disabled={busy}>{t("Send a test")}</button>
-              <button className="secondary" onClick={onEdit}>{t("Edit")}</button>
-              <button className="secondary" onClick={onToggle} disabled={busy}>{channel.enabled ? t("Disable") : t("Enable")}</button>
-              <button className="secondary" onClick={onRemove} disabled={busy}>{t("Delete")}</button>
+              <button className="ui-btn-secondary" onClick={onTest} disabled={busy}>{t("Send a test")}</button>
+              <button className="ui-btn-secondary" onClick={onEdit}>{t("Edit")}</button>
+              <button className="ui-btn-secondary" onClick={onToggle} disabled={busy}>{channel.enabled ? t("Disable") : t("Enable")}</button>
+              <button className="ui-btn-secondary" onClick={onRemove} disabled={busy}>{t("Delete")}</button>
             </Actions>
           </td>
         )}
@@ -719,8 +719,8 @@ function ChannelRow({ channel, canManage, busy, outcome, onTest, onEdit, onToggl
         <tr>
           <td colSpan={canManage ? 7 : 6}>
             {outcome.state === "delivered" || outcome.status === "sent"
-              ? <span className="badge ok">{t("The test message went out at {when}.", { when: new Date(outcome.sent_at).toLocaleString() })}</span>
-              : <><span className="badge error">{t("The test failed")}</span> <span className="source">{deliveryWords(t, outcome)}</span></>}
+              ? <span className="ui-pill ui-ok">{t("The test message went out at {when}.", { when: new Date(outcome.sent_at).toLocaleString() })}</span>
+              : <><span className="ui-pill ui-error">{t("The test failed")}</span> <span className="ui-note">{deliveryWords(t, outcome)}</span></>}
           </td>
         </tr>
       )}
@@ -742,7 +742,7 @@ function ChannelFields({ form, subjects, severities, onChange }: {
     events: form.events.includes(name) ? form.events.filter((event) => event !== name) : [...form.events, name],
   });
   return (
-    <FieldGrid>
+    <Fields>
       <Field label={t("Name")}>
         <input value={form.name} onChange={(e) => set({ name: e.target.value })} />
       </Field>
@@ -761,37 +761,37 @@ function ChannelFields({ form, subjects, severities, onChange }: {
             : form.urlSet
               ? secretWords(t, form, t("URL is set; leave the field empty to keep it, or type a new one. The address is the credential of the channel and is never shown back."))
               : t("An incoming webhook of Slack, or of a service that reads its shape: the body is {text, blocks}.")}>
-          <input value={form.url} onChange={(e) => set({ url: e.target.value })} className="mono" placeholder={form.urlSet ? t("URL is set") : "https://"} />
+          <input value={form.url} onChange={(e) => set({ url: e.target.value })} className="ui-mono" placeholder={form.urlSet ? t("URL is set") : "https://"} />
         </Field>
       )}
       {form.kind === "webhook" && (
         <Field label={t("Signing secret")} wide
           hint={secretWords(t, form, t("Required: the receiver verifies the signature, and an empty key signs nothing."))}>
-          <input type="password" autoComplete="new-password" value={form.secret} onChange={(e) => set({ secret: e.target.value })} className="mono" />
+          <input type="password" autoComplete="new-password" value={form.secret} onChange={(e) => set({ secret: e.target.value })} className="ui-mono" />
         </Field>
       )}
       {form.kind === "email" && (
         <>
           <Field label={t("Mail relay host")}>
-            <input value={form.host} onChange={(e) => set({ host: e.target.value })} className="mono" />
+            <input value={form.host} onChange={(e) => set({ host: e.target.value })} className="ui-mono" />
           </Field>
           <Field label={t("Port")}>
             <input type="number" min={1} max={65535} value={form.port} onChange={(e) => set({ port: e.target.value })} />
           </Field>
           <Field label={t("From")}>
-            <input value={form.from} onChange={(e) => set({ from: e.target.value })} className="mono" placeholder="flotestro@example.com" />
+            <input value={form.from} onChange={(e) => set({ from: e.target.value })} className="ui-mono" placeholder="flotestro@example.com" />
           </Field>
           <Field label={t("Recipients")} hint={t("One per line or comma-separated; at most twenty.")}>
-            <textarea rows={3} value={form.to} onChange={(e) => set({ to: e.target.value })} className="mono" />
+            <textarea rows={3} value={form.to} onChange={(e) => set({ to: e.target.value })} className="ui-mono" />
           </Field>
           <Field label={t("Username")} hint={t("Empty means the relay takes mail without a login.")}>
-            <input value={form.username} onChange={(e) => set({ username: e.target.value })} className="mono" autoComplete="off" />
+            <input value={form.username} onChange={(e) => set({ username: e.target.value })} className="ui-mono" autoComplete="off" />
           </Field>
           <Field label={t("Password secret")} hint={t("The name of a secret of the secret store; the password itself is never written here.")}>
-            <input value={form.passwordSecret} onChange={(e) => set({ passwordSecret: e.target.value })} className="mono" />
+            <input value={form.passwordSecret} onChange={(e) => set({ passwordSecret: e.target.value })} className="ui-mono" />
           </Field>
-          <div className="field">
-            <label className="toggle">
+          <div className="ui-field">
+            <label className="ui-check">
               <input type="checkbox" checked={form.starttls} onChange={(e) => set({ starttls: e.target.checked })} />{" "}
               {t("STARTTLS (required for a login)")}
             </label>
@@ -799,12 +799,12 @@ function ChannelFields({ form, subjects, severities, onChange }: {
         </>
       )}
 
-      <div className="field wide">
-        <span className="field-label">{t("Events")}</span>
+      <div className="ui-field ui-wide">
+        <span className="ui-field-label">{t("Events")}</span>
         {subjects.map((subject) => (
-          <label key={subject.name} className="toggle">
+          <label key={subject.name} className="ui-check">
             <input type="checkbox" checked={form.events.includes(subject.name)} onChange={() => toggleEvent(subject.name)} />{" "}
-            <span className="hm-mono">{subject.name}</span> <span className="source">{subject.description}</span>
+            <span className="ui-mono">{subject.name}</span> <span className="ui-note">{subject.description}</span>
           </label>
         ))}
       </div>
@@ -824,12 +824,12 @@ function ChannelFields({ form, subjects, severities, onChange }: {
       <Field label={t("Reason or change reference")} wide hint={t("Kept in the audit trail with the channel.")}>
         <input value={form.reason} onChange={(e) => set({ reason: e.target.value })} />
       </Field>
-      <div className="field">
-        <label className="toggle">
+      <div className="ui-field">
+        <label className="ui-check">
           <input type="checkbox" checked={form.enabled} onChange={(e) => set({ enabled: e.target.checked })} />{" "}
           {t("enabled")}
         </label>
       </div>
-    </FieldGrid>
+    </Fields>
   );
 }

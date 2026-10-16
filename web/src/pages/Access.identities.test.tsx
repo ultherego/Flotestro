@@ -124,7 +124,7 @@ describe("a row of the identity list", () => {
     const buttons = Array.from(row.querySelectorAll("button"));
     expect(buttons.map((button) => button.getAttribute("data-testid")))
       .toEqual(["open-identity-0"]);
-    expect(container.querySelectorAll(".actions-cell")).toHaveLength(0);
+    expect(container.querySelectorAll(".ui-actioncell")).toHaveLength(0);
   });
 
   it("opens the record on the name and sorts the rare acts into tabs", async () => {

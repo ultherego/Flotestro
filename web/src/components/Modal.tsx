@@ -195,10 +195,10 @@ function ConfirmDialog({ request, onSettle }: { request: ConfirmRequest; onSettl
   const describedBy = [request.body ? bodyId : "", request.reason ? `${reasonId}-hint` : ""].filter(Boolean).join(" ") || undefined;
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) cancel(); }}>
+    <div className="ui-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) cancel(); }}>
       <div
         ref={dialog}
-        className={request.danger ? "modal danger" : "modal"}
+        className="ui-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -206,18 +206,18 @@ function ConfirmDialog({ request, onSettle }: { request: ConfirmRequest; onSettl
         tabIndex={-1}
         onKeyDown={onKeyDown}
       >
-        <h2 id={titleId} className="modal-title">{request.title}</h2>
+        <h2 id={titleId} className="ui-modal-title">{request.title}</h2>
         {request.body && (
           typeof request.body === "string"
-            ? <p id={bodyId} className="modal-body">{request.body}</p>
-            : <div id={bodyId} className="modal-body">{request.body}</div>
+            ? <p id={bodyId} className="ui-stack">{request.body}</p>
+            : <div id={bodyId} className="ui-stack">{request.body}</div>
         )}
         {request.input && (
-          <div className="field modal-field">
-            <label htmlFor={inputId} className="field-label">{request.input.label}</label>
+          <div className="ui-field ui-field">
+            <label htmlFor={inputId} className="ui-field-label">{request.input.label}</label>
             <input
               id={inputId}
-              className={request.input.mono ? "mono" : undefined}
+              className={request.input.mono ? "ui-mono" : undefined}
               value={value}
               placeholder={request.input.placeholder}
               onChange={(event) => setValue(event.target.value)}
@@ -225,12 +225,12 @@ function ConfirmDialog({ request, onSettle }: { request: ConfirmRequest; onSettl
               aria-describedby={request.input.hint ? `${inputId}-hint` : undefined}
               data-autofocus=""
             />
-            {request.input.hint && <span id={`${inputId}-hint`} className="field-hint">{request.input.hint}</span>}
+            {request.input.hint && <span id={`${inputId}-hint`} className="ui-field-hint">{request.input.hint}</span>}
           </div>
         )}
         {request.reason && (
-          <div className="field modal-field">
-            <label htmlFor={reasonId} className="field-label">{request.reason.label ?? t("Reason")}</label>
+          <div className="ui-field ui-field">
+            <label htmlFor={reasonId} className="ui-field-label">{request.reason.label ?? t("Reason")}</label>
             <input
               id={reasonId}
               value={reason}
@@ -240,23 +240,23 @@ function ConfirmDialog({ request, onSettle }: { request: ConfirmRequest; onSettl
               aria-describedby={`${reasonId}-hint`}
               data-autofocus={request.input ? undefined : ""}
             />
-            <span id={`${reasonId}-hint`} className={reasonReady ? "field-hint" : "field-hint modal-rule"}>
+            <span id={`${reasonId}-hint`} className={reasonReady ? "ui-field-hint" : "ui-field-hint ui-note"}>
               {t("At least {n} characters, kept in the audit trail.", { n: reasonMin })}
               {!reasonReady && reason.trim().length > 0 && ` ${t("{n} more to go.", { n: reasonMin - reason.trim().length })}`}
             </span>
           </div>
         )}
-        <div className="actions modal-actions">
+        <div className="ui-actions ui-actions ui-right">
           <button
             type="button"
-            className={request.danger ? "danger" : undefined}
+            className={request.danger ? "ui-btn-danger" : undefined}
             disabled={!ready}
             onClick={accept}
             data-autofocus={initialFocus === "confirm" ? "" : undefined}
           >
             {request.confirmLabel ?? t("Confirm")}
           </button>
-          <button type="button" className="secondary" onClick={cancel} data-autofocus={initialFocus === "cancel" ? "" : undefined}>
+          <button type="button" className="ui-btn-secondary" onClick={cancel} data-autofocus={initialFocus === "cancel" ? "" : undefined}>
             {request.cancelLabel ?? t("Cancel")}
           </button>
         </div>

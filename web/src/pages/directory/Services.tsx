@@ -2,8 +2,8 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../../lib/api";
 import type { DirectoryService } from "../../lib/types";
-import { ErrorBox, Empty } from "../../components/ui";
-import { Card, Toolbar } from "../../components/layout";
+import { ErrorBox } from "../../components/ui";
+import { Empty, Panel, Toolbar } from "../../ui/kit";
 import { useT } from "../../i18n";
 import { DirectoryConfirmation, Forbidden, PlanImpact, TriState, useDirectoryChange } from "./shared";
 
@@ -43,7 +43,7 @@ export function Services() {
 
   return (
     <>
-      <p className="subtitle">
+      <p className="ui-note">
         {t("The service principals of the directory, one per service and host. A keytab is never exported to the browser: this view says whether one is on record, and a rotation retires it in the directory while the host fetches its own new one.")}
       </p>
 
@@ -65,10 +65,10 @@ export function Services() {
           onCancel={() => setRotating(null)}
         />
       )}
-      {message && <p className="page-error">{message}</p>}
+      {message && <p className="ui-errorbox">{message}</p>}
       {change && <PlanImpact change={change} />}
 
-      <Card flush>
+      <Panel flush>
         {!items.length ? (
           <Empty>{data?.items.length ? t("No service matches the filter.") : t("The directory has no service principals the panel can read.")}</Empty>
         ) : (
@@ -82,24 +82,24 @@ export function Services() {
             <tbody>
               {items.map((service) => (
                 <tr key={service.principal}>
-                  <td className="mono">
+                  <td className="ui-mono">
                     {service.principal}
                     {(service.aliases ?? []).length > 0 && (
-                      <div className="source">{t("aliases: {names}", { names: (service.aliases ?? []).join(", ") })}</div>
+                      <div className="ui-note">{t("aliases: {names}", { names: (service.aliases ?? []).join(", ") })}</div>
                     )}
                   </td>
-                  <td className="mono">{service.service}</td>
-                  <td className="mono">{service.host}</td>
+                  <td className="ui-mono">{service.service}</td>
+                  <td className="ui-mono">{service.host}</td>
                   <td><TriState value={service.has_keytab} yes={t("on record")} no={t("none")} /></td>
-                  <td className="mono">{(service.managed_by ?? []).join(", ") || "—"}</td>
+                  <td className="ui-mono">{(service.managed_by ?? []).join(", ") || "—"}</td>
                   {canRotate && (
                     <td>
                       {rotatable(service) ? (
-                        <button className="secondary" onClick={() => setRotating(service)} disabled={mutation.isPending}>
+                        <button className="ui-btn-secondary" onClick={() => setRotating(service)} disabled={mutation.isPending}>
                           {t("Rotate keytab")}
                         </button>
                       ) : (
-                        <span className="source" title={t("The host's own keytab is replaced by a re-join, not a rotation.")}>—</span>
+                        <span className="ui-note" title={t("The host's own keytab is replaced by a re-join, not a rotation.")}>—</span>
                       )}
                     </td>
                   )}
@@ -108,7 +108,7 @@ export function Services() {
             </tbody>
           </table>
         )}
-      </Card>
+      </Panel>
     </>
   );
 }

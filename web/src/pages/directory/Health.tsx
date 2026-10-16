@@ -2,8 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
 import type { IdentityStatus } from "../../lib/types";
-import { ErrorBox, Empty, Pair, Pairs, Time } from "../../components/ui";
-import { Card, Columns, Stat, StatGrid } from "../../components/layout";
+import { ErrorBox, Pair, Pairs, Time } from "../../components/ui";
+import { Cols, Empty, Panel, Stat, Stats } from "../../ui/kit";
 import { useT } from "../../i18n";
 
 /**
@@ -18,7 +18,7 @@ export function Health() {
   });
   if (status.error) return <ErrorBox error={status.error} />;
   const data = status.data;
-  if (!data) return <Card><Empty>{t("Checking…")}</Empty></Card>;
+  if (!data) return <Panel><Empty>{t("Checking…")}</Empty></Panel>;
 
   const connector = data.connector;
   const fleet = data.hosts;
@@ -33,12 +33,12 @@ export function Health() {
 
   return (
     <>
-      <p className="subtitle">
+      <p className="ui-note">
         {t("Two independent halves: what the panel can say about its own connection to the directory, and what the hosts reported about theirs. One being red does not colour the other.")}
       </p>
 
-      <Columns wide>
-        <Card
+      <Cols wide>
+        <Panel
           title={t("Connector")}
           tone={!data.configured ? undefined : data.reachable ? undefined : "error"}
           description={!data.configured
@@ -49,14 +49,14 @@ export function Health() {
         >
           {data.configured && (
             <Pairs>
-              <Pair label={t("Principal")}><span className="mono">{data.principal ?? connector?.principal ?? "—"}</span></Pair>
+              <Pair label={t("Principal")}><span className="ui-mono">{data.principal ?? connector?.principal ?? "—"}</span></Pair>
               <Pair label={t("Reachable")}>
-                {data.reachable ? <span className="badge ok">{t("yes")}</span> : <span className="badge error">{t("no")}</span>}
+                {data.reachable ? <span className="ui-pill ui-ok">{t("yes")}</span> : <span className="ui-pill ui-error">{t("no")}</span>}
               </Pair>
               <Pair label={t("Last successful call")}><Time value={connector?.last_success_at ?? null} /></Pair>
               <Pair label={t("Last error")}>
                 {connector?.last_error
-                  ? <><span className="source">{connector.last_error}</span> · <Time value={connector.last_error_at ?? null} /></>
+                  ? <><span className="ui-note">{connector.last_error}</span> · <Time value={connector.last_error_at ?? null} /></>
                   : "—"}
               </Pair>
               <Pair label={t("Cache")}>
@@ -70,9 +70,9 @@ export function Health() {
               </Pair>
             </Pairs>
           )}
-        </Card>
+        </Panel>
 
-        <Card
+        <Panel
           title={t("Keytab")}
           tone={connector && !connector.keytab_readable ? "warn" : undefined}
           description={t("The connector's own keytab as the panel reads it. A keytab file carries no expiry date - only the key version and the stamp of its last write - so none is shown.")}
@@ -81,38 +81,38 @@ export function Health() {
           {!connector ? (
             <Empty>{t("No directory connector is configured.")}</Empty>
           ) : !connector.keytab_readable ? (
-            <p className="warning"><span>{connector.keytab_detail || t("The keytab could not be read.")}</span></p>
+            <p className="ui-banner"><span>{connector.keytab_detail || t("The keytab could not be read.")}</span></p>
           ) : !connector.keytab_entries.length ? (
             <Empty>{t("The keytab holds no entries.")}</Empty>
           ) : (
             <table>
-              <thead><tr><th scope="col">{t("Principal")}</th><th scope="col" className="num">KVNO</th><th scope="col">{t("Written")}</th></tr></thead>
+              <thead><tr><th scope="col">{t("Principal")}</th><th scope="col" className="ui-numeric">KVNO</th><th scope="col">{t("Written")}</th></tr></thead>
               <tbody>
                 {connector.keytab_entries.map((entry, index) => (
                   <tr key={index}>
-                    <td className="mono">{entry.principal}</td>
-                    <td className="num">{entry.kvno}</td>
+                    <td className="ui-mono">{entry.principal}</td>
+                    <td className="ui-numeric">{entry.kvno}</td>
                     <td><Time value={entry.timestamp ?? null} /></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-        </Card>
-      </Columns>
+        </Panel>
+      </Cols>
 
-      <Card
+      <Panel
         title={t("Hosts offline from the directory")}
         description={t("Enrolled hosts whose SSSD last reported itself cut off from the directory, with the panel's verdict on their logins from the facts each host reported.")}
       flush
       >
-        <StatGrid compact>
+        <Stats compact>
           <Stat label={t("Offline from the directory")} value={fleet ? fleet.offline_count : "—"} tone={fleet?.offline_count ? "warn" : undefined} />
           {Object.keys(verdicts).sort().map((verdict) => (
             <Stat key={verdict} label={verdictLabel[verdict] ?? verdict} value={verdicts[verdict]}
                   tone={verdict === "no_cached_logins" && verdicts[verdict] ? "error" : undefined} />
           ))}
-        </StatGrid>
+        </Stats>
         {!fleet || !fleet.offline_from_directory.length ? (
           <Empty>{t("Every enrolled host last reported the directory reachable.")}</Empty>
         ) : (
@@ -125,17 +125,17 @@ export function Health() {
                   <td>{[host.site, host.environment].filter(Boolean).join(" / ") || "—"}</td>
                   <td><Time value={host.checked_at ?? null} /></td>
                   <td>
-                    <span className={host.offline_verdict.verdict === "no_cached_logins" ? "badge error" : host.offline_verdict.verdict === "unknown" ? "badge unknown" : "badge warn"}>
+                    <span className={host.offline_verdict.verdict === "no_cached_logins" ? "ui-pill ui-error" : host.offline_verdict.verdict === "unknown" ? "ui-pill ui-unknown" : "ui-pill ui-warn"}>
                       {verdictLabel[host.offline_verdict.verdict] ?? host.offline_verdict.verdict}
                     </span>
-                    {host.offline_verdict.reason && <div className="source">{host.offline_verdict.reason}</div>}
+                    {host.offline_verdict.reason && <div className="ui-note">{host.offline_verdict.reason}</div>}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-      </Card>
+      </Panel>
     </>
   );
 }

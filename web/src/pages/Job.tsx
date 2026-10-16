@@ -5,8 +5,8 @@ import { api, type Collection } from "../lib/api";
 import { absoluteTime } from "../lib/format";
 import { isHostPlan, PlanBlocked, PlanChanges, PlanFacts, PlanSummary, planWords, type HostPlan, type PackagePlanFacts } from "../components/plan";
 import type { Attempt, Job } from "../lib/types";
-import { ErrorBox, ErrorCode, Time, Pair, Pairs, ProgressBar, Empty, JobState } from "../components/ui";
-import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
+import { ErrorBox, ErrorCode, Time, Pair, Pairs, ProgressBar, JobState } from "../components/ui";
+import { Actions, Empty, Field, Fields, PageHead, Panel } from "../ui/kit";
 import { OPERATIONS_INTERVAL, useProgress } from "../lib/stream";
 import { AttemptHead, orderAgainAddress, prettyJSON, reasonAccepted, REORDERABLE_STATES, waitedBudget } from "./Jobs";
 import { useT } from "../i18n";
@@ -216,7 +216,7 @@ export function JobPage() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         breadcrumb={[{ label: t("Jobs"), to: "/jobs" }]}
         title={data.action_type}
         description={
@@ -230,11 +230,11 @@ export function JobPage() {
             {awaiting && (
               <>
                 <button onClick={() => { setCanceling(false); setApproving(true); }}>{t("Approve")}</button>
-                <button className="secondary" onClick={() => { setApproving(false); setCanceling(true); }}>{t("Cancel")}</button>
+                <button className="ui-btn-secondary" onClick={() => { setApproving(false); setCanceling(true); }}>{t("Cancel")}</button>
               </>
             )}
             {REORDERABLE_STATES.includes(data.state) && (
-              <Link className="button secondary" to={orderAgainAddress(data)} title={t("Opens the Bulk workspace with the same operation, payload and host written in.")}>
+              <Link className="ui-btn ui-btn-secondary" to={orderAgainAddress(data)} title={t("Opens the Bulk workspace with the same operation, payload and host written in.")}>
                 {t("Order again")}
               </Link>
             )}
@@ -247,7 +247,7 @@ export function JobPage() {
           approval carries is the hash of what stands here, so a swap
           between reading and clicking is refused by the server. */}
       {approving && awaiting && (
-        <Card
+        <Panel
           title={t("Approve the job?")}
           description={t("You approve exactly this payload for {operation} on {host}; the consent is bound to hash {hash}.", {
             operation: data.action_type, host, hash: data.payload_hash.slice(0, 12),
@@ -255,78 +255,78 @@ export function JobPage() {
           footer={
             <Actions>
               <button onClick={() => approve.mutate(data)} disabled={approve.isPending}>{t("Approve this payload")}</button>
-              <button className="secondary" onClick={() => setApproving(false)}>{t("Back")}</button>
-              {approve.error && <span className="page-error">{approve.error instanceof Error ? approve.error.message : String(approve.error)}</span>}
+              <button className="ui-btn-secondary" onClick={() => setApproving(false)}>{t("Back")}</button>
+              {approve.error && <span className="ui-errorbox">{approve.error instanceof Error ? approve.error.message : String(approve.error)}</span>}
             </Actions>
           }
         >
           <pre>{prettyJSON(data.payload)}</pre>
-          <FieldGrid>
+          <Fields>
             <Field label={t("Reason (kept in the audit trail)")} hint={t("Optional for an approval; the second approver of a destructive operation reads it.")} wide>
               <input value={approvalReason} onChange={(e) => setApprovalReason(e.target.value)} />
             </Field>
-          </FieldGrid>
-        </Card>
+          </Fields>
+        </Panel>
       )}
 
       {canceling && awaiting && (
-        <Card
+        <Panel
           title={t("Cancel the job?")}
           description={t("The job is withdrawn before the host has touched anything; the reason goes to the audit trail.")}
           footer={
             <Actions>
               <button
-                className="danger"
+                className="ui-btn-danger"
                 disabled={!reasonAccepted(cancelReason) || cancel.isPending}
                 title={reasonAccepted(cancelReason) ? undefined : t("A cancel needs a reason of at least 8 characters.")}
                 onClick={() => cancel.mutate()}
               >
                 {t("Cancel this job")}
               </button>
-              <button className="secondary" onClick={() => setCanceling(false)}>{t("Back")}</button>
-              {cancel.error && <span className="page-error">{cancel.error instanceof Error ? cancel.error.message : String(cancel.error)}</span>}
+              <button className="ui-btn-secondary" onClick={() => setCanceling(false)}>{t("Back")}</button>
+              {cancel.error && <span className="ui-errorbox">{cancel.error instanceof Error ? cancel.error.message : String(cancel.error)}</span>}
             </Actions>
           }
         >
-          <FieldGrid>
+          <Fields>
             <Field label={t("Reason (kept in the audit trail)")} hint={t("Required, at least 8 characters.")} wide>
               <input autoFocus value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} />
             </Field>
-          </FieldGrid>
-        </Card>
+          </Fields>
+        </Panel>
       )}
 
-      <div className="widgets">
-        <Card className="span-6" title={t("Job")}>
+      <div className="ui-grid">
+        <Panel className="ui-col-6" title={t("Job")}>
           <Pairs>
-            <Pair label={t("Identifier")}><span className="mono">{data.id}</span></Pair>
+            <Pair label={t("Identifier")}><span className="ui-mono">{data.id}</span></Pair>
             <Pair label={t("Host")}><Link to={`/hosts/${data.host_id}/overview`}>{host}</Link></Pair>
             <Pair label={t("Campaign")}>
-              {data.campaign_id ? <Link to={`/campaigns/${data.campaign_id}`} className="mono">{data.campaign_id}</Link> : "—"}
+              {data.campaign_id ? <Link to={`/campaigns/${data.campaign_id}`} className="ui-mono">{data.campaign_id}</Link> : "—"}
             </Pair>
             <Pair label={t("Read fan-out")}>
-              {data.fanout_id ? <Link to={`/reads/${data.fanout_id}`} className="mono">{data.fanout_id}</Link> : "—"}
+              {data.fanout_id ? <Link to={`/reads/${data.fanout_id}`} className="ui-mono">{data.fanout_id}</Link> : "—"}
             </Pair>
             <Pair label={t("State")}>
               <JobState state={data.state} />
               {data.state === "queued" && waitedBudget(data.wait_reason) && (
-                <> <span className="badge warn">{t("waiting for budget {key}", { key: waitedBudget(data.wait_reason) })}</span></>
+                <> <span className="ui-pill ui-warn">{t("waiting for budget {key}", { key: waitedBudget(data.wait_reason) })}</span></>
               )}
-              {data.wait_reason && !waitedBudget(data.wait_reason) && <span className="source"> · {data.wait_reason}</span>}
+              {data.wait_reason && !waitedBudget(data.wait_reason) && <span className="ui-note"> · {data.wait_reason}</span>}
               {report && (
                 <ProgressBar percent={report.percent} step={report.step} total={report.total} caption={report.message} />
               )}
             </Pair>
             <Pair label={t("Requested by")}>{data.created_by}</Pair>
-            <Pair label={t("Created")}><Time value={data.created_at} /> <span className="source">{absoluteTime(data.created_at)}</span></Pair>
+            <Pair label={t("Created")}><Time value={data.created_at} /> <span className="ui-note">{absoluteTime(data.created_at)}</span></Pair>
             <Pair label={t("Expires")}><Time value={data.expires_at} /></Pair>
-            <Pair label={t("Finished")}>{data.finished_at ? <><Time value={data.finished_at} /> <span className="source">{absoluteTime(data.finished_at)}</span></> : "—"}</Pair>
+            <Pair label={t("Finished")}>{data.finished_at ? <><Time value={data.finished_at} /> <span className="ui-note">{absoluteTime(data.finished_at)}</span></> : "—"}</Pair>
             <Pair label={t("Timeout")}>{data.timeout_seconds ? t("{n} s", { n: data.timeout_seconds }) : "—"}</Pair>
             <Pair label={t("Budget class")}>{data.budget_class || "—"}</Pair>
           </Pairs>
-        </Card>
+        </Panel>
 
-        <Card className="span-6" title={t("Decision and result")}>
+        <Panel className="ui-col-6" title={t("Decision and result")}>
           <Pairs>
             <Pair label={t("Approvals")}>
               {data.required_approvals > 1
@@ -344,16 +344,16 @@ export function JobPage() {
                 a job standing in cancel_requested says whom it waits for. */}
             {data.cancel_requested_at && (
               <Pair label={t("Cancel requested")}>
-                <Time value={data.cancel_requested_at} /> <span className="source">{absoluteTime(data.cancel_requested_at)}</span>
-                {!data.cancel_ack_at && <> · <span className="badge warn">{t("waiting for the host to answer")}</span></>}
+                <Time value={data.cancel_requested_at} /> <span className="ui-note">{absoluteTime(data.cancel_requested_at)}</span>
+                {!data.cancel_ack_at && <> · <span className="ui-pill ui-warn">{t("waiting for the host to answer")}</span></>}
               </Pair>
             )}
             {data.cancel_ack_at && (
               <Pair label={t("Cancel acknowledged")}>
-                <Time value={data.cancel_ack_at} /> <span className="source">{absoluteTime(data.cancel_ack_at)}</span>
-                {" · "}<span className="mono">{data.cancel_outcome}</span>
-                {data.cancel_phase && <span className="source"> · {data.cancel_phase}</span>}
-                {cancelAckLine(data, t) && <div className="source">{cancelAckLine(data, t)}</div>}
+                <Time value={data.cancel_ack_at} /> <span className="ui-note">{absoluteTime(data.cancel_ack_at)}</span>
+                {" · "}<span className="ui-mono">{data.cancel_outcome}</span>
+                {data.cancel_phase && <span className="ui-note"> · {data.cancel_phase}</span>}
+                {cancelAckLine(data, t) && <div className="ui-note">{cancelAckLine(data, t)}</div>}
               </Pair>
             )}
             <Pair label={t("Result")}>{data.result_status || "—"}</Pair>
@@ -365,27 +365,27 @@ export function JobPage() {
                 corner of the output. */}
             <Pair label={t("Verification")}>
               {verifications.length === 0 ? (
-                <span className="source">{t("The host reported no verification for this operation.")}</span>
+                <span className="ui-note">{t("The host reported no verification for this operation.")}</span>
               ) : (
                 verifications.map(({ attempt, verification }) => (
                   <div key={attempt}>
-                    <span className={verification.verified ? "badge ok" : "badge error"}>
+                    <span className={verification.verified ? "ui-pill ui-ok" : "ui-pill ui-error"}>
                       {verification.verified ? t("observed") : t("not observed")}
                     </span>{" "}
-                    <span className="mono">{verificationLine(verification, t)}</span>
+                    <span className="ui-mono">{verificationLine(verification, t)}</span>
                   </div>
                 ))
               )}
               {appliedUnverifiedNote(data, t) && (
-                <div className="warning">{appliedUnverifiedNote(data, t)}</div>
+                <div className="ui-banner">{appliedUnverifiedNote(data, t)}</div>
               )}
             </Pair>
-            <Pair label={t("Payload hash")}><span className="mono" style={{ wordBreak: "break-all" }}>{data.payload_hash}</span></Pair>
+            <Pair label={t("Payload hash")}><span className="ui-mono" style={{ wordBreak: "break-all" }}>{data.payload_hash}</span></Pair>
           </Pairs>
-        </Card>
+        </Panel>
 
-        <Card
-          className="span-12"
+        <Panel
+          className="ui-col-12"
           title={t("Approval history")}
           description={t("Every consent recorded for this job, in the order it was given.")}
           flush
@@ -400,16 +400,16 @@ export function JobPage() {
                   <tr key={`${approval.approver}:${approval.approved_at}`}>
                     <td>{approval.approver}</td>
                     <td>{approval.reason || "—"}</td>
-                    <td><Time value={approval.approved_at} /> <span className="source">{absoluteTime(approval.approved_at)}</span></td>
+                    <td><Time value={approval.approved_at} /> <span className="ui-note">{absoluteTime(approval.approved_at)}</span></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-        </Card>
+        </Panel>
 
-        <Card
-          className="span-6"
+        <Panel
+          className="ui-col-6"
           title={t("Payload")}
           description={t("The order as the host receives it; the hash above is computed over exactly this.")}
           actions={<DownloadButton text={prettyJSON(data.payload)} filename={`job-${data.id.slice(0, 8)}-payload.json`} />}
@@ -421,23 +421,23 @@ export function JobPage() {
             <>
               <Pairs>
                 {fields.map((pair) => (
-                  <Pair key={pair.path} label={pair.path}><span className="mono">{pair.value}</span></Pair>
+                  <Pair key={pair.path} label={pair.path}><span className="ui-mono">{pair.value}</span></Pair>
                 ))}
               </Pairs>
-              <div className="source">{t("As JSON, the text the hash covers")}</div>
+              <div className="ui-note">{t("As JSON, the text the hash covers")}</div>
             </>
           )}
           <pre>{prettyJSON(data.payload) || "—"}</pre>
           {hasContent(data.preconditions) && (
             <>
-              <div className="source">{t("Preconditions")}</div>
+              <div className="ui-note">{t("Preconditions")}</div>
               <pre>{prettyJSON(data.preconditions)}</pre>
             </>
           )}
-        </Card>
+        </Panel>
 
-        <Card
-          className="span-6"
+        <Panel
+          className="ui-col-6"
           title={t("Plan")}
           description={plan ? t("What the host computed it would change; the hash names this plan.") : t("The host has computed no plan for this job.")}
           actions={plan ? <DownloadButton text={prettyJSON(planned?.detail)} filename={`job-${data.id.slice(0, 8)}-plan.json`} /> : undefined}
@@ -445,7 +445,7 @@ export function JobPage() {
           {plan ? (
             <>
               <Pairs>
-                <Pair label={t("Plan hash")}><span className="mono">{planHash || "—"}</span></Pair>
+                <Pair label={t("Plan hash")}><span className="ui-mono">{planHash || "—"}</span></Pair>
                 {/* A package plan reads as a table of packages below; the
                     summary line of a host plan names its action and change. */}
                 <Pair label={t("Summary")}>
@@ -460,10 +460,10 @@ export function JobPage() {
           ) : (
             <Empty>{t("No plan.")}</Empty>
           )}
-        </Card>
+        </Panel>
 
-        <Card
-          className="span-12"
+        <Panel
+          className="ui-col-12"
           title={t("Attempts")}
           description={t("Every attempt at carrying out the job, with its output in full.")}
         >
@@ -475,21 +475,21 @@ export function JobPage() {
             <Empty>{t("No execution attempts.")}</Empty>
           ) : (
             attempts.data.items.map((attempt) => (
-              <div key={attempt.id} className="attempt">
+              <div key={attempt.id} className="ui-group">
                 <AttemptHead attempt={attempt} />
-                <div className="source">
+                <div className="ui-note">
                   {attempt.dispatched_at && <>{t("dispatched")} <Time value={attempt.dispatched_at} /></>}
                   {attempt.accepted_at && <> · {t("accepted")} <Time value={attempt.accepted_at} /></>}
                   {attempt.started_at && <> · {t("started")} <Time value={attempt.started_at} /></>}
                   {attempt.finished_at && <> · {t("finished")} <Time value={attempt.finished_at} /></>}
                   {(attempt as AttemptDetail).output_truncated && (
-                    <> · <span className="badge warn">{t("output cut by the host at its limit")}</span></>
+                    <> · <span className="ui-pill ui-warn">{t("output cut by the host at its limit")}</span></>
                   )}
                 </div>
                 {/* The reading the host made after this attempt's change,
                     next to the attempt that made it. */}
                 {(attempt as AttemptDetail).verification && (
-                  <div className="source">
+                  <div className="ui-note">
                     {t("verification")}:{" "}
                     {verificationLine((attempt as AttemptDetail).verification as Verification, t)}
                   </div>
@@ -503,7 +503,7 @@ export function JobPage() {
               </div>
             ))
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   );
@@ -518,10 +518,10 @@ function Output({ label, text, filename }: { label: string; text: string; filena
   const long = text.length > OUTPUT_PREVIEW;
   return (
     <div>
-      <div className="attempt-head">
-        <span className="source">{label} · {t("{n} characters", { n: text.length })}</span>
+      <div className="ui-group-head">
+        <span className="ui-note">{label} · {t("{n} characters", { n: text.length })}</span>
         {long && (
-          <button type="button" className="secondary" onClick={() => setAll(!all)}>
+          <button type="button" className="ui-btn-secondary" onClick={() => setAll(!all)}>
             {all ? t("Show the first {n} characters", { n: OUTPUT_PREVIEW }) : t("Show all")}
           </button>
         )}
@@ -552,7 +552,7 @@ function DownloadButton({ text, filename }: { text: string; filename: string }) 
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   return (
-    <button type="button" className="secondary" onClick={save} disabled={!text}>
+    <button type="button" className="ui-btn-secondary" onClick={save} disabled={!text}>
       {t("Download")}
     </button>
   );

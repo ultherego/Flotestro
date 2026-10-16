@@ -4,12 +4,17 @@ import {
 } from "react";
 import { Link } from "react-router-dom";
 import { useT } from "../i18n";
+import { toneClass } from "../ui/kit";
 
 /**
  * The notifications of the panel.
  */
 
 export type ToastKind = "success" | "error" | "info";
+
+/* What each kind is, as a state: a success is the healthy colour, and the
+   name of the kind is not itself a class. */
+const TOAST_TONE: Record<ToastKind, string> = { success: "ok", error: "error", info: "info" };
 
 export type ToastLink = { to: string; label: string };
 
@@ -115,7 +120,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           hand when the first toast lands: a live region that appears with
           its first content is often not announced. The cards carry no
           live role of their own: a region inside a region is read twice. */}
-      <div className="toasts" role="region" aria-live="polite" aria-label={t("Notifications")}>
+      <div className="ui-toasts" role="region" aria-live="polite" aria-label={t("Notifications")}>
         {items.map((item) => (
           <ToastCard
             key={item.id}
@@ -149,7 +154,7 @@ function ToastCard({ item, onDismiss, onHold, onRelease }: {
   // operator's hand; it resumes when they leave.
   return (
     <div
-      className={`toast ${item.kind}`}
+      className={`ui-toast ${toneClass(TOAST_TONE[item.kind])}`}
       data-testid="toast"
       onKeyDown={onKeyDown}
       onMouseEnter={onHold}
@@ -157,16 +162,16 @@ function ToastCard({ item, onDismiss, onHold, onRelease }: {
       onFocus={onHold}
       onBlur={onRelease}
     >
-      <div className="toast-text">
+      <div className="ui-toast-text">
         {item.text}
         {item.link && (
           <>
             {" "}
-            <Link className="toast-link" to={item.link.to} onClick={onDismiss}>{item.link.label}</Link>
+            <Link className="ui-toast-link" to={item.link.to} onClick={onDismiss}>{item.link.label}</Link>
           </>
         )}
       </div>
-      <button type="button" className="toast-dismiss" onClick={onDismiss} aria-label={t("Dismiss")} title={t("Dismiss")}>
+      <button type="button" className="ui-toast-dismiss" onClick={onDismiss} aria-label={t("Dismiss")} title={t("Dismiss")}>
         ×
       </button>
     </div>

@@ -2,8 +2,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../lib/api";
 import type { AccessSimulation, DirectoryChange, DirectoryGroup, HBACRule, IdentityStatus, SudoRule } from "../lib/types";
-import { ErrorBox, Empty } from "../components/ui";
-import { Actions, Card, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
+import { ErrorBox } from "../components/ui";
+import { Actions, Empty, Field, Fields, PageHead, Panel, Toolbar } from "../ui/kit";
 import { useT } from "../i18n";
 import { Forbidden, ListField, PlanImpact, ReasonField, names, useDirectoryChange } from "./directory/shared";
 import { Users } from "./directory/Users";
@@ -46,7 +46,7 @@ export function Directory() {
 
   return (
     <>
-      <PageHeader
+      <PageHead
         title={t("Identity directory")}
         description={status.data?.configured === false
           ? t("No directory connector is configured.")
@@ -58,9 +58,9 @@ export function Directory() {
         help={<p>{t("What the identity directory holds about the fleet, as the panel reads it. The panel does not own these records: it reads them, and a change made here is a change asked of the directory.")}</p>}
       />
 
-      <div className="tabs">
+      <div className="ui-tabs">
         {TABS.map((key) => (
-          <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>
+          <button key={key} className={tab === key ? "ui-active" : ""} onClick={() => setTab(key)}>
             {t(TAB_TITLES[key])}
           </button>
         ))}
@@ -102,7 +102,7 @@ function Groups() {
   return (
     <>
       {editing && (
-        <Card
+        <Panel
           title={t("Members of the group {name}", { name: editing.name })}
           description={t("The plan shows the resulting membership and the hosts and sudo rules the group leads to; the moved users lose their panel sessions and log in with the new scope.")}
           footer={
@@ -114,47 +114,47 @@ function Groups() {
                       }, { onSuccess: () => setEditing(null) })}>
                 {t("Plan membership change")}
               </button>
-              <button className="secondary" onClick={() => setEditing(null)}>{t("Close")}</button>
-              {message && <p className="page-error">{message}</p>}
+              <button className="ui-btn-secondary" onClick={() => setEditing(null)}>{t("Close")}</button>
+              {message && <p className="ui-errorbox">{message}</p>}
             </Actions>
           }
         >
-          <p className="source">
+          <p className="ui-note">
             <strong>{t("Current members ({n})", { n: (editing.members ?? []).length })}:</strong>{" "}
-            <span className="mono">{(editing.members ?? []).join(", ") || "—"}</span>
+            <span className="ui-mono">{(editing.members ?? []).join(", ") || "—"}</span>
           </p>
-          <FieldGrid>
+          <Fields>
             <ListField label={t("Add users")} value={add} onChange={setAdd} placeholder="alice, bob" />
             <ListField label={t("Remove users")} value={remove} onChange={setRemove} placeholder="carol" />
             <ReasonField value={reason} onChange={setReason} />
-          </FieldGrid>
-        </Card>
+          </Fields>
+        </Panel>
       )}
 
       {change && <PlanImpact change={change} />}
 
-      <Card flush>
+      <Panel flush>
         {!data?.items.length ? (
           <Empty>{t("No groups.")}</Empty>
         ) : (
           <table>
-            <thead><tr><th scope="col">{t("Group")}</th><th scope="col" className="num">GID</th><th scope="col">{t("Description")}</th><th scope="col">{t("Members")}</th><th scope="col"></th></tr></thead>
+            <thead><tr><th scope="col">{t("Group")}</th><th scope="col" className="ui-numeric">GID</th><th scope="col">{t("Description")}</th><th scope="col">{t("Members")}</th><th scope="col"></th></tr></thead>
             <tbody>
               {data.items.map((group) => (
                 <tr key={group.name}>
-                  <td className="mono">{group.name}</td>
-                  <td className="num">{group.gid_number || "—"}</td>
+                  <td className="ui-mono">{group.name}</td>
+                  <td className="ui-numeric">{group.gid_number || "—"}</td>
                   <td>{group.description || "—"}</td>
                   <td>{(group.members ?? []).join(", ") || "—"}</td>
-                  <td className="num">
-                    <button className="secondary" onClick={() => { setEditing(group); setAdd(""); setRemove(""); }}>{t("Edit members")}</button>
+                  <td className="ui-numeric">
+                    <button className="ui-btn-secondary" onClick={() => { setEditing(group); setAdd(""); setRemove(""); }}>{t("Edit members")}</button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-      </Card>
+      </Panel>
     </>
   );
 }
@@ -207,7 +207,7 @@ function HBACRules() {
 
   return (
     <>
-      <p className="subtitle">
+      <p className="ui-note">
         {t("An HBAC rule says who may enter which hosts through which services. A rule is declared as a whole and the directory is brought to it; the plan shows the hosts and users it reaches and the diff against the rule of the same name before a second person approves.")}
       </p>
 
@@ -216,7 +216,7 @@ function HBACRules() {
       </Toolbar>
 
       {form && (
-        <Card
+        <Panel
           title={editing ? t("Edit rule {name}", { name: form.name }) : t("New HBAC rule")}
           footer={
             <Actions>
@@ -225,17 +225,17 @@ function HBACRules() {
                 {t("Plan rule")}
               </button>
               {editing && (
-                <button className="secondary" disabled={reason.trim().length < 8 || mutation.isPending}
+                <button className="ui-btn-secondary" disabled={reason.trim().length < 8 || mutation.isPending}
                         onClick={() => mutation.mutate({ action: "identity.hbac.rule.remove", reason, payload: { hbac_rule: { name: form.name } } })}>
                   {t("Plan removal")}
                 </button>
               )}
-              <button className="secondary" onClick={() => setForm(null)}>{t("Close")}</button>
-              {message && <p className="page-error">{message}</p>}
+              <button className="ui-btn-secondary" onClick={() => setForm(null)}>{t("Close")}</button>
+              {message && <p className="ui-errorbox">{message}</p>}
             </Actions>
           }
         >
-          <FieldGrid>
+          <Fields>
             <Field label={t("Name")}>
               <input value={form.name} onChange={(e) => set("name", e.target.value)} disabled={editing}
                      placeholder="ops-ssh" />
@@ -255,35 +255,35 @@ function HBACRules() {
                        placeholder="sshd, sudo" disabled={form.all_services} />
             <ListField label={t("Service groups")} value={form.service_groups} onChange={(v) => set("service_groups", v)}
                        placeholder="Sudo" disabled={form.all_services} />
-          </FieldGrid>
-          <label className="toggle">
+          </Fields>
+          <label className="ui-check">
             <input type="checkbox" checked={form.enabled} onChange={(e) => set("enabled", e.target.checked)} />
             {t("Enabled — a disabled rule is a draft and may be incomplete")}
           </label>
-          <label className="toggle">
+          <label className="ui-check">
             <input type="checkbox" checked={form.all_users} onChange={(e) => set("all_users", e.target.checked)} />
             {t("Every user, instead of the listed users and groups")}
           </label>
-          <label className="toggle">
+          <label className="ui-check">
             <input type="checkbox" checked={form.all_hosts} onChange={(e) => set("all_hosts", e.target.checked)} />
             {t("Every host, instead of the listed hosts and host groups")}
           </label>
-          <label className="toggle">
+          <label className="ui-check">
             <input type="checkbox" checked={form.all_services} onChange={(e) => set("all_services", e.target.checked)} />
             {t("Every service, instead of the listed services")}
           </label>
-          <FieldGrid>
+          <Fields>
             <Field label={t("Reason")} wide hint={t("A change of access is recorded with a reason and fresh authentication.")}>
               <input value={reason} onChange={(e) => setReason(e.target.value)}
                      placeholder={t("why this rule changes (min. 8 characters)")} />
             </Field>
-          </FieldGrid>
-        </Card>
+          </Fields>
+        </Panel>
       )}
 
       {change && <PlanImpact change={change} />}
 
-      <Card flush>
+      <Panel flush>
         {!data?.items.length ? (
           <Empty>{t("No rules.")}</Empty>
         ) : (
@@ -299,18 +299,18 @@ function HBACRules() {
                   <td>{rule.all_services ? t("every service") : [...(rule.services ?? []), ...(rule.service_groups ?? [])].join(", ") || "—"}</td>
                   <td>
                     {rule.allows_everything
-                      ? <span className="badge error">{t("covers the whole fleet")}</span>
-                      : <span className="badge">{t("narrowed")}</span>}
+                      ? <span className="ui-pill ui-error">{t("covers the whole fleet")}</span>
+                      : <span className="ui-pill">{t("narrowed")}</span>}
                   </td>
-                  <td className="num">
-                    <button className="secondary" onClick={() => { setForm(hbacFormOf(rule)); setEditing(true); }}>{t("Edit")}</button>
+                  <td className="ui-numeric">
+                    <button className="ui-btn-secondary" onClick={() => { setForm(hbacFormOf(rule)); setEditing(true); }}>{t("Edit")}</button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-      </Card>
+      </Panel>
 
       <SimulateAccess />
     </>
@@ -332,18 +332,18 @@ function SimulateAccess() {
   const result = simulate.data;
 
   return (
-    <Card
+    <Panel
       title={t("Simulate access")}
       description={t("Ask the directory whether a user may use a service on a host. The answer is the directory's verdict, not a guess of the panel.")}
       footer={
         <Actions>
           <button disabled={!user || !host || simulate.isPending} onClick={() => simulate.mutate()}>{t("Simulate")}</button>
-          {simulate.error && <p className="page-error">{simulate.error instanceof Error ? simulate.error.message : String(simulate.error)}</p>}
+          {simulate.error && <p className="ui-errorbox">{simulate.error instanceof Error ? simulate.error.message : String(simulate.error)}</p>}
           {result && (
-            <p className="source">
+            <p className="ui-note">
               {result.allowed
-                ? <span className="badge ok">{t("allowed")}</span>
-                : <span className="badge error">{t("denied")}</span>}
+                ? <span className="ui-pill ui-ok">{t("allowed")}</span>
+                : <span className="ui-pill ui-error">{t("denied")}</span>}
               {" "}
               {t("matched: {rules}", { rules: result.matched.join(", ") || "—" })}
               {" · "}
@@ -355,7 +355,7 @@ function SimulateAccess() {
         </Actions>
       }
     >
-      <FieldGrid>
+      <Fields>
         <Field label={t("User")}>
           <input value={user} onChange={(e) => setUser(e.target.value)} placeholder="alice" />
         </Field>
@@ -365,8 +365,8 @@ function SimulateAccess() {
         <Field label={t("Service")}>
           <input value={service} onChange={(e) => setService(e.target.value)} placeholder="sshd" />
         </Field>
-      </FieldGrid>
-    </Card>
+      </Fields>
+    </Panel>
   );
 }
 
@@ -425,7 +425,7 @@ function SudoRules() {
 
   return (
     <>
-      <p className="subtitle">
+      <p className="ui-note">
         {t("A sudo rule says who may run which commands as whom on which hosts. Every command, no password (!authenticate) and running as root are named in the plan one by one, so the person approving reads what the rule grants rather than a single word.")}
       </p>
 
@@ -434,7 +434,7 @@ function SudoRules() {
       </Toolbar>
 
       {form && (
-        <Card
+        <Panel
           title={editing ? t("Edit rule {name}", { name: form.name }) : t("New sudo rule")}
           footer={
             <Actions>
@@ -443,17 +443,17 @@ function SudoRules() {
                 {t("Plan rule")}
               </button>
               {editing && (
-                <button className="secondary" disabled={reason.trim().length < 8 || mutation.isPending}
+                <button className="ui-btn-secondary" disabled={reason.trim().length < 8 || mutation.isPending}
                         onClick={() => mutation.mutate({ action: "identity.sudo.rule.remove", reason, payload: { sudo_rule: { name: form.name } } })}>
                   {t("Plan removal")}
                 </button>
               )}
-              <button className="secondary" onClick={() => setForm(null)}>{t("Close")}</button>
-              {message && <p className="page-error">{message}</p>}
+              <button className="ui-btn-secondary" onClick={() => setForm(null)}>{t("Close")}</button>
+              {message && <p className="ui-errorbox">{message}</p>}
             </Actions>
           }
         >
-          <FieldGrid>
+          <Fields>
             <Field label={t("Name")}>
               <input value={form.name} onChange={(e) => set("name", e.target.value)} disabled={editing}
                      placeholder="ops-restart" />
@@ -479,39 +479,39 @@ function SudoRules() {
                        placeholder="wheel" />
             <ListField label={t("Options")} value={form.options} onChange={(v) => set("options", v)}
                        placeholder="!authenticate, !requiretty" />
-          </FieldGrid>
-          <label className="toggle">
+          </Fields>
+          <label className="ui-check">
             <input type="checkbox" checked={form.enabled} onChange={(e) => set("enabled", e.target.checked)} />
             {t("Enabled — a disabled rule is a draft and may be incomplete")}
           </label>
-          <label className="toggle">
+          <label className="ui-check">
             <input type="checkbox" checked={form.all_users} onChange={(e) => set("all_users", e.target.checked)} />
             {t("Every user, instead of the listed users and groups")}
           </label>
-          <label className="toggle">
+          <label className="ui-check">
             <input type="checkbox" checked={form.all_hosts} onChange={(e) => set("all_hosts", e.target.checked)} />
             {t("Every host, instead of the listed hosts and host groups")}
           </label>
-          <label className="toggle">
+          <label className="ui-check">
             <input type="checkbox" checked={form.all_commands} onChange={(e) => set("all_commands", e.target.checked)} />
             {t("Every command — together with root this is full root access")}
           </label>
-          <label className="toggle">
+          <label className="ui-check">
             <input type="checkbox" checked={form.run_as_any_user} onChange={(e) => set("run_as_any_user", e.target.checked)} />
             {t("Run as any user, instead of the listed run-as users")}
           </label>
-          <FieldGrid>
+          <Fields>
             <Field label={t("Reason")} wide hint={t("A change of access is recorded with a reason and fresh authentication.")}>
               <input value={reason} onChange={(e) => setReason(e.target.value)}
                      placeholder={t("why this rule changes (min. 8 characters)")} />
             </Field>
-          </FieldGrid>
-        </Card>
+          </Fields>
+        </Panel>
       )}
 
       {change && <PlanImpact change={change} />}
 
-      <Card flush>
+      <Panel flush>
         {!data?.items.length ? (
           <Empty>{t("No sudo rules.")}</Empty>
         ) : (
@@ -524,21 +524,21 @@ function SudoRules() {
                   <td>{rule.enabled ? t("yes") : t("no")}</td>
                   <td>{rule.all_users ? t("every user") : [...(rule.users ?? []), ...(rule.user_groups ?? [])].join(", ") || "—"}</td>
                   <td>{rule.all_hosts ? t("every host") : [...(rule.hosts ?? []), ...(rule.host_groups ?? [])].join(", ") || "—"}</td>
-                  <td className="mono">{rule.all_commands ? t("every command") : [...(rule.commands ?? []), ...(rule.command_groups ?? [])].join(", ") || "—"}</td>
+                  <td className="ui-mono">{rule.all_commands ? t("every command") : [...(rule.commands ?? []), ...(rule.command_groups ?? [])].join(", ") || "—"}</td>
                   <td>
                     {rule.critical
-                      ? <span className="badge error" title={(rule.critical_reasons ?? []).join("; ")}>{t("critical")}</span>
+                      ? <span className="ui-pill ui-error" title={(rule.critical_reasons ?? []).join("; ")}>{t("critical")}</span>
                       : "—"}
                   </td>
-                  <td className="num">
-                    <button className="secondary" onClick={() => { setForm(sudoFormOf(rule)); setEditing(true); }}>{t("Edit")}</button>
+                  <td className="ui-numeric">
+                    <button className="ui-btn-secondary" onClick={() => { setForm(sudoFormOf(rule)); setEditing(true); }}>{t("Edit")}</button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-      </Card>
+      </Panel>
     </>
   );
 }
@@ -608,7 +608,7 @@ function DirectoryDNS() {
 
   return (
     <>
-      <p className="subtitle">
+      <p className="ui-note">
         {t("Zones and records live in the directory, not in anyone's /etc/hosts. A record here answers for the whole network, so it goes the same way as a directory account: plan first, then approval, then execution — and the reverse record is a separate, visible step of that plan.")}
       </p>
 
@@ -623,21 +623,21 @@ function DirectoryDNS() {
         </select>
       </Toolbar>
 
-      <Card
+      <Panel
         footer={
           <Actions>
             <button disabled={!selected || !name || !value} onClick={() => request.mutate(record(true))}>
               {t("Plan record")}
             </button>
-            <button className="secondary" disabled={!selected || !name || !value}
+            <button className="ui-btn-secondary" disabled={!selected || !name || !value}
                     onClick={() => request.mutate(record(false))}>
               {t("Plan removal")}
             </button>
-            {message && <p className="source">{message}</p>}
+            {message && <p className="ui-note">{message}</p>}
           </Actions>
         }
       >
-        <FieldGrid>
+        <Fields>
           <Field label={t("Name")}>
             <input value={name} onChange={(e) => setName(e.target.value)}
                    placeholder={t("name (web, @, _ldap._tcp)")} />
@@ -657,36 +657,36 @@ function DirectoryDNS() {
             <input value={ttl} onChange={(e) => setTtl(e.target.value)}
                    placeholder="TTL" />
           </Field>
-        </FieldGrid>
+        </Fields>
         {(type === "A" || type === "AAAA") && (
-          <label className="toggle">
+          <label className="ui-check">
             <input type="checkbox" checked={reverse} onChange={(e) => setReverse(e.target.checked)} />
             {t("Also write the reverse (PTR) record — forgetting it is the usual mistake")}
           </label>
         )}
-      </Card>
+      </Panel>
 
-      <Card flush>
+      <Panel flush>
         {records.error ? (
           <ErrorBox error={records.error} />
         ) : !(records.data?.items ?? []).length ? (
           <Empty>{t("This zone has no records the panel can read.")}</Empty>
         ) : (
           <table>
-            <thead><tr><th scope="col">{t("Name")}</th><th scope="col">{t("Type")}</th><th scope="col">{t("Value")}</th><th scope="col" className="num">TTL</th></tr></thead>
+            <thead><tr><th scope="col">{t("Name")}</th><th scope="col">{t("Type")}</th><th scope="col">{t("Value")}</th><th scope="col" className="ui-numeric">TTL</th></tr></thead>
             <tbody>
               {(records.data?.items ?? []).map((item, index) => (
                 <tr key={`${item.name}-${item.type}-${index}`}>
-                  <td className="mono">{item.name}</td>
+                  <td className="ui-mono">{item.name}</td>
                   <td>{item.type}</td>
-                  <td className="source mono">{item.values.join(", ")}</td>
-                  <td className="num">{item.ttl || "—"}</td>
+                  <td className="ui-note ui-mono">{item.values.join(", ")}</td>
+                  <td className="ui-numeric">{item.ttl || "—"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-      </Card>
+      </Panel>
     </>
   );
 }

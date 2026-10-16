@@ -81,7 +81,7 @@ const PATHS: Record<IconName, string> = {
 export function Icon({ name, className }: { name: IconName; className?: string }) {
   return (
     <svg
-      className={className ? `icon ${className}` : "icon"}
+      className={className ? `ui-icon ${className}` : "ui-icon"}
       width="16"
       height="16"
       viewBox="0 0 24 24"

@@ -27,7 +27,7 @@ describe("a measurement", () => {
   it("colours the figure for a state, and never boxes the tile", () => {
     render(<Stat label="Disk" value={94} unit="%" tone="error" />);
     const tile = screen.getByTestId("stat-Disk");
-    expect(tile.className).toContain("ui-stat-error");
+    expect(tile.className).toContain("ui-error");
     // A row of tiles with two of them framed in red stops being a row, so
     // the state is on the figure: the class is on the tile and the
     // stylesheet paints the value, not a border.

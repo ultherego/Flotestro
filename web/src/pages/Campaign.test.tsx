@@ -261,7 +261,7 @@ describe("the campaign screen", () => {
     // and two failures, which is what makes the line red.
     await waitFor(() => expect(screen.getByTestId("verdict")).toHaveTextContent("8 of 20 hosts done, 2 failed"));
     const verdict = screen.getByTestId("verdict");
-    expect(verdict.className).toContain("error");
+    expect(verdict.className).toContain("ui-error");
     expect(verdict).toHaveTextContent("requested by jkowalski");
     expect(verdict).toHaveTextContent("approved by anowak");
   });
@@ -271,7 +271,7 @@ describe("the campaign screen", () => {
     // The approval record is fetched only once the campaign says somebody
     // approved, so the wait is for that tile to arrive.
     await waitFor(() => expect(screen.getByText("Approval record")).toBeInTheDocument());
-    const titles = Array.from(document.querySelectorAll(".part-head")).map((one) => one.textContent ?? "");
+    const titles = Array.from(document.querySelectorAll(".ui-tile-head")).map((one) => one.textContent ?? "");
     for (const name of ["Details", "Approval record", "Waves"]) {
       expect(titles.some((title) => title.includes(name)), name).toBe(true);
     }
@@ -283,7 +283,7 @@ describe("the campaign screen", () => {
   it("says how many waves there were without being asked", async () => {
     draw();
     await waitFor(() => expect(screen.getByText("Waves")).toBeInTheDocument());
-    const waves = screen.getByText("Waves").closest(".part-head") as HTMLElement;
+    const waves = screen.getByText("Waves").closest(".ui-tile-head") as HTMLElement;
     expect(waves.textContent).toContain("2 waves");
   });
 });

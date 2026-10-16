@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Alert, Host, HostMetrics, HostMonitoring, MetricGap, MetricPoint, MetricRange, RuleCatalogue } from "../../lib/types";
 import { absoluteTime, bytes } from "../../lib/format";
-import { ErrorBox, Time, Empty } from "../../components/ui";
+import { ErrorBox, Time } from "../../components/ui";
 import { AreaChart, ChartLegend, Meter, type AreaSeries } from "../../components/widgets";
 import {
   Fact, Facts, Field, Fields, Form, FormActions, FormNote, Message, ModuleHeader, ModulePage, Section, Summary, Table,
@@ -13,6 +13,7 @@ import { capability } from "../../lib/modules";
 import { AlertStateBadge, SeverityBadge, SilenceBadges, duration, metricValue, type ScopedSilence } from "../Monitoring";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 /** The one order this page places; refused, it leaves the page a read of the samples already taken. */
 const MONITORING_READS = ["monitoring.probe.run"];
@@ -229,12 +230,12 @@ export function Monitoring() {
         title={t("Monitoring")}
         description={t("Metrics the agent samples every minute; alerts by the panel's own rules.")}
         actions={
-          <div className="segmented" role="group" aria-label={t("Window")}>
+          <div className="ui-segmented" role="group" aria-label={t("Window")}>
             {RANGES.map((item) => (
               <button
                 key={item.value}
                 type="button"
-                className={item.value === range ? "active" : undefined}
+                className={item.value === range ? "ui-active" : undefined}
                 onClick={() => setRange(item.value)}
               >
                 {t(item.label)}
@@ -244,11 +245,11 @@ export function Monitoring() {
         }
       />
       <ReadOnlyModuleNotice host={host.id} actions={MONITORING_READS} />
-      <p className="hm-freshness">
+      <p className="ui-freshness">
         {series || state ? (
           lastSampleAt
             ? <span>{t("Last sample")} <Time value={lastSampleAt} /></span>
-            : <span className="unread">{t("The agent has not sent a sample yet")}</span>
+            : <span className="ui-warn">{t("The agent has not sent a sample yet")}</span>
         ) : (
           <span>{t("Loading…")}</span>
         )}
@@ -257,18 +258,18 @@ export function Monitoring() {
         {/* A hole in the data and a quiet machine read alike on a chart, so
             the page names the holes and their cause before the charts. */}
         {gaps.length > 0 && (
-          <span className="badge warn" title={explained ? explained.reason : t("The host sent nothing over these stretches.")}>
+          <span className="ui-pill ui-warn" title={explained ? explained.reason : t("The host sent nothing over these stretches.")}>
             {t("{n} gaps in this window", { n: gaps.length })}
           </span>
         )}
         {refusedSamples > 0 && (
-          <span className="badge error" title={refused[0].reason}>
+          <span className="ui-pill ui-error" title={refused[0].reason}>
             {t("{n} samples refused", { n: refusedSamples })}
           </span>
         )}
         {clock && (
           <span
-            className="badge warn"
+            className="ui-pill ui-warn"
             title={t("The panel stamped {n} readings of this host with its own time; the host's clock stood {skew} from the panel's.", {
               n: clock.samples, skew: duration(Math.round(Math.abs(clock.skew_millis) / 1000)),
             })}
@@ -298,7 +299,7 @@ export function Monitoring() {
         <Section
           title={t("CPU")}
           description={t("Busy time across all cores, in percent.")}
-          tools={latest && <span className="hm-mono">{t("now {value}", { value: metricValue("cpu_percent", latest.cpu_percent) })}</span>}
+          tools={latest && <span className="ui-mono">{t("now {value}", { value: metricValue("cpu_percent", latest.cpu_percent) })}</span>}
           span={6}
           flush={blank !== null}
         >
@@ -313,7 +314,7 @@ export function Monitoring() {
         <Section
           title={t("Load")}
           description={t("Load average over 1, 5 and 15 minutes.")}
-          tools={latest && <span className="hm-mono">{`${latest.load1.toFixed(2)} · ${latest.load5.toFixed(2)} · ${latest.load15.toFixed(2)}`}</span>}
+          tools={latest && <span className="ui-mono">{`${latest.load1.toFixed(2)} · ${latest.load5.toFixed(2)} · ${latest.load15.toFixed(2)}`}</span>}
           span={6}
           flush={blank !== null}
         >
@@ -328,7 +329,7 @@ export function Monitoring() {
         <Section
           title={t("Memory")}
           description={t("Used memory against the total, with swap as a second line.")}
-          tools={latest && <span className="hm-mono">{`${bytes(latest.memory_used)} / ${bytes(latest.memory_total)}`}</span>}
+          tools={latest && <span className="ui-mono">{`${bytes(latest.memory_used)} / ${bytes(latest.memory_total)}`}</span>}
           span={6}
           flush={blank !== null}
         >
@@ -367,7 +368,7 @@ export function Monitoring() {
           title={t("Agent")}
           description={t("The agent's own footprint: resident memory, with the helper's while it runs, and CPU as a share of one core.")}
           tools={latest && latest.agent_rss_bytes !== undefined && (
-            <span className="hm-mono">{t("now {value}", { value: bytes(latest.agent_rss_bytes) })}</span>
+            <span className="ui-mono">{t("now {value}", { value: bytes(latest.agent_rss_bytes) })}</span>
           )}
           span={6}
           flush={blank !== null || !agentReported}
@@ -403,7 +404,7 @@ export function Monitoring() {
             <Fact label={t("Helper RSS")}>
               {latest?.helper_rss_bytes !== undefined
                 ? bytes(latest.helper_rss_bytes)
-                : <span className="source">{t("not running, or not measured")}</span>}
+                : <span className="ui-note">{t("not running, or not measured")}</span>}
             </Fact>
           </Facts>
         </Section>
@@ -420,9 +421,9 @@ export function Monitoring() {
                 {(latest.filesystems ?? []).map((fs) => (
                   <tr key={fs.mount}>
                     <td>
-                      <span className="hm-primary hm-mono">{fs.mount}</span>
+                      <span className="ui-name ui-mono">{fs.mount}</span>
                       {fs.inodes_total > 0 && (
-                        <div className="source">{t("inodes {value}", { value: percent((fs.inodes_used / fs.inodes_total) * 100) })}</div>
+                        <div className="ui-note">{t("inodes {value}", { value: percent((fs.inodes_used / fs.inodes_total) * 100) })}</div>
                       )}
                     </td>
                     <td>
@@ -454,12 +455,12 @@ export function Monitoring() {
                 never sent one leaves a hole with none. */}
             <Fact label={t("Refused samples")}>
               {!state ? <Unknown /> : refused.length === 0 ? (
-                <span className="source">{t("none")}</span>
+                <span className="ui-note">{t("none")}</span>
               ) : (
                 <>
                   {refusedSamples}
-                  <div className="source hm-mono">{refused[0].reason}</div>
-                  <div className="source"><Time value={refused[0].last_sample_at} /></div>
+                  <div className="ui-note ui-mono">{refused[0].reason}</div>
+                  <div className="ui-note"><Time value={refused[0].last_sample_at} /></div>
                 </>
               )}
             </Fact>
@@ -487,7 +488,7 @@ export function Monitoring() {
                 </select>
               </Field>
               <Field label={t("When it ends")}>
-                <label className="toggle">
+                <label className="ui-check">
                   <input type="checkbox" checked={sendSummary} onChange={(e) => setSendSummary(e.target.checked)} />
                   <span>{t("send one summary per channel")}</span>
                 </label>
@@ -513,7 +514,7 @@ export function Monitoring() {
             <Table>
               <thead>
                 <tr>
-                  <th scope="col">{t("Rule")}</th><th scope="col">{t("Severity")}</th><th scope="col">{t("State")}</th><th scope="col" className="hm-num">{t("Value")}</th>
+                  <th scope="col">{t("Rule")}</th><th scope="col">{t("Severity")}</th><th scope="col">{t("State")}</th><th scope="col" className="ui-numeric">{t("Value")}</th>
                   <th scope="col">{t("Detail")}</th><th scope="col">{t("Since")}</th><th scope="col"></th>
                 </tr>
               </thead>
@@ -521,22 +522,22 @@ export function Monitoring() {
                 {alerts.map((alert) => (
                   <tr key={alert.id}>
                     <td>
-                      <span className="hm-primary">{alert.rule_name}</span>
-                      <div className="source hm-mono">{alert.metric}</div>
+                      <span className="ui-name">{alert.rule_name}</span>
+                      <div className="ui-note ui-mono">{alert.metric}</div>
                     </td>
                     <td><SeverityBadge severity={alert.severity} /></td>
                     <td><AlertStateBadge state={alert.state} silenced={alert.silenced} /></td>
-                    <td className="hm-num">{metricValue(alert.metric, alert.value)}</td>
-                    <td className="source">{alert.detail}</td>
+                    <td className="ui-numeric">{metricValue(alert.metric, alert.value)}</td>
+                    <td className="ui-note">{alert.detail}</td>
                     <td><Time value={alert.fired_at || alert.started_at} /></td>
                     <td>
                       {/* A resolved alert has nothing left to silence; the
                           button would order a silence for a rule that is quiet. */}
                       {alert.state === "resolved" ? (
-                        <span className="source" title={t("The alert is resolved; there is nothing to silence.")}>—</span>
+                        <span className="ui-note" title={t("The alert is resolved; there is nothing to silence.")}>—</span>
                       ) : (
                         <button
-                          className="secondary"
+                          className="ui-btn-secondary"
                           disabled={alert.silenced || !reasonReady || silence.isPending}
                           title={alert.silenced ? t("Already silenced.") : reasonReady ? undefined : t("Write a reason in the silence form first.")}
                           onClick={() => silence.mutate(alert.rule_id)}
@@ -568,15 +569,15 @@ export function Monitoring() {
                 {silences.map((entry) => (
                   <tr key={entry.id}>
                     <td><Time value={entry.until} /></td>
-                    <td>{entry.rule_name || <span className="source">{t("every rule")}</span>}</td>
+                    <td>{entry.rule_name || <span className="ui-note">{t("every rule")}</span>}</td>
                     <td>
-                      {!entry.host_id && <span className="source">{t("every host")}</span>}{" "}
+                      {!entry.host_id && <span className="ui-note">{t("every host")}</span>}{" "}
                       <SilenceBadges silence={entry} />
                     </td>
                     <td>{entry.reason}</td>
-                    <td className="source">{entry.created_by}</td>
+                    <td className="ui-note">{entry.created_by}</td>
                     <td>
-                      <button className="secondary" disabled={unsilence.isPending} onClick={() => unsilence.mutate(entry)}>
+                      <button className="ui-btn-secondary" disabled={unsilence.isPending} onClick={() => unsilence.mutate(entry)}>
                         {t("End now")}
                       </button>
                     </td>
@@ -688,10 +689,10 @@ function ProbeNow({ host }: { host: Host }) {
           <Facts>
             <Fact label={t("Verdict")}>
               {result.passed
-                ? <span className="badge ok">{t("passed")}</span>
+                ? <span className="ui-pill ui-ok">{t("passed")}</span>
                 : result.reachable
-                  ? <span className="badge warn">{t("answered, but not as expected")}</span>
-                  : <span className="badge error">{t("unreachable")}</span>}
+                  ? <span className="ui-pill ui-warn">{t("answered, but not as expected")}</span>
+                  : <span className="ui-pill ui-error">{t("unreachable")}</span>}
             </Fact>
             <Fact label={t("Duration")}>{result.duration_millis} ms</Fact>
             {result.status_code !== undefined && <Fact label={t("Status")}>{result.status_code}</Fact>}
@@ -701,7 +702,7 @@ function ProbeNow({ host }: { host: Host }) {
                 {t("expires")} <Time value={result.tls_expiry} />{result.tls_issuer ? ` · ${result.tls_issuer}` : ""}
               </Fact>
             )}
-            {result.error && <Fact label={t("Error")} wide><span className="hm-mono">{result.error}</span></Fact>}
+            {result.error && <Fact label={t("Error")} wide><span className="ui-mono">{result.error}</span></Fact>}
             {result.observed_at && <Fact label={t("Observed")}><Time value={result.observed_at} /></Fact>}
           </Facts>
         )}

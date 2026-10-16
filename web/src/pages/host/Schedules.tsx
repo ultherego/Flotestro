@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Capabilities, Job } from "../../lib/types";
-import { Time, Empty } from "../../components/ui";
+import { Time } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import {
   Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader,
@@ -12,6 +12,7 @@ import {
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
+import { Empty } from "../../ui/kit";
 
 export type Schedule = {
   id: string;
@@ -206,7 +207,7 @@ export function Schedules() {
           without an explanation would look like a host with no recurring
           jobs. */}
       {snapshot?.unavailable_reason && (
-        <p className="warning">
+        <p className="ui-banner">
           <span>{t("Schedules could not be read: {reason}", { reason: snapshot.unavailable_reason })}</span>
         </p>
       )}
@@ -264,14 +265,14 @@ export function Schedules() {
             <tbody>
               {entries.map((entry) => (
                 <tr key={`${entry.path ?? ""}:${entry.line ?? 0}:${entry.id}`}>
-                  <td className="hm-mono hm-primary">{entry.id}</td>
+                  <td className="ui-mono ui-name">{entry.id}</td>
                   <td>{entry.kind}</td>
                   {/* The entry's ownership decides what the panel may do with it. */}
                   <td>
                     {entry.source === "managed" ? (
                       "Flotestro"
                     ) : (
-                      <span className="badge unknown" title={entry.path}>
+                      <span className="ui-pill ui-unknown" title={entry.path}>
                         {t("host admin")}
                       </span>
                     )}
@@ -279,34 +280,34 @@ export function Schedules() {
                   {/* A timer the panel wrote shows both: the expression the
                       operator typed and what systemd was told, which are
                       the same schedule in two languages. */}
-                  <td className="hm-mono">
-                    {entry.expression || <span className="badge unknown">{t("event-based")}</span>}
+                  <td className="ui-mono">
+                    {entry.expression || <span className="ui-pill ui-unknown">{t("event-based")}</span>}
                     {entry.calendar && entry.calendar !== entry.expression && (
-                      <span className="source" title={t("The calendar expression systemd runs it by")}>
+                      <span className="ui-note" title={t("The calendar expression systemd runs it by")}>
                         {" "}· {entry.calendar}
                       </span>
                     )}
-                    {entry.timezone && <span className="source"> · {entry.timezone}</span>}
+                    {entry.timezone && <span className="ui-note"> · {entry.timezone}</span>}
                   </td>
                   {/* The next run, and the two after it: the rhythm of the
                       entry is read from three dates, not from one. */}
                   <td>
                     {entry.next_run ? <Time value={entry.next_run} /> : "—"}
                     {(entry.next_runs ?? []).length > 1 && (
-                      <span className="source" title={t("The following runs, in the host zone")}>
+                      <span className="ui-note" title={t("The following runs, in the host zone")}>
                         {" "}· {t("then")} {(entry.next_runs ?? []).slice(1).map((run) => hostClock(run)).join(", ")}
                       </span>
                     )}
                   </td>
                   {/* A pre-existing entry is a shell line, an owned one - an
                       argument list. We show what the host will really run. */}
-                  <td className="hm-mono" title={command(entry)}>{command(entry).slice(0, 50)}</td>
-                  <td>{entry.enabled ? <span className="badge ok">{t("enabled")}</span> : <span className="badge">{t("disabled")}</span>}</td>
+                  <td className="ui-mono" title={command(entry)}>{command(entry).slice(0, 50)}</td>
+                  <td>{entry.enabled ? <span className="ui-pill ui-ok">{t("enabled")}</span> : <span className="ui-pill">{t("disabled")}</span>}</td>
                   <td>
                     {/* Every button stands behind the server's preview of
                         what this operator may order on this host: a viewer
                         sees none of them. */}
-                    <div className="operations">
+                    <div className="ui-actions">
                       <ActionGuard action="schedule.run_now" host={host.id}>
                         <button
                           onClick={() =>
@@ -332,7 +333,7 @@ export function Schedules() {
                           is not stopped by a separate confirmation. */}
                       <ActionGuard action="schedule.disable" host={host.id}>
                         <button
-                          className="secondary"
+                          className="ui-btn-secondary"
                           onClick={() =>
                             request.mutate({
                               action: "schedule.disable",
@@ -346,7 +347,7 @@ export function Schedules() {
                       </ActionGuard>
                       <ActionGuard action="schedule.remove" host={host.id}>
                         <button
-                          className="hm-danger"
+                          className="ui-btn-danger"
                           onClick={() =>
                             setIntent({
                               action: "schedule.remove",
@@ -601,7 +602,7 @@ function NewEntry({
             runs no shell and that quotes mean nothing here. */}
         {args.length > 0 && (
           <FormNote>
-            {t("Will run:")} <span className="hm-mono">{args.map((argument, i) => `[${i}] ${argument}`).join("  ")}</span>
+            {t("Will run:")} <span className="ui-mono">{args.map((argument, i) => `[${i}] ${argument}`).join("  ")}</span>
           </FormNote>
         )}
         {previewError && <Message text={previewError} error />}
@@ -611,7 +612,7 @@ function NewEntry({
               ? t("The host does not accept the expression: {reason}", { reason: shown.error })
               : t("Next runs in {zone}:", { zone: shown.timezone || t("the host zone") })}{" "}
             {!shown.error && (
-              <span className="hm-mono">{(shown.next_runs ?? []).map((run) => hostClock(run)).join(", ")}</span>
+              <span className="ui-mono">{(shown.next_runs ?? []).map((run) => hostClock(run)).join(", ")}</span>
             )}
           </FormNote>
         )}
@@ -625,14 +626,14 @@ function NewEntry({
         )}
         {(shown?.units ?? []).map((unit) => (
           <FormNote key={unit.path}>
-            <span className="hm-mono">{unit.path}</span>
-            <pre className="hm-mono">{unit.content}</pre>
+            <span className="ui-mono">{unit.path}</span>
+            <pre className="ui-mono">{unit.content}</pre>
           </FormNote>
         ))}
         <FormActions>
           <ActionGuard action="schedule.preview" host={hostId} explain>
             <button
-              className="secondary"
+              className="ui-btn-secondary"
               onClick={() => preview.mutate(expression.trim())}
               disabled={!expression.trim() || preview.isPending || !online}
             >
