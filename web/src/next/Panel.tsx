@@ -2,6 +2,15 @@ import { Route, Routes, useLocation } from "react-router-dom";
 import { Shell } from "./Shell";
 import { Dashboard } from "./screens/Dashboard";
 import { Hosts } from "./screens/Hosts";
+import { Profile } from "./screens/Profile";
+import { Reads } from "./screens/Reads";
+import { Readiness } from "./screens/Readiness";
+import { Monitoring } from "./screens/Monitoring";
+import { Backups } from "./screens/Backups";
+import { Certificates } from "./screens/Certificates";
+import { Vulnerabilities } from "./screens/Vulnerabilities";
+import { Unresolved } from "./screens/Unresolved";
+import { Jobs } from "./screens/Jobs";
 import { HostWorkspace } from "./screens/host/Workspace";
 import { Campaigns } from "./screens/Campaigns";
 import { Security } from "./screens/Security";
@@ -25,6 +34,7 @@ const TITLES: Record<string, string> = {
   "": "Fleet dashboard",
   dashboard: "Fleet dashboard",
   hosts: "Hosts",
+  profile: "My settings",
   campaigns: "Campaigns",
   security: "Security",
 };
@@ -33,18 +43,37 @@ export function NextPanel() {
   const location = useLocation();
   const section = location.pathname.replace(/^\/next\/?/, "").split("/")[0] ?? "";
   const title = TITLES[section] ?? section.charAt(0).toUpperCase() + section.slice(1);
+
+  // One machine brings its own shell, because its rail is its modules and
+  // not the fleet's places. Wrapped in the fleet's shell as well it drew
+  // two of everything - two rails, two bars, two brands.
+  if (/^\/next\/hosts\/[^/]+/.test(location.pathname)) {
+    return (
+      <Routes>
+        <Route path="/next/hosts/:id" element={<HostWorkspace />} />
+        <Route path="/next/hosts/:id/:module" element={<HostWorkspace />} />
+      </Routes>
+    );
+  }
+
   return (
     <Shell trail={{ section: title }}>
       <Routes>
         <Route path="/next" element={<Dashboard />} />
         <Route path="/next/dashboard" element={<Dashboard />} />
         <Route path="/next/hosts" element={<Hosts />} />
-        {/* One machine: the rail becomes its modules, and the workspace
-            draws the one named in the address. */}
-        <Route path="/next/hosts/:id" element={<HostWorkspace />} />
-        <Route path="/next/hosts/:id/:module" element={<HostWorkspace />} />
         <Route path="/next/campaigns" element={<Campaigns />} />
         <Route path="/next/security" element={<Security />} />
+        <Route path="/next/jobs" element={<Jobs />} />
+        <Route path="/next/unresolved" element={<Unresolved />} />
+        <Route path="/next/vulnerabilities" element={<Vulnerabilities />} />
+        <Route path="/next/certificates" element={<Certificates />} />
+        <Route path="/next/backups" element={<Backups />} />
+        <Route path="/next/monitoring" element={<Monitoring />} />
+        <Route path="/next/reads/:id" element={<Reads />} />
+        <Route path="/next/readiness" element={<Readiness />} />
+        <Route path="/next/reads" element={<Reads />} />
+        <Route path="/next/profile" element={<Profile />} />
         <Route path="*" element={<NotYet />} />
       </Routes>
     </Shell>

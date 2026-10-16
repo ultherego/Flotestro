@@ -88,14 +88,17 @@
 .fl-app a:not([class*="fl-"]):hover { text-decoration: underline; }
 .fl-app :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: var(--r-sm); }
 
-/* Tone: a state is two properties, and every piece of the kit reads them. */
-.fl-app .fl-ok { --tone: var(--ok); --tone-ink: var(--ok-text); }
-.fl-app .fl-warn { --tone: var(--warn); --tone-ink: var(--warn-text); }
-.fl-app .fl-error { --tone: var(--error); --tone-ink: var(--error-text); }
-.fl-app .fl-info { --tone: var(--blue); --tone-ink: var(--blue); }
-.fl-app .fl-unknown { --tone: var(--unknown); --tone-ink: var(--unknown-text); }
-.fl-app .fl-neutral { --tone: var(--border-strong); --tone-ink: var(--ink-muted); }
-.fl-app .fl-accent { --tone: var(--brand); --tone-ink: var(--brand-ink); }
+/* Tone: a state is two properties, and every piece of the kit reads them.
+   It colours its own text as well, so a figure in a cell can be told it
+   is failing without a piece of its own - and every container that must
+   not take the colour with it says so below, where its own rule wins. */
+.fl-app .fl-ok { --tone: var(--ok); --tone-ink: var(--ok-text); color: var(--tone-ink); }
+.fl-app .fl-warn { --tone: var(--warn); --tone-ink: var(--warn-text); color: var(--tone-ink); }
+.fl-app .fl-error { --tone: var(--error); --tone-ink: var(--error-text); color: var(--tone-ink); }
+.fl-app .fl-info { --tone: var(--blue); --tone-ink: var(--blue); color: var(--tone-ink); }
+.fl-app .fl-unknown { --tone: var(--unknown); --tone-ink: var(--unknown-text); color: var(--tone-ink); }
+.fl-app .fl-neutral { --tone: var(--border-strong); --tone-ink: var(--ink-muted); color: var(--tone-ink); }
+.fl-app .fl-accent { --tone: var(--brand); --tone-ink: var(--brand-ink); color: var(--tone-ink); }
 
 /* =====================================================================
    The shell: a rail that floats, a bar with no walls, the page.
@@ -684,7 +687,7 @@
   align-items: center;
 }
 .fl-app .fl-bars-row dt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-muted); font-size: 12.5px; }
-.fl-app .fl-bars-row dd { min-width: 0; }
+.fl-app .fl-bars-row dd { min-width: 0; color: var(--ink); }
 .fl-app .fl-bars-count { text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; }
 
 .fl-app .fl-band { display: flex; gap: 3px; border-radius: var(--r); overflow: hidden; min-height: 68px; }
@@ -711,7 +714,7 @@
 
 /* The ring: one share, read at a glance, with its legend beside it. */
 .fl-app .fl-ring { display: flex; align-items: center; gap: var(--x5); flex-wrap: wrap; min-width: 0; }
-.fl-app .fl-ring-plot { position: relative; flex: none; width: 132px; height: 132px; }
+.fl-app .fl-ring-plot { position: relative; flex: none; width: 132px; height: 132px; color: var(--ink); }
 .fl-app .fl-ring-plot svg { width: 100%; height: 100%; transform: rotate(-90deg); }
 .fl-app .fl-ring-track { fill: none; stroke: var(--raised); }
 .fl-app .fl-ring-arc { fill: none; stroke: var(--tone, var(--brand)); stroke-linecap: round; transition: stroke-dasharray 0.3s ease; }
@@ -727,7 +730,7 @@
 .fl-app .fl-ring-value { font-size: 26px; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
 .fl-app .fl-ring-label { color: var(--ink-faint); font-size: 11px; }
 .fl-app .fl-ring-legend { flex: 1 1 140px; display: grid; gap: var(--x2); min-width: 0; }
-.fl-app .fl-ring-legend-row { display: flex; align-items: baseline; gap: var(--x2); min-width: 0; font-size: 12.5px; }
+.fl-app .fl-ring-legend-row { display: flex; align-items: baseline; gap: var(--x2); min-width: 0; font-size: 12.5px; color: var(--ink); }
 .fl-app .fl-ring-legend-row b { margin-left: auto; font-variant-numeric: tabular-nums; }
 .fl-app .fl-ring-key { flex: none; width: 9px; height: 9px; border-radius: 3px; background: var(--tone, var(--brand)); }
 
@@ -803,6 +806,27 @@
   color: var(--error-text);
   font-size: 13px;
 }
+
+/* Output the machine produced: a log, a diff, a payload. It is read as
+   one block, so it keeps its own surface, wraps rather than widening the
+   page, and scrolls inside its own box instead of growing the screen. */
+.fl-app .fl-log, .fl-app pre {
+  margin: 0;
+  max-height: 420px;
+  overflow: auto;
+  padding: var(--x3) var(--x4);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.fl-app .fl-log.fl-tall { max-height: 620px; }
 
 /* The chrome of a list. */
 .fl-app .fl-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--x2) var(--x3); min-width: 0; }

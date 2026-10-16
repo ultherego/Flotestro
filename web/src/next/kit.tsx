@@ -1,6 +1,9 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Icon, type IconName } from "../components/icons";
+import { exportAddress, exportFileName } from "../components/ExportButton";
+import { fetchWithCredentials } from "../lib/api";
+import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
 
 /**
@@ -805,5 +808,58 @@ export function Modal({ title, children, onClose, actions }: {
         <div className="fl-actions fl-right">{actions}</div>
       </section>
     </div>
+  );
+}
+
+
+/* ------------------------------------------------------------ the file */
+
+/**
+ * A list, taken away as a file.
+ *
+ * The address it asks for is the list's own with the screen's filter on
+ * it, so what is saved is what is on the screen rather than the first
+ * page of everything. It goes through the panel's own fetch because a
+ * bare <a download> drops the bearer token and comes back a refusal.
+ */
+export function Download({ path, params, label, disabled = false }: {
+  /** The address of the list, without a query: /api/v1/hosts. */
+  path: string;
+  /** The filter as the server reads it; the keys of a page are dropped. */
+  params?: URLSearchParams;
+  label?: string;
+  disabled?: boolean;
+}) {
+  const t = useT();
+  const toast = useToast();
+  const [working, setWorking] = useState(false);
+  const take = async () => {
+    setWorking(true);
+    try {
+      const response = await fetchWithCredentials(exportAddress(path, params));
+      if (!response.ok) {
+        let detail = response.statusText;
+        try { detail = ((await response.json()) as { detail?: string }).detail ?? detail; } catch { /* a proxy's page, not the API's answer */ }
+        throw new Error(detail);
+      }
+      const blob = await response.blob();
+      const href = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = href;
+      anchor.download = exportFileName(response.headers.get("Content-Disposition"));
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(href);
+    } catch (error) {
+      toast.error(t("The export failed: {message}", { message: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setWorking(false);
+    }
+  };
+  return (
+    <button type="button" className="fl-quiet fl-small" onClick={take} disabled={disabled || working} data-testid="export-csv">
+      {working ? t("Exporting…") : (label ?? t("Export CSV"))}
+    </button>
   );
 }
