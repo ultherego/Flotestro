@@ -103,6 +103,12 @@ export const ABOUT: Record<string, About> = {
     icon: "audit",
     help: "Every change and every refusal, in the order they happened, hash-chained so a gap can be proved rather than argued about. The trail filters on the server. A denial is kept as carefully as a success: one is a typo, a run of them is somebody probing.",
   },
+  notifications: {
+    title: "Notifications",
+    lead: "Where the panel sends what it has to say, and what is stuck.",
+    icon: "notifications",
+    help: "A channel is an address the panel delivers to - a webhook, a mailbox - and the queue beside it is what it has not managed to deliver. A dead letter is the one that needs a person: the worker has stopped trying. A channel that is disabled stays listed, because it would carry again the moment somebody enables it.",
+  },
   relays: {
     title: "Relays",
     lead: "The plumbing of each site, and what it is holding.",

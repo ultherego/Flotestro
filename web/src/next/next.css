@@ -2133,6 +2133,14 @@
   color: var(--text-faint);
 }
 
+.fl-app .fl-readout-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.fl-app .fl-readout-body mark {
+  background: color-mix(in srgb, var(--accent) 34%, transparent);
+  color: var(--text);
+  border-radius: 2px;
+}
+
 .fl-app .fl-readout-body {
   margin: 0;
   padding: var(--s3) var(--s4);

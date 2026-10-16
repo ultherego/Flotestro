@@ -1,0 +1,7 @@
+  "Notices": "Komunikaty",
+  "boots on the Power module": "rozruchy w module Zasilanie",
+  "Opens the reads screen with this query filled in; the lines of every chosen host come back in one timeline.": "Otwiera ekran odczytów z wypełnionym zapytaniem; wiersze ze wszystkich wybranych hostów wracają na jednej osi czasu.",
+  "Nothing read yet. Ask the host for a bounded range of its journal, or for a file on its allowlist.": "Nic jeszcze nie odczytano. Poproś hosta o ograniczony zakres dziennika albo o plik z jego listy dozwolonych ścieżek.",
+  "Match {n} of {total}, line {line}": "Trafienie {n} z {total}, wiersz {line}",
+  "The stream, newest at the foot": "Strumień, najnowsze na dole",
+  "What the host sent": "Co przysłał host",

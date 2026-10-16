@@ -1,0 +1,7 @@
+  "Copy {id} is unpacked into a directory on {host}. The target must be empty; what goes back from there to its place is a separate decision.": "Kopia {id} zostanie rozpakowana do katalogu na {host}. Katalog docelowy musi być pusty; to, co wróci z niego na swoje miejsce, jest osobną decyzją.",
+  "A copy nobody has ever read back is a promise, not a safeguard.": "Kopia, której nikt nigdy nie odczytał, jest obietnicą, nie zabezpieczeniem.",
+  "Tools on this host": "Narzędzia na tym hoście",
+  "Backups run with the tools this host already has; the panel installs none of them.": "Kopie robią narzędzia, które host już ma; panel nie instaluje żadnego z nich.",
+  "The host has not said which backup tools it has.": "Host nie podał, jakie narzędzia do kopii zapasowych ma u siebie.",
+  "An absolute path on {host}; it must be empty. The panel never restores straight into system directories, and not into /tmp either — the host helper has its own private one, where restored data would vanish with the operation.": "Ścieżka bezwzględna na {host}; katalog musi być pusty. Panel nigdy nie odtwarza wprost do katalogów systemowych ani do /tmp — pomocnik na hoście ma własny prywatny /tmp, w którym odtworzone dane zniknęłyby razem z operacją.",
+  "The panel forgets the definition {name} on {host}. Nothing is deleted from the repository and the history of its runs stays.": "Panel zapomina definicję {name} na {host}. Nic nie zostaje usunięte z repozytorium, a historia jej przebiegów zostaje.",

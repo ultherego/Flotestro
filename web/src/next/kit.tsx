@@ -509,15 +509,19 @@ export function Meter({ share, text, tone }: { share: number; text: ReactNode; t
  * sat on the colour - and it is the reason this is a component rather than
  * a layout each screen arranges for itself.
  */
-export function Bars({ items }: { items: { label: ReactNode; value: number; tone?: Tone | string }[] }) {
-  const top = Math.max(1, ...items.map((item) => item.value));
+export function Bars({ items }: {
+  /** A value nobody took is undefined: no bar at all, and a dash for it. */
+  items: { label: ReactNode; value?: number; tone?: Tone | string }[];
+}) {
+  const counted = items.map((item) => item.value).filter((one): one is number => one !== undefined);
+  const top = Math.max(1, ...counted);
   return (
     <dl className="fl-bars">
       {items.map((item, index) => (
-        <div className="fl-bars-row" key={index}>
+        <div className={join("fl-bars-row", item.value === undefined && toneClass("unknown"))} key={index}>
           <dt>{item.label}</dt>
-          <dd><Bar share={item.value / top} tone={item.tone ?? "accent"} /></dd>
-          <dd className="fl-bars-count">{item.value}</dd>
+          <dd>{item.value === undefined ? <span className="fl-bar-track" /> : <Bar share={item.value / top} tone={item.tone ?? "accent"} />}</dd>
+          <dd className="fl-bars-count">{item.value === undefined ? "—" : item.value}</dd>
         </div>
       ))}
     </dl>
@@ -580,11 +584,16 @@ export function Facts({ children }: { children: ReactNode }) {
   return <dl className="fl-facts">{children}</dl>;
 }
 
-export function Fact({ label, children }: { label: ReactNode; children: ReactNode }) {
+export function Fact({ label, children, mono = false }: {
+  label: ReactNode;
+  children: ReactNode;
+  /** A serial, a uuid, a boot id, a path: read as one word, not as prose. */
+  mono?: boolean;
+}) {
   return (
     <div className="fl-fact">
       <dt>{label}</dt>
-      <dd>{children}</dd>
+      <dd className={mono ? "fl-mono" : undefined}>{children}</dd>
     </div>
   );
 }
@@ -727,13 +736,23 @@ export type Series = { name: string; tone: Tone; values: number[] };
  * its own reading as a title, which is what a reader actually asks of a
  * bar, and the axis says what the heights mean.
  */
-export function Chart({ labels, series, everyLabel = 3, height = 160, shape = "bars", testId }: {
+export function Chart({ labels, series, everyLabel = 3, height = 160, shape = "bars", max, format, testId }: {
   labels: string[];
   series: Series[];
   /** Draw one label in every n, so they do not run together. */
   everyLabel?: number;
   /** What it draws at where its container cannot be measured. */
   height?: number;
+  /**
+   * The ceiling of the scale, where the measure has one.
+   *
+   * A percentage drawn to its own highest reading says a host at 4% is
+   * as loaded as one at 99%. Given a ceiling, the drawing says what the
+   * number means.
+   */
+  max?: number;
+  /** How a reading is written on the axis and in the header: bytes, ms. */
+  format?: (value: number) => string;
   /**
    * Counts in a period are columns; a level over time is a line, filled
    * when it is the only series and bare when several share the frame.
@@ -763,7 +782,7 @@ export function Chart({ labels, series, everyLabel = 3, height = 160, shape = "b
   }, []);
   const columns = Math.max(1, labels.length);
   const totals = labels.map((_, i) => series.reduce((sum, one) => sum + (one.values[i] ?? 0), 0));
-  const top = Math.max(1, ...totals);
+  const top = Math.max(1, max ?? 0, ...(max === undefined ? totals : []));
   const W = 600;
   const padLeft = 26;
   const padBottom = 16;
@@ -800,7 +819,7 @@ export function Chart({ labels, series, everyLabel = 3, height = 160, shape = "b
               <b>{labels[read]}</b>
               {series.map((one) => (
                 <em key={one.name} className={toneClass(one.tone)}>
-                  {one.name} {one.values[read] ?? 0}
+                  {one.name} {(format ?? ((n: number) => String(n)))(one.values[read] ?? 0)}
                 </em>
               ))}
             </>
@@ -814,7 +833,7 @@ export function Chart({ labels, series, everyLabel = 3, height = 160, shape = "b
           {[0, 0.5, 1].map((share) => (
             <g key={share}>
               <line className="fl-chart-rule" x1={padLeft} x2={W} y1={y(top * share)} y2={y(top * share)} />
-              <text className="fl-chart-scale" x="0" y={y(top * share) + 3}>{Math.round(top * share)}</text>
+              <text className="fl-chart-scale" x="0" y={y(top * share) + 3}>{(format ?? ((n: number) => String(Math.round(n))))(top * share)}</text>
             </g>
           ))}
 
@@ -931,6 +950,23 @@ export function Spark({ values, tone }: { values: number[]; tone?: Tone }) {
   );
 }
 
+/**
+ * A share as a percentage, which never rounds to all or to none.
+ *
+ * Ninety-nine point seven per cent of the fleet checked, drawn as 100%,
+ * reads as "everything was checked" - and the three hosts nobody could
+ * judge are the ones the reader was looking for. A share that is not
+ * whole keeps a tenth rather than borrowing one.
+ */
+function share100(share: number, sign = true): string {
+  const whole = share * 100;
+  const rounded = Math.round(whole);
+  const honest = (rounded === 100 && whole < 100) || (rounded === 0 && whole > 0)
+    ? whole.toFixed(1)
+    : String(rounded);
+  return sign ? `${honest}%` : honest;
+}
+
 /* ---------------------------------------------------------------- ring */
 
 /**
@@ -968,7 +1004,7 @@ export function Ring({ share, label, tone = "accent", legend }: {
           )}
         </svg>
         <div className="fl-ring-face">
-          <span className="fl-ring-value">{known ? `${Math.round(filled * 100)}%` : "—"}</span>
+          <span className="fl-ring-value">{known ? share100(filled) : "—"}</span>
           <span className="fl-ring-label">{label}</span>
         </div>
       </div>
@@ -1486,7 +1522,7 @@ export function Pie({ slices, total, label, hole = 0.62, testId }: {
             <>
               <i className="fl-ring-key" />
               <dt className="fl-truncate">{one.label}</dt>
-              <dd><b>{one.value}</b> <span className="fl-faint">{sum > 0 ? t("{n}%", { n: Math.round((one.value / sum) * 100) }) : ""}</span></dd>
+              <dd><b>{one.value}</b> <span className="fl-faint">{sum > 0 ? t("{n}%", { n: share100(one.value / sum, false) }) : ""}</span></dd>
             </>
           );
           const className = join("fl-ring-legend-row", toneClass(one.tone));
@@ -1585,12 +1621,21 @@ export function Button({ kind = "do", onClick, disabled, title, icon, children, 
  * it rather than somewhere else on the screen. A screen that put one of
  * these in a text field gave its label two controls.
  */
-export function Readout({ label, value, note, lines, testId }: {
+export function Readout({ label, value, note, lines, highlight, wrap = false, testId }: {
   label?: ReactNode;
   value: string;
   note?: ReactNode;
   /** How tall before it scrolls; the default suits a command or two. */
   lines?: number;
+  /**
+   * What the reader is looking for, marked where it occurs.
+   *
+   * A search over a log that can only say which line matched, and not
+   * where in it, makes the reader do the finding twice.
+   */
+  highlight?: string;
+  /** Fold a long line instead of scrolling it sideways. */
+  wrap?: boolean;
   testId?: string;
 }) {
   const t = useT();
@@ -1612,10 +1657,35 @@ export function Readout({ label, value, note, lines, testId }: {
           </button>
         </div>
       )}
-      <pre className="fl-readout-body" style={lines ? { maxHeight: `${lines * 1.5}em` } : undefined}>{value}</pre>
+      <pre
+        className={join("fl-readout-body", wrap && "fl-readout-wrap")}
+        style={lines ? { maxHeight: `${lines * 1.5}em` } : undefined}
+      >
+        {marked(value, highlight)}
+      </pre>
       {note && <span className="fl-field-hint">{note}</span>}
     </div>
   );
+}
+
+/** The text, with every occurrence of what is sought marked in it. */
+function marked(value: string, needle?: string): ReactNode {
+  const what = needle?.trim() ?? "";
+  if (what === "") return value;
+  const out: ReactNode[] = [];
+  const lower = value.toLowerCase();
+  const seek = what.toLowerCase();
+  let at = 0;
+  for (;;) {
+    const found = lower.indexOf(seek, at);
+    if (found < 0) break;
+    if (found > at) out.push(value.slice(at, found));
+    out.push(<mark key={found}>{value.slice(found, found + what.length)}</mark>);
+    at = found + what.length;
+  }
+  if (out.length === 0) return value;
+  if (at < value.length) out.push(value.slice(at));
+  return out;
 }
 
 /* --------------------------------------------------------- the choice */

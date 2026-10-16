@@ -1,0 +1,8 @@
+  "Notices": "Komunikaty",
+  "{n} gaps in this window; the points the host never sent are left out rather than drawn at nought.": "dziur w tym oknie: {n}; punkty, których host nie przysłał, są pomijane, a nie rysowane jako zero.",
+  "Cause: {reason}.": "Przyczyna: {reason}.",
+  "Sampling": "Próbkowanie",
+  "raw samples": "surowe próbki",
+  "Gaps in this window": "Dziury w tym oknie",
+  "No reading in this window.": "Brak odczytu w tym oknie.",
+  "Inodes": "I-węzły",

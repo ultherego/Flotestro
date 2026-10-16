@@ -226,7 +226,7 @@ export function Overview({ host }: { host: Host }) {
             loading={jobs.isLoading} empty={t("Nothing has been done to this host yet.")}
             columns={[
               { key: "when", head: t("Time"), cell: (one) => (
-                <Link to={`/jobs/${one.id}`} title={absoluteTime(one.created_at)}>
+                <Link to={`/next/jobs/${one.id}`} title={absoluteTime(one.created_at)}>
                   {relativeTime(one.finished_at ?? one.created_at)}
                 </Link>
               ) },

@@ -6,6 +6,8 @@ import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, BEARER_TOKEN_KEY, type Collection } from "../lib/api";
 import { isBoolean, useStoredState } from "../lib/storage";
+import { useDebounced } from "../lib/debounce";
+import { REFRESH_INTERVAL } from "../lib/stream";
 import { usePreferences } from "../lib/preferences";
 import { SCALES } from "../lib/scale";
 import { THEMES } from "../lib/theme";
@@ -14,11 +16,11 @@ import { LOCALES, useLocale } from "../i18n";
 import { useCapabilities } from "../lib/capabilities";
 import { fleetNavigation, type NavGroup } from "../lib/navigation";
 import type { IconName } from "../components/icons";
-import type { Host, Whoami } from "../lib/types";
+import type { Whoami } from "../lib/types";
 import { Icon } from "../components/icons";
 import { LogoMark } from "../components/Logo";
 import { useT } from "../i18n";
-import { Problem } from "./kit";
+import { Pill, Problem } from "./kit";
 
 /**
  * The shell of the panel: a rail of places down the left, a bar across the
@@ -168,9 +170,7 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
             <span className="fl-search-text">{t("Search the fleet…")}</span>
             <span className="fl-search-key">{keyHint}</span>
           </button>
-          <Link to="/next/notifications" className="fl-iconbtn" aria-label={t("Notifications")}>
-            <Icon name="notifications" />
-          </Link>
+          <Bell />
           <Link to="/next/settings" className="fl-iconbtn" aria-label={t("Settings")}><Icon name="settings" /></Link>
         </header>
 
@@ -181,6 +181,52 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
       </div>
       {finding && <Finder places={fleet.groups} onClose={() => setFinding(false)} />}
     </div>
+  );
+}
+
+/**
+ * What the bell counts: the messages nobody received.
+ *
+ * It is the figure the notifications screen itself reads, off the same
+ * answer - `dead_letters` is the whole installation's, not the page's, so
+ * a filter on that screen cannot make the bell disagree with it. A row
+ * that is still being tried is not waiting on anybody; a dead letter is,
+ * and it stays there until an operator puts it back in the queue.
+ */
+const WAITING = "/api/v1/notifications/deliveries?limit=1";
+
+/**
+ * The bell, and how many are waiting behind it.
+ *
+ * A count nobody could take is not a count of none. Where the read is
+ * refused - no right to read the notifications, or an installation with
+ * them switched off - and where it simply failed, the bell carries no
+ * figure at all rather than a nought that would read as "all clear".
+ */
+function Bell() {
+  const t = useT();
+  const waiting = useQuery({
+    queryKey: ["bell", "waiting"],
+    queryFn: () => api.get<{ dead_letters?: number }>(WAITING),
+    refetchInterval: REFRESH_INTERVAL,
+    retry: false,
+  });
+  const counted = waiting.data?.dead_letters;
+  const known = typeof counted === "number";
+  const label = !known
+    ? t("Notifications")
+    : counted > 0
+      ? t("Notifications: {n} waiting", { n: counted })
+      : t("Notifications: nothing waiting");
+  return (
+    <>
+      <Link to="/next/notifications" className="fl-iconbtn" aria-label={label} title={label} data-testid="bell">
+        <Icon name="notifications" />
+      </Link>
+      {known && counted > 0 && (
+        <Pill tone="error" dot={false} title={label}>{counted}</Pill>
+      )}
+    </>
   );
 }
 
@@ -377,14 +423,61 @@ function Rail({ group }: { group: Face["groups"][number] }) {
   );
 }
 
+/** One thing the fleet-wide search found, as the server describes it. */
+export type Found = {
+  kind: string;
+  id: string;
+  title: string;
+  subtitle: string;
+  /** Where the panel this replaces keeps it; the new one has its own. */
+  path: string;
+};
+
+type SearchAnswer = { items: Found[]; truncated?: string[] };
+
+/** One tag of the catalogue and how many hosts carry it. */
+type TagCount = { tag: string; hosts: number };
+
+/**
+ * The kinds of thing the finder leads to, and where each one lives in the
+ * new panel.
+ *
+ * The server's own `path` is the old panel's address, so it is not used:
+ * every address here is written again under `/next`. A kind the new panel
+ * has no screen for is left out rather than offered as a row that leads
+ * to a page saying the screen is not written yet.
+ */
+const FOUND: Record<string, { to: (one: Found) => string; icon: IconName; kind: string }> = {
+  host: { to: (one) => `/next/hosts/${encodeURIComponent(one.id)}`, icon: "server", kind: "host" },
+  job: { to: (one) => `/next/jobs/${encodeURIComponent(one.id)}`, icon: "jobs", kind: "job" },
+  campaign: { to: (one) => `/next/campaigns/${encodeURIComponent(one.id)}`, icon: "campaigns", kind: "campaign" },
+  // A group has no screen of its own under /next; the list is where one
+  // is read, so that is honestly where the row leads.
+  group: { to: () => "/next/groups", icon: "groups", kind: "group" },
+};
+
+/** How many of one kind the finder shows before the rest wait on a narrower query. */
+const FINDER_LIMIT = 6;
+
+/** The fewest characters worth asking the server about. */
+const FINDER_MINIMUM = 2;
+
 /**
  * The way to anywhere, from the keyboard.
  *
  * A rail reaches the places of the panel; it cannot reach the thousandth
- * host. This reaches both: the places are matched on their names, and
- * anything longer than a letter or two is also asked of the fleet. What
- * comes back is a list the arrow keys walk and Enter opens, which is the
- * one interaction everybody already knows from every other panel.
+ * host, nor a job by the identifier somebody pasted out of a report. This
+ * reaches both: the places are matched on their names here, and anything
+ * longer than a letter is put to the fleet - hosts, jobs, campaigns and
+ * groups through the panel's own search, tags through the catalogue,
+ * which takes no query of its own. What comes back is a list the arrow
+ * keys walk and Enter opens, which is the one interaction everybody
+ * already knows from every other panel.
+ *
+ * Nothing older can overwrite anything newer: each query is its own cache
+ * entry, keyed by what was typed, so an answer that arrives late lands
+ * beside the question it answered and the screen goes on drawing the
+ * answer to the question that is actually in the box.
  */
 function Finder({ places, onClose }: {
   places: Face["groups"];
@@ -399,10 +492,25 @@ function Finder({ places, onClose }: {
   useEffect(() => { field.current?.focus(); }, []);
 
   const asked = query.trim();
-  const hosts = useQuery({
-    queryKey: ["finder-hosts", asked],
-    queryFn: () => api.get<Collection<Host>>(`/api/v1/hosts?limit=6&q=${encodeURIComponent(asked)}`),
-    enabled: asked.length >= 2,
+  // Typing is not a question: the fleet is asked once the hand stops, so
+  // a pasted identifier is one read and not thirty-six.
+  const settled = useDebounced(asked, 200);
+  const enough = settled.length >= FINDER_MINIMUM;
+
+  const search = useQuery({
+    queryKey: ["finder", "search", settled],
+    queryFn: () => api.get<SearchAnswer>(
+      `/api/v1/search?limit=${FINDER_LIMIT}&q=${encodeURIComponent(settled)}`),
+    enabled: enough,
+    retry: false,
+  });
+  // The tag catalogue takes no query and answers with the whole of what
+  // the reader may see, so it is read once and matched here. It is still
+  // asked for only once there is something to look for.
+  const tags = useQuery({
+    queryKey: ["finder", "tags"],
+    queryFn: () => api.get<Collection<TagCount>>("/api/v1/tags"),
+    enabled: enough,
     retry: false,
   });
 
@@ -411,14 +519,39 @@ function Finder({ places, onClose }: {
     .filter((item) => !item.unavailable && t(item.label).toLowerCase().includes(asked.toLowerCase()))
     .slice(0, 8);
 
-  const found: { to: string; label: string; note?: string; icon: IconName }[] = [
-    ...matched.map((item) => ({ to: item.to, label: t(item.label), note: item.group ? t(item.group) : undefined, icon: item.icon })),
-    ...(hosts.data?.items ?? []).map((host) => ({
-      to: `/next/hosts/${host.id}`,
-      label: host.hostname || host.id,
-      note: [host.site, host.environment].filter(Boolean).join(" · ") || undefined,
-      icon: "server" as IconName,
+  const lower = settled.toLowerCase();
+  const found: { key: string; to: string; label: string; kind: string; note?: string; icon: IconName }[] = [
+    ...matched.map((item) => ({
+      key: `place:${item.to}`,
+      to: item.to,
+      label: t(item.label),
+      kind: t("place"),
+      note: item.group ? t(item.group) : undefined,
+      icon: item.icon,
     })),
+    ...(search.data?.items ?? []).flatMap((one) => {
+      const where = FOUND[one.kind];
+      if (!where) return [];
+      return [{
+        key: `${one.kind}:${one.id}`,
+        to: where.to(one),
+        label: one.title || one.id,
+        kind: t(where.kind),
+        note: one.subtitle || undefined,
+        icon: where.icon,
+      }];
+    }),
+    ...(enough ? (tags.data?.items ?? []) : [])
+      .filter((one) => one.tag.toLowerCase().includes(lower))
+      .slice(0, FINDER_LIMIT)
+      .map((one) => ({
+        key: `tag:${one.tag}`,
+        to: "/next/tags",
+        label: one.tag,
+        kind: t("tag"),
+        note: t("{n} hosts", { n: one.hosts }),
+        icon: "groups" as IconName,
+      })),
   ];
   const here = Math.min(at, Math.max(0, found.length - 1));
 
@@ -443,8 +576,8 @@ function Finder({ places, onClose }: {
             value={query}
             onChange={(event) => { setQuery(event.target.value); setAt(0); }}
             onKeyDown={key}
-            placeholder={t("A place in the panel, or a host by name…")}
-            aria-label={t("A place in the panel, or a host by name…")}
+            placeholder={t("A place, a host, a job, a campaign, a group or a tag…")}
+            aria-label={t("A place, a host, a job, a campaign, a group or a tag…")}
             data-testid="finder-field"
           />
           <span className="fl-search-key">esc</span>
@@ -452,20 +585,26 @@ function Finder({ places, onClose }: {
         <div className="fl-finder-found" role="listbox">
           {found.length === 0 ? (
             <p className="fl-finder-none">
-              {asked.length === 0 ? t("Type to look for a place or a host.") : t("Nothing here answers to that.")}
+              {asked.length === 0
+                ? t("Type to look for a place, a host, a job, a campaign, a group or a tag.")
+                : t("Nothing here answers to that.")}
             </p>
           ) : found.map((one, index) => (
             <Link
-              key={one.to}
+              key={one.key}
               to={one.to}
               role="option"
               aria-selected={index === here}
               className={index === here ? "fl-finder-row fl-on" : "fl-finder-row"}
               onMouseEnter={() => setAt(index)}
               onClick={onClose}
+              data-testid={`finder-${one.key}`}
             >
               <Icon name={one.icon} />
               <span className="fl-finder-name">{one.label}</span>
+              {/* Every row says what kind of thing it is: a name alone
+                  does not tell a campaign from the group it runs over. */}
+              <Pill tone="neutral" dot={false}>{one.kind}</Pill>
               {one.note && <span className="fl-finder-note">{one.note}</span>}
             </Link>
           ))}

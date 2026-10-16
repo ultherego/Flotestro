@@ -1,0 +1,7 @@
+  "Which slice of the host to read": "Który wycinek hosta odczytać",
+  "The processes could not be read: {reason}": "Nie udało się odczytać procesów: {reason}",
+  "Whether something on the host answers for a process, or nothing does.": "Czy cokolwiek na hoście odpowiada za proces, czy nic.",
+  "A snapshot is read from the host on request; the trend over time is on Monitoring.": "Migawka jest czytana z hosta na żądanie; trend w czasie jest w Monitoringu.",
+  "{shown} of {listed} shown · {total} on the host": "pokazano {shown} z {listed} · na hoście: {total}",
+  "No process answers this filter.": "Żaden proces nie pasuje do tego filtra.",
+  "PID 1 ignores signals it does not handle; a reboot is ordered on the Power screen.": "PID 1 ignoruje sygnały, których nie obsługuje; reboot zleca się na ekranie Zasilanie.",

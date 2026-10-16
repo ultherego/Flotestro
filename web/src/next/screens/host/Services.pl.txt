@@ -1,0 +1,8 @@
+  "The units could not be read: {reason}": "Nie udało się odczytać jednostek: {reason}",
+  "The reason to open this screen: what the host could not keep running.": "Powód, dla którego otwiera się ten ekran: czego host nie utrzymał w ruchu.",
+  "No unit answers this filter.": "Żadna jednostka nie pasuje do tego filtra.",
+  "The unit": "Jednostka",
+  "What the host says about this unit, read on its own.": "Co host mówi o tej jednostce — odczyt wykonany osobno.",
+  "The host is being asked about this unit.": "Trwa odpytywanie hosta o tę jednostkę.",
+  "{path}: not read — {reason}": "{path}: nieodczytany — {reason}",
+  "Narrow the list to this unit": "Zawęź listę do tej jednostki",

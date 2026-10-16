@@ -1,0 +1,3 @@
+  "Which mechanism carries the recurring work here.": "Który mechanizm niesie tu pracę cykliczną.",
+  "Nothing recurring has been reported.": "Nie zgłoszono nic cyklicznego.",
+  "What runs, when, and under which account.": "Co się uruchamia, kiedy i na jakim koncie.",

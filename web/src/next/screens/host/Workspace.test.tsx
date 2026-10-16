@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import { HostWorkspace } from "./Workspace";
+import { HOST_MODULES } from "./modules";
+import { MODULES } from "../../../lib/modules";
 
 /**
  * A host page answers two questions before any module does: which machine
@@ -116,10 +118,20 @@ describe("the host workspace", () => {
     expect(containers?.tagName).not.toBe("A");
   });
 
-  it("says a module that has not been rewritten yet is not there, and where it is", async () => {
-    draw("/next/hosts/h1/packages");
-    await waitFor(() => expect(screen.getByText(/still being rewritten/)).toBeInTheDocument());
-    expect(screen.getByRole("link", { name: /Open it in the panel/ })).toHaveAttribute("href", "/hosts/h1/packages");
+  /**
+   * Every module the registry names has a screen here.
+   *
+   * It was the other way round until the modules were written: the test
+   * held the panel to saying so where one was missing. Now the registry
+   * and the screens are two lists that must agree, and a module added to
+   * one without the other is a failure here rather than a blank page in
+   * front of an operator.
+   */
+  it("draws every module the registry names", () => {
+    const named = MODULES.map((one) => one.segment).sort();
+    const drawn = Object.keys(HOST_MODULES).sort();
+    expect(named.filter((one) => !drawn.includes(one))).toEqual([]);
+    expect(drawn.filter((one) => !named.includes(one))).toEqual([]);
   });
 });
 

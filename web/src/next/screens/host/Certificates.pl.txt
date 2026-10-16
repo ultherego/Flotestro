@@ -1,0 +1,3 @@
+  "Soonest deadline first. Open a path for the issuer, the chain and the deployments of that file.": "Najbliższy termin pierwszy. Otwórz ścieżkę, aby zobaczyć wystawcę, łańcuch i wdrożenia tego pliku.",
+  "The panel stops reading {path} on {host}. The file on the host stays exactly as it is, and so does whatever renews it.": "Panel przestaje czytać {path} na {host}. Plik na hoście zostaje dokładnie taki, jaki jest, tak samo jak to, co go odnawia.",
+  "The chosen certificate": "Wybrany certyfikat",

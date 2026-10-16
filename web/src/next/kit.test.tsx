@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import type { ReactElement } from "react";
-import { Band, Bars, Card, Chart, Find, Kpi, Needs, Pie, Flow, Pill, Squares, Table, Tile, Toolbar, pageNumbers } from "./kit";
+import { Band, Bars, Card, Chart, Find, Flow, Kpi, Needs, Pie, Pill, Ring, Squares, Table, Tile, Toolbar, pageNumbers } from "./kit";
 
 /**
  * The kit decides what the panel looks like, so the rules a screen must
@@ -257,5 +257,24 @@ describe("cards that fill the window", () => {
     // nineteen hundred on a 4k screen, and the same card cannot be both.
     expect(flow?.className).toContain("fl-flow-520");
     expect(flow).toHaveTextContent("one");
+  });
+});
+
+describe("a share drawn as a percentage", () => {
+  it("never rounds up to all, nor down to none", () => {
+    // 997 of 1000 checked, drawn as 100%, reads as "everything was
+    // checked" - and the three nobody could judge are exactly what the
+    // reader opened the screen for.
+    draw(<Ring share={0.997} label="checked" />);
+    expect(document.querySelector(".fl-ring-value")).toHaveTextContent("99.7%");
+    cleanup();
+
+    draw(<Ring share={0.0004} label="checked" />);
+    expect(document.querySelector(".fl-ring-value")).toHaveTextContent("0.0%");
+    cleanup();
+
+    // A whole share is still a whole number.
+    draw(<Ring share={1} label="checked" />);
+    expect(document.querySelector(".fl-ring-value")).toHaveTextContent("100%");
   });
 });

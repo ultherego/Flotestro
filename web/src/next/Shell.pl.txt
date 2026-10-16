@@ -1,0 +1,5 @@
+  "Notifications: {n} waiting": "Powiadomienia: oczekuje {n}",
+  "Notifications: nothing waiting": "Powiadomienia: nic nie oczekuje",
+  "place": "miejsce",
+  "A place, a host, a job, a campaign, a group or a tag…": "Miejsce, host, zadanie, kampania, grupa lub tag…",
+  "Type to look for a place, a host, a job, a campaign, a group or a tag.": "Zacznij pisać, aby znaleźć miejsce, hosta, zadanie, kampanię, grupę lub tag.",

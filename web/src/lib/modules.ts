@@ -71,7 +71,7 @@ function requires(...names: string[]) {
 
 // The registry is written in the order of the groups, so the flat list
 // and the grouped navigation agree on where a module stands.
-const MODULES: Module[] = [
+export const MODULES: Module[] = [
   { segment: "overview", name: "Overview", group: "system", icon: "overview", reason: () => "" },
   // The platform picture travels in the system fragment every agent sends,
   // so the tab is never unavailable; an old agent shows the basic facts.

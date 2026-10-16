@@ -1,0 +1,6 @@
+  "a second apart and Kerberos gives up": "sekunda różnicy i Kerberos odmawia biletów",
+  "{n} reported by the daemon.": "Zgłoszonych przez demona: {n}.",
+  "Configuration, not reachability: a server written here that never answers does not show up in the source list at all.": "Konfiguracja, nie osiągalność: serwer wpisany tutaj, który nigdy nie odpowiada, w ogóle nie pojawi się na liście źródeł.",
+  "pool": "pula",
+  "server": "serwer",
+  "What the panel wrote": "Co zapisał panel",

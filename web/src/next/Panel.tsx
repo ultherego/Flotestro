@@ -20,6 +20,7 @@ import { Jobs } from "./screens/Jobs";
 import { HostWorkspace } from "./screens/host/Workspace";
 import { Campaigns } from "./screens/Campaigns";
 import { Security } from "./screens/Security";
+import { Notifications } from "./screens/Notifications";
 import { AddHost } from "./screens/AddHost";
 import { Bulk } from "./screens/Bulk";
 import { Campaign } from "./screens/Campaign";
@@ -132,6 +133,7 @@ export function NextPanel({ look }: { look: Look }) {
         <Route path="/next/reads" element={<Reads />} />
         <Route path="/next/profile" element={<Profile />} />
         <Route path="/next/audit" element={<Audit />} />
+        <Route path="/next/notifications" element={<Notifications />} />
         <Route path="/next/relays" element={<Relays />} />
         <Route path="/next/groups" element={<Groups />} />
         <Route path="/next/tags" element={<Tags />} />

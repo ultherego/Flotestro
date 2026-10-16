@@ -1,0 +1,4 @@
+  "What the declared state says about this host, rule by rule.": "Co stan deklarowany mówi o tym hoście, reguła po regule.",
+  "Policies that select this host": "Polityki obejmujące tego hosta",
+  "No policy selects this host.": "Żadna polityka nie obejmuje tego hosta.",
+  "Every rule of every policy that selects this host.": "Każda reguła każdej polityki, która obejmuje tego hosta.",

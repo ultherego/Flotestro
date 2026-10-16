@@ -1,0 +1,5 @@
+  "The platform could not be read: {reason}": "Nie udało się odczytać platformy: {reason}",
+  "booted {when}": "start systemu {when}",
+  "{n} MHz": "{n} MHz",
+  "The adapters the other modules stand on, and the reason where one is missing.": "Adaptery, na których stoją pozostałe moduły — i powód tam, gdzie któregoś brakuje.",
+  "What the host could not read, and why.": "Czego host nie zdołał odczytać i dlaczego.",
