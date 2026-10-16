@@ -43,7 +43,7 @@
   --fl-bar: 60px;
   --fl-gutter: var(--s5);
   --fl-pad: var(--s7);
-  --fl-row: 132px;
+  --fl-row: 152px;
 
   --fl-card: color-mix(in srgb, var(--bg-panel) 94%, var(--text) 6%);
   --fl-edge: color-mix(in srgb, var(--text) 9%, transparent);
@@ -816,8 +816,8 @@
    paragraph. */
 .fl-app .fl-kpi-mark {
   flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   display: grid;
   place-items: center;
   border-radius: 50%;

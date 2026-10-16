@@ -69,7 +69,7 @@ export function settle(widgets: BoardWidget[], held: string): BoardWidget[] {
  * the height of a headline tile, because that is the smallest thing
  * anybody puts on a board.
  */
-export const ROW = 132;
+export const ROW = 152;
 
 export function Board({ screen, catalogue, drawn }: {
   /**
