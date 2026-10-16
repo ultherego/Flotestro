@@ -619,7 +619,11 @@
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: var(--fl-gutter);
-  align-items: start;
+  /* Cards in one row end where the tallest of them ends. Left to their
+     own heights they read as blocks thrown down - the owner's words,
+     twice - and on a wide screen there are four of them in a row to
+     disagree about where the bottom is. */
+  align-items: stretch;
 }
 
 /* Every block a screen puts down stands the same distance from the one
