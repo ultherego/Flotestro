@@ -14,8 +14,7 @@ import { useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Band, Bars, Card, Chart, Empty, Field, Fields, Meter, Modal, Note, PAGE_SIZES, Pill,
-  Problem, Table, Tag, Tags, Toolbar, TwoLine, type Segment, type Tone,
+  Band, Bars, Card, Chart, Empty, Field, Fields, Meter, Modal, Note, Pill, Presets, Problem, RowsPerPage, Table, Tag, Tags, Toolbar, TwoLine, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -372,16 +371,7 @@ export function Jobs() {
             foot={
               <>
                 <span className="fl-note">{t("{n} listed", { n: jobs.length })}</span>
-                <label className="fl-rows">
-                  {t("Rows per page")}
-                  <select
-                    value={size}
-                    onChange={(event) => setSize(Number(event.target.value))}
-                    data-testid="page-size"
-                  >
-                    {PAGE_SIZES.map((one) => <option key={one} value={one}>{one}</option>)}
-                  </select>
-                </label>
+                <RowsPerPage size={size} onSize={setSize} />
                 {list.hasNextPage && (
                   <button
                     type="button"
@@ -474,14 +464,13 @@ export function Jobs() {
               />
               {/* A preset sets the lower bound and lifts the upper one:
                   "the last day" reaches now, whatever Until said before. */}
-              <div className="fl-seg">
-                {([[1, t("last hour")], [24, t("last 24 h")], [24 * 7, t("last 7 days")]] as const).map(([hours, label]) => (
-                  <button key={hours} type="button"
-                          onClick={() => setFilters((before) => ({ ...before, since: hoursAgo(hours), until: "" }))}>
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <Presets
+                label={t("Time range")}
+                options={([[1, t("last hour")], [24, t("last 24 h")], [24 * 7, t("last 7 days")]] as const).map(([hours, label]) => ({
+                  label,
+                  onPick: () => setFilters((before) => ({ ...before, since: hoursAgo(hours), until: "" })),
+                }))}
+              />
               {/* The host and the fan-out arrive from a link rather than from
                   a field, so they stand as chips the reader can take off. */}
               {(filters.host_id || filters.fanout_id) && (

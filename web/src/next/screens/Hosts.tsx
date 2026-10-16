@@ -7,7 +7,7 @@ import { relativeTime, absoluteTime } from "../../lib/format";
 import type { FleetActivity, Host } from "../../lib/types";
 import { useT } from "../../i18n";
 import {
-  Bars, Card, Dot, Empty, Find, Grid, HeadActions, Meter, Pill, Problem, Seg, Table, Tag, Tags, type Tone, TwoLine,
+  Bars, Bones, Card, Dot, Find, Grid, HeadActions, Meter, Pill, Problem, Seg, Stack, Table, Tag, Tags, TwoLine, type Tone,
 } from "../kit";
 
 /**
@@ -181,7 +181,7 @@ export function Hosts() {
 
         <Card span={3} title={t("Fleet composition")} note={t("Counted over the whole fleet you can see.")}>
           {a ? (
-            <div className="fl-stack">
+            <Stack>
               <Dimension label={t("Connection")} items={[
                 { label: t("Online"), value: count("online"), tone: "ok" },
                 { label: t("Stale"), value: count("stale"), tone: "warn" },
@@ -191,8 +191,8 @@ export function Hosts() {
               <Dimension label={t("Systems")} items={a.by_os_family.map((f) => ({ label: facet(f.key), value: f.count, tone: "accent" as Tone }))} />
               <Dimension label={t("Agent builds")} items={a.by_agent_version.map((f) => ({ label: facet(f.key), value: f.count, tone: "neutral" as Tone }))} />
               <Dimension label={t("Sites")} items={a.by_site.map((f) => ({ label: facet(f.key), value: f.count, tone: "info" as Tone }))} />
-            </div>
-          ) : <Empty>{t("Loading…")}</Empty>}
+            </Stack>
+          ) : <Bones rows={4} />}
         </Card>
       </Grid>
     </>

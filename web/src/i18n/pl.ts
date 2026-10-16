@@ -1055,6 +1055,7 @@ export const pl: Record<string, string> = {
   "The fleet at a glance": "Flota na jeden rzut oka",
   "One square is one host; point at it for its name.": "Jeden kwadrat to jeden host; najedz, zeby zobaczyc nazwe.",
   "The newest {n} of {total}.": "Najnowsze {n} z {total}.",
+  "Time range": "Zakres czasu",
   "{n}%": "{n}%",
   "Point at the chart for a reading": "Najedz kursorem na wykres, zeby odczytac wartosc",
   "Export CSV": "Eksportuj CSV",

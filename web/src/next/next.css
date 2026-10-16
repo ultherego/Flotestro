@@ -553,13 +553,16 @@
 }
 
 .fl-app .fl-helpmark {
-  width: 20px;
-  height: 20px;
   flex: 0 0 auto;
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  aspect-ratio: 1;
   padding: 0;
-  display: grid;
+  display: inline-grid;
   place-items: center;
-  border-radius: 50%;
+  line-height: 1;
+  border-radius: 999px;
   border: 1px solid var(--border);
   background: none;
   color: var(--text-faint);
@@ -1591,7 +1594,31 @@
 .fl-app .fl-danger { background: var(--error) !important; color: var(--error-contrast) !important; border-color: transparent !important; }
 
 .fl-app .fl-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); margin-bottom: var(--s4); }
-.fl-app .fl-flush .fl-toolbar { padding: 0 var(--s5); }
+
+/* The card's body is what scrolls, so a toolbar inside it would scroll
+   away with the rows it filters. It sticks to the top of the body, and
+   the table's head sticks under it. The offset is the toolbar's own
+   height - one control, 34px, in padding of --s3 - which is a constant
+   because every control in the kit is that height. */
+.fl-app .fl-card-body > .fl-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: calc(var(--s3) * -1) 0 var(--s3);
+  padding: var(--s3) var(--s5);
+  background: var(--fl-card);
+  border-bottom: 1px solid var(--border);
+}
+
+.fl-app .fl-flush .fl-card-body > .fl-toolbar { margin-top: 0; }
+.fl-app .fl-card-body:has(> .fl-toolbar) .fl-table th { top: 59px; }
+
+/* Wrapped onto two lines the offset would be wrong, and a head that
+   covers the first row is worse than one that scrolls. */
+@media (max-width: 900px) {
+  .fl-app .fl-card-body > .fl-toolbar { position: static; margin-top: 0; }
+  .fl-app .fl-table th { position: static; }
+}
 .fl-app .fl-toolbar-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
 
 .fl-app .fl-find { position: relative; flex: 0 1 280px; display: flex; align-items: center; }
@@ -1788,6 +1815,9 @@
    ------------------------------------------------------------------ */
 
 .fl-app .fl-arrange {
+  position: sticky;
+  top: var(--fl-bar);
+  z-index: 15;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1796,7 +1826,8 @@
   padding: var(--s2);
   border-radius: var(--radius);
   border: 1px dashed var(--border-strong);
-  background: var(--bg-sunken);
+  background: var(--bg-raised);
+  box-shadow: var(--fl-lift);
 }
 
 .fl-app .fl-arrange-reason { flex: 1 1 260px; }
@@ -1806,6 +1837,7 @@
 .fl-app .fl-held > * { height: 100%; }
 
 .fl-app .fl-editing .fl-held {
+  padding-top: 26px;
   outline: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent);
   outline-offset: 2px;
   border-radius: var(--radius-card);
@@ -1817,15 +1849,15 @@
 
 .fl-app .fl-grip {
   position: absolute;
-  inset: auto 0 100% 0;
+  inset: 0 0 auto 0;
+  height: 24px;
   display: flex;
   align-items: center;
   gap: var(--s2);
   padding: var(--s1) var(--s2);
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  border-radius: var(--radius-sm);
   background: var(--bg-raised);
   border: 1px solid var(--border-strong);
-  border-bottom: 0;
   font-size: var(--t-label);
   color: var(--text-muted);
   cursor: grab;

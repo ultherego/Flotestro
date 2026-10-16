@@ -1,5 +1,5 @@
 import { useParams } from "react-router-dom";
-import { Link } from "react-router-dom";
+
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../../lib/api";
 import { useCapabilities } from "../../../lib/capabilities";
@@ -9,7 +9,9 @@ import { relativeTime, absoluteTime } from "../../../lib/format";
 import type { Host } from "../../../lib/types";
 import { useT } from "../../../i18n";
 import { Shell, type Face } from "../../Shell";
-import { Empty, Head, Pill, Problem, Tag, Tags, type Tone } from "../../kit";
+import {
+  Empty, Head, Pill, Problem, Tag, Tags, type Tone,
+} from "../../kit";
 import { HOST_MODULES } from "./modules";
 
 /**
@@ -110,7 +112,7 @@ function HostHead({ host }: { host: Host }) {
           )}
           {host.tags.length > 0
             ? host.tags.map((tag) => (
-                <Link key={tag} className="fl-tag" to={`/next/hosts?tag=${encodeURIComponent(tag)}`}>{tag}</Link>
+                <Tag key={tag} to={`/next/hosts?tag=${encodeURIComponent(tag)}`}>{tag}</Tag>
               ))
             : <Tag>{t("no tags")}</Tag>}
         </Tags>

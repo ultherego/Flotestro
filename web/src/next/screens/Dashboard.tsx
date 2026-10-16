@@ -8,8 +8,7 @@ import { stateName } from "../../components/ui";
 import { useT } from "../../i18n";
 import type { Host } from "../../lib/types";
 import {
-  Band, Bars, Bones, Card, Chart, Empty, Feed, FeedRow, HeadActions, Kpi, Needs, Pie, Pill,
-  Problem, type Segment, Squares, Table, type Tone,
+  Band, Bars, Bones, Card, Chart, Empty, Feed, FeedRow, HeadActions, Kpi, Needs, Pie, Pill, Problem, Squares, Stack, Table, type Segment, type Tone,
 } from "../kit";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
@@ -285,12 +284,12 @@ export function Dashboard() {
         composition: (
           <Card title={t("Fleet composition")} note={t("By system, agent build, site and environment.")}>
             {a ? (
-              <div className="fl-stack">
+              <Stack>
                 <Composition label={t("Systems")} items={a.by_os_family.map((f) => ({ label: facet(f.key), value: f.count, tone: "accent" as Tone }))} />
                 <Composition label={t("Agent builds")} items={a.by_agent_version.map((f) => ({ label: facet(f.key), value: f.count, tone: "neutral" as Tone }))} />
                 <Composition label={t("Sites")} items={a.by_site.map((f) => ({ label: facet(f.key), value: f.count, tone: "info" as Tone }))} />
                 <Composition label={t("Environments")} items={a.by_environment.map((f) => ({ label: facet(f.key), value: f.count, tone: "info" as Tone }))} />
-              </div>
+              </Stack>
             ) : <Bones rows={4} />}
           </Card>
         ),

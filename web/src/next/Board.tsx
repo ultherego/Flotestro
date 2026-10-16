@@ -7,7 +7,8 @@ import {
 } from "../components/board";
 import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
-import { Problem } from "./kit";
+import { Icon } from "../components/icons";
+import { HeadActions, Problem } from "./kit";
 
 /**
  * A screen somebody lays out for themselves: the containers are put where
@@ -133,7 +134,7 @@ export function Board({ screen, catalogue, drawn }: {
      the owner's words, and he is right. A container is as tall as its
      cell and its content scrolls inside it; the corner is there to
      change that. */
-  const placed = placeAll(shown);
+  const placed = settle(placeAll(shown), "");
   const titleOf = (key: string) => catalogue.find((one) => one.key === key)?.title ?? key;
   const absent = catalogue.filter((one) => known.has(one.key) && !shown.some((on) => on.key === one.key));
 
@@ -199,13 +200,18 @@ export function Board({ screen, catalogue, drawn }: {
         <Problem>{t("The stored arrangement could not be read; this is the one the panel ships with.")}</Problem>
       )}
 
-      {layout.data !== undefined && (
+      {layout.data !== undefined && editing === null && (
+        <HeadActions>
+          <button type="button" className="fl-quiet" onClick={() => setEditing([...settle(placeAll(shown), ""), ...current.filter((one) => one.hidden)])} data-testid="arrange">
+            <Icon name="dashboard" />
+            {t("Arrange this screen")}
+          </button>
+        </HeadActions>
+      )}
+
+      {layout.data !== undefined && editing !== null && (
         <div className="fl-arrange">
-          {editing === null ? (
-            <button type="button" className="fl-plain" onClick={() => setEditing(current)} data-testid="arrange">
-              {t("Arrange this screen")}
-            </button>
-          ) : (
+          {(
             <>
               <input
                 className="fl-arrange-reason"

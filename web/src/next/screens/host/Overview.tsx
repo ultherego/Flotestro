@@ -9,7 +9,7 @@ import { useT } from "../../../i18n";
 import { Board } from "../../Board";
 import type { BoardEntry } from "../../../components/board";
 import {
-  Band, Card, Empty, Fact, Facts, Kpi, Meter, Pill, Table, type Segment, type Tone,
+  Band, Card, Empty, Fact, Facts, Kpi, Meter, Needs, Pill, Table, type Segment, type Tone,
 } from "../../kit";
 
 /**
@@ -124,28 +124,15 @@ export function Overview({ host }: { host: Host }) {
       ),
       attention: (
         <Card title={t("Needs attention")} note={t("Counted by the agent on its last report.")}>
-          <div className="fl-needs">
-            {attention.map((one) => {
-              const unknown = one.value === null || one.value === undefined;
-              const shown = typeof one.value === "boolean" ? (one.value ? t("yes") : t("no")) : one.value;
-              const quiet = one.value === false || one.value === 0;
-              const body = (
-                <>
-                  <span className={`fl-needs-count ${quiet || unknown ? "fl-neutral" : `fl-${one.tone}`}`}>
-                    {unknown ? "—" : shown}
-                  </span>
-                  <span className="fl-needs-label">{one.label}</span>
-                </>
-              );
-              return (
-                <div key={one.label}>
-                  {one.to && !quiet && !unknown
-                    ? <Link to={one.to} className="fl-needs-row">{body}</Link>
-                    : <span className="fl-needs-row">{body}</span>}
-                </div>
-              );
-            })}
-          </div>
+          <Needs items={attention.map((one) => ({
+            label: one.label,
+            value: one.value ?? undefined,
+            tone: one.tone,
+            quiet: one.value === false || one.value === 0,
+            to: one.to && one.value !== false && one.value !== 0 && one.value !== null && one.value !== undefined
+              ? one.to
+              : undefined,
+          }))} />
         </Card>
       ),
       system: (

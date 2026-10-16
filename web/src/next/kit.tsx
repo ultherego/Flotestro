@@ -127,9 +127,18 @@ export function Screen({ title, lead, help, icon, actions, banner, children }: {
   banner?: ReactNode;
   children: ReactNode;
 }) {
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => { setSlot(document.getElementById("fl-head-slot")); }, []);
+  /* The shell draws one heading for every screen, out of one table, so
+     that forty of them cannot grow forty shapes of heading. Where it has,
+     a screen hands over only what can be done from it; drawn on its own -
+     in a test, or outside the shell - it draws the heading itself so that
+     what it is called is never lost. */
   return (
     <>
-      <Head title={title} lead={lead} help={help} icon={icon} actions={actions} />
+      {slot
+        ? actions && <HeadActions>{actions}</HeadActions>
+        : <Head title={title} lead={lead} help={help} icon={icon} actions={actions} />}
       {banner}
       {children}
     </>
@@ -293,8 +302,10 @@ export function Pill({ tone, children, title, dot = true }: {
   return <span className={join("fl-pill", !dot && "fl-nodot", toneClass(tone))} title={title}>{children}</span>;
 }
 
-export function Tag({ children }: { children: ReactNode }) {
-  return <span className="fl-tag">{children}</span>;
+export function Tag({ children, to, title }: { children: ReactNode; to?: string; title?: string }) {
+  return to
+    ? <Link to={to} className="fl-tag" title={title}>{children}</Link>
+    : <span className="fl-tag" title={title}>{children}</span>;
 }
 
 export function Tags({ children }: { children: ReactNode }) {
@@ -1267,21 +1278,33 @@ export function FeedRow({ icon, tone, what, who, when, to }: {
  * before it reaches here.
  */
 export function Needs({ items }: {
-  items: { label: ReactNode; value?: number; tone?: Tone; to?: string }[];
+  items: {
+    label: ReactNode;
+    /** undefined is "nobody knows"; a boolean is a yes or a no. */
+    value?: number | string | boolean;
+    tone?: Tone;
+    /** Nothing to answer here - a nought, a no - so it wears no state. */
+    quiet?: boolean;
+    to?: string;
+  }[];
 }) {
   const t = useT();
   return (
     <div className="fl-needs">
       {items.map((one, index) => {
-        const unknown = one.value === undefined;
+        const unknown = one.value === undefined || one.value === null;
+        const shown = typeof one.value === "boolean" ? (one.value ? t("yes") : t("no")) : one.value;
         const body = (
           <>
             <span className="fl-needs-label">{one.label}</span>
             {unknown && <span className="fl-faint fl-small">{t("not counted")}</span>}
-            <span className="fl-needs-count">{unknown ? "—" : one.value}</span>
+            <span className="fl-needs-count">{unknown ? "—" : shown}</span>
           </>
         );
-        const className = join("fl-needs-row", toneClass(unknown ? "unknown" : one.tone));
+        const className = join(
+          "fl-needs-row",
+          toneClass(unknown ? "unknown" : one.quiet ? "neutral" : one.tone),
+        );
         return one.to
           ? <Link key={index} to={one.to} className={className}>{body}</Link>
           : <div key={index} className={className}>{body}</div>;
@@ -1393,6 +1416,47 @@ export function Pie({ slices, total, label, hole = 0.62, testId }: {
             : <div key={index} className={className}>{body}</div>;
         })}
       </dl>
+    </div>
+  );
+}
+
+/* ----------------------------------------------------- list furniture */
+
+/**
+ * How many rows a list shows at once. One control, so the same words and
+ * the same sizes appear wherever a list is long enough to need them.
+ */
+export function RowsPerPage({ size, onSize, sizes = PAGE_SIZES, testId }: {
+  size: number;
+  onSize: (size: number) => void;
+  sizes?: readonly number[];
+  testId?: string;
+}) {
+  const t = useT();
+  return (
+    <label className="fl-rows">
+      {t("Rows per page")}
+      <select value={size} onChange={(event) => onSize(Number(event.target.value))} data-testid={testId ?? "page-size"}>
+        {sizes.map((one) => <option key={one} value={one}>{one}</option>)}
+      </select>
+    </label>
+  );
+}
+
+/**
+ * A row of shortcuts that set something rather than choose between
+ * states: "the last hour", "the last day". None of them is ever the one
+ * that is on, which is what separates this from a Seg.
+ */
+export function Presets({ options, label }: {
+  options: { label: ReactNode; onPick: () => void }[];
+  label?: string;
+}) {
+  return (
+    <div className="fl-seg" role="group" aria-label={label}>
+      {options.map((one, index) => (
+        <button key={index} type="button" onClick={one.onPick}>{one.label}</button>
+      ))}
     </div>
   );
 }
