@@ -1917,6 +1917,12 @@
 .fl-app .fl-held { position: relative; min-width: 0; min-height: 0; }
 .fl-app .fl-held > * { height: 100%; }
 
+/* A notice is a line, not a box the height of its cell. Stretched to
+   fill one it read as a tall empty frame with a sentence floating in
+   the middle of it. */
+.fl-app .fl-held > .fl-banner,
+.fl-app .fl-held > .fl-problem { height: auto; }
+
 .fl-app .fl-editing .fl-held {
   padding-top: 26px;
   outline: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent);

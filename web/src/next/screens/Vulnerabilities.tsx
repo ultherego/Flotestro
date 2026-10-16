@@ -794,7 +794,7 @@ export const VULNERABILITIES: BoardEntry[] = [
   { key: "split", title: "What the vendor offers", width: 5, height: 2 },
   { key: "assessed", title: "Judged", width: 3, height: 2 },
   { key: "worst", title: "Where to start", width: 4, height: 2 },
-  { key: "held", title: "Feed fetches held back", width: 12, height: 2 },
+  { key: "held", title: "Feed fetches held back", width: 12, height: 1 },
   { key: "sources", title: "Security data", width: 12, height: 3 },
   { key: "list", title: "The list", width: 12, height: 6 },
 ];

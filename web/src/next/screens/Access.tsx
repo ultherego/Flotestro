@@ -2086,7 +2086,7 @@ export const ACCESS: BoardEntry[] = [
   { key: "signin", title: "Who may sign in", width: 4, height: 1 },
   { key: "identities", title: "Identities on record", width: 4, height: 1 },
   { key: "norole", title: "Without a role of their own", width: 4, height: 1 },
-  { key: "filter", title: "Find somebody", width: 12, height: 2 },
+  { key: "filter", title: "Find somebody", width: 12, height: 1 },
   { key: "create", title: "New identity", width: 12, height: 4 },
   { key: "list", title: "The list", width: 12, height: 6 },
   { key: "record", title: "The opened identity", width: 12, height: 5 },
