@@ -56,6 +56,16 @@
   --fl-edge: color-mix(in srgb, var(--text) 9%, transparent);
   --fl-lift: 0 1px 2px rgba(0, 0, 0, 0.18), 0 8px 24px -12px rgba(0, 0, 0, 0.45);
   --fl-lift-high: 0 2px 4px rgba(0, 0, 0, 0.2), 0 18px 40px -16px rgba(0, 0, 0, 0.55);
+  /* The brand does not follow the theme.
+   *
+   * A mark that changes colour with the reader's preference is not a
+   * mark - the three host dots inside it are fixed for the same reason,
+   * and have been since it was drawn. These two are the only values in
+   * this file that are not a token of the product, and they are here
+   * because a brand colour is not a theme's. */
+  --fl-brand: #fab387;
+  --fl-brand-ink: #11111b;
+
   --fl-quick: 140ms cubic-bezier(0.2, 0, 0.1, 1);
   --fl-slow: 600ms cubic-bezier(0.2, 0, 0.1, 1);
 
@@ -182,8 +192,8 @@
   height: 30px;
   flex: 0 0 auto;
   border-radius: 9px;
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--fl-brand);
+  color: var(--fl-brand-ink);
   font-size: var(--t-small);
 }
 

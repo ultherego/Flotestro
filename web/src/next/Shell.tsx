@@ -110,7 +110,9 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
         <aside className={drawer ? "fl-rail fl-open" : "fl-rail"}>
           <Link to="/next" className="fl-brand">
             <span className="fl-brand-mark" aria-hidden="true">
-              <LogoMark size={26} ground="color-mix(in srgb, var(--accent) 14%, transparent)" />
+              {/* The holes of the mark are cut in the badge it sits on, and the
+                  badge is the brand's colour in every theme. */}
+              <LogoMark size={26} ground="var(--fl-brand)" />
             </span>
             <span className="fl-brand-name">Flotestro</span>
           </Link>
