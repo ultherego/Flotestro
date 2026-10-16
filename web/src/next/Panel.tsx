@@ -35,7 +35,7 @@ import { Secrets } from "./screens/Secrets";
 import { Settings } from "./screens/Settings";
 import { Status } from "./screens/Status";
 import { Support } from "./screens/Support";
-import { Empty, Head, HeadSlot, Screen } from "./kit";
+import { Empty, Head, HeadSlot, Screen, ShellHead } from "./kit";
 import { ABOUT } from "./screens/about";
 import { LookProvider, type Look } from "./look";
 import { useT } from "../i18n";
@@ -104,6 +104,7 @@ export function NextPanel({ look }: { look: Look }) {
   return (
     <LookProvider look={look}>
     <Shell trail={{ section: about ? about.title : title }}>
+      <ShellHead.Provider value={about !== undefined}>
       {about && (
         <Head
           title={t(about.title)}
@@ -172,6 +173,7 @@ export function NextPanel({ look }: { look: Look }) {
         <Route path="/next/access" element={<Access />} />
         <Route path="*" element={<NotYet />} />
       </Routes>
+      </ShellHead.Provider>
     </Shell>
     </LookProvider>
   );

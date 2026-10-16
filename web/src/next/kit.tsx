@@ -1,5 +1,5 @@
 import {
-  Children, isValidElement, useEffect, useId, useRef, useState,
+  Children, createContext, isValidElement, useContext, useEffect, useId, useRef, useState,
   type CSSProperties, type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent, type ReactNode,
 } from "react";
@@ -127,18 +127,35 @@ export function Screen({ title, lead, help, icon, actions, banner, children }: {
   banner?: ReactNode;
   children: ReactNode;
 }) {
-  const [slot, setSlot] = useState<HTMLElement | null>(null);
-  useEffect(() => { setSlot(document.getElementById("fl-head-slot")); }, []);
   /* The shell draws one heading for every screen, out of one table, so
-     that forty of them cannot grow forty shapes of heading. Where it has,
-     a screen hands over only what can be done from it; drawn on its own -
-     in a test, or outside the shell - it draws the heading itself so that
-     what it is called is never lost. */
+     that forty of them cannot grow forty shapes of heading. Where it has
+     drawn one, a screen hands over only what can be done from it; where
+     it has not - a screen that names a thing rather than a section, a
+     test, anything outside the shell - the screen draws the heading
+     itself, so what it is called is never lost.
+   
+     Which of the two it is comes from the shell, not from looking for
+     the slot in the document: a screen that draws its own heading also
+     draws a slot, and a screen that looked would find its own and stop
+     drawing the heading it had just drawn. */
+  const drawn = useContext(ShellHead);
   return (
     <>
-      {slot
+      {drawn
         ? actions && <HeadActions>{actions}</HeadActions>
-        : <Head title={title} lead={lead} help={help} icon={icon} actions={actions} />}
+        : (
+          <Head
+            title={title}
+            lead={lead}
+            help={help}
+            icon={icon}
+            /* A screen that draws its own heading offers the same slot
+               the shell's does, or what the screen holds - the arranging
+               mode, a module's own actions - lands on a line of its own
+               under the title instead of beside it. */
+            actions={<>{actions}<HeadSlot /></>}
+          />
+        )}
       {banner}
       {children}
     </>
@@ -162,6 +179,14 @@ export function Flow({ children, min = 420 }: {
 }) {
   return <div className={`fl-flow fl-flow-${min}`}>{children}</div>;
 }
+
+/**
+ * Whether the shell has already drawn the heading above this screen.
+ *
+ * The shell sets it; a `Screen` reads it and either hands over its
+ * actions or draws the heading itself.
+ */
+export const ShellHead = createContext(false);
 
 /**
  * Where a screen's own actions land in the heading above it.
