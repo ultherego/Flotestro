@@ -5,8 +5,10 @@ import { copyToClipboard } from "../../lib/clipboard";
 import { absoluteTime, bytes, duration, goDuration, relativeTime } from "../../lib/format";
 import { useT } from "../../i18n";
 import type { Translate } from "../../i18n";
+import { Board } from "../Board";
+import type { BoardEntry } from "../../components/board";
 import {
-  Band, Banner, Bars, Bones, Card, Chart, Empty, Fact, Facts, Feed, FeedRow, Grid, Kpi, Kpis,
+  Band, Banner, Bars, Bones, Card, Chart, Empty, Fact, Facts, Feed, FeedRow, Kpi,
   Note, Pie, Pill, Problem, Ring, Screen, type Segment, type Series, Squares, Stack, Table,
   type Tone,
 } from "../kit";
@@ -318,173 +320,183 @@ export function Status() {
       {!error && !data && <Bones rows={6} />}
 
       {data && (
-        <>
-          <Kpis>
-            <Kpi
-              hero
-              icon="settings"
-              label={t("Parts judged")}
-              value={blocks.length - data.unknown}
-              note={t("of {total} the server reports", { total: blocks.length })}
-              testId="kpi-judged"
-            />
-            <Kpi
-              icon="check"
-              label={t("Fine")}
-              value={count("ok")}
-              tone="ok"
-              note={t("nothing to do about these")}
-              testId="kpi-fine"
-            />
-            <Kpi
-              icon="help"
-              label={t("Need a look")}
-              value={wanting.length - (count("unknown") ?? 0)}
-              tone={wanting.length - (count("unknown") ?? 0) > 0 ? "error" : "ok"}
-              note={t("not fine, or fine with a note")}
-              testId="kpi-wanting"
-            />
-            <Kpi
-              icon="overview"
-              label={t("Not judged")}
-              value={data.unknown}
-              tone={data.unknown > 0 ? "unknown" : "ok"}
-              note={t("unknown is not the same as fine")}
-              testId="kpi-unknown"
-            />
-            <Kpi
-              icon="monitoring"
-              label={t("Database round trip")}
-              value={latency === undefined ? null : latency.toFixed(1)}
-              unit="ms"
-              note={t("as the server last measured it")}
-              spark={latencySeries.length > 1 ? latencySeries.map((one) => one.latency ?? 0) : undefined}
-              testId="kpi-latency"
-            />
-          </Kpis>
-
-          <Grid>
-            <Card
-              span={4}
-              title={t("How the parts divide")}
-              note={t("What nobody could judge is a slice like any other, not an absence.")}
-            >
-              <Pie
-                testId="status-division"
-                total={blocks.length}
-                label={t("parts")}
-                slices={[
-                  { label: t("Fine"), value: count("ok") ?? 0, tone: "ok" },
-                  { label: t("Attention"), value: count("warn") ?? 0, tone: "warn" },
-                  { label: t("Not fine"), value: count("error") ?? 0, tone: "error" },
-                  { label: t("Not judged"), value: count("unknown") ?? 0, tone: "unknown" },
-                ]}
+        <Board
+          screen={STATUS_SCREEN}
+          catalogue={statusCatalogue(blocks, Boolean(data.blocks.build))}
+          drawn={{
+            judged: (
+              <Kpi
+                hero
+                icon="settings"
+                label={t("Parts judged")}
+                value={blocks.length - data.unknown}
+                note={t("of {total} the server reports", { total: blocks.length })}
+                testId="kpi-judged"
               />
-            </Card>
-
-            <Card
-              span={4}
-              title={t("Every part at a glance")}
-              note={t("One square per part, in the order a failure reaches the operator.")}
-            >
-              <Squares
-                testId="status-squares"
-                items={blocks.map((key) => ({
-                  key,
-                  tone: toneOf(key),
-                  title: `${t(BLOCK_TITLES[key] ?? key)} · ${verdictWord(toneOf(key), t)}`,
-                }))}
-                tally={[
-                  { label: t("fine"), value: count("ok") ?? "—", tone: "ok" },
-                  { label: t("attention"), value: count("warn") ?? "—", tone: "warn" },
-                  { label: t("not fine"), value: count("error") ?? "—", tone: "error" },
-                  { label: t("not judged"), value: count("unknown") ?? "—", tone: "unknown" },
-                ]}
+            ),
+            fine: (
+              <Kpi
+                icon="check"
+                label={t("Fine")}
+                value={count("ok")}
+                tone="ok"
+                note={t("nothing to do about these")}
+                testId="kpi-fine"
               />
-            </Card>
-
-            <Card
-              span={4}
-              title={t("The database pool")}
-              note={t("How much of this gateway's own pool of connections is taken. A pool the server did not report draws no arc.")}
-            >
-              <Ring
-                share={poolShare}
-                label={t("of the pool")}
-                tone={poolShare === undefined ? "unknown" : poolShare > 0.85 ? "error" : poolShare > 0.7 ? "warn" : "ok"}
-                legend={[
-                  { label: t("In use"), value: poolUsed ?? "—" },
-                  { label: t("Limit"), value: poolMax ?? "—" },
-                  { label: t("Idle"), value: numberFact(data.blocks.database?.facts, "pool_idle") ?? "—" },
-                  { label: t("Waits for a free connection"), value: numberFact(data.blocks.database?.facts, "pool_empty_acquires") ?? "—" },
-                ]}
+            ),
+            wanting: (
+              <Kpi
+                icon="help"
+                label={t("Need a look")}
+                value={wanting.length - (count("unknown") ?? 0)}
+                tone={wanting.length - (count("unknown") ?? 0) > 0 ? "error" : "ok"}
+                note={t("not fine, or fine with a note")}
+                testId="kpi-wanting"
               />
-            </Card>
-
-            <Card
-              span={12}
-              title={t("Parts that need a look")}
-              note={t("Everything that is not plainly fine, with the reason the server gave.")}
-              flush
-            >
-              {wanting.length === 0
-                ? <Empty>{t("Every part of this panel was judged and every one is fine.")}</Empty>
-                : (
-                  <Feed>
-                    {wanting.map((key) => (
-                      <FeedRow
-                        key={key}
-                        icon="settings"
-                        tone={toneOf(key)}
-                        what={t(BLOCK_TITLES[key] ?? key)}
-                        who={data.blocks[key].reason || data.blocks[key].attention || t("judged as unknown")}
-                        when={verdictWord(toneOf(key), t)}
-                      />
-                    ))}
-                  </Feed>
-                )}
-            </Card>
-
-            <Card
-              span={12}
-              title={t("Since this screen was opened")}
-              note={t("The readings this screen took, one every {n} seconds. The server keeps no history of its own condition, so nothing here reaches back before the page was opened.", { n: STATUS_REFRESH_INTERVAL / 1000 })}
-            >
-              {latencySeries.length < 2 && pendingSeries.length < 2
-                ? <Note>{t("One reading so far. A line appears with the second.")}</Note>
-                : (
-                  <Stack>
-                    {latencySeries.length > 1 && (
-                      <Chart
-                        testId="latency-chart"
-                        shape="area"
-                        height={120}
-                        everyLabel={Math.max(1, Math.ceil(latencySeries.length / 8))}
-                        labels={latencySeries.map((one) => clock(one.at))}
-                        series={[{ name: t("Round trip, ms"), tone: "accent", values: latencySeries.map((one) => one.latency ?? 0) } as Series]}
-                      />
-                    )}
-                    {pendingSeries.length > 1 && (
-                      <Chart
-                        testId="pending-chart"
-                        shape="line"
-                        height={120}
-                        everyLabel={Math.max(1, Math.ceil(pendingSeries.length / 8))}
-                        labels={pendingSeries.map((one) => clock(one.at))}
-                        series={[{ name: t("Events waiting in the trail"), tone: "info", values: pendingSeries.map((one) => one.pending ?? 0) } as Series]}
-                      />
-                    )}
-                  </Stack>
-                )}
-            </Card>
-
-            {blocks.map((key) => (
-              <Block key={key} name={key} block={data.blocks[key]} />
-            ))}
-
-            {data.blocks.build && <About block={data.blocks.build} />}
-          </Grid>
-        </>
+            ),
+            not_judged: (
+              <Kpi
+                icon="overview"
+                label={t("Not judged")}
+                value={data.unknown}
+                tone={data.unknown > 0 ? "unknown" : "ok"}
+                note={t("unknown is not the same as fine")}
+                testId="kpi-unknown"
+              />
+            ),
+            latency: (
+              <Kpi
+                icon="monitoring"
+                label={t("Database round trip")}
+                value={latency === undefined ? null : latency.toFixed(1)}
+                unit="ms"
+                note={t("as the server last measured it")}
+                spark={latencySeries.length > 1 ? latencySeries.map((one) => one.latency ?? 0) : undefined}
+                testId="kpi-latency"
+              />
+            ),
+            division: (
+              <Card
+                title={t("How the parts divide")}
+                note={t("What nobody could judge is a slice like any other, not an absence.")}
+              >
+                <Pie
+                  testId="status-division"
+                  total={blocks.length}
+                  label={t("parts")}
+                  slices={[
+                    { label: t("Fine"), value: count("ok") ?? 0, tone: "ok" },
+                    { label: t("Attention"), value: count("warn") ?? 0, tone: "warn" },
+                    { label: t("Not fine"), value: count("error") ?? 0, tone: "error" },
+                    { label: t("Not judged"), value: count("unknown") ?? 0, tone: "unknown" },
+                  ]}
+                />
+              </Card>
+            ),
+            squares: (
+              <Card
+                title={t("Every part at a glance")}
+                note={t("One square per part, in the order a failure reaches the operator.")}
+              >
+                <Squares
+                  testId="status-squares"
+                  items={blocks.map((key) => ({
+                    key,
+                    tone: toneOf(key),
+                    title: `${t(BLOCK_TITLES[key] ?? key)} · ${verdictWord(toneOf(key), t)}`,
+                  }))}
+                  tally={[
+                    { label: t("fine"), value: count("ok") ?? "—", tone: "ok" },
+                    { label: t("attention"), value: count("warn") ?? "—", tone: "warn" },
+                    { label: t("not fine"), value: count("error") ?? "—", tone: "error" },
+                    { label: t("not judged"), value: count("unknown") ?? "—", tone: "unknown" },
+                  ]}
+                />
+              </Card>
+            ),
+            pool: (
+              <Card
+                title={t("The database pool")}
+                note={t("How much of this gateway's own pool of connections is taken. A pool the server did not report draws no arc.")}
+              >
+                <Ring
+                  share={poolShare}
+                  label={t("of the pool")}
+                  tone={poolShare === undefined ? "unknown" : poolShare > 0.85 ? "error" : poolShare > 0.7 ? "warn" : "ok"}
+                  legend={[
+                    { label: t("In use"), value: poolUsed ?? "—" },
+                    { label: t("Limit"), value: poolMax ?? "—" },
+                    { label: t("Idle"), value: numberFact(data.blocks.database?.facts, "pool_idle") ?? "—" },
+                    { label: t("Waits for a free connection"), value: numberFact(data.blocks.database?.facts, "pool_empty_acquires") ?? "—" },
+                  ]}
+                />
+              </Card>
+            ),
+            attention: (
+              <Card
+                title={t("Parts that need a look")}
+                note={t("Everything that is not plainly fine, with the reason the server gave.")}
+                flush
+              >
+                {wanting.length === 0
+                  ? <Empty>{t("Every part of this panel was judged and every one is fine.")}</Empty>
+                  : (
+                    <Feed>
+                      {wanting.map((key) => (
+                        <FeedRow
+                          key={key}
+                          icon="settings"
+                          tone={toneOf(key)}
+                          what={t(BLOCK_TITLES[key] ?? key)}
+                          who={data.blocks[key].reason || data.blocks[key].attention || t("judged as unknown")}
+                          when={verdictWord(toneOf(key), t)}
+                        />
+                      ))}
+                    </Feed>
+                  )}
+              </Card>
+            ),
+            since: (
+              <Card
+                title={t("Since this screen was opened")}
+                note={t("The readings this screen took, one every {n} seconds. The server keeps no history of its own condition, so nothing here reaches back before the page was opened.", { n: STATUS_REFRESH_INTERVAL / 1000 })}
+              >
+                {latencySeries.length < 2 && pendingSeries.length < 2
+                  ? <Note>{t("One reading so far. A line appears with the second.")}</Note>
+                  : (
+                    <Stack>
+                      {latencySeries.length > 1 && (
+                        <Chart
+                          testId="latency-chart"
+                          shape="area"
+                          height={120}
+                          everyLabel={Math.max(1, Math.ceil(latencySeries.length / 8))}
+                          labels={latencySeries.map((one) => clock(one.at))}
+                          series={[{ name: t("Round trip, ms"), tone: "accent", values: latencySeries.map((one) => one.latency ?? 0) } as Series]}
+                        />
+                      )}
+                      {pendingSeries.length > 1 && (
+                        <Chart
+                          testId="pending-chart"
+                          shape="line"
+                          height={120}
+                          everyLabel={Math.max(1, Math.ceil(pendingSeries.length / 8))}
+                          labels={pendingSeries.map((one) => clock(one.at))}
+                          series={[{ name: t("Events waiting in the trail"), tone: "info", values: pendingSeries.map((one) => one.pending ?? 0) } as Series]}
+                        />
+                      )}
+                    </Stack>
+                  )}
+              </Card>
+            ),
+            /* One container per part the server reported, so an
+               installation can put the part it watches first. */
+            ...Object.fromEntries(blocks.map((key) => [
+              key, <Block key={key} name={key} block={data.blocks[key]} />,
+            ])),
+            ...(data.blocks.build ? { build: <About block={data.blocks.build} /> } : {}),
+          }}
+        />
       )}
     </Screen>
   );
@@ -506,7 +518,6 @@ function Block({ name, block }: { name: string; block: StatusBlock }) {
   const summary = blockSummary(name, block.facts, t);
   return (
     <Card
-      span={4}
       title={t(BLOCK_TITLES[name] ?? name)}
       note={summary || undefined}
       tools={<Pill tone={tone}>{verdictWord(tone, t)}</Pill>}
@@ -741,7 +752,6 @@ function About({ block }: { block: StatusBlock }) {
   const up = typeof facts.uptime_seconds === "number" ? duration(facts.uptime_seconds) : "—";
   return (
     <Card
-      span={4}
       title={t("About")}
       note={t("version {version}, up {uptime}", { version: text("version"), uptime: up })}
     >
@@ -870,4 +880,51 @@ function kindOfKey(key: string): FactKind {
   if (/_bytes$/.test(key)) return "bytes";
   if (/_ms$/.test(key)) return "ms";
   return "text";
+}
+
+/** The name this screen's arrangement is stored under. */
+export const STATUS_SCREEN = "next_status";
+
+/**
+ * The containers that stand on this screen whatever the server reports.
+ *
+ * The parts themselves are not here: which parts a panel has is the
+ * server's answer, so they are added to the catalogue as they arrive.
+ */
+export const STATUS: BoardEntry[] = [
+  { key: "judged", title: "Parts judged", width: 4, height: 1 },
+  { key: "fine", title: "Fine", width: 2, height: 1 },
+  { key: "wanting", title: "Need a look", width: 2, height: 1 },
+  { key: "not_judged", title: "Not judged", width: 2, height: 1 },
+  { key: "latency", title: "Database round trip", width: 2, height: 1 },
+  // A pie over four outcomes, a square per part and one arc: each is a
+  // drawing of a fixed size with a short legend under it.
+  { key: "division", title: "How the parts divide", width: 4, height: 2 },
+  { key: "squares", title: "Every part at a glance", width: 4, height: 2 },
+  { key: "pool", title: "The database pool", width: 4, height: 2 },
+  // A row per part that is not fine: at worst every part of the panel.
+  { key: "attention", title: "Parts that need a look", width: 12, height: 3 },
+  // Two charts of 120 pixels each, with their labels.
+  { key: "since", title: "Since this screen was opened", width: 12, height: 3 },
+];
+
+/**
+ * How tall a part's own container ships: three rows for a list of facts,
+ * four for the parts that draw a table of their own under it.
+ */
+const TALL_BLOCKS = new Set(["database", "crypto", "outbox", "vulnerability_feeds", "housekeeping"]);
+
+/** The catalogue with the parts this server reported added to it. */
+export function statusCatalogue(blocks: string[], build: boolean): BoardEntry[] {
+  return [
+    ...STATUS,
+    ...blocks.map((key) => ({
+      key,
+      title: BLOCK_TITLES[key] ?? key,
+      width: 4,
+      height: TALL_BLOCKS.has(key) ? 4 : 3,
+    })),
+    // Eleven facts and two links: the card a bug report starts with.
+    ...(build ? [{ key: "build", title: BLOCK_TITLES.build, width: 4, height: 4 }] : []),
+  ];
 }

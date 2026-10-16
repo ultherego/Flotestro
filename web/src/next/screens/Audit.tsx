@@ -621,7 +621,9 @@ export function targetLink(targetType?: string, targetID?: string): string | nul
     case "budget": return "/next/budgets";
     case "notification_channel": return "/next/notifications";
     case "tag": return "/next/tags";
-    case "pki": return "/next/access?tab=ca";
+    // The fleet authority is a section of the settings screen in this
+    // panel; the old one's access tab for it does not exist here.
+    case "pki": return "/next/settings";
     default: return null;
   }
 }

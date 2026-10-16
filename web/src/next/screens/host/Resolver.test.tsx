@@ -238,6 +238,48 @@ describe("what the resolver module says", () => {
     expect(within(row).queryByText("no")).toBeNull();
   });
 
+  /**
+   * The two facts the old panel put on a link's row, and the word behind
+   * the abbreviation. A link that validates and a link that encrypts are
+   * different machines to an operator, and neither is readable from the
+   * global card above the table.
+   */
+  it("keeps DNSSEC and DoT on the link's own row, and says what DoT stands for", async () => {
+    Object.assign(answers, {
+      "/api/v1/hosts/h1/inventory/dns": fragment({
+        ...resolved,
+        links: [{
+          name: "enp0s3", servers: ["192.168.56.50"], domains: ["flotestro.test"],
+          default_route: true, dnssec: "allow-downgrade", dns_over_tls: "opportunistic",
+        }],
+      }),
+      "/api/v1/hosts/h1/actions": may(EVERY),
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("link-enp0s3")).toBeInTheDocument());
+    const row = screen.getByTestId("link-enp0s3");
+    expect(within(row).getByText("allow-downgrade")).toBeInTheDocument();
+    expect(within(row).getByText("opportunistic")).toBeInTheDocument();
+    // "DoT" is three letters; the heading carries what they mean, as the
+    // heading of the panel being replaced did.
+    expect(screen.getByText("DoT")).toHaveAttribute("title", "DNS over TLS");
+  });
+
+  /** A link that reported neither draws the dash, never a "no". */
+  it("leaves DNSSEC and DoT blank on a link that reported neither", async () => {
+    Object.assign(answers, {
+      "/api/v1/hosts/h1/inventory/dns": fragment({
+        ...resolved,
+        links: [{ name: "enp0s8", servers: [], domains: [], default_route: false }],
+      }),
+      "/api/v1/hosts/h1/actions": may(EVERY),
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("link-enp0s8")).toBeInTheDocument());
+    const row = screen.getByTestId("link-enp0s8");
+    expect(within(row).getAllByText("—").length).toBeGreaterThanOrEqual(2);
+  });
+
   it("says the host has one global list rather than drawing an empty table", async () => {
     Object.assign(answers, {
       "/api/v1/hosts/h1/inventory/dns": fragment({ ...resolved, links: [] }),

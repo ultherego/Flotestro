@@ -6,8 +6,10 @@ import { copyToClipboard } from "../../lib/clipboard";
 import { absoluteTime, relativeTime } from "../../lib/format";
 import type { Whoami } from "../../lib/types";
 import { useT } from "../../i18n";
+import { Board } from "../Board";
+import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Bars, Bones, Band, Button, C, Card, Check, Empty, Fact, Facts, Field, Fields,
+  Actions, Banner, Bars, Bones, Band, Button, Card, Check, Empty, Fact, Facts, Field, Fields,
   Grid, Kpi, Kpis, Modal, Note, Pill, Problem, Readout, Screen, Stack, Table, Toolbar, Find,
   TwoLine, type Segment,
 } from "../kit";
@@ -320,151 +322,150 @@ function SecretStore() {
         />
       )}
 
-      <Grid>
-        <Card
-          span={8}
-          title={t("Store")}
-          note={loaded
-            ? t("{n} secrets; the never-rotated ones are counted among the issuable, still on their first version.", { n: secrets.length })
-            : undefined}
-        >
-          {loaded ? <Band segments={band} testId="secrets-band" /> : <Bones rows={2} />}
-        </Card>
-
-        <Card span={4} title={t("By creator")} note={t("Who put the secrets in.")}>
-          {!loaded ? (
-            <Bones rows={3} />
-          ) : byCreator.length === 0 ? (
-            <Empty icon="secrets">{t("Nobody has put a secret in yet.")}</Empty>
-          ) : (
-            <Bars items={byCreator.map(([creator, n]) => ({ label: creator, value: n, tone: "accent" }))} />
-          )}
-        </Card>
-
-        {aside?.kind === "create" && canWrite && (
-          <C span={12}>
-            <NewSecret onDone={settled} onCancel={() => setAside(null)} />
-          </C>
-        )}
-
-        <Card
-          span={12}
-          title={t("Secrets")}
-          foot={canWrite ? undefined : <Note>{denied}</Note>}
-          flush
-        >
-          <Toolbar end={loaded
-            ? <span>{t("{shown} of {n} secrets", { shown: shown.length, n: secrets.length })}</span>
-            : undefined}
+      <Board screen={SECRETS_SCREEN} catalogue={SECRETS} drawn={{
+        store: (
+          <Card
+            title={t("Store")}
+            note={loaded
+              ? t("{n} secrets; the never-rotated ones are counted among the issuable, still on their first version.", { n: secrets.length })
+              : undefined}
           >
-            <Find
-              value={search}
-              onChange={setSearch}
-              placeholder={t("Search by name or description")}
-              testId="secrets-search"
-            />
-          </Toolbar>
-          {!loaded ? (
-            <Bones rows={5} />
-          ) : (
-            <Table
-              rows={shown}
-              keyOf={(one) => one.id}
-              rowTestId={(one) => `secret-${one.name}`}
-              testId="secrets-table"
-              /* The rotation belongs under the secret it rotates: the panel
-                 being replaced opened it in a second row there, and a card
-                 elsewhere on the page leaves the reader checking which
-                 secret the form in front of them is about. */
-              opened={(one) => rotating?.name === one.name && canWrite}
-              detail={(one) => (
-                <RotateSecret key={one.name} secret={one} onDone={settled} onCancel={() => setAside(null)} />
-              )}
-              empty={secrets.length === 0
-                ? t("No secrets are stored in this installation. A secret is a value a job may be handed on one host for one run; nothing here can read it back afterwards.")
-                : t("No secret matches the search.")}
-              columns={[
-                {
-                  key: "name",
-                  head: t("Name"),
-                  cell: (one) => (
-                    <TwoLine sub={one.description || t("nobody wrote what it is for")}>
-                      <Link to={secretAddress(one.name)}>{one.name}</Link>
-                    </TwoLine>
-                  ),
-                },
-                { key: "version", head: t("Version"), num: true, cell: (one) => one.current_version },
-                {
-                  key: "created",
-                  head: t("Created"),
-                  minor: true,
-                  cell: (one) => (
-                    <TwoLine sub={<span title={absoluteTime(one.created_at)}>{relativeTime(one.created_at)}</span>}>
-                      {one.created_by}
-                    </TwoLine>
-                  ),
-                },
-                {
-                  key: "state",
-                  head: t("State"),
-                  cell: (one) => one.retired_at
-                    ? <Pill tone="error" title={absoluteTime(one.retired_at)}>{t("retired")}</Pill>
-                    : <Pill tone="ok">{t("issuable")}</Pill>,
-                },
-                {
-                  key: "actions",
-                  head: "",
-                  actions: true,
-                  cell: (one) => (
-                    <>
-                      {/* A reference to a retired secret is a job that fails
-                          at the lease, so the button goes with the lease. */}
-                      {!one.retired_at && (
-                        <button
-                          type="button"
-                          className="fl-quiet fl-small"
-                          onClick={() => copy(one.name, secretReference(one.name, one.current_version))}
-                          title={secretReference(one.name, one.current_version)}
-                          data-testid={`copy-${one.name}`}
-                        >
-                          {copied === one.name ? t("Copied") : failed === one.name ? t("Copy by hand") : t("Copy reference")}
-                        </button>
-                      )}
-                      {/* The button that opens the row closes it again,
-                          because the form is in the row it opened. */}
-                      {!one.retired_at && canWrite && (
-                        <button
-                          type="button"
-                          className="fl-quiet fl-small"
-                          onClick={() => setAside(rotating?.name === one.name ? null : { kind: "rotate", name: one.name })}
-                          disabled={aside !== null && rotating?.name !== one.name}
-                          aria-expanded={rotating?.name === one.name}
-                          aria-label={rotating?.name === one.name ? undefined : t("Rotate {name}", { name: one.name })}
-                          data-testid={`rotate-${one.name}`}
-                        >
-                          {rotating?.name === one.name ? t("Close") : t("Rotate")}
-                        </button>
-                      )}
-                      {!one.retired_at && canDestroy && (
-                        <button
-                          type="button"
-                          className="fl-danger fl-small"
-                          onClick={() => setAside({ kind: "retire", name: one.name })}
-                          disabled={aside !== null}
-                          aria-label={t("Retire {name}", { name: one.name })}
-                          data-testid={`retire-${one.name}`}
-                        >
-                          {t("Retire")}
-                        </button>
-                      )}
-                    </>
-                  ),
-                },
-              ]}
-            />
-          )}
-        </Card>
-      </Grid>
+            {loaded ? <Band segments={band} testId="secrets-band" /> : <Bones rows={2} />}
+          </Card>
+        ),
+        by_creator: (
+          <Card title={t("By creator")} note={t("Who put the secrets in.")}>
+            {!loaded ? (
+              <Bones rows={3} />
+            ) : byCreator.length === 0 ? (
+              <Empty icon="secrets">{t("Nobody has put a secret in yet.")}</Empty>
+            ) : (
+              <Bars items={byCreator.map(([creator, n]) => ({ label: creator, value: n, tone: "accent" }))} />
+            )}
+          </Card>
+        ),
+        new_secret: aside?.kind === "create" && canWrite && (
+          <NewSecret onDone={settled} onCancel={() => setAside(null)} />
+        ),
+        list: (
+          <Card
+            title={t("Secrets")}
+            foot={canWrite ? undefined : <Note>{denied}</Note>}
+            flush
+          >
+            <Toolbar end={loaded
+              ? <span>{t("{shown} of {n} secrets", { shown: shown.length, n: secrets.length })}</span>
+              : undefined}
+            >
+              <Find
+                value={search}
+                onChange={setSearch}
+                placeholder={t("Search by name or description")}
+                testId="secrets-search"
+              />
+            </Toolbar>
+            {!loaded ? (
+              <Bones rows={5} />
+            ) : (
+              <Table
+                rows={shown}
+                keyOf={(one) => one.id}
+                rowTestId={(one) => `secret-${one.name}`}
+                testId="secrets-table"
+                /* The rotation belongs under the secret it rotates: the panel
+                   being replaced opened it in a second row there, and a card
+                   elsewhere on the page leaves the reader checking which
+                   secret the form in front of them is about. */
+                opened={(one) => rotating?.name === one.name && canWrite}
+                detail={(one) => (
+                  <RotateSecret key={one.name} secret={one} onDone={settled} onCancel={() => setAside(null)} />
+                )}
+                empty={secrets.length === 0
+                  ? t("No secrets are stored in this installation. A secret is a value a job may be handed on one host for one run; nothing here can read it back afterwards.")
+                  : t("No secret matches the search.")}
+                columns={[
+                  {
+                    key: "name",
+                    head: t("Name"),
+                    cell: (one) => (
+                      <TwoLine sub={one.description || t("nobody wrote what it is for")}>
+                        <Link to={secretAddress(one.name)}>{one.name}</Link>
+                      </TwoLine>
+                    ),
+                  },
+                  { key: "version", head: t("Version"), num: true, cell: (one) => one.current_version },
+                  {
+                    key: "created",
+                    head: t("Created"),
+                    minor: true,
+                    cell: (one) => (
+                      <TwoLine sub={<span title={absoluteTime(one.created_at)}>{relativeTime(one.created_at)}</span>}>
+                        {one.created_by}
+                      </TwoLine>
+                    ),
+                  },
+                  {
+                    key: "state",
+                    head: t("State"),
+                    cell: (one) => one.retired_at
+                      ? <Pill tone="error" title={absoluteTime(one.retired_at)}>{t("retired")}</Pill>
+                      : <Pill tone="ok">{t("issuable")}</Pill>,
+                  },
+                  {
+                    key: "actions",
+                    head: "",
+                    actions: true,
+                    cell: (one) => (
+                      <>
+                        {/* A reference to a retired secret is a job that fails
+                            at the lease, so the button goes with the lease. */}
+                        {!one.retired_at && (
+                          <button
+                            type="button"
+                            className="fl-quiet fl-small"
+                            onClick={() => copy(one.name, secretReference(one.name, one.current_version))}
+                            title={secretReference(one.name, one.current_version)}
+                            data-testid={`copy-${one.name}`}
+                          >
+                            {copied === one.name ? t("Copied") : failed === one.name ? t("Copy by hand") : t("Copy reference")}
+                          </button>
+                        )}
+                        {/* The button that opens the row closes it again,
+                            because the form is in the row it opened. */}
+                        {!one.retired_at && canWrite && (
+                          <button
+                            type="button"
+                            className="fl-quiet fl-small"
+                            onClick={() => setAside(rotating?.name === one.name ? null : { kind: "rotate", name: one.name })}
+                            disabled={aside !== null && rotating?.name !== one.name}
+                            aria-expanded={rotating?.name === one.name}
+                            aria-label={rotating?.name === one.name ? undefined : t("Rotate {name}", { name: one.name })}
+                            data-testid={`rotate-${one.name}`}
+                          >
+                            {rotating?.name === one.name ? t("Close") : t("Rotate")}
+                          </button>
+                        )}
+                        {!one.retired_at && canDestroy && (
+                          <button
+                            type="button"
+                            className="fl-danger fl-small"
+                            onClick={() => setAside({ kind: "retire", name: one.name })}
+                            disabled={aside !== null}
+                            aria-label={t("Retire {name}", { name: one.name })}
+                            data-testid={`retire-${one.name}`}
+                          >
+                            {t("Retire")}
+                          </button>
+                        )}
+                      </>
+                    ),
+                  },
+                ]}
+              />
+            )}
+          </Card>
+        ),
+      }} />
     </Screen>
   );
 }
@@ -939,3 +940,27 @@ function DestroyVersion({ secret, version, busy, error, onClose, onDestroy }: {
     </Modal>
   );
 }
+
+/** The name the store's arrangement is stored under. */
+export const SECRETS_SCREEN = "next_secrets";
+
+/**
+ * The containers of the store, and the shape each ships with.
+ *
+ * The one record of a secret is not on a board: it is one secret read on
+ * its own, as it was in the panel this replaces, and there is nothing on
+ * it to arrange.
+ */
+export const SECRETS: BoardEntry[] = [
+  // A band over three counts of a store that is already counted: one row
+  // holds the title, the sentence under it and the band itself.
+  { key: "store", title: "Store", width: 8, height: 1 },
+  // At most eight creators, one bar each.
+  { key: "by_creator", title: "By creator", width: 4, height: 2 },
+  // A form of four fields, one of which grows into a textarea when the
+  // value is shown: it is filled in, so it is not asked to scroll.
+  { key: "new_secret", title: "New secret", width: 12, height: 3 },
+  // The store itself grows with the installation, and a rotation opens
+  // inside the row it belongs to.
+  { key: "list", title: "Secrets", width: 12, height: 6 },
+];

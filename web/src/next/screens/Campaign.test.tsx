@@ -323,6 +323,50 @@ describe("one campaign", () => {
     fireEvent.change(screen.getByTestId("event-kind"), { target: { value: "campaign.paused" } });
     await waitFor(() => expect(within(feed()).queryByText("target.succeeded")).toBeNull());
   });
+
+  /* The drawing groups the states into three bands, so a wave's own row
+     is the only place that says whether the wave is closed and what it
+     counted state by state. A wave still letting hosts in and a wave that
+     has run every host look the same from their counts alone. */
+  it("carries on each wave's row whether it is closed, whether it is the canary, and its counts", async () => {
+    Object.assign(answers, world({
+      "/api/v1/campaigns/c1/report": report({ succeeded: 3, failed: 1, pending: 2 }, {
+        waves: [
+          { wave: 0, is_canary: true, completed: true, totals: { succeeded: 1 } },
+          { wave: 1, is_canary: false, completed: false, totals: { succeeded: 2, failed: 1, pending: 2 } },
+        ],
+      }),
+    }));
+    draw();
+    await waitFor(() => expect(screen.getByTestId("waves")).toBeInTheDocument());
+
+    const canary = screen.getByTestId("wave-0");
+    expect(within(canary).getAllByText("yes")).toHaveLength(2);
+    expect(canary).toHaveTextContent("succeeded: 1");
+
+    const second = screen.getByTestId("wave-1");
+    // The canary column and the closed column are read apart: this wave is
+    // neither, and a single "no" would not say which.
+    expect(within(second).getAllByText("no")).toHaveLength(2);
+    expect(second).toHaveTextContent("succeeded: 2");
+    expect(second).toHaveTextContent("failed: 1");
+    // The grouped drawing folds pending into "Other"; the row names it.
+    expect(second).toHaveTextContent("pending: 2");
+  });
+
+  it("says a wave the report put no count against was not counted, and never draws it as noughts", async () => {
+    Object.assign(answers, world({
+      "/api/v1/campaigns/c1/report": report({ pending: 6 }, {
+        waves: [{ wave: 0, is_canary: true, completed: false, totals: {} }],
+      }),
+    }));
+    draw();
+    await waitFor(() => expect(screen.getByTestId("wave-0")).toBeInTheDocument());
+    // The summary cell, not the row: the wave is numbered 0 itself.
+    const summary = screen.getByTestId("wave-0").querySelectorAll("td")[3];
+    expect(summary).toHaveTextContent("not counted");
+    expect(summary).not.toHaveTextContent("0");
+  });
 });
 
 describe("what the screen reads out of a campaign", () => {

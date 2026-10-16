@@ -102,6 +102,31 @@ describe("a host's accounts", () => {
     expect(row).toHaveTextContent("AbCdEfGhIjKl");
   });
 
+  /**
+   * The UID stays on the row, and nought is a value here.
+   *
+   * 0 is root - the one number on this screen an operator must be able
+   * to see without opening anything - so the column draws it rather than
+   * treating it as "nobody said".
+   */
+  it("draws the UID on the row, and a UID of nought as root's own number", async () => {
+    Object.assign(answers, {
+      "/api/v1/hosts/h1/local-accounts": { accounts: [
+        account({ name: "root", uid: 0, gid: 0, home: "/root" }),
+        account({ name: "jane", uid: 1000 }),
+      ] },
+      "/api/v1/hosts/h1/actions": allowed,
+    });
+    draw();
+    const root = await screen.findByTestId("account-root");
+    // The cell holds the number itself, not a dash standing in for one.
+    const uid = within(root).getByText("0");
+    expect(uid).toBeInTheDocument();
+    expect(uid).not.toHaveTextContent("—");
+    expect(screen.getByText("UID")).toBeInTheDocument();
+    expect(within(screen.getByTestId("account-jane")).getByText("1000")).toBeInTheDocument();
+  });
+
   it("says an account the host could not read is unknown, never 'no access'", async () => {
     Object.assign(answers, {
       "/api/v1/hosts/h1/local-accounts": { accounts: [

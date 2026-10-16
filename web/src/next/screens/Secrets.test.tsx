@@ -6,7 +6,7 @@ import "@testing-library/jest-dom/vitest";
 import { ApiError } from "../../lib/api";
 import {
   Secrets, filterSecrets, reasonGiven, secretAddress, secretReference, storeCounts, destroyable,
-  REASON_MIN_LENGTH,
+  REASON_MIN_LENGTH, SECRETS_SCREEN,
 } from "./Secrets";
 import { ToastProvider } from "../../components/Toast";
 
@@ -488,5 +488,28 @@ describe("rotating and retiring", () => {
     await waitFor(() =>
       expect(screen.getByText("Sign in again to retire a secret.")).toBeInTheDocument());
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+});
+
+/**
+ * The store is arranged by whoever runs the installation, like every
+ * other board of the panel. It was drawn on a plain screen in the
+ * rewrite, and nothing said so: the control was simply not there and the
+ * arrangement already stored for it could not be reached.
+ */
+describe("arranging the store", () => {
+  it("offers the arrange bar and draws its containers on the board", async () => {
+    Object.assign(answers, {
+      "/api/v1/secrets": { items: [secret({})] },
+      "/api/v1/whoami": writer,
+      "/api/v1/settings/layout": { widgets: [], present: false, revision: 1 },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("board")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("arrange")).toBeInTheDocument());
+    expect(screen.getByTestId("arrange")).toHaveTextContent("Arrange this screen");
+    // Under the name the server accepts, and the same one every time.
+    expect(SECRETS_SCREEN).toMatch(/^[a-z0-9_]+$/);
+    expect(asked).toContain(`/api/v1/settings/layout/${SECRETS_SCREEN}`);
   });
 });

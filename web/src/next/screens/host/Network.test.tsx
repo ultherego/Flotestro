@@ -128,6 +128,31 @@ describe("what the network module says", () => {
     expect(screen.getAllByText("NetworkManager").length).toBeGreaterThan(0);
   });
 
+  /**
+   * The hardware address and the MTU stay on the interface's own row.
+   * A MAC is how an operator matches an interface to a switch port, a
+   * DHCP reservation or a card they are holding; an interface that never
+   * reported one says nothing rather than drawing a plausible zero.
+   */
+  it("keeps the hardware address and the MTU on the interface's row", async () => {
+    Object.assign(answers, {
+      "/api/v1/hosts/h1/inventory/network": fragment({
+        interfaces: [iface({}), iface({ name: "tun0", kind: "tun", mac: undefined, mtu: 1400, management: false })],
+        management_interface: "enp0s3", management_address: "192.168.56.70", write_adapter: "networkmanager",
+      }),
+      "/api/v1/hosts/h1/actions": may(EVERY),
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("interface-enp0s3")).toBeInTheDocument());
+    expect(screen.getByTestId("interface-enp0s3")).toHaveTextContent("08:00:27:11:22:33");
+    expect(screen.getByTestId("interface-enp0s3")).toHaveTextContent("1500");
+
+    const tunnel = screen.getByTestId("interface-tun0");
+    expect(tunnel).toHaveTextContent("1400");
+    expect(within(tunnel).getAllByText("—").length).toBeGreaterThan(0);
+    expect(tunnel).not.toHaveTextContent("08:00:27");
+  });
+
   it("keeps an interface that reported no carrier unknown rather than down", async () => {
     Object.assign(answers, {
       "/api/v1/hosts/h1/inventory/network": fragment({

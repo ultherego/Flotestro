@@ -5,7 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import {
-  Settings, chosenAddress, confirmable, hubState, settingsTab, sourceTone, OWN_ADDRESS,
+  Settings, areaKey, chosenAddress, confirmable, hubState, settingsCatalogue, settingsTab,
+  sourceTone, OWN_ADDRESS, SETTINGS_SCREEN,
 } from "./Settings";
 import { ToastProvider } from "../../components/Toast";
 
@@ -125,12 +126,19 @@ const base = () => ({
   "/api/v1/settings": facts,
   "/api/v1/settings/monitoring": monitoring,
   "/api/v1/settings/advertised": advertised,
+  "/api/v1/pki": {
+    authorities: [{
+      subject: "CN=Flotestro Fleet CA", serial: "4a2f90c1b7de3355aa01",
+      fingerprint: "aa11bb22cc33dd44", not_before: "2026-01-01T00:00:00Z",
+      not_after: "2028-01-01T00:00:00Z", state: "active", hosts_using: 1805,
+    }],
+  },
 });
 
 const admin = {
   subject: "t", kind: "user", roles: [], bindings: [],
   permissions: ["settings.read", "settings.advertise.write", "principal.manage", "host.read",
-                "notification.read", "budget.read", "policy.read"],
+                "notification.read", "budget.read", "policy.read", "pki.read", "pki.rotate"],
 };
 const reader = { subject: "t", kind: "user", roles: [], bindings: [], permissions: ["host.read"] };
 
@@ -444,5 +452,91 @@ describe("what has not arrived yet", () => {
     const { container } = draw();
     expect(container.querySelectorAll(".fl-bone").length).toBeGreaterThan(0);
     expect(within(container).queryByText("Loading…")).toBeNull();
+  });
+});
+
+/**
+ * The General tab is arranged by whoever runs the installation, as it
+ * was in the screen this replaces: both the panel's own settings and the
+ * areas the process was started with are containers on a board. The
+ * rewrite drew them on a plain screen, so the control was gone and the
+ * arrangement stored for it could not be reached.
+ */
+describe("arranging the general tab", () => {
+  it("offers the arrange bar and draws its containers on the board", async () => {
+    Object.assign(answers, base(), {
+      "/api/v1/whoami": admin,
+      "/api/v1/settings/layout": { widgets: [], present: false, revision: 1 },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("board")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("arrange")).toBeInTheDocument());
+    expect(screen.getByTestId("arrange")).toHaveTextContent("Arrange this screen");
+    expect(SETTINGS_SCREEN).toMatch(/^[a-z0-9_]+$/);
+    expect(asked).toContain(`/api/v1/settings/layout/${SETTINGS_SCREEN}`);
+  });
+
+  it("keeps an area of the configuration apart from the tab's own containers", () => {
+    // The server names the areas and this file names the containers; an
+    // area called "retention" must not land where the monitoring
+    // retentions stand.
+    const catalogue = settingsCatalogue([
+      { key: "retention", title: "Retention", facts: [] },
+      { key: "build", title: "Build", facts: [] },
+    ]);
+    expect(new Set(catalogue.map((one) => one.key)).size).toBe(catalogue.length);
+    expect(catalogue.map((one) => one.key)).toContain(areaKey("retention"));
+    expect(areaKey("retention")).not.toBe("retention");
+  });
+});
+
+/**
+ * The fleet CA is a section of this tab, as it was a section of the
+ * screen this replaces.
+ *
+ * It is the root of trust of the whole installation and the rewrite had
+ * no counterpart for it at all: nothing under src/next named the four
+ * addresses under /api/v1/pki, so preparing an authority, handing
+ * signing over to it, retiring one and reading what the fleet trusts
+ * could not be done from the new panel.
+ */
+describe("the fleet CA on the general tab", () => {
+  it("stands as a container of the board, with the trust set in it", async () => {
+    Object.assign(answers, base(), { "/api/v1/whoami": admin });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("authority-aa11bb22cc33dd44")).toBeInTheDocument());
+    expect(asked).toContain("/api/v1/pki");
+    // A container of the board, so it can be moved and sized like the
+    // rest of the tab rather than being nailed to the foot of it.
+    expect(settingsCatalogue([]).map((one) => one.key)).toContain("fleet_ca");
+    const entry = settingsCatalogue([]).find((one) => one.key === "fleet_ca");
+    expect(entry?.height).toBeGreaterThan(1);
+  });
+
+  it("is not drawn for a sign-in that may not read it, and asks nothing of the server", async () => {
+    Object.assign(answers, base(), { "/api/v1/whoami": reader });
+    draw();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "General" })).toBeInTheDocument());
+    expect(screen.queryByTestId("ca-authorities")).toBeNull();
+    expect(asked).not.toContain("/api/v1/pki");
+  });
+
+  it("puts a refused change above the board rather than in a container of it", async () => {
+    const { ApiError } = await import("../../lib/api");
+    Object.assign(answers, base(), { "/api/v1/whoami": admin });
+    Object.assign(writes, {
+      "/api/v1/pki/prepare": new ApiError(409, "prepared_not_announced", "not announced"),
+    });
+    draw();
+
+    fireEvent.change(await screen.findByTestId("ca-reason"),
+      { target: { value: "planned CA rotation before expiry" } });
+    fireEvent.click(screen.getByTestId("ca-prepare"));
+
+    const warning = await screen.findByTestId("ca-warning");
+    expect(warning).toHaveTextContent("Prepare nothing further.");
+    // A notice is not a container somebody arranges: it stands above the
+    // grid, not in a cell of it.
+    expect(screen.getByTestId("board").contains(warning)).toBe(false);
   });
 });

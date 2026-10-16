@@ -11,7 +11,7 @@ import { useT, type Translate } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Bars, Bones, Card, Check, Download, Empty, Fact, Facts, Fig, Field, Fields, Figs, Find, HeadActions, Kpi, Modal, Note, Pager, Pill, Problem, Seg, Stack, Table, Tabs, Tags, Toolbar, TwoLine, type Column, type Tone,
+  Actions, Banner, Bars, Bones, Card, Check, Download, Empty, Fact, Facts, Fig, Field, Fields, Figs, Find, HeadActions, Kpi, Modal, Note, Pager, Pill, Problem, Seg, stacked, Stack, Table, Tabs, Tags, Toolbar, TwoLine, type Column, type Tone,
 } from "../kit";
 
 /**
@@ -593,6 +593,10 @@ export function Access() {
     staleTime: 60 * 1000,
   });
 
+  // Only the holders listing carries it; the identities listing is the
+  // panel's own record and says nothing about the directory.
+  const directory = holders.data?.directory;
+
   const error = scope === "signin" ? holders.error : principals.error;
   if (error instanceof ApiError && error.forbidden) {
     return <Empty>{t("You do not have permission to manage access.")}</Empty>;
@@ -771,7 +775,28 @@ export function Access() {
         </Banner>
       )}
 
-      <Board screen={ACCESS_SCREEN} catalogue={ACCESS} drawn={{
+      <Board
+        screen={ACCESS_SCREEN}
+        catalogue={ACCESS}
+        /* What the directory side of this answer is worth. A directory
+           that did not answer is not a directory with nobody in it, and
+           the screen says which of the two it is looking at - the panel
+           being replaced said so and this one had stopped. */
+        notices={stacked(
+          directory?.configured === true && directory.read === false && (
+            <Banner tone="warn" testId="directory-unread">
+              {t("The directory did not answer, so only the access this panel records itself is listed: {reason}", {
+                reason: directory.reason ?? t("no reason given"),
+              })}
+            </Banner>
+          ),
+          directory?.configured === false && (
+            <Note testId="directory-absent">
+              {t("No directory is configured, so this is the access the panel records itself.")}
+            </Note>
+          ),
+        )}
+        drawn={{
         signin: (
           <Kpi
             hero

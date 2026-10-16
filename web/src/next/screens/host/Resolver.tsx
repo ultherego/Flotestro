@@ -477,7 +477,10 @@ export function Resolver({ host }: { host: Host }) {
                   one.default_route === undefined ? unknownPill : one.default_route ? t("yes") : t("no")
                 ) },
                 { key: "dnssec", head: "DNSSEC", minor: true, cell: (one) => one.dnssec || <span className="fl-faint">—</span> },
-                { key: "dot", head: "DoT", minor: true, cell: (one) => one.dns_over_tls || <span className="fl-faint">—</span> },
+                // The heading is the abbreviation the daemon prints; what it
+                // stands for was on the old panel's heading and stays here.
+                { key: "dot", head: <span title={t("DNS over TLS")}>DoT</span>, label: "DoT", minor: true,
+                  cell: (one) => one.dns_over_tls || <span className="fl-faint">—</span> },
               ]}
             />
           </Card>

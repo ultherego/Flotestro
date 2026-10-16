@@ -45,12 +45,21 @@ export function toneClass(name?: string | null): string | undefined {
  * The head of a screen: what it is, one line on what it answers, and the
  * actions that belong to the whole of it.
  */
-export function Head({ title, lead, actions, icon, help }: {
+export function Head({ title, lead, actions, icon, help, crumb }: {
   title: ReactNode;
   lead?: ReactNode;
   actions?: ReactNode;
   /** The mark of the screen, the same one the rail gives its place. */
   icon?: IconName;
+  /**
+   * The way back to where the reader came from, above the name.
+   *
+   * The rail says where in the panel a screen is; this says which piece
+   * of work led to this one - a campaign whose target was opened, say -
+   * and it is the only way back to it, because the rail does not know
+   * the reader arrived from there.
+   */
+  crumb?: ReactNode;
   /**
    * What this screen is for, at length, behind a mark beside the title.
    *
@@ -67,6 +76,7 @@ export function Head({ title, lead, actions, icon, help }: {
     <header className="fl-head">
       {icon && <span className="fl-head-mark" aria-hidden="true"><Icon name={icon} /></span>}
       <div className="fl-head-text">
+        {crumb && <p className="fl-head-crumb">{crumb}</p>}
         <h1 className="fl-head-title">
           {title}
           {help && (
@@ -1306,13 +1316,14 @@ export function Actions({ children, right = false }: { children: ReactNode; righ
 }
 
 /** A line the reader has to take account of before going on. */
-export function Banner({ tone = "warn", children, actions }: {
+export function Banner({ tone = "warn", children, actions, testId }: {
   tone?: Tone;
   children: ReactNode;
   actions?: ReactNode;
+  testId?: string;
 }) {
   return (
-    <div className={join("fl-banner", toneClass(tone))} role="status">
+    <div className={join("fl-banner", toneClass(tone))} role="status" data-testid={testId}>
       <span className="fl-banner-text">{children}</span>
       {actions && <div className="fl-actions">{actions}</div>}
     </div>
@@ -1846,6 +1857,139 @@ export function Button({ kind = "do", onClick, disabled, title, icon, children, 
     <button type={type} className={className} onClick={onClick} disabled={disabled} title={title} data-testid={testId}>
       {icon && <Icon name={icon} />}
       {children}
+    </button>
+  );
+}
+
+/* ----------------------------------------------------------- the menu */
+
+/**
+ * The actions that are reached for from anywhere but belong beside none
+ * of them, folded behind one word.
+ *
+ * A head that carries six buttons is a head nobody reads, so what is
+ * rarely wanted waits here. It closes on a click away from it and on
+ * Escape, like every other thing that covers part of the screen.
+ */
+export function Menu({ label, children, testId }: {
+  label: ReactNode;
+  children: ReactNode;
+  testId?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const holder = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: globalThis.MouseEvent) => {
+      if (!holder.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const escape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+  return (
+    <div className="fl-menu-anchor" ref={holder}>
+      <button
+        type="button"
+        className="fl-quiet"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen((on) => !on)}
+        data-testid={testId}
+      >
+        {label}
+        <Icon name="chevron" />
+      </button>
+      {open && (
+        // The click that chose something closes the menu: a menu left
+        // open over the answer to what was just ordered hides it.
+        <div
+          className="fl-menu"
+          role="menu"
+          data-testid={testId ? `${testId}-open` : undefined}
+          onClick={() => setOpen(false)}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One line of a menu: somewhere to go, or something to order. */
+export function MenuItem({ to, onClick, disabled, title, icon, children, testId }: {
+  /** Where it leads; without it the line is a control rather than a way. */
+  to?: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  title?: string;
+  icon?: IconName;
+  children: ReactNode;
+  testId?: string;
+}) {
+  if (to) {
+    return (
+      <Link to={to} className="fl-menu-item" role="menuitem" title={title} data-testid={testId}>
+        {icon && <Icon name={icon} />}
+        {children}
+      </Link>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="fl-menu-item"
+      role="menuitem"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      data-testid={testId}
+    >
+      {icon && <Icon name={icon} />}
+      {children}
+    </button>
+  );
+}
+
+/* ------------------------------------------------------------ the copy */
+
+/**
+ * A short value with the whole of it taken to the clipboard.
+ *
+ * It has three answers and not two, because the browser has three: not
+ * asked yet, taken, and refused. A panel reached over plain HTTP has no
+ * clipboard at all, and a button that says "copied" there tells the
+ * reader a value is somewhere it is not - so a refusal says so and
+ * leaves the whole value selectable under the pointer instead.
+ */
+export function Copy({ value, title, testId }: {
+  value: string;
+  /** What the button offers to take, for the pointer. */
+  title?: string;
+  testId?: string;
+}) {
+  const t = useT();
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const take = async () => {
+    const { copyToClipboard } = await import("../lib/clipboard");
+    setState(await copyToClipboard(value) ? "copied" : "failed");
+  };
+  return (
+    <button
+      type="button"
+      className="fl-plain"
+      onClick={() => { void take(); }}
+      title={title ?? value}
+      data-testid={testId}
+    >
+      <Icon name="copy" />
+      {state === "copied" ? t("Copied") : state === "failed" ? t("Copy by hand") : t("Copy")}
     </button>
   );
 }

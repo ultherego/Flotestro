@@ -570,3 +570,42 @@ describe("what a save takes away", () => {
     expect(permissionsLost(["a"], ["a", "b"])).toEqual([]);
   });
 });
+
+/**
+ * A directory that did not answer is not a directory with nobody in it.
+ * The panel being replaced said which of the two it was looking at; this
+ * one declared the field and never read it, so an unanswering directory
+ * read as an empty one - the exact fault the product's first rule is on.
+ */
+describe("what the directory side of the answer is worth", () => {
+  it("says the directory did not answer, and why", async () => {
+    given({
+      "/api/v1/access/holders": {
+        items: [holder()], count: 1,
+        directory: { configured: true, read: false, reason: "the bind account is locked" },
+      },
+    });
+    draw();
+    const said = await screen.findByTestId("directory-unread");
+    expect(said).toHaveTextContent("the bind account is locked");
+  });
+
+  it("says when there is no directory at all, which is not the same thing", async () => {
+    given({
+      "/api/v1/access/holders": {
+        items: [holder()], count: 1, directory: { configured: false, read: false },
+      },
+    });
+    draw();
+    expect(await screen.findByTestId("directory-absent")).toBeInTheDocument();
+    expect(screen.queryByTestId("directory-unread")).toBeNull();
+  });
+
+  it("says neither where the directory answered", async () => {
+    given();
+    draw();
+    await screen.findByText("tszymanski");
+    expect(screen.queryByTestId("directory-unread")).toBeNull();
+    expect(screen.queryByTestId("directory-absent")).toBeNull();
+  });
+});

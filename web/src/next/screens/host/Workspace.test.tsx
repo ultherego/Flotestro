@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
@@ -16,6 +16,9 @@ import { MODULES } from "../../../lib/modules";
  */
 
 const answers: Record<string, unknown> = {};
+/** What the head ordered, and what it wrote, in the order it did. */
+const posted: { path: string; body: unknown }[] = [];
+const written: { path: string; body: unknown }[] = [];
 
 vi.mock("../../../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../lib/api")>();
@@ -34,7 +37,14 @@ vi.mock("../../../lib/api", async (importOriginal) => {
         const answer = answers[key];
         return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
       },
-      put: () => Promise.resolve({}),
+      post: (path: string, body: unknown) => {
+        posted.push({ path, body });
+        return Promise.resolve({ id: "j1", requires_approval: false });
+      },
+      put: (path: string, body: unknown) => {
+        written.push({ path, body });
+        return Promise.resolve({});
+      },
       del: () => Promise.resolve(undefined),
     },
   };
@@ -169,5 +179,217 @@ describe("the overview of a host", () => {
     const band = screen.getByTestId("adapters");
     expect(band).toHaveTextContent("available");
     expect(band).toHaveTextContent("unavailable");
+  });
+});
+
+/**
+ * The head stands above all twenty-seven modules, so what it can do is
+ * what an operator can do from anywhere on a machine: correct its tags,
+ * ask it to read its inventory again, take its identifier away whole,
+ * and see before anything else that the gateway is turning it away or
+ * that somebody has declared a window on it.
+ */
+describe("the head above every module of a host", () => {
+  /** The answers every one of these starts from, whatever ran before. */
+  const base = () => {
+    Object.assign(answers, {
+      "/api/v1/hosts/h1": { ...host, management_address_source: "session" },
+      "/api/v1/capabilities": { directory: true, local_users: true, campaign_v2: true },
+      "/api/v1/whoami": { subject: "tester", permissions: ["host.read"] },
+      "/api/v1/jobs": { items: [] },
+      "/api/v1/hosts/h1/actions": { version: 1, items: [] },
+      "/api/v1/hosts/h1/timeline": { items: [], count: 0, sources: [] },
+      "/api/v1/settings/layout": { widgets: [], present: false, revision: 0 },
+      "/api/v1/hosts/h1/inventory/system": {
+        source: "agent", revision: "abcdef123456", observed_at: "2026-10-16T08:00:00Z", payload: {},
+      },
+      "/api/v1/hosts/h1/system/history": { items: [] },
+    });
+  };
+
+  beforeEach(() => {
+    base();
+    posted.length = 0;
+    written.length = 0;
+  });
+
+  it("writes the tags in place, and offers that to nobody without the permission", async () => {
+    draw("/next/hosts/h1");
+    await screen.findByRole("link", { name: "role=db" });
+    // A reader sees the tags and no way to change them: the gate is the
+    // permission, not a refusal the server gives after the typing.
+    expect(screen.queryByTestId("edit-tags")).toBeNull();
+    cleanup();
+
+    answers["/api/v1/whoami"] = { subject: "tester", permissions: ["host.read", "host.tag.write"] };
+    draw("/next/hosts/h1");
+    fireEvent.click(await screen.findByTestId("edit-tags"));
+    const field = screen.getByTestId("tags-input");
+    // What it opens with is what the host carries, so a correction is an
+    // edit rather than a retyping.
+    expect(field).toHaveValue("role=db");
+    fireEvent.change(field, { target: { value: "  role=db   tier=gold " } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(written).toHaveLength(1));
+    expect(written[0]).toEqual({
+      path: "/api/v1/hosts/h1/tags",
+      body: { tags: ["role=db", "tier=gold"] },
+    });
+  });
+
+  it("takes Escape as leaving the tags as they were", async () => {
+    answers["/api/v1/whoami"] = { subject: "tester", permissions: ["host.tag.write"] };
+    draw("/next/hosts/h1");
+    fireEvent.click(await screen.findByTestId("edit-tags"));
+    fireEvent.change(screen.getByTestId("tags-input"), { target: { value: "role=web" } });
+    fireEvent.keyDown(screen.getByTestId("tags-input"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByTestId("tags-input")).toBeNull());
+    expect(written).toEqual([]);
+  });
+
+  it("reads the open module's inventory again and says how the job came out", async () => {
+    answers["/api/v1/jobs/j1"] = { id: "j1", state: "succeeded", result_message: "inventory refreshed" };
+    draw("/next/hosts/h1/system");
+    fireEvent.click(await screen.findByTestId("refresh-module"));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    // The scope is the registry's: the module that is open lives off the
+    // system fragment, so that is the one the host re-reads.
+    expect(posted[0]).toEqual({
+      path: "/api/v1/hosts/h1/operations",
+      body: { action: "inventory.refresh", payload: { inventory: { modules: ["system"] } } },
+    });
+    // The order is followed to its end: "ordered" leaves the reader
+    // watching a page that has not changed.
+    await waitFor(() => expect(screen.getByText("inventory refreshed")).toBeInTheDocument());
+  });
+
+  it("says a refused refresh was refused, rather than reporting nothing", async () => {
+    answers["/api/v1/jobs/j1"] = { id: "j1", state: "failed", result_error_code: "helper_unavailable" };
+    draw("/next/hosts/h1/system");
+    fireEvent.click(await screen.findByTestId("refresh-module"));
+    await waitFor(() => expect(screen.getByText("helper_unavailable")).toBeInTheDocument());
+  });
+
+  it("reads the whole inventory again from the actions, and leads where a module is not", async () => {
+    answers["/api/v1/jobs/j1"] = { id: "j1", state: "succeeded", result_message: "inventory refreshed" };
+    draw("/next/hosts/h1");
+    fireEvent.click(await screen.findByTestId("host-actions"));
+    expect(screen.getByRole("menuitem", { name: "Open the logs" })).toHaveAttribute("href", "/next/hosts/h1/logs");
+    expect(screen.getByRole("menuitem", { name: "Jobs of this host" })).toHaveAttribute("href", "/next/hosts/h1/jobs");
+    // Deliberately a way to the power module and not a button that
+    // reboots from a menu: the order is confirmed where it is placed.
+    expect(screen.getByRole("menuitem", { name: "Reboot (power module)" })).toHaveAttribute("href", "/next/hosts/h1/power");
+    fireEvent.click(screen.getByTestId("refresh-inventory"));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toEqual({
+      path: "/api/v1/hosts/h1/operations",
+      body: { action: "inventory.refresh", payload: { inventory: {} } },
+    });
+  });
+
+  it("offers no refresh of a host that is not connected", async () => {
+    answers["/api/v1/hosts/h1"] = { ...host, connection_state: "offline" };
+    draw("/next/hosts/h1/system");
+    await waitFor(() => expect(screen.getByTestId("refresh-module")).toBeDisabled());
+    fireEvent.click(screen.getByTestId("host-actions"));
+    expect(screen.getByTestId("refresh-inventory")).toBeDisabled();
+  });
+
+  it("shows the identifier short and says copied only when the clipboard took it", async () => {
+    answers["/api/v1/hosts/h1"] = { ...host, id: "0123456789abcdef" };
+    // A panel over plain HTTP has no clipboard at all, and a button that
+    // says "copied" there tells the reader a value is somewhere it is not.
+    const refusing = vi.fn().mockRejectedValue(new Error("not a secure context"));
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: refusing }, configurable: true });
+    draw("/next/hosts/h1");
+    expect(await screen.findByTestId("host-id")).toHaveTextContent("01234567");
+    fireEvent.click(screen.getByTestId("copy-host-id"));
+    await waitFor(() => expect(screen.getByTestId("copy-host-id")).toHaveTextContent("Copy by hand"));
+    expect(refusing).toHaveBeenCalledWith("0123456789abcdef");
+    cleanup();
+
+    const taking = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: taking }, configurable: true });
+    draw("/next/hosts/h1");
+    fireEvent.click(await screen.findByTestId("copy-host-id"));
+    await waitFor(() => expect(screen.getByTestId("copy-host-id")).toHaveTextContent("Copied"));
+    // The whole of it goes, not the eight characters that are read.
+    expect(taking).toHaveBeenCalledWith("0123456789abcdef");
+  });
+
+  it("says the gateway turned this host away, and why", async () => {
+    answers["/api/v1/hosts/h1"] = {
+      ...host,
+      connection_state: "offline",
+      last_connection_refusal: {
+        code: "certificate_expired",
+        at: new Date(Date.now() - 3600_000).toISOString(),
+        detail: "serial 7 expired on 2026-10-15",
+      },
+    };
+    draw("/next/hosts/h1");
+    const badge = await screen.findByText(/connection refused: certificate expired/);
+    expect(badge).toHaveAttribute("title", "serial 7 expired on 2026-10-15");
+    cleanup();
+
+    // A host that answers is not being refused, whatever the last refusal
+    // was: the badge would be a state the reader has already left behind.
+    answers["/api/v1/hosts/h1"] = {
+      ...host,
+      connection_state: "online",
+      last_connection_refusal: { code: "certificate_expired", at: new Date().toISOString() },
+    };
+    draw("/next/hosts/h1");
+    await screen.findByRole("heading", { name: "agent-arch" });
+    expect(screen.queryByText(/connection refused/)).toBeNull();
+  });
+
+  it("says a maintenance window while it stands, and not after it has passed", async () => {
+    answers["/api/v1/hosts/h1"] = {
+      ...host,
+      maintenance: {
+        until: new Date(Date.now() + 3600_000).toISOString(),
+        reason: "disk replacement",
+        set_by: "ula",
+      },
+    };
+    draw("/next/hosts/h1");
+    const badge = await screen.findByText(/maintenance until/);
+    expect(badge).toHaveAttribute("title", "disk replacement · set by ula");
+    cleanup();
+
+    answers["/api/v1/hosts/h1"] = {
+      ...host,
+      maintenance: { until: new Date(Date.now() - 60_000).toISOString(), reason: "disk replacement" },
+    };
+    draw("/next/hosts/h1");
+    await screen.findByRole("heading", { name: "agent-arch" });
+    expect(screen.queryByText(/maintenance until/)).toBeNull();
+  });
+
+  it("says where the management address came from, and that none has been seen", async () => {
+    draw("/next/hosts/h1");
+    // The address the control plane saw at its own end and one the host
+    // reported about itself are two different facts.
+    expect(await screen.findByTestId("address-source")).toHaveTextContent("session");
+    expect(screen.getByTestId("address-source").closest(".fl-tag"))
+      .toHaveAttribute("title", "address seen by the control plane on its end of the connection");
+    cleanup();
+
+    answers["/api/v1/hosts/h1"] = { ...host, management_address: "", management_address_source: undefined };
+    draw("/next/hosts/h1");
+    const head = (await screen.findByRole("heading", { name: "agent-arch" })).closest(".fl-head") as HTMLElement;
+    expect(within(head).getByText("address unknown")).toBeInTheDocument();
+  });
+
+  it("keeps the way back to the campaign an operator came from", async () => {
+    draw("/next/hosts/h1/overview?campaign=c-42");
+    expect(await screen.findByRole("link", { name: "Back to the campaign" }))
+      .toHaveAttribute("href", "/next/campaigns/c-42");
+    cleanup();
+
+    draw("/next/hosts/h1/overview");
+    await screen.findByRole("heading", { name: "agent-arch" });
+    expect(screen.queryByRole("link", { name: "Back to the campaign" })).toBeNull();
   });
 });

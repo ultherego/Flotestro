@@ -121,6 +121,9 @@ describe("the policies of a host", () => {
     // The revision is what makes a verdict checkable; the whole of it is
     // too long to read, the first twelve are enough to match.
     expect(row).toHaveTextContent("abcdef012345");
+    // And the heading says what the revision is, as the old one did.
+    expect(screen.getByText("Judged against"))
+      .toHaveAttribute("title", "The inventory revision the rule was judged against.");
   });
 
   it("names the rule by its index when the policy did not describe it", async () => {

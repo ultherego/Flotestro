@@ -566,6 +566,10 @@
 .fl-app .fl-menu-item svg { width: 15px; height: 15px; }
 .fl-app .fl-menu-out { width: 100%; justify-content: center; margin-top: var(--s2); }
 
+/* A line of a menu that cannot be taken says so rather than disappearing. */
+.fl-app .fl-menu-item:disabled { color: var(--text-faint); cursor: not-allowed; }
+.fl-app .fl-menu-item:disabled:hover { background: none; color: var(--text-faint); }
+
 /* ---------------------------------------------------------------------
    5. The head of a screen
 
@@ -595,6 +599,13 @@
 
 .fl-app .fl-head-mark svg { width: 18px; height: 18px; }
 .fl-app .fl-head-text { flex: 1 1 auto; min-width: 0; }
+
+/* The way back to the work a screen was opened from, above its name. */
+.fl-app .fl-head-crumb {
+  margin-bottom: var(--s2);
+  font-size: var(--t-small);
+  color: var(--text-muted);
+}
 
 .fl-app .fl-head-title {
   display: flex;

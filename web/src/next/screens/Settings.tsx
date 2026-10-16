@@ -9,8 +9,11 @@ import type {
 import type { IconName } from "../../components/icons";
 import { useToast } from "../../components/Toast";
 import { useT } from "../../i18n";
+import { Board } from "../Board";
+import { CertificateAuthority, CertificateAuthorityWarning } from "./CertificateAuthority";
+import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Bones, C, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Flow, Grid, Note, Pill, Problem, Screen, Tabs,
+  Actions, Banner, Bones, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Grid, Note, Pill, Problem, Screen, stacked, Tabs,
 } from "../kit";
 
 /**
@@ -271,61 +274,91 @@ function General({ permissions }: { permissions: Set<string> }) {
   })).filter(({ area, facts }) => needle === "" || facts.length > 0 || t(area.title).toLowerCase().includes(needle));
 
   const mayReadAddress = permissions.has("settings.read") || permissions.has("principal.manage");
+  // The fleet CA is the root of trust of the whole installation, so the
+  // section is drawn for a sign-in that may read it and the rotation is
+  // offered only to one that may change it.
+  const mayReadCA = permissions.has("pki.read") || permissions.has("pki.rotate");
+  // What a refused change to the trust set said. It is the section's own
+  // answer and it is drawn above the board: a banner is not a container
+  // somebody arranges.
+  const [caWarning, setCaWarning] = useState<ApiError | null>(null);
+  // A panel without the monitoring has no such settings, and the card
+  // draws nothing at all then. The board is asked here rather than left
+  // to find out, because a container that draws nothing still takes a
+  // cell of the grid - a hand's width of empty floor across the screen.
+  const retention = useMonitoringSettings();
 
   return (
-    <Grid>
-      {error && <C span={12}><Problem>{String(error)}</Problem></C>}
-
-      <MonitoringRetention />
-
-      {mayReadAddress && (
-        <Card
-          span={12}
-          title={t("Advertised address")}
-          note={t("The address the agents dial to reach this panel.")}
-        >
-          <AdvertisedAddress mayConfirm={permissions.has("settings.advertise.write")} />
-        </Card>
+    <Board
+      screen={SETTINGS_SCREEN}
+      catalogue={settingsCatalogue(data?.areas ?? [])}
+      /* What has to be read before the settings are: the read that
+         failed, and the search nothing answered. Neither is a container
+         somebody arranges. */
+      notices={stacked(
+        error ? <Problem>{String(error)}</Problem> : null,
+        /* The element is only made when there is something to say: an
+           element that renders null is still something to stack, and the
+           screen would open with a band of empty floor across it. */
+        caWarning
+          ? <CertificateAuthorityWarning error={caWarning} close={() => setCaWarning(null)} />
+          : null,
+        data && areas.length === 0
+          ? <Card><Empty icon="search">{t("No setting of that name.")}</Empty></Card>
+          : null,
       )}
+      drawn={{
+        retention: !retention.error && <MonitoringRetention />,
 
-      <Card
-        span={12}
-        title={t("What the process was started with")}
-        note={t("Read at start, changed where the deployment is defined.")}
-        tools={
-          <Find
-            value={query}
-            onChange={setQuery}
-            placeholder={t("Find a setting")}
-            testId="settings-search"
+        address: mayReadAddress && (
+          <Card
+            title={t("Advertised address")}
+            note={t("The address the agents dial to reach this panel.")}
+          >
+            <AdvertisedAddress mayConfirm={permissions.has("settings.advertise.write")} />
+          </Card>
+        ),
+
+        fleet_ca: mayReadCA && (
+          <CertificateAuthority
+            mayRotate={permissions.has("pki.rotate")}
+            reportError={setCaWarning}
           />
-        }
-      >
-        {!data && !error && <Bones rows={2} />}
-      </Card>
+        ),
 
-      {data && areas.length > 0 && (
-        <C span={12}>
-          <Flow>
-            {areas.map(({ area, facts }) => (
-              <Card
-                key={area.key}
-                title={t(area.title)}
-                note={facts.length === 1 ? t("{n} value", { n: facts.length }) : t("{n} values", { n: facts.length })}
-              >
-                <AreaFacts area={area} facts={facts} />
-              </Card>
-            ))}
-          </Flow>
-        </C>
-      )}
+        started_with: (
+          <Card
+            title={t("What the process was started with")}
+            note={t("Read at start, changed where the deployment is defined.")}
+            tools={
+              <Find
+                value={query}
+                onChange={setQuery}
+                placeholder={t("Find a setting")}
+                testId="settings-search"
+              />
+            }
+          >
+            {!data && !error && <Bones rows={2} />}
+          </Card>
+        ),
 
-      {data && areas.length === 0 && (
-        <Card span={12}>
-          <Empty icon="search">{t("No setting of that name.")}</Empty>
-        </Card>
-      )}
-    </Grid>
+        /* One container per area of the configuration, as the screen
+           being replaced had: which of them comes first belongs to the
+           installation. An area the search narrowed away is not drawn,
+           so it keeps no cell either. */
+        ...Object.fromEntries(areas.map(({ area, facts }) => [
+          areaKey(area.key),
+          <Card
+            key={area.key}
+            title={t(area.title)}
+            note={facts.length === 1 ? t("{n} value", { n: facts.length }) : t("{n} values", { n: facts.length })}
+          >
+            <AreaFacts area={area} facts={facts} />
+          </Card>,
+        ])),
+      }}
+    />
   );
 }
 
@@ -515,6 +548,21 @@ const DURATION_FIELDS: { key: keyof MonitoringValues; label: string; hint: strin
  * change that drops readings still being kept needs that said out loud
  * before the button opens.
  */
+/**
+ * The monitoring settings, read once for the whole tab.
+ *
+ * The card below draws them; the board asks the same question to know
+ * whether there is a container to place at all, and react-query answers
+ * both from one request.
+ */
+function useMonitoringSettings() {
+  return useQuery({
+    queryKey: ["settings", "monitoring"],
+    queryFn: () => api.get<MonitoringSettings>("/api/v1/settings/monitoring"),
+    retry: false,
+  });
+}
+
 function MonitoringRetention() {
   const t = useT();
   const toast = useToast();
@@ -525,11 +573,7 @@ function MonitoringRetention() {
   const [acknowledged, setAcknowledged] = useState(false);
   const [message, setMessage] = useState("");
 
-  const settings = useQuery({
-    queryKey: ["settings", "monitoring"],
-    queryFn: () => api.get<MonitoringSettings>("/api/v1/settings/monitoring"),
-    retry: false,
-  });
+  const settings = useMonitoringSettings();
 
   // The form holds what the installation stored; an empty field is not
   // zero, it is one the environment of the control plane still decides.
@@ -592,7 +636,7 @@ function MonitoringRetention() {
   if (settings.error) return null;
   if (!settings.data) {
     return (
-      <Card span={12} title={t("Monitoring retention")} note={t("How long the panel keeps what the hosts send.")}>
+      <Card title={t("Monitoring retention")} note={t("How long the panel keeps what the hosts send.")}>
         <Bones rows={4} />
       </Card>
     );
@@ -606,7 +650,6 @@ function MonitoringRetention() {
 
   return (
     <Card
-      span={12}
       title={t("Monitoring retention")}
       note={t("How long the panel keeps what the hosts send.")}
       foot={
@@ -1010,4 +1053,61 @@ function AgentConfiguration() {
       {(data.warnings ?? []).map((warning) => <Note key={warning}>{warning}</Note>)}
     </>
   );
+}
+
+/** The name the General tab's arrangement is stored under. */
+export const SETTINGS_SCREEN = "next_settings";
+
+/**
+ * The containers of the General tab that are there whatever the server
+ * was started with.
+ */
+export const SETTINGS: BoardEntry[] = [
+  // Six fields, each with the sentence that says what it costs, and the
+  // count of what a change would remove under them.
+  { key: "retention", title: "Monitoring retention", width: 12, height: 4 },
+  // What is in force, and the interfaces this panel read off itself with
+  // a choice between them.
+  { key: "address", title: "Advertised address", width: 12, height: 4 },
+  // The trust set, what still hangs on each authority, and the two phases
+  // of a rotation. It is the one section on this tab that changes what a
+  // thousand machines will accept, so it is given the room to be read.
+  { key: "fleet_ca", title: "Fleet CA", width: 12, height: 4 },
+  // A heading and the search under it: the areas themselves are below.
+  { key: "started_with", title: "What the process was started with", width: 12, height: 1 },
+];
+
+/**
+ * A container key for an area of the configuration.
+ *
+ * The areas are named by the server and the containers of this tab are
+ * named here, so the two are kept apart: an installation whose settings
+ * carry an area called `retention` would otherwise have had it stand
+ * where the monitoring retentions do, and one of the two would have been
+ * drawn twice and the other not at all.
+ */
+export function areaKey(area: string): string {
+  return `area_${area}`;
+}
+
+/**
+ * The catalogue with one container per area the server reported.
+ *
+ * The height is the area's own: a pair of values does not need the room
+ * fifteen do, and the count is the whole area's rather than what the
+ * search left of it, so the shape a container ships with does not change
+ * while somebody types.
+ */
+export function settingsCatalogue(areas: SettingsArea[]): BoardEntry[] {
+  return [
+    ...SETTINGS,
+    ...areas.map((area) => ({
+      key: areaKey(area.key),
+      title: area.title,
+      width: 4,
+      // Two values to a row at this width, and a row is about 50 pixels
+      // against the 152 of a cell.
+      height: area.facts.length > 10 ? 4 : area.facts.length > 4 ? 3 : 2,
+    })),
+  ];
 }

@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import type { ReactElement } from "react";
-import { Band, Bars, Card, Chart, Diff, Find, Flow, Kpi, Needs, Pie, Pill, Readout, Ring, Squares, Table, Tile, Toolbar, pageNumbers, stacked } from "./kit";
+import { Band, Bars, Card, Chart, Diff, Find, Flow, Head, Kpi, Menu, MenuItem, Needs, Pie, Pill, Readout, Ring, Squares, Table, Tile, Toolbar, pageNumbers, stacked } from "./kit";
 
 /**
  * The kit decides what the panel looks like, so the rules a screen must
@@ -392,5 +392,42 @@ describe("a patch", () => {
     expect(patch.querySelector(".fl-diff-in")).toHaveTextContent("+new line");
     expect(patch.querySelector(".fl-diff-out")).toHaveTextContent("-old line");
     expect(patch.querySelector(".fl-diff-where")).toHaveTextContent("@@");
+  });
+});
+
+describe("the actions behind one word", () => {
+  it("opens, leads somewhere, and closes on what was chosen", () => {
+    draw(
+      <Menu label="Actions" testId="acts">
+        <MenuItem to="/next/hosts/h1/logs">Open the logs</MenuItem>
+        <MenuItem disabled onClick={() => undefined}>Refresh</MenuItem>
+      </Menu>,
+    );
+    expect(screen.queryByTestId("acts-open")).toBeNull();
+    fireEvent.click(screen.getByTestId("acts"));
+    expect(screen.getByRole("menuitem", { name: "Open the logs" })).toHaveAttribute("href", "/next/hosts/h1/logs");
+    // A line that cannot be taken stays where it is and says so, rather
+    // than disappearing and leaving the reader wondering what is missing.
+    expect(screen.getByRole("menuitem", { name: "Refresh" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open the logs" }));
+    expect(screen.queryByTestId("acts-open")).toBeNull();
+  });
+
+  it("closes on Escape, like everything else that covers the screen", () => {
+    draw(<Menu label="Actions" testId="acts"><MenuItem onClick={() => undefined}>Do it</MenuItem></Menu>);
+    fireEvent.click(screen.getByTestId("acts"));
+    expect(screen.getByTestId("acts-open")).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByTestId("acts-open")).toBeNull();
+  });
+});
+
+describe("the way back above a screen's name", () => {
+  it("is drawn only where the reader came from somewhere", () => {
+    draw(<Head title="agent-arch" crumb={<a href="/next/campaigns/c1">Back to the campaign</a>} />);
+    expect(screen.getByRole("link", { name: "Back to the campaign" })).toBeInTheDocument();
+    cleanup();
+    draw(<Head title="agent-arch" />);
+    expect(document.querySelector(".fl-head-crumb")).toBeNull();
   });
 });

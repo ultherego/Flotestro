@@ -4,7 +4,9 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
-import { Status, blockSummary, blockTone, numberFact, shortIdentifier } from "./Status";
+import {
+  Status, STATUS_SCREEN, blockSummary, blockTone, numberFact, shortIdentifier, statusCatalogue,
+} from "./Status";
 
 /**
  * The screen that says whether this installation is well.
@@ -224,5 +226,33 @@ describe("the judgements the screen makes on its own", () => {
   it("keeps the ends of an identifier and drops the middle nobody reads", () => {
     expect(shortIdentifier("short")).toBe("short");
     expect(shortIdentifier("0123456789abcdef0123456789abcdef")).toBe("01234567…89abcdef");
+  });
+});
+
+/**
+ * The parts of the panel stand on a board, as they did in the screen
+ * this replaces: which part an installation watches first is its own
+ * decision. The rewrite drew them on a plain screen, so the control was
+ * gone and the arrangement stored for it was unreachable.
+ */
+describe("arranging the parts", () => {
+  it("offers the arrange bar and draws its containers on the board", async () => {
+    Object.assign(answers, {
+      "/api/v1/status": view(),
+      "/api/v1/settings/layout": { widgets: [], present: false, revision: 1 },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("board")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("arrange")).toBeInTheDocument());
+    expect(screen.getByTestId("arrange")).toHaveTextContent("Arrange this screen");
+    expect(STATUS_SCREEN).toMatch(/^[a-z0-9_]+$/);
+    expect(asked).toContain(`/api/v1/settings/layout/${STATUS_SCREEN}`);
+  });
+
+  it("gives every part the server reported a container of its own", () => {
+    const catalogue = statusCatalogue(["database", "outbox"], true);
+    expect(catalogue.map((one) => one.key)).toEqual(expect.arrayContaining(["database", "outbox", "build"]));
+    // Nothing named twice: a key drawn twice is a container drawn twice.
+    expect(new Set(catalogue.map((one) => one.key)).size).toBe(catalogue.length);
   });
 });

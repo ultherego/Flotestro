@@ -686,6 +686,67 @@ export function Campaign() {
           )}
         </Card>
 
+        {/* The drawing above groups the states into three bands so the
+            shape of the rollout can be read; this is the report itself.
+            Whether a wave is closed is on no drawing at all: a wave that
+            has run every host and a wave still letting hosts in look the
+            same from their counts, and the operator decides differently
+            on each. */}
+        <Card
+          span={12}
+          title={t("Waves")}
+          note={t("Each wave as the report counts it, state by state.")}
+          flush
+          foot={report.data ? t("{n} waves", { n: waves.length }) : undefined}
+        >
+          <Table
+            rows={waves}
+            keyOf={(one) => String(one.wave)}
+            rowTestId={(one) => `wave-${one.wave}`}
+            testId="waves"
+            loading={!report.data}
+            empty={t("No wave has been recorded yet.")}
+            columns={[
+              { key: "wave", head: t("Wave"), num: true, cell: (one) => one.wave },
+              {
+                key: "canary",
+                head: t("Canary"),
+                cell: (one) => one.is_canary
+                  ? <Pill tone="info" title={t("The first wave, the one the barrier rests on.")}>{t("yes")}</Pill>
+                  : t("no"),
+              },
+              {
+                key: "closed",
+                head: t("Closed"),
+                cell: (one) => one.completed
+                  ? <Pill tone="ok" title={t("Every host of this wave has finished.")}>{t("yes")}</Pill>
+                  : <Pill tone="info" title={t("Hosts of this wave are still under way.")}>{t("no")}</Pill>,
+              },
+              {
+                key: "summary",
+                head: t("Summary"),
+                cell: (one) => {
+                  const counted = Object.entries(one.totals).filter(([, n]) => n > 0);
+                  // A wave the report put no count against is not a wave of
+                  // noughts - nobody counted it - and it says so.
+                  if (counted.length === 0) {
+                    return <Pill tone="unknown">{t("not counted")}</Pill>;
+                  }
+                  return (
+                    <Tags>
+                      {counted.map(([state, n]) => (
+                        <Pill key={state} tone={targetTone(state)}>
+                          {`${t(stateName(state))}: ${n}`}
+                        </Pill>
+                      ))}
+                    </Tags>
+                  );
+                },
+              },
+            ]}
+          />
+        </Card>
+
         {/* The whole set in one block: it answers "is anything wrong"
             before a number can be read, and stays readable where a table
             of a thousand rows does not. */}

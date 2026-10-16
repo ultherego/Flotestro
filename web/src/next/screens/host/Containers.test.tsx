@@ -146,6 +146,36 @@ describe("what the containers module says", () => {
     expect(within(row).queryByText("healthy")).toBeNull();
   });
 
+  /**
+   * Which compose project a thing belongs to is on its row, for all
+   * three kinds of object. A container the operator stops by hand is put
+   * back by the project that declares it, so "who owns this" is the
+   * question a row has to answer before anybody touches it.
+   */
+  it("names the compose project on a container, a network and a volume", async () => {
+    Object.assign(answers, {
+      "/api/v1/hosts/h1/inventory/containers": fragment("containers", summary),
+      "/api/v1/hosts/h1/inventory/containers.full": fragment("containers.full", {
+        containers: [{ ...web, compose: { project: "shop", service: "front" } }, worker],
+        networks: [{ id: "n1", name: "shop_default", driver: "bridge", compose: "shop" }],
+        volumes: [{ name: "shop_db", driver: "local", in_use: false, compose: "shop" }],
+      }),
+      "/api/v1/hosts/h1/actions": may(EVERY),
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("container-web")).toBeInTheDocument());
+    expect(screen.getByTestId("container-web")).toHaveTextContent("shop/front");
+    // A container no project declares says nothing rather than borrowing
+    // the project of the row above it.
+    expect(screen.getByTestId("container-worker")).not.toHaveTextContent("shop");
+
+    fireEvent.click(screen.getByRole("tab", { name: /Networks/ }));
+    expect(screen.getByTestId("network-shop_default")).toHaveTextContent("shop");
+
+    fireEvent.click(screen.getByRole("tab", { name: /Volumes/ }));
+    expect(screen.getByTestId("volume-shop_db")).toHaveTextContent("shop");
+  });
+
   it("offers Start on a stopped container and Stop on a running one", async () => {
     Object.assign(answers, {
       "/api/v1/hosts/h1/inventory/containers": fragment("containers", summary),

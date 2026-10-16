@@ -103,6 +103,45 @@ afterEach(() => {
   for (const key of Object.keys(answers)) delete answers[key];
 });
 
+describe("the health log of a device", () => {
+  /**
+   * The attribute's number stays beside its name.
+   *
+   * smartctl's vendors disagree on the wording - "Reallocated_Sector_Ct"
+   * is 5 on one firmware and spelled another way on the next - so the ID
+   * is what an operator matches against a datasheet or a vendor's note.
+   * It is also the one column here where a nought is a reading.
+   */
+  it("keeps the attribute's ID on its row, next to the name and the raw value", async () => {
+    base({ devices: [disk({})], mounts: [] });
+    Object.assign(answers, {
+      "/api/v1/jobs/job-1234abcd/attempts": { items: [{
+        status: "succeeded",
+        detail: {
+          health_passed: true,
+          attributes: [
+            { id: 5, name: "Reallocated_Sector_Ct", value: 100, worst: 100, threshold: 10, raw: 0, raw_string: "0" },
+            { id: 194, name: "Temperature_Celsius", value: 72, worst: 50, threshold: 0, raw: 28, raw_string: "28" },
+          ],
+        },
+      }] },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("smart-/dev/sdb")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("smart-/dev/sdb"));
+    fireEvent.click(screen.getByTestId("smart-read"));
+    await waitFor(() => expect(screen.getByTestId("smart-attributes")).toBeInTheDocument());
+
+    const table = screen.getByTestId("smart-attributes");
+    expect(within(table).getByText("ID")).toBeInTheDocument();
+    const rows = within(table).getAllByRole("row");
+    expect(rows[1]).toHaveTextContent("5");
+    expect(rows[1]).toHaveTextContent("Reallocated_Sector_Ct");
+    expect(rows[2]).toHaveTextContent("194");
+    expect(rows[2]).toHaveTextContent("Temperature_Celsius");
+  });
+});
+
 describe("the storage of a host", () => {
   it("folds a filesystem mounted twice at one point into one row that says twice", async () => {
     base({
