@@ -2,7 +2,7 @@ import { useEffect, useState, type MouseEvent } from "react";
 import { Navigate, Route, Routes, useLocation, useMatch } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, BEARER_TOKEN_KEY, ApiError } from "./lib/api";
-import { PasswordSignIn } from "./pages/SignIn";
+import { Door } from "./next/Door";
 import type { Host, Whoami } from "./lib/types";
 import { useCapabilities } from "./lib/capabilities";
 import { useTheme } from "./lib/theme";
@@ -13,7 +13,6 @@ import { Sidebar } from "./components/Sidebar";
 import { NextPanel } from "./next/Panel";
 import { fleetNavigation, visibility, type NavFace, type NavGroup } from "./lib/navigation";
 import { Topbar, type Trail } from "./components/Topbar";
-import { Logo } from "./components/Logo";
 import { Dashboard } from "./pages/Dashboard";
 import { Hosts } from "./pages/Hosts";
 import { AddHost } from "./pages/AddHost";
@@ -302,38 +301,13 @@ async function signOut(event: MouseEvent) {
   window.location.href = result.logout_url || "/";
 }
 
+/**
+ * The way in. It is the new panel's, because it is the first thing
+ * anybody sees and there is only one of it: the old shell and the new
+ * one are both reached through this door.
+ */
 export function LoginScreen({ provider }: { provider: boolean }) {
-  const t = useT();
-  return (
-    <div className="ui-login">
-      <div>
-        <h1 className="ui-login-brand"><Logo size={40} /></h1>
-        <p className="ui-note">{t("Linux fleet management")}</p>
-
-        {/* The password door. An installation with no identity provider had
-            none until 16.10: the panel had roles and tokens and no way for a
-            person to sign in. It stands first because where there is no
-            provider it is the only way in, and where there is one an
-            administrator still keeps a local account for the day the
-            provider is the thing that is down. */}
-        <PasswordSignIn />
-
-        {provider && (
-          <>
-            <div className="ui-login-or"><span>{t("or")}</span></div>
-            <button className="ui-btn-secondary" onClick={() => (window.location.href = "/auth/login?redirect=/dashboard")}>
-              {t("Sign in with identity provider")}
-            </button>
-            <p className="ui-note">
-              {t("Your identity provider may sign you in with an account you already have an open session for.")}{" "}
-              <a href="/auth/login?force=1&redirect=/dashboard">{t("Sign in as a different user")}</a>
-            </p>
-          </>
-        )}
-        <BootstrapTokenEntry />
-      </div>
-    </div>
-  );
+  return <Door provider={provider} />;
 }
 
 /** The first page: the one the operator chose, the dashboard until then. */
@@ -347,27 +321,6 @@ function Landing() {
  * The way in before the identity provider lets anybody in: the bootstrap
  * token from the state directory.
  */
-function BootstrapTokenEntry() {
-  const t = useT();
-  const [token, setToken] = useState("");
-  return (
-    <details style={{ marginTop: 18, textAlign: "left" }}>
-      <summary className="ui-note" style={{ cursor: "pointer" }}>{t("Sign in with a bootstrap token")}</summary>
-      <p className="ui-note">
-        {t("The bootstrap token is printed at the first start and lies in the state directory. It is for the first group mapping only: the first-run checklist warns while it still works.")}
-      </p>
-      <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="flta…" autoComplete="off"
-             data-testid="bootstrap-token" style={{ width: "100%", marginBottom: 8 }} />
-      <button className="ui-btn-secondary" disabled={token.trim() === ""} onClick={() => {
-        try { sessionStorage.setItem(BEARER_TOKEN_KEY, token.trim()); } catch { /* a window without storage: the token is simply not kept */ }
-        window.location.href = "/setup";
-      }}>
-        {t("Continue to the first run")}
-      </button>
-    </details>
-  );
-}
-
 /**
  * The section the address belongs to, for the trail in the top bar.
  */

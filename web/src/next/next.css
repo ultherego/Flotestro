@@ -2180,3 +2180,111 @@
 
 .fl-app .fl-choice-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .fl-app .fl-choice-name { font-size: var(--t-body); font-weight: 600; }
+
+/* ---------------------------------------------------------------------
+   21. The way in
+
+   The first thing anybody sees of this product. It is set a size larger
+   than the panel behind it, because a person typing a password reads one
+   line at a time rather than scanning a board, and it stands on a ground
+   lit from two corners instead of on an empty page.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-door {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--s6);
+  font-size: var(--t-lead);
+  background:
+    radial-gradient(70rem 46rem at 10% -14%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 58%),
+    radial-gradient(56rem 40rem at 108% 112%, color-mix(in srgb, var(--blue) 24%, transparent), transparent 60%),
+    radial-gradient(40rem 30rem at 86% 4%, color-mix(in srgb, var(--lavender) 14%, transparent), transparent 64%),
+    var(--bg);
+}
+
+.fl-app .fl-door-card {
+  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  padding: var(--s7) var(--s6) var(--s6);
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--fl-face);
+  box-shadow: var(--fl-lift-high);
+}
+
+.fl-app .fl-door-head { display: flex; flex-direction: column; align-items: center; gap: var(--s2); text-align: center; }
+
+.fl-app .fl-door-mark {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  background: var(--fl-brand);
+  color: var(--fl-brand-ink);
+}
+
+.fl-app .fl-door-name { font-size: 26px; font-weight: 650; letter-spacing: -0.02em; }
+.fl-app .fl-door-lead { font-size: var(--t-body); color: var(--text-faint); }
+.fl-app .fl-door-form { display: flex; flex-direction: column; gap: var(--s4); }
+.fl-app .fl-door-wide { width: 100%; justify-content: center; height: 42px; font-size: var(--t-body); }
+
+/* The door is outside the screen, so the rule that makes a bare button
+   the filled one does not reach it. The one that signs a person in says
+   so for itself. */
+.fl-app .fl-door button[type="submit"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 650;
+  transition: filter var(--fl-quick), opacity var(--fl-quick);
+}
+
+.fl-app .fl-door button[type="submit"]:hover { filter: brightness(1.08); }
+.fl-app .fl-door button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* A field on this screen is a size larger than one inside the panel. */
+.fl-app .fl-door input {
+  width: 100%;
+  height: 42px;
+  padding: 0 var(--s4);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: var(--t-lead);
+  transition: border-color var(--fl-quick);
+}
+
+.fl-app .fl-door input:focus { border-color: var(--accent); outline: none; }
+.fl-app .fl-door .fl-field-label { font-size: var(--t-small); }
+
+.fl-app .fl-door-or {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  color: var(--text-faint);
+  font-size: var(--t-small);
+}
+
+.fl-app .fl-door-or::before,
+.fl-app .fl-door-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--border); }
+
+.fl-app .fl-door-more { display: flex; flex-direction: column; gap: var(--s3); font-size: var(--t-small); }
+
+.fl-app .fl-door-more summary {
+  cursor: pointer;
+  color: var(--text-faint);
+  transition: color var(--fl-quick);
+}
+
+.fl-app .fl-door-more summary:hover { color: var(--text); }
+.fl-app .fl-door-more[open] summary { margin-bottom: var(--s1); }
