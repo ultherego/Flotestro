@@ -374,6 +374,7 @@ export function Vulnerabilities() {
 
       findings: (
         <Kpi
+          hero
           icon="vulnerabilities"
           testId="findings"
           label={t("Open findings")}

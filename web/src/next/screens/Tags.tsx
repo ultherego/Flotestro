@@ -102,6 +102,7 @@ export function Tags() {
       <Board screen={TAGS_SCREEN} catalogue={TAGS} drawn={{
         count: (
           <Kpi
+            hero
             icon="hosts"
             label={t("Tags")}
             value={loaded ? items.length : null}

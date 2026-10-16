@@ -78,6 +78,7 @@ export function Readiness() {
         ),
         hosts: (
           <Kpi
+            hero
             icon="hosts"
             label={t("Hosts")}
             value={data?.hosts ?? null}

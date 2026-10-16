@@ -196,7 +196,7 @@ export function Relays() {
 
       <Board screen={RELAYS_SCREEN} catalogue={RELAYS} drawn={{
         count: (
-          <Kpi icon="relays" label={t("Relays")} value={loaded ? relays.length : null}
+          <Kpi hero icon="relays" label={t("Relays")} value={loaded ? relays.length : null}
                note={settledSite ? t("in site {site}", { site: settledSite }) : t("of every site")} />
         ),
         attested: (

@@ -137,6 +137,7 @@ export function Teams() {
       <Board screen={TEAMS_SCREEN} catalogue={TEAMS} drawn={{
         count: (
           <Kpi
+            hero
             icon="access"
             label={t("Teams")}
             value={list.data ? teams.length : null}

@@ -441,7 +441,7 @@ function UsersTab() {
   return (
     <>
       <Kpis>
-        <Kpi icon="accounts" label={t("Accounts")} value={data ? users.length : null}
+        <Kpi hero icon="accounts" label={t("Accounts")} value={data ? users.length : null}
              note={t("the directory's own, not the panel's")} testId="kpi-accounts" />
         <Kpi icon="security" label={t("Locked")} value={locked} tone={locked ? "warn" : "ok"}
              note={t("no Kerberos login until unlocked")} testId="kpi-locked" />

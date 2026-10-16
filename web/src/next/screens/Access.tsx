@@ -681,6 +681,7 @@ export function Access() {
       <Board screen={ACCESS_SCREEN} catalogue={ACCESS} drawn={{
         signin: (
           <Kpi
+            hero
             icon="access"
             label={t("Who may sign in")}
             value={holders.data?.items.length ?? null}

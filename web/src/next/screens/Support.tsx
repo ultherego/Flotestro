@@ -175,6 +175,7 @@ export function Support() {
     >
       <Kpis>
         <Kpi
+          hero
           icon="logs"
           label={t("Bundles held")}
           value={loaded ? bundles.length : null}

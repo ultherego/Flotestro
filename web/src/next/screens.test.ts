@@ -64,6 +64,15 @@ describe("a screen of the new panel", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("gives the accent to one tile at most, because it answers one question", () => {
+    const offenders: string[] = [];
+    for (const screen of screens()) {
+      const heroes = screen.text.match(/<Kpi\b[^>]*?\bhero\b|\bhero\n/g) ?? [];
+      if (heroes.length > 1) offenders.push(`${screen.name} has ${heroes.length}`);
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it("never carries an inline style, which no theme can follow", () => {
     const offenders: string[] = [];
     for (const screen of screens()) {

@@ -760,15 +760,18 @@
   padding: var(--s4) var(--s5) var(--s5);
 }
 
-/* Only a card whose height was fixed for it scrolls inside itself. Every
-   card scrolling meant the wheel moved whatever happened to be under the
-   pointer instead of the page, which reads as a panel that cannot decide
-   what the wheel is for. Where one does scroll, it keeps the gesture:
-   reaching its end does not throw the page. */
+/* Only a card whose height was fixed for it scrolls inside itself; one
+   that fits never takes the wheel, so the page moves under the pointer
+   wherever it happens to be.
+ 
+   And a card that does scroll hands the wheel back when its own content
+   ends - the browser's own chaining, which an earlier "contain" here
+   took away. Holding the gesture meant the pointer resting on a long
+   table trapped the page, which is the thing the owner could not do. */
 .fl-app .fl-placed .fl-card-body,
 .fl-app .fl-card-body > .fl-tablewrap {
   overflow: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
 }
 
 /* A drawing fills the card it was put in: a chart stands on its floor,
@@ -1474,7 +1477,6 @@
   padding: var(--s3) var(--s4);
   max-height: 24em;
   overflow: auto;
-  overscroll-behavior: contain;
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg-sunken);

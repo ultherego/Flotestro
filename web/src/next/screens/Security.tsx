@@ -95,6 +95,7 @@ export function Security() {
     <Board screen={SECURITY_SCREEN} catalogue={SECURITY} drawn={{
       findings: (
         <Kpi
+          hero
           icon="security"
           label={t("Findings")}
           value={failed ?? null}
