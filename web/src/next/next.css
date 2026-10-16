@@ -933,7 +933,14 @@
 .fl-app .fl-kpi-unit { font-size: var(--t-lead); font-weight: 500; color: var(--text-faint); letter-spacing: 0; }
 .fl-app .fl-kpi-dash { color: var(--unknown-text); }
 .fl-app .fl-kpi-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s2); }
-.fl-app .fl-kpi-note { font-size: var(--t-small); color: var(--text-faint); }
+.fl-app .fl-kpi-note {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--t-small);
+  color: var(--text-faint);
+}
 
 .fl-app .fl-kpi-delta {
   display: inline-flex;
