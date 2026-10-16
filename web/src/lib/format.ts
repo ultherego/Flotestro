@@ -88,8 +88,12 @@ export function optional(value: number | boolean | null | undefined): string {
   return String(value);
 }
 
-export function bytes(value?: number): string {
-  if (!value) return "0 B";
+export function bytes(value?: number | null): string {
+  // Nobody knowing is not nought. A size the host never reported read as
+  // "0 B" here, which is a claim the panel has no grounds for - a disk
+  // nobody measured and an empty disk are not the same disk.
+  if (value === undefined || value === null || Number.isNaN(value)) return "\u2014";
+  if (value === 0) return "0 B";
   const units = ["B", "KiB", "MiB", "GiB", "TiB"];
   let size = value;
   let unit = 0;

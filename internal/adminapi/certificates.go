@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/audit"
@@ -304,11 +305,21 @@ func (s *Server) handleUnwatchCertificate(w http.ResponseWriter, r *http.Request
 		s.fail(w, err)
 		return
 	}
+	// Sent by the panel and dropped here until now: a path stops being
+	// watched for a reason, and the trail is where that reason belongs.
+	reason, ok := requestReason(w, r, nil)
+	if !ok {
+		return
+	}
+	detail := map[string]any{"path": path}
+	if reason = strings.TrimSpace(reason); reason != "" {
+		detail["reason"] = reason
+	}
 	s.audit.Record(r.Context(), audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "certificate.unwatch", TargetType: "host", TargetID: hostID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{"path": path},
+		Detail: detail,
 	})
 	w.WriteHeader(http.StatusNoContent)
 }

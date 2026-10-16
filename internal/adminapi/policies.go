@@ -204,11 +204,20 @@ func (s *Server) handleDeletePolicy(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// A policy is deleted for a reason; whoever sends one has it kept.
+	reason, ok := requestReason(w, r, nil)
+	if !ok {
+		return
+	}
+	detail := map[string]any{"name": found.Name, "version": found.Version}
+	if reason = strings.TrimSpace(reason); reason != "" {
+		detail["reason"] = reason
+	}
 	s.audit.Record(r.Context(), audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "policy.delete", TargetType: "policy", TargetID: found.ID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{"name": found.Name, "version": found.Version},
+		Detail: detail,
 		Before: policy.DocumentOf(*found),
 	})
 	w.WriteHeader(http.StatusNoContent)

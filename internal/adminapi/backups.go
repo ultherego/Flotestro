@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/audit"
@@ -311,11 +312,22 @@ func (s *Server) handleDeleteBackupDefinition(w http.ResponseWriter, r *http.Req
 		s.fail(w, err)
 		return
 	}
+	// The panel asks whoever removes a definition why, and sends it. It was
+	// being dropped here, so the trail recorded the removal of a backup with
+	// no reason beside it - which is the one thing an incident asks first.
+	reason, ok := requestReason(w, r, nil)
+	if !ok {
+		return
+	}
+	detail := map[string]any{"name": name}
+	if reason = strings.TrimSpace(reason); reason != "" {
+		detail["reason"] = reason
+	}
 	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "backup.definition.remove", TargetType: "host", TargetID: hostID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{"name": name},
+		Detail: detail,
 	}); err != nil {
 		s.fail(w, err)
 		return
