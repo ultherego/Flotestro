@@ -3,8 +3,9 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, BEARER_TOKEN_KEY } from "../lib/api";
 import { usePreferences } from "../lib/preferences";
-import { useScale, SCALES } from "../lib/scale";
-import { useTheme, THEMES } from "../lib/theme";
+import { SCALES } from "../lib/scale";
+import { THEMES } from "../lib/theme";
+import { useLook } from "./look";
 import { LOCALES, useLocale } from "../i18n";
 import { useCapabilities } from "../lib/capabilities";
 import { fleetNavigation, type NavGroup } from "../lib/navigation";
@@ -152,8 +153,7 @@ function UserMenu({ name, roles, subject }: { name: string; roles: string[]; sub
   const t = useT();
   const [open, setOpen] = useState(false);
   const holder = useRef<HTMLDivElement>(null);
-  const { theme, setTheme } = useTheme();
-  const { scale, setScale } = useScale();
+  const { theme, setTheme, scale, setScale } = useLook();
   const { locale, setLocale } = useLocale();
   const { save } = usePreferences();
 

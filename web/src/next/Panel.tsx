@@ -22,6 +22,7 @@ import { Campaigns } from "./screens/Campaigns";
 import { Security } from "./screens/Security";
 import { Empty, Head } from "./kit";
 import { ABOUT } from "./screens/about";
+import { LookProvider, type Look } from "./look";
 import { useT } from "../i18n";
 
 /**
@@ -46,7 +47,7 @@ const TITLES: Record<string, string> = {
   security: "Security",
 };
 
-export function NextPanel() {
+export function NextPanel({ look }: { look: Look }) {
   const t = useT();
   const location = useLocation();
   const section = location.pathname.replace(/^\/next\/?/, "").split("/")[0] ?? "";
@@ -57,10 +58,12 @@ export function NextPanel() {
   // two of everything - two rails, two bars, two brands.
   if (/^\/next\/hosts\/[^/]+/.test(location.pathname)) {
     return (
+      <LookProvider look={look}>
       <Routes>
         <Route path="/next/hosts/:id" element={<HostWorkspace />} />
         <Route path="/next/hosts/:id/:module" element={<HostWorkspace />} />
       </Routes>
+      </LookProvider>
     );
   }
 
@@ -69,6 +72,7 @@ export function NextPanel() {
   const about = ABOUT[section === "" ? "dashboard" : section];
 
   return (
+    <LookProvider look={look}>
     <Shell trail={{ section: about ? about.title : title }}>
       {about && (
         <Head
@@ -104,6 +108,7 @@ export function NextPanel() {
         <Route path="*" element={<NotYet />} />
       </Routes>
     </Shell>
+    </LookProvider>
   );
 }
 

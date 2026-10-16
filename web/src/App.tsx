@@ -151,7 +151,7 @@ export function App() {
       <ToastProvider>
         <ModalProvider>
           <PreferencesProvider applyTheme={setTheme}>
-            <NextPanel />
+            <NextPanel look={{ theme, setTheme, scale, setScale }} />
           </PreferencesProvider>
         </ModalProvider>
       </ToastProvider>
