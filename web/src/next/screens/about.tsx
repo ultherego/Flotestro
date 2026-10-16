@@ -103,6 +103,18 @@ export const ABOUT: Record<string, About> = {
     icon: "audit",
     help: "Every change and every refusal, in the order they happened, hash-chained so a gap can be proved rather than argued about. The trail filters on the server. A denial is kept as carefully as a success: one is a typo, a run of them is somebody probing.",
   },
+  budgets: {
+    title: "Budgets",
+    lead: "How many operations the fleet carries at once.",
+    icon: "settings",
+    help: "The capacity of the fleet, in tokens: how many operations the fleet, a site, a failure domain, a gateway or a backup backend carries at once. A campaign or a job that finds no free token waits here, and the free tokens are divided fairly between everyone asking. A key with an asterisk in its scope is the default every scope of that family gets; a key nobody configured is not a budget of zero, it is no limit at all.",
+  },
+  policies: {
+    title: "Policies",
+    lead: "What is to be true on a group of hosts.",
+    icon: "security",
+    help: "What is to be true on a group of hosts: a package installed, a unit running, a file at a known content, a setting at a value, a key on an account. The panel judges every host from its inventory and never by touching it; a drift is reported, or turned into a campaign that waits for approval. A published policy is frozen as it stands and is applied from its publication onwards, so what was enforced yesterday stays readable.",
+  },
   notifications: {
     title: "Notifications",
     lead: "Where the panel sends what it has to say, and what is stuck.",

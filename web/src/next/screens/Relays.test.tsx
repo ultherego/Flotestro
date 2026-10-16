@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
+import { ApiError } from "../../lib/api";
 import { Relays, bufferSummary, historyAddress, relayTone, BUFFER_RANGES, type RelayBufferPoint } from "./Relays";
 import { ToastProvider } from "../../components/Toast";
 
@@ -34,7 +34,11 @@ vi.mock("../../lib/api", async (importOriginal) => {
           .filter((one) => path.startsWith(one))
           .sort((a, b) => b.length - a.length)[0];
         if (!key) return Promise.reject(new actual.ApiError(403, "forbidden", "not for you"));
-        return Promise.resolve(answers[key]);
+        // An Error standing in the table is a refusal, so a test can ask
+        // for the 404 an address naming no relay comes back with.
+        const value = answers[key];
+        if (value instanceof Error) return Promise.reject(value);
+        return Promise.resolve(value);
       },
       post: (path: string, body: unknown) => {
         posted.push({ path, body });
@@ -68,12 +72,32 @@ const point = (over: Partial<RelayBufferPoint>): RelayBufferPoint => ({
   ...over,
 });
 
-function draw() {
+/** Where the panel stands now, so a click can be read as an address. */
+function Where() {
+  const where = useLocation();
+  return <span data-testid="where">{where.pathname}</span>;
+}
+
+/**
+ * The screen under the two addresses it answers on. The list and the one
+ * relay are the same component, so both routes lead to it and the
+ * parameter is what decides which the reader gets.
+ */
+function draw(at = "/next/relays") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[at]}>
+        <ToastProvider>
+          <Routes>
+            <Route path="/next/relays" element={<Relays />} />
+            <Route path="/next/relays/:id" element={<Relays />} />
+          </Routes>
+          <Where />
+        </ToastProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
-  return render(<Relays />, { wrapper });
 }
 
 afterEach(() => {
@@ -194,6 +218,61 @@ describe("the relays of the sites", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("relay-relay-warsaw")).toBeInTheDocument());
     expect(screen.queryByTestId("revoke")).not.toBeInTheDocument();
+  });
+});
+
+describe("one relay from the address", () => {
+  it("opens on the relay the address names, even when the list is narrowed past it", async () => {
+    Object.assign(answers, {
+      // The list the screen reads is one site's; the relay in the address
+      // is not in it, and it is read on its own record all the same.
+      "/api/v1/relays": { items: [relay({})], count: 1 },
+      "/api/v1/relays/r2": {
+        relay: relay({ id: "r2", name: "relay-krakow", site: "krakow", environment: "" }),
+        hosts: [{
+          host_id: "h9", hostname: "agent-arch", site: "krakow", lifecycle_state: "active",
+          agent_version: "0.63.1", connected_at: "2026-10-16T07:00:00Z", last_heartbeat_at: "2026-10-16T07:58:00Z",
+        }],
+      },
+      "/api/v1/relays/r2/buffer-history": {
+        relay_id: "r2", range: "24h", step_seconds: 60, rollup: false,
+        points: [], latest: null, alerts: [], raw_retention_hours: 48, rollup_retention_days: 30,
+      },
+    });
+    draw("/next/relays/r2");
+    await waitFor(() => expect(screen.getByTestId("attested-agent-arch")).toBeInTheDocument());
+    // The card is the relay the address named and not the first of the list.
+    expect(screen.getByText("relay-krakow")).toBeInTheDocument();
+    expect(asked.some((one) => one === "/api/v1/relays/r2")).toBe(true);
+    expect(asked.some((one) => one === "/api/v1/relays/r1")).toBe(false);
+  });
+
+  it("says an identifier naming nothing names nothing, and offers the list", async () => {
+    Object.assign(answers, {
+      "/api/v1/relays": { items: [relay({})], count: 1 },
+      "/api/v1/relays/nope": new ApiError(404, "not_found", "no such relay"),
+    });
+    draw("/next/relays/nope");
+    await waitFor(() => expect(screen.getByText(/No relay with the identifier nope/)).toBeInTheDocument());
+    // No card of a relay that is not there, and a way back to the list.
+    expect(screen.queryByTestId("relay-relay-warsaw")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "All relays" })).toHaveAttribute("href", "/next/relays");
+  });
+
+  it("puts the relay picked from a row in the address, without reloading the panel", async () => {
+    Object.assign(answers, {
+      "/api/v1/relays": { items: [relay({}), relay({ id: "r2", name: "relay-krakow", site: "krakow" })], count: 2 },
+      "/api/v1/relays/r1": { relay: relay({}), hosts: [] },
+      "/api/v1/relays/r2": { relay: relay({ id: "r2", name: "relay-krakow", site: "krakow" }), hosts: [] },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("pick-relay-krakow")).toBeInTheDocument());
+    expect(screen.getByTestId("where")).toHaveTextContent("/next/relays");
+    fireEvent.click(screen.getByTestId("pick-relay-krakow"));
+    // The address is the one thing that changed: the list is still drawn
+    // under it, so nothing was reloaded.
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/next/relays/r2"));
+    expect(screen.getByTestId("relay-relay-warsaw")).toBeInTheDocument();
   });
 });
 

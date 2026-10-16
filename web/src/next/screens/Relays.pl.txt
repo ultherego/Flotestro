@@ -26,3 +26,6 @@
   "Buffered, KiB": "W buforze, KiB",
   "Revoking…": "Unieważnianie…",
   "Reason (kept in the trail)": "Powód (trafia do dziennika audytu)",
+  "A relay is one connection upwards per site. It attests the identity of the hosts behind it, so what it reports about itself is what the panel knows about that site, and it spools results while the link upwards is down. Everything on this screen is what a relay said about itself: a spool nobody has reported is an em dash and never a nought.": "Relay to jedno połączenie w górę na lokalizację. Poświadcza tożsamość hostów za sobą, więc to, co raportuje o sobie, jest tym, co panel wie o tej lokalizacji, i buforuje wyniki na czas zerwania łącza w górę. Wszystko na tym ekranie to słowa samego relaya: bufor, którego nikt nie zaraportował, to myślnik, a nigdy zero.",
+  "All relays": "Wszystkie relaye",
+  "No relay with the identifier {id} is registered in this installation.": "W tej instalacji nie ma zarejestrowanego relaya o identyfikatorze {id}.",

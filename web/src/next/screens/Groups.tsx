@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, LIST_PAGE, loadedItems, type Collection, type Page } from "../../lib/api";
+import { api, ApiError, LIST_PAGE, loadedItems, type Collection, type Page } from "../../lib/api";
 import { useDebounced } from "../../lib/debounce";
 import { absoluteTime, relativeTime } from "../../lib/format";
 import type { Host, HostGroup, SelectorExpression, Whoami } from "../../lib/types";
@@ -10,8 +10,9 @@ import { useToast } from "../../components/Toast";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Band, Banner, Bars, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Modal,
-  Note, Pill, Problem, Seg, Table, Toolbar, TwoLine, type Segment,
+  Actions, Band, Banner, Bars, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Find,
+  Grid, Kpi, Kpis, Modal, Note, Pill, Problem, Readout, Screen, Seg, Stack, Table, Tag, Toolbar,
+  TwoLine, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -135,7 +136,37 @@ export function namedBy(usage: GroupUsage | undefined, t: (key: string, vars?: R
   return t("Its selector is named by: {list}. They will stop resolving.", { list: names.join(", ") });
 }
 
+/**
+ * The groups, or one of them.
+ *
+ * The address decides: `/next/groups` is the catalogue, and
+ * `/next/groups/<id>` opens that group on its own, so a group somebody
+ * is looking at can be sent to somebody else and reloaded where it was.
+ */
 export function Groups() {
+  const { id = "" } = useParams();
+  return id ? <OneGroup id={id} /> : <GroupList />;
+}
+
+/** The bulk workspace opened on this group, inside the new panel. */
+export function campaignAddress(name: string): string {
+  return `/next/bulk?${new URLSearchParams({ name, group: name })}`;
+}
+
+/** A new read with this group as its selector, inside the new panel. */
+export function readAddress(name: string): string {
+  return `/next/reads?${new URLSearchParams({ action: "journal.read", group: name })}`;
+}
+
+/** How a host's connection reads as a tone; nobody's guess is unknown. */
+export function connectionTone(state?: string): Tone {
+  if (state === "online") return "ok";
+  if (state === "offline") return "error";
+  if (state === "stale") return "warn";
+  return "unknown";
+}
+
+function GroupList() {
   const t = useT();
   const [search, setSearch] = useState("");
   const [order, setOrder] = useState<GroupOrder>("name");
@@ -190,7 +221,7 @@ export function Groups() {
               ? <Empty>{loaded ? t("No group has a size to show.") : t("Reading the groups…")}</Empty>
               : (
                 <Bars items={biggest.map((one) => ({
-                  label: <Link to={`/groups/${one.id}`}>{one.name}</Link>,
+                  label: <Link to={`/next/groups/${one.id}`}>{one.name}</Link>,
                   value: one.member_count ?? 0,
                 }))} />
               )}
@@ -203,7 +234,7 @@ export function Groups() {
               : (
                 <Facts>
                   {broken.map((one) => (
-                    <Fact key={one.id} label={<Link to={`/groups/${one.id}`}>{one.name}</Link>}>
+                    <Fact key={one.id} label={<Link to={`/next/groups/${one.id}`}>{one.name}</Link>}>
                       <span className="fl-error">{one.unresolvable}</span>
                     </Fact>
                   ))}
@@ -251,7 +282,7 @@ export function Groups() {
               columns={[
                 { key: "name", head: t("Group"), cell: (one) => (
                   <TwoLine sub={one.description}>
-                    <Link to={`/groups/${one.id}`}>{one.name}</Link>
+                    <Link to={`/next/groups/${one.id}`}>{one.name}</Link>
                   </TwoLine>
                 ) },
                 { key: "kind", head: t("Kind"), cell: (one) => (
@@ -679,6 +710,282 @@ function MemberChooser({ chosen, onChange }: { chosen: Set<string>; onChange: (n
         </Actions>
       )}
     </>
+  );
+}
+
+/* ------------------------------------------------------------ one group */
+
+/** A record that names a group in its selector, as the detail card lists it. */
+type NamedBy = { key: string; kind: string; name: string; state: string; to?: string };
+
+/**
+ * One group: what it answers with, what names it elsewhere, and the hosts
+ * it resolves to now.
+ *
+ * The three are one screen because they are one question. A selector
+ * read without the campaigns that name it is a rule nobody can change
+ * safely, and a size read without the members is a number nobody can
+ * check. A size the server could not give stays unknown here as well:
+ * the record is the same record the row above came from.
+ */
+function OneGroup({ id }: { id: string }) {
+  const t = useT();
+  const navigate = useNavigate();
+  const [search, setSearch] = useState("");
+  const settled = useDebounced(search.trim());
+
+  const group = useQuery({
+    queryKey: ["host-group", id],
+    queryFn: () => api.get<GroupDetail>(`/api/v1/host-groups/${id}`),
+    retry: false,
+  });
+
+  const params = new URLSearchParams({ limit: String(LIST_PAGE) });
+  if (settled) params.set("q", settled);
+  const hosts = useInfiniteQuery({
+    queryKey: ["host-group-hosts", id, params.toString()],
+    queryFn: ({ pageParam }) => {
+      const page = new URLSearchParams(params);
+      if (pageParam) page.set("cursor", pageParam);
+      return api.get<Page<Host>>(`/api/v1/host-groups/${id}/hosts?${page}`);
+    },
+    initialPageParam: "",
+    getNextPageParam: (last) => last.next_cursor || undefined,
+    enabled: group.data !== undefined,
+  });
+
+  const help = (
+    <p>
+      {t("One group: the answer it saves to the question which hosts, what names that answer elsewhere in the panel, and the hosts it resolves to now. A member list changes only when somebody changes it; a selector is asked again every time it is read, so a host tagged this morning is in the group this morning.")}
+    </p>
+  );
+
+  if (group.error) {
+    const missing = group.error instanceof ApiError && group.error.status === 404;
+    return (
+      <Screen title={t("Group")} icon="groups" help={help}>
+        <Card>
+          {missing
+            ? (
+              <Empty icon="groups" action={<Link to="/next/groups">{t("All groups")}</Link>}>
+                {t("No group with the identifier {id} exists in this installation.", { id })}
+              </Empty>
+            )
+            : <Problem>{String(group.error)}</Problem>}
+        </Card>
+      </Screen>
+    );
+  }
+  if (!group.data) {
+    return (
+      <Screen title={t("Group")} icon="groups" help={help}>
+        <Card><Bones rows={4} /></Card>
+      </Screen>
+    );
+  }
+
+  const one = group.data;
+  const dynamic = one.kind === "dynamic";
+  const rows = loadedItems(hosts.data);
+  const total = hosts.data?.pages[0]?.total ?? rows.length;
+  const usage = one.used_by;
+  const named: NamedBy[] = [
+    ...(usage?.campaigns ?? []).map((campaign) => ({
+      key: `campaign-${campaign.id}`, kind: t("campaign"), name: campaign.name,
+      state: campaign.state, to: `/next/campaigns/${campaign.id}`,
+    })),
+    ...(usage?.policies ?? []).map((policy) => ({
+      key: `policy-${policy.id}`, kind: t("policy"), name: policy.name, state: policy.state,
+    })),
+  ];
+  const kindPill = dynamic
+    ? <Pill tone="info" title={t("resolved from its selector every time it is read")}>{t("selector")}</Pill>
+    : <Pill tone="neutral" title={t("a member list kept by hand")}>{t("member list")}</Pill>;
+
+  return (
+    <Screen
+      title={one.name}
+      icon="groups"
+      help={help}
+      lead={
+        <>
+          {kindPill}{" "}
+          <Tag>{t("created by {who}", { who: one.created_by })}</Tag>{" "}
+          <Tag>{t("updated {when}", { when: relativeTime(one.updated_at) })}</Tag>
+        </>
+      }
+      actions={
+        <>
+          <Button kind="quiet" onClick={() => navigate(campaignAddress(one.name))} testId="campaign-on-group">
+            {t("Start a campaign on this group")}
+          </Button>
+          <Button kind="quiet" onClick={() => navigate(readAddress(one.name))} testId="read-on-group">
+            {t("Run a read on this group")}
+          </Button>
+          <Button kind="quiet" onClick={() => navigate("/next/groups")} testId="all-groups">
+            {t("All groups")}
+          </Button>
+        </>
+      }
+      banner={one.unresolvable
+        ? <Banner tone="error">{t("The selector does not resolve: {reason}", { reason: one.unresolvable })}</Banner>
+        : undefined}
+    >
+      <Kpis>
+        {/* A group that does not resolve names nobody only because nobody
+            could ask it, so its size is an em dash and not a nought. */}
+        <Kpi
+          hero
+          icon="groups"
+          label={t("Hosts")}
+          value={one.unresolvable ? null : one.member_count ?? null}
+          note={dynamic ? t("resolved every time it is read") : t("written into the list by hand")}
+          testId="kpi-group-hosts"
+        />
+        <Kpi
+          icon="campaigns"
+          label={t("Named by")}
+          value={usage ? named.length : null}
+          note={t("campaigns and policies whose selector names this group")}
+          testId="kpi-group-named-by"
+        />
+      </Kpis>
+
+      <Grid>
+        <Card span={5} title={t("Group")} note={one.description || t("Nobody wrote what it is for.")}>
+          <Facts>
+            <Fact label={t("Name")} mono>{one.name}</Fact>
+            <Fact label={t("Kind")}>{kindPill}</Fact>
+            <Fact label={t("Hosts")}>
+              {one.unresolvable
+                ? <Pill tone="error" title={one.unresolvable}>{t("unresolvable")}</Pill>
+                : one.member_count === undefined
+                  ? <Pill tone="unknown">{t("unknown")}</Pill>
+                  : one.member_count}
+            </Fact>
+            <Fact label={t("Created by")} mono>{one.created_by}</Fact>
+            <Fact label={t("Created")}>
+              <span title={absoluteTime(one.created_at)}>{relativeTime(one.created_at)}</span>
+            </Fact>
+            <Fact label={t("Updated")}>
+              <span title={absoluteTime(one.updated_at)}>{relativeTime(one.updated_at)}</span>
+            </Fact>
+          </Facts>
+        </Card>
+
+        <Card
+          span={7}
+          title={t("What it answers with")}
+          note={dynamic
+            ? t("The rule the server compiles into a host query; the members below are today's answer to it.")
+            : t("A list kept by hand; it changes when somebody changes it and at no other time.")}
+        >
+          {dynamic
+            ? (
+              <Stack>
+                <Readout label={t("Selector")} value={describeSelector(one.selector)} testId="group-selector" />
+                <Readout
+                  label={t("As the server reads it")}
+                  value={JSON.stringify(one.selector ?? null, null, 2)}
+                  lines={10}
+                  testId="group-selector-json"
+                />
+              </Stack>
+            )
+            : <Note>{t("The hosts below are the list itself; nothing is resolved.")}</Note>}
+        </Card>
+
+        <Card
+          span={12}
+          title={t("Used by")}
+          note={dynamic
+            ? t("A change of the selector reaches every policy listed at its next check; a campaign keeps the snapshot it froze.")
+            : t("A change of the members reaches every policy listed at its next check; a campaign keeps the snapshot it froze.")}
+          flush
+        >
+          <Table
+            rows={named}
+            keyOf={(row) => row.key}
+            rowTestId={(row) => `uses-${row.name}`}
+            testId="group-used-by"
+            empty={t("No campaign and no policy names this group in its selector.")}
+            columns={[
+              { key: "kind", head: t("Record"), cell: (row) => row.kind },
+              { key: "name", head: t("Name"), cell: (row) => (
+                row.to ? <Link to={row.to}>{row.name}</Link> : row.name
+              ) },
+              { key: "state", head: t("State"), cell: (row) => <Pill tone="neutral">{t(row.state)}</Pill> },
+            ]}
+          />
+        </Card>
+
+        <Card
+          span={12}
+          title={t("Members")}
+          note={t("What the group resolves to for you. Somebody who may read one site sees that site's share of it and no more.")}
+          flush
+          foot={hosts.hasNextPage
+            ? (
+              <Actions>
+                <Button
+                  kind="quiet"
+                  onClick={() => void hosts.fetchNextPage()}
+                  disabled={hosts.isFetchingNextPage}
+                  testId="more-members"
+                >
+                  {t("Load more ({n} left)", { n: total - rows.length })}
+                </Button>
+              </Actions>
+            )
+            : undefined}
+        >
+          <Toolbar end={hosts.data ? <span>{t("{n} hosts", { n: total })}</span> : undefined}>
+            <Find
+              value={search}
+              onChange={setSearch}
+              placeholder={t("Search hostname, address, machine ID or owner")}
+              testId="member-search"
+            />
+          </Toolbar>
+          {hosts.error
+            ? <Problem>{String(hosts.error)}</Problem>
+            : (
+              <Table
+                rows={rows}
+                keyOf={(host) => host.id}
+                rowTestId={(host) => `member-${host.hostname}`}
+                testId="group-members"
+                loading={hosts.isLoading}
+                empty={settled
+                  ? t("No member of this group matches this.")
+                  : t("The group resolves to no host you can see.")}
+                columns={[
+                  { key: "host", head: t("Host"), cell: (host) => (
+                    <TwoLine sub={host.environment ? `${host.site} / ${host.environment}` : host.site}>
+                      <Link to={`/next/hosts/${host.id}`}>{host.hostname}</Link>
+                    </TwoLine>
+                  ) },
+                  { key: "state", head: t("State"), cell: (host) => (
+                    <Pill tone={connectionTone(host.connection_state)}>{t(host.connection_state)}</Pill>
+                  ) },
+                  { key: "system", head: t("System"), minor: true, cell: (host) => (
+                    [host.os_distribution || host.os_family, host.os_version].filter(Boolean).join(" ")
+                      || <Pill tone="unknown">{t("unknown")}</Pill>
+                  ) },
+                  { key: "tags", head: t("Tags"), minor: true, tight: true, cell: (host) => (
+                    host.tags.length > 0 ? <code>{host.tags.join(" ")}</code> : "—"
+                  ) },
+                  { key: "seen", head: t("Last seen"), minor: true, cell: (host) => (
+                    host.last_seen_at
+                      ? <span title={absoluteTime(host.last_seen_at)}>{relativeTime(host.last_seen_at)}</span>
+                      : t("— never reported")
+                  ) },
+                ]}
+              />
+            )}
+        </Card>
+      </Grid>
+    </Screen>
   );
 }
 

@@ -64,11 +64,22 @@ describe("a screen of the new panel", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("gives the accent to one tile at most, because it answers one question", () => {
+  /**
+   * One tile of a row wears the accent, and one only.
+   *
+   * It says "this is what the screen is about", and two of them are two
+   * answers to one question. The count is per row of tiles rather than
+   * per file, because a screen that serves a list and one thing draws
+   * two rows and each is entitled to its own.
+   */
+  it("gives the accent to one tile of a row, because a row answers one question", () => {
     const offenders: string[] = [];
     for (const screen of screens()) {
-      const heroes = screen.text.match(/<Kpi\b[^>]*?\bhero\b|\bhero\n/g) ?? [];
-      if (heroes.length > 1) offenders.push(`${screen.name} has ${heroes.length}`);
+      for (const row of screen.text.split("<Kpis>").slice(1)) {
+        const tiles = row.split("</Kpis>")[0];
+        const heroes = tiles.match(/\bhero\b/g) ?? [];
+        if (heroes.length > 1) offenders.push(`${screen.name}: a row with ${heroes.length}`);
+      }
     }
     expect(offenders).toEqual([]);
   });

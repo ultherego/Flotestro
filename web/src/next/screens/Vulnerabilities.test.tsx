@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
-import { SEVERITIES, Vulnerabilities, openFindings, severityTone } from "./Vulnerabilities";
+import { ApiError } from "../../lib/api";
+import {
+  SEVERITIES, Vulnerabilities, openFindings, patchAddress, patchGroups, severityTone,
+} from "./Vulnerabilities";
 import { ToastProvider } from "../../components/Toast";
 
 /**
@@ -35,7 +37,11 @@ vi.mock("../../lib/api", async (importOriginal) => {
           .filter((one) => path.startsWith(one))
           .sort((a, b) => b.length - a.length)[0];
         if (!key) return Promise.reject(new actual.ApiError(404, "not_found", "no"));
-        return Promise.resolve(answers[key]);
+        // An Error standing in the table is a refusal, so a test can ask
+        // for the 404 a CVE nobody has heard of comes back with.
+        const value = answers[key];
+        if (value instanceof Error) return Promise.reject(value);
+        return Promise.resolve(value);
       },
       post: () => Promise.resolve({}),
       put: () => Promise.resolve({}),
@@ -72,12 +78,31 @@ const cve = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-function draw() {
+/** Where the panel stands now, so a click can be read as an address. */
+function Where() {
+  const where = useLocation();
+  return <span data-testid="where">{where.pathname}</span>;
+}
+
+/**
+ * The screen under the two addresses it answers on: the fleet, and one
+ * advisory across it.
+ */
+function draw(at = "/next/vulnerabilities") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[at]}>
+        <ToastProvider>
+          <Routes>
+            <Route path="/next/vulnerabilities" element={<Vulnerabilities />} />
+            <Route path="/next/vulnerabilities/:cve" element={<Vulnerabilities />} />
+          </Routes>
+          <Where />
+        </ToastProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
-  return render(<Vulnerabilities />, { wrapper });
 }
 
 afterEach(() => {
@@ -276,6 +301,128 @@ describe("the feed fetches the gate held back", () => {
     expect(screen.getByTestId("accept-confirm")).toBeDisabled();
     fireEvent.change(screen.getByTestId("accept-reason"), { target: { value: "vendor retired the findings" } });
     expect(screen.getByTestId("accept-confirm")).toBeEnabled();
+  });
+});
+
+describe("one advisory from the address", () => {
+  const finding = (over: Record<string, unknown> = {}) => ({
+    host_id: "h1", hostname: "web-01", site: "waw", environment: "prod",
+    provider: "debian", advisory_id: "DSA-5600-1", package: "openssl",
+    installed_version: "3.0.11-1", fixed_version: "3.0.11-1~deb12u2",
+    state: "affected", vendor_fix: "known", repository_candidate: "visible",
+    severity: "critical", vendor_severity: "grave", evaluated_at: "2026-10-16T08:00:00Z",
+    ...over,
+  });
+
+  const report = (over: Record<string, unknown> = {}) => ({
+    cve: "CVE-2026-1001",
+    details: {
+      cve: "CVE-2026-1001", source: "nvd", cvss_score: 9.8, cvss_severity: "critical",
+      cvss_vector: "AV:N/AC:L", cvss_version: "3.1", summary: "A hole in the transport.",
+      published_at: "2026-10-01T08:00:00Z",
+    },
+    severity: "critical",
+    references: [{
+      provider: "debian", advisory_id: "DSA-5600-1", title: "openssl security update",
+      url: "https://example.invalid/dsa", status: "fixed", release: "12",
+      published_at: "2026-10-02T08:00:00Z",
+    }],
+    hosts: [finding()],
+    hosts_total: 4, affected_hosts: 1, undecided_hosts: 2, hosts_with_vendor_fix: 1,
+    packages: ["openssl"], truncated: false,
+    ...over,
+  });
+
+  it("opens the advisory the address names: which hosts, which packages, what fixes it", async () => {
+    Object.assign(answers, {
+      "/api/v1/vulnerabilities": fleet(),
+      "/api/v1/vulnerabilities/cves/CVE-2026-1001": report(),
+    });
+    draw("/next/vulnerabilities/CVE-2026-1001");
+    await waitFor(() => expect(screen.getByTestId("finding-web-01-openssl")).toBeInTheDocument());
+    const row = screen.getByTestId("finding-web-01-openssl");
+    // The way to a fix is the host's own vulnerability module.
+    expect(within(row).getByRole("link", { name: "web-01" }))
+      .toHaveAttribute("href", "/next/hosts/h1/vulnerabilities");
+    expect(row).toHaveTextContent("3.0.11-1~deb12u2");
+    // What the vendor published, with the advisory's own link.
+    expect(within(screen.getByTestId("advisory-DSA-5600-1")).getByRole("link", { name: "DSA-5600-1" }))
+      .toHaveAttribute("href", "https://example.invalid/dsa");
+    // Three counts and not one sum: the undecided hosts keep their own.
+    expect(screen.getByTestId("kpi-cve-undecided")).toHaveTextContent("2");
+    expect(screen.getByTestId("kpi-cve-fix")).toHaveTextContent("1");
+    // The fleet list is not drawn underneath it.
+    expect(screen.queryByTestId("hosts")).not.toBeInTheDocument();
+  });
+
+  it("says a CVE nobody holds is held by nobody, and offers the fleet", async () => {
+    Object.assign(answers, {
+      "/api/v1/vulnerabilities": fleet(),
+      "/api/v1/vulnerabilities/cves/CVE-2026-9999": new ApiError(404, "not_found", "no such CVE"),
+    });
+    draw("/next/vulnerabilities/CVE-2026-9999");
+    await waitFor(() => expect(screen.getByText(/No host you can see carries CVE-2026-9999/)).toBeInTheDocument());
+    expect(screen.queryByTestId("cve-hosts")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "All vulnerabilities" }))
+      .toHaveAttribute("href", "/next/vulnerabilities");
+  });
+
+  it("puts the CVE picked from a row in the address", async () => {
+    Object.assign(answers, {
+      "/api/v1/vulnerabilities": fleet(),
+      "/api/v1/vulnerabilities/cves?": { items: [cve()], count: 1, total: 1, limit: 50, offset: 0 },
+      "/api/v1/vulnerabilities/cves/CVE-2026-1001": report(),
+    });
+    draw("/next/vulnerabilities?view=cves");
+    await waitFor(() => expect(screen.getByTestId("cve-CVE-2026-1001")).toBeInTheDocument());
+    fireEvent.click(within(screen.getByTestId("cve-CVE-2026-1001")).getByRole("link", { name: "CVE-2026-1001" }));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/next/vulnerabilities/CVE-2026-1001"));
+    await waitFor(() => expect(screen.getByTestId("cve-hosts")).toBeInTheDocument());
+  });
+
+  it("offers one patch order per set of packages, never the union of them", async () => {
+    Object.assign(answers, {
+      "/api/v1/vulnerabilities": fleet(),
+      "/api/v1/vulnerabilities/cves/CVE-2026-1001": report({
+        hosts: [
+          finding(),
+          finding({ host_id: "h2", hostname: "web-02", package: "libssl3" }),
+        ],
+        affected_hosts: 2, hosts_with_vendor_fix: 2,
+        packages: ["openssl", "libssl3"],
+      }),
+    });
+    draw("/next/vulnerabilities/CVE-2026-1001");
+    // Two sets of packages, so two orders: a host sent names it does not
+    // have is refused by its own package manager.
+    await waitFor(() => expect(screen.getByTestId("patch-openssl")).toBeInTheDocument());
+    expect(screen.getByTestId("patch-libssl3")).toBeInTheDocument();
+    expect(screen.getByText(/takes 2 orders/)).toBeInTheDocument();
+  });
+
+  it("groups the patch orders by the packages a host is actually affected in", () => {
+    const rows = [
+      { host_id: "h1", package: "openssl", state: "affected", vendor_fix: "known" },
+      { host_id: "h2", package: "openssl", state: "affected", vendor_fix: "known" },
+      { host_id: "h2", package: "libssl3", state: "affected", vendor_fix: "known" },
+      // No vendor fix and nothing established: neither is an order.
+      { host_id: "h3", package: "openssl", state: "affected", vendor_fix: "unavailable" },
+      { host_id: "h4", package: "openssl", state: "not_established", vendor_fix: "known" },
+    ];
+    const groups = patchGroups("CVE-2026-1001", rows);
+    expect(groups).toHaveLength(2);
+    // Two groups of one host each, so the packages decide the order.
+    expect(groups.map((one) => one.packages)).toEqual([["libssl3", "openssl"], ["openssl"]]);
+    expect(groups.find((one) => one.packages.length === 1)?.hosts).toEqual(["h1"]);
+  });
+
+  it("sends one order to the hosts it names, with the packages those hosts carry", () => {
+    const address = patchAddress("CVE-2026-1001", ["openssl"], ["h1", "h2"]);
+    expect(address.startsWith("/next/bulk?")).toBe(true);
+    const params = new URLSearchParams(address.slice("/next/bulk?".length));
+    expect(params.get("action")).toBe("packages.upgrade");
+    expect(params.getAll("host_id")).toEqual(["h1", "h2"]);
+    expect(JSON.parse(params.get("payload") ?? "{}")).toEqual({ package_upgrade: { packages: ["openssl"] } });
   });
 });
 

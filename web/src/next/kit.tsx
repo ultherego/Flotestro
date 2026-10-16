@@ -1118,9 +1118,10 @@ export function Tabs<T extends string>({ value, onChange, tabs }: {
 /**
  * A question that has to be answered before anything else happens.
  *
- * It is for a decision, never for a form somebody might want to read the
- * screen behind: what is destructive, what needs a reason for the trail,
- * what cannot be undone. Everything else belongs on the page.
+ * It is for a decision and for what the decision has to carry - the
+ * reason that goes into the trail, the name typed out to show the right
+ * machine was meant. It is not for a form somebody might want to read
+ * the screen behind while filling in: that belongs on the page.
  */
 export function Modal({ title, children, onClose, actions }: {
   title: ReactNode;

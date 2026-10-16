@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../lib/api";
 import { copyToClipboard } from "../../lib/clipboard";
@@ -7,8 +7,9 @@ import { absoluteTime, relativeTime } from "../../lib/format";
 import type { Whoami } from "../../lib/types";
 import { useT } from "../../i18n";
 import {
-  Actions, Banner, Bars, Bones, Band, C, Card, Check, Empty, Field, Fields, Grid, Modal, Note,
-  Pill, Problem, Screen, Table, Toolbar, Find, TwoLine, type Segment,
+  Actions, Banner, Bars, Bones, Band, Button, C, Card, Check, Empty, Fact, Facts, Field, Fields,
+  Grid, Kpi, Kpis, Modal, Note, Pill, Problem, Readout, Screen, Stack, Table, Toolbar, Find,
+  TwoLine, type Segment,
 } from "../kit";
 
 /**
@@ -206,7 +207,20 @@ type Aside =
   | { kind: "rotate"; name: string }
   | { kind: "retire"; name: string };
 
+/**
+ * The store, or one secret in it.
+ *
+ * `/next/secrets` is the store and `/next/secrets/<name>` is one record,
+ * because the name is the identifier everywhere else - in a job payload,
+ * in the trail, in a lease. The value is the identifier of nothing and
+ * never appears in an address.
+ */
 export function Secrets() {
+  const { name } = useParams();
+  return name ? <OneSecret name={name} /> : <SecretStore />;
+}
+
+function SecretStore() {
   const t = useT();
   const queryClient = useQueryClient();
   const permissions = usePermissions();
@@ -628,6 +642,295 @@ function RetireSecret({ secret, onDone, onClose }: {
         {t("I understand that {name} stops being issued for good.", { name: secret.name })}
       </Check>
       {retire.error && <Problem>{errorText(retire.error)}</Problem>}
+    </Modal>
+  );
+}
+
+/* ---------------------------------------------------------- one secret */
+
+/**
+ * One secret: its metadata and every version it has ever had.
+ *
+ * The value is not here, and there is no control on this screen that
+ * could fetch it. What a reader takes away is the reference a job
+ * payload names - the name, and the version where one is pinned - which
+ * is the only thing about a secret that is safe to copy.
+ */
+function OneSecret({ name }: { name: string }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const permissions = usePermissions();
+  const canDestroy = permissions.has(SECRET_DESTROY_PERMISSION);
+  // The version whose destruction is being decided. The reason lives in
+  // the dialog and goes away with it.
+  const [destroying, setDestroying] = useState<number | null>(null);
+  const [notice, setNotice] = useState("");
+  const { copied, failed, copy } = useCopy();
+
+  const secret = useQuery({
+    queryKey: ["secret", name],
+    queryFn: () => api.get<Secret>(`/api/v1/secrets/${encodeURIComponent(name)}`),
+    retry: false,
+  });
+
+  const destroy = useMutation({
+    mutationFn: (input: { version: number; reason: string }) =>
+      api.del<Secret>(
+        `/api/v1/secrets/${encodeURIComponent(name)}/versions/${input.version}`,
+        { reason: input.reason },
+      ),
+    onSuccess: (updated, input) => {
+      setNotice(t("Version {version} of {name} destroyed; its content cannot be issued or recovered.", {
+        version: input.version, name: updated.name,
+      }));
+      setDestroying(null);
+      queryClient.setQueryData(["secret", name], updated);
+      void queryClient.invalidateQueries({ queryKey: ["secrets"] });
+    },
+  });
+
+  if (secret.error) {
+    const missing = secret.error instanceof ApiError && secret.error.status === 404;
+    const forbidden = secret.error instanceof ApiError && secret.error.forbidden;
+    return (
+      <Screen title={name} lead={t("Values go in and do not come out.")} icon="secrets" help={<HelpText />}>
+        <Card>
+          {missing ? (
+            <Empty icon="secrets" action={<Link to="/next/secrets">{t("All secrets")}</Link>}>
+              {t("No secret named {name} exists in this installation.", { name })}
+            </Empty>
+          ) : forbidden ? (
+            <Empty icon="secrets">{t("You do not have permission to read the secret store.")}</Empty>
+          ) : (
+            <Problem>{errorText(secret.error)}</Problem>
+          )}
+        </Card>
+      </Screen>
+    );
+  }
+  if (!secret.data) {
+    return (
+      <Screen title={name} lead={t("Values go in and do not come out.")} icon="secrets" help={<HelpText />}>
+        <Card><Bones rows={4} /></Card>
+      </Screen>
+    );
+  }
+
+  const data = secret.data;
+  // A record that carries no history is a record whose history nobody
+  // read, not a secret that never had a version.
+  const versions = data.versions ? [...data.versions].sort((x, y) => y.version - x.version) : undefined;
+  const kept = versions ? versions.filter((one) => !one.destroyed_at).length : null;
+  const pending = destroying === null ? undefined : versions?.find((one) => one.version === destroying);
+
+  return (
+    <Screen
+      title={data.name}
+      lead={data.description || t("Nobody wrote what it is for.")}
+      icon="secrets"
+      help={<HelpText />}
+      banner={notice ? (
+        <Banner
+          tone="ok"
+          actions={<Button kind="quiet" onClick={() => setNotice("")}>{t("Close")}</Button>}
+        >
+          <span data-testid="secret-notice">{notice}</span>
+        </Banner>
+      ) : undefined}
+      actions={
+        data.retired_at
+          ? <Pill tone="error" title={absoluteTime(data.retired_at)}>{t("retired")}</Pill>
+          : <Pill tone="ok">{t("issuable")}</Pill>
+      }
+    >
+      <Kpis>
+        <Kpi
+          hero
+          icon="secrets"
+          label={t("Current version")}
+          value={data.current_version}
+          note={t("what a reference without a version is given")}
+          testId="kpi-secret-version"
+        />
+        <Kpi
+          label={t("Versions with content")}
+          value={kept}
+          note={versions ? t("of {n} that ever existed", { n: versions.length }) : undefined}
+          testId="kpi-secret-kept"
+        />
+        <Kpi
+          label={t("Last change")}
+          value={relativeTime(data.updated_at)}
+          note={t("created {when}", { when: relativeTime(data.created_at) })}
+          testId="kpi-secret-changed"
+        />
+      </Kpis>
+
+      <Grid>
+        <Card
+          span={6}
+          title={t("Secret")}
+          note={t("The metadata. The value is not here and cannot be read back from anywhere in the panel.")}
+        >
+          <Facts>
+            <Fact label={t("Name")} mono>{data.name}</Fact>
+            <Fact label={t("Current version")}>{data.current_version}</Fact>
+            <Fact label={t("Created by")} mono>{data.created_by}</Fact>
+            <Fact label={t("Created")}>
+              <span title={absoluteTime(data.created_at)}>{relativeTime(data.created_at)}</span>
+            </Fact>
+            <Fact label={t("Last change")}>
+              <span title={absoluteTime(data.updated_at)}>{relativeTime(data.updated_at)}</span>
+            </Fact>
+            <Fact label={t("Retired")}>
+              {data.retired_at
+                ? <span title={absoluteTime(data.retired_at)}>{relativeTime(data.retired_at)}</span>
+                : t("no")}
+            </Fact>
+          </Facts>
+        </Card>
+
+        <Card
+          span={6}
+          title={t("Reference")}
+          note={t("What a job payload names. Without a version the host is given the one current at delivery; with a version it is given that one and no other, also after a rotation.")}
+        >
+          <Stack>
+            <Readout
+              label={t("Current at delivery")}
+              value={secretReference(data.name)}
+              testId="reference-current"
+            />
+            <Readout
+              label={t("Pinned to version {version}", { version: data.current_version })}
+              value={secretReference(data.name, data.current_version)}
+              testId="reference-pinned"
+            />
+          </Stack>
+        </Card>
+
+        <Card
+          span={12}
+          title={t("Versions")}
+          note={t("Every version that ever existed, newest first. Destroying one erases its content, never the row: the record that the version existed is part of the audit.")}
+          flush
+        >
+          <Table
+            rows={versions ?? []}
+            keyOf={(one) => String(one.version)}
+            rowTestId={(one) => `version-${one.version}`}
+            testId="secret-versions"
+            loading={versions === undefined}
+            empty={t("The history of this secret is empty.")}
+            columns={[
+              { key: "version", head: t("Version"), num: true, cell: (one) => (
+                one.version === data.current_version
+                  ? <TwoLine sub={<Pill tone="ok">{t("current")}</Pill>}>{one.version}</TwoLine>
+                  : one.version
+              ) },
+              { key: "size", head: t("Size"), num: true, cell: (one) => t("{n} B", { n: one.size_bytes }) },
+              { key: "by", head: t("Created by"), minor: true, cell: (one) => (
+                <TwoLine sub={<span title={absoluteTime(one.created_at)}>{relativeTime(one.created_at)}</span>}>
+                  {one.created_by}
+                </TwoLine>
+              ) },
+              { key: "state", head: t("State"), cell: (one) => (
+                one.destroyed_at
+                  ? <Pill tone="error" title={absoluteTime(one.destroyed_at)}>{t("destroyed")}</Pill>
+                  : <Pill tone="ok">{t("kept")}</Pill>
+              ) },
+              { key: "actions", head: "", actions: true, cell: (one) => (
+                <>
+                  <Button
+                    kind="quiet"
+                    onClick={() => copy(`v${one.version}`, secretReference(data.name, one.version))}
+                    title={secretReference(data.name, one.version)}
+                    testId={`copy-version-${one.version}`}
+                  >
+                    {copied === `v${one.version}`
+                      ? t("Copied")
+                      : failed === `v${one.version}` ? t("Copy by hand") : t("Copy reference")}
+                  </Button>
+                  {canDestroy && destroyable(data, one) && (
+                    <Button
+                      kind="danger"
+                      onClick={() => setDestroying(one.version)}
+                      disabled={destroying !== null}
+                      testId={`destroy-${one.version}`}
+                    >
+                      {t("Destroy…")}
+                    </Button>
+                  )}
+                </>
+              ) },
+            ]}
+          />
+        </Card>
+      </Grid>
+
+      {pending && (
+        <DestroyVersion
+          key={pending.version}
+          secret={data}
+          version={pending}
+          busy={destroy.isPending}
+          error={destroy.error ? errorText(destroy.error) : ""}
+          onClose={() => { destroy.reset(); setDestroying(null); }}
+          onDestroy={(reason) => destroy.mutate({ version: pending.version, reason })}
+        />
+      )}
+    </Screen>
+  );
+}
+
+/**
+ * The destruction of one version's content.
+ *
+ * It says twice what it does, because it cannot be undone: the content
+ * goes from the store and from every backup of the database, and a host
+ * holding a lease on it is refused instead of served.
+ */
+function DestroyVersion({ secret, version, busy, error, onClose, onDestroy }: {
+  secret: Secret;
+  version: SecretVersion;
+  busy: boolean;
+  error: string;
+  onClose: () => void;
+  onDestroy: (reason: string) => void;
+}) {
+  const t = useT();
+  const [reason, setReason] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  return (
+    <Modal
+      title={t("Destroy version {version} of {name}", { version: version.version, name: secret.name })}
+      onClose={onClose}
+      actions={
+        <>
+          <Button kind="quiet" onClick={onClose} disabled={busy}>{t("Cancel")}</Button>
+          <Button
+            kind="danger"
+            disabled={!confirmed || !reasonGiven(reason) || busy}
+            onClick={() => onDestroy(reason)}
+            testId="destroy-confirm"
+          >
+            {busy ? t("Destroying…") : t("Destroy version {version}", { version: version.version })}
+          </Button>
+        </>
+      }
+    >
+      <Note>
+        {t("The content of version {version} of {name} is erased now, from the store and from every backup of the database; a job holding a lease on it is refused instead of served. The row stays as the record that the version existed.", {
+          version: version.version, name: secret.name,
+        })}
+      </Note>
+      <Fields>
+        <ReasonField value={reason} onChange={setReason} testId="destroy-reason" />
+      </Fields>
+      <Check checked={confirmed} onChange={setConfirmed}>
+        {t("I understand that version {version} cannot be recovered afterwards.", { version: version.version })}
+      </Check>
+      {error && <Problem>{error}</Problem>}
     </Modal>
   );
 }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../lib/api";
 import { useDebounced } from "../../lib/debounce";
@@ -10,7 +10,7 @@ import { useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Band, Bars, Card, Chart, Empty, Fact, Facts, Field, Fields, Fig, Figs, Find, Kpi, Meter, Modal, Note, Pill, Problem, Seg, type Segment, type Series, Stack, Table, type Tone, TwoLine,
+  Band, Bars, Bones, Button, Card, Chart, Empty, Fact, Facts, Field, Fields, Fig, Figs, Find, Kpi, Meter, Modal, Note, Pill, Problem, Screen, Seg, type Segment, type Series, Stack, Table, type Tone, TwoLine,
 } from "../kit";
 
 /**
@@ -80,12 +80,31 @@ export function historyAddress(relayID: string, range: BufferRangeName): string 
   return `/api/v1/relays/${relayID}/buffer-history?range=${range}`;
 }
 
+/** What the screen is for, at length, behind the mark beside the title. */
+function RelayHelp() {
+  const t = useT();
+  return (
+    <p>
+      {t("A relay is one connection upwards per site. It attests the identity of the hosts behind it, so what it reports about itself is what the panel knows about that site, and it spools results while the link upwards is down. Everything on this screen is what a relay said about itself: a spool nobody has reported is an em dash and never a nought.")}
+    </p>
+  );
+}
+
+/**
+ * The relays, with one of them open.
+ *
+ * The address says which: `/next/relays/<id>` opens that relay and
+ * `/next/relays` opens on the first of the list, so the screen somebody
+ * is reading is a link they can send. Picking a row walks the address
+ * rather than reloading the panel.
+ */
 export function Relays() {
   const t = useT();
   const toast = useToast();
   const queryClient = useQueryClient();
+  const { id: fromAddress = "" } = useParams();
+  const navigate = useNavigate();
   const [site, setSite] = useState("");
-  const [picked, setPicked] = useState("");
   const [range, setRange] = useState<BufferRangeName>("24h");
   const [revoking, setRevoking] = useState(false);
   const [reason, setReason] = useState("");
@@ -113,17 +132,20 @@ export function Relays() {
 
   const relays = list.data?.items ?? [];
   const loaded = list.data !== undefined;
-  // The one being read: whichever was chosen, or the first of the list, so
-  // the cards under the table are never empty for no reason.
-  const chosenID = relays.some((one) => one.id === picked) ? picked : relays[0]?.id ?? "";
-  const chosen = relays.find((one) => one.id === chosenID);
+  // The one being read: the relay the address names, or the first of the
+  // list, so the cards under the table are never empty for no reason. A
+  // relay named in the address is read on its own record and not looked
+  // for in the list, because the list may be narrowed to another site.
+  const chosenID = fromAddress || relays[0]?.id || "";
 
   const detail = useQuery({
     queryKey: ["relays", chosenID, "detail"],
     queryFn: () => api.get<RelayDetail>(`/api/v1/relays/${chosenID}`),
     enabled: chosenID !== "",
+    retry: false,
     refetchInterval: 30 * 1000,
   });
+  const chosen = detail.data?.relay ?? relays.find((one) => one.id === chosenID);
 
   const history = useQuery({
     queryKey: ["relays", chosenID, "buffer-history", range],
@@ -152,6 +174,20 @@ export function Relays() {
   });
 
   if (list.error) return <Problem>{String(list.error)}</Problem>;
+
+  /* An address naming no relay says so and offers the list, rather than
+     drawing the cards of a relay that is not there. */
+  if (fromAddress && detail.error instanceof ApiError && detail.error.status === 404) {
+    return (
+      <Screen title={t("Relay")} icon="relays" help={<RelayHelp />}>
+        <Card>
+          <Empty icon="relays" action={<Link to="/next/relays">{t("All relays")}</Link>}>
+            {t("No relay with the identifier {id} is registered in this installation.", { id: fromAddress })}
+          </Empty>
+        </Card>
+      </Screen>
+    );
+  }
 
   const count = (state: RelayState) => (loaded ? relays.filter((one) => one.state === state).length : undefined);
   const states: Segment[] = [
@@ -247,8 +283,8 @@ export function Relays() {
                   <TwoLine sub={one.advertised_names && one.advertised_names.length > 0
                     ? <code>{one.advertised_names.join(", ")}</code>
                     : undefined}>
-                    <button type="button" className="fl-word" onClick={() => setPicked(one.id)}
-                            data-testid={`pick-${one.name}`}>{one.name}</button>
+                    <Button kind="word" onClick={() => navigate(`/next/relays/${one.id}`)}
+                            testId={`pick-${one.name}`}>{one.name}</Button>
                   </TwoLine>
                 ) },
                 { key: "site", head: t("Site"), cell: (one) => (
@@ -283,9 +319,13 @@ export function Relays() {
               )
               : undefined}
           >
-            {!chosen
-              ? <Empty>{t("Choose a relay to read what it reported.")}</Empty>
-              : (
+            {detail.error && chosenID
+              ? <Problem>{String(detail.error)}</Problem>
+              : !chosen && detail.isLoading
+                ? <Bones rows={6} />
+                : !chosen
+                  ? <Empty>{t("Choose a relay to read what it reported.")}</Empty>
+                  : (
                 <Stack>
                   <Facts>
                     <Fact label={t("State")}><Pill tone={relayTone(chosen.state)}>{t(stateWord(chosen.state))}</Pill></Fact>
@@ -341,11 +381,10 @@ export function Relays() {
               rows={hosts}
               keyOf={(one) => one.host_id}
               rowTestId={(one: RelayHost) => `attested-${one.hostname}`}
+              loading={detail.isLoading}
               empty={!chosen
                 ? t("Choose a relay to read what it reported.")
-                : detail.isLoading
-                  ? t("Reading the relays…")
-                  : t("No host has an open session through this relay.")}
+                : t("No host has an open session through this relay.")}
               columns={[
                 { key: "host", head: t("Host"), cell: (one) => (
                   <TwoLine sub={one.environment ? `${one.site} / ${one.environment}` : one.site}>
@@ -382,12 +421,12 @@ export function Relays() {
               />
             }
           >
-            {!chosen
+            {!chosen && !detail.isLoading
               ? <Empty>{t("Choose a relay to read what it reported.")}</Empty>
               : history.error
                 ? <Problem>{String(history.error)}</Problem>
                 : !history.data
-                  ? <Empty>{t("Reading the relays…")}</Empty>
+                  ? <Bones rows={4} />
                   : points.length === 0
                     ? <Empty>{t("The relay reported nothing in this window. A relay reports every minute while it reaches the centre; a silent relay is on the state above, not here.")}</Empty>
                     : (

@@ -21,6 +21,10 @@ import { HostWorkspace } from "./screens/host/Workspace";
 import { Campaigns } from "./screens/Campaigns";
 import { Security } from "./screens/Security";
 import { Notifications } from "./screens/Notifications";
+import { Budgets } from "./screens/Budgets";
+import { Policies } from "./screens/Policies";
+import { Schedules } from "./screens/Schedules";
+import { Setup } from "./screens/Setup";
 import { AddHost } from "./screens/AddHost";
 import { Bulk } from "./screens/Bulk";
 import { Campaign } from "./screens/Campaign";
@@ -31,7 +35,7 @@ import { Secrets } from "./screens/Secrets";
 import { Settings } from "./screens/Settings";
 import { Status } from "./screens/Status";
 import { Support } from "./screens/Support";
-import { Empty, Head, HeadSlot } from "./kit";
+import { Empty, Head, HeadSlot, Screen } from "./kit";
 import { ABOUT } from "./screens/about";
 import { LookProvider, type Look } from "./look";
 import { useT } from "../i18n";
@@ -89,7 +93,10 @@ export function NextPanel({ look }: { look: Look }) {
    * screens holds every one of them to a title and an explanation.
    */
   const ownHeading = [
-    /^\/next\/jobs\/[^/]+$/, /^\/next\/campaigns\/[^/]+$/, /^\/next\/hosts\/new$/,
+    /^\/next\/jobs\/[^/]+$/, /^\/next\/hosts\/new$/, /^\/next\/setup$/,
+    // One campaign names itself; the schedules screen is given its frame
+    // where it is routed, so the shell draws neither.
+    /^\/next\/campaigns\/[^/]+$/,
     /^\/next\/(bulk|reports|settings|secrets|directory|status|support)$/,
   ].some((one) => one.test(location.pathname));
   const about = ownHeading ? undefined : ABOUT[section === "" ? "dashboard" : section];
@@ -121,6 +128,22 @@ export function NextPanel({ look }: { look: Look }) {
         <Route path="/next/jobs/:id" element={<Job />} />
         <Route path="/next/campaigns/:id" element={<Campaign />} />
         <Route path="/next/campaigns" element={<Campaigns />} />
+        {/* Before the one campaign: "schedules" is a word, not an id. */}
+        <Route
+          path="/next/campaigns/schedules"
+          element={
+            <Screen
+              title={t("Scheduled campaigns")}
+              lead={t("The campaigns that run on a clock, and what each is waiting for.")}
+              icon="schedules"
+              help={
+                <p>{t("A schedule is an order the panel keeps until its moment: at that moment it places the campaign, and the campaign then waits for its approval like any other. It places that order under the rights of whoever last wrote the schedule, read again at every moment - so a schedule can be refused long after it was written, and the refusal is kept on it rather than thrown away.")}</p>
+              }
+            >
+              <Schedules />
+            </Screen>
+          }
+        />
         <Route path="/next/security" element={<Security />} />
         <Route path="/next/jobs" element={<Jobs />} />
         <Route path="/next/unresolved" element={<Unresolved />} />
@@ -134,6 +157,14 @@ export function NextPanel({ look }: { look: Look }) {
         <Route path="/next/profile" element={<Profile />} />
         <Route path="/next/audit" element={<Audit />} />
         <Route path="/next/notifications" element={<Notifications />} />
+        <Route path="/next/budgets" element={<Budgets />} />
+        <Route path="/next/policies" element={<Policies />} />
+        <Route path="/next/policies/:id" element={<Policies />} />
+        <Route path="/next/setup" element={<Setup />} />
+        <Route path="/next/groups/:id" element={<Groups />} />
+        <Route path="/next/relays/:id" element={<Relays />} />
+        <Route path="/next/secrets/:name" element={<Secrets />} />
+        <Route path="/next/vulnerabilities/:cve" element={<Vulnerabilities />} />
         <Route path="/next/relays" element={<Relays />} />
         <Route path="/next/groups" element={<Groups />} />
         <Route path="/next/tags" element={<Tags />} />

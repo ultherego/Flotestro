@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
+import { ApiError } from "../../lib/api";
 import {
-  Groups, describeSelector, matchingGroups, namedBy, orderGroups, selectorOf, type GroupUsage,
+  Groups, campaignAddress, connectionTone, describeSelector, matchingGroups, namedBy, orderGroups,
+  readAddress, selectorOf, type GroupUsage,
 } from "./Groups";
 import { ToastProvider } from "../../components/Toast";
 
@@ -34,7 +35,11 @@ vi.mock("../../lib/api", async (importOriginal) => {
       .filter((one) => path.startsWith(one))
       .sort((a, b) => b.length - a.length)[0];
     if (!key) return Promise.reject(new actual.ApiError(404, "not_found", "no"));
-    return Promise.resolve(answers[key]);
+    // An Error standing in the table is a refusal, so a test can ask for
+    // the 404 an identifier naming nothing comes back with.
+    const value = answers[key];
+    if (value instanceof Error) return Promise.reject(value);
+    return Promise.resolve(value);
   };
   return {
     ...actual,
@@ -55,12 +60,32 @@ const group = (over: Record<string, unknown>) => ({
   ...over,
 });
 
-function draw() {
+/** Where the panel stands now, so a click can be read as an address. */
+function Where() {
+  const where = useLocation();
+  return <span data-testid="where">{where.pathname}</span>;
+}
+
+/**
+ * The screen under the two addresses it answers on: the catalogue, and
+ * one group. They are one component, so both routes lead to it and the
+ * parameter is what decides which the reader gets.
+ */
+function draw(at = "/next/groups") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[at]}>
+        <ToastProvider>
+          <Routes>
+            <Route path="/next/groups" element={<Groups />} />
+            <Route path="/next/groups/:id" element={<Groups />} />
+          </Routes>
+          <Where />
+        </ToastProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
-  return render(<Groups />, { wrapper });
 }
 
 afterEach(() => {
@@ -80,7 +105,7 @@ describe("the list of groups", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("group-databases")).toBeInTheDocument());
     const row = screen.getByTestId("group-databases");
-    expect(within(row).getByRole("link", { name: "databases" })).toHaveAttribute("href", "/groups/g1");
+    expect(within(row).getByRole("link", { name: "databases" })).toHaveAttribute("href", "/next/groups/g1");
     expect(row).toHaveTextContent("every database host");
     expect(within(row).getByText("selector")).toBeInTheDocument();
     expect(row).toHaveTextContent("tag=role=db");
@@ -126,6 +151,101 @@ describe("the list of groups", () => {
     Object.assign(answers, { "/api/v1/host-groups": { items: [], count: 0 } });
     draw();
     await waitFor(() => expect(screen.getByText(/No group yet/)).toBeInTheDocument());
+  });
+});
+
+describe("one group from the address", () => {
+  const member = (over: Record<string, unknown> = {}) => ({
+    id: "h1", hostname: "db-1", machine_id: "m1", site: "waw", environment: "prod",
+    tags: ["role=db"], release_channel: "stable", lifecycle_state: "active",
+    os_distribution: "debian", os_version: "12", connection_state: "online",
+    last_seen_at: "2026-10-16T07:00:00Z", enrolled_at: "2026-09-01T08:00:00Z",
+    reboot_required: null, failed_units: null, pending_updates: null, pending_security_updates: null,
+    package_database_broken: false, capabilities: {}, identity: {},
+    ...over,
+  });
+
+  it("opens the group the address names: its selector, what names it, and what it resolves to", async () => {
+    Object.assign(answers, {
+      "/api/v1/host-groups": { items: [group({})], count: 1 },
+      "/api/v1/host-groups/g1": group({
+        used_by: {
+          campaigns: [{ id: "c1", name: "patch the lab", state: "running" }],
+          policies: [{ id: "p1", name: "baseline", state: "enabled" }],
+        },
+      }),
+      "/api/v1/host-groups/g1/hosts": { items: [member()], count: 1, total: 1 },
+      "/api/v1/whoami": { subject: "t", kind: "user", roles: [], bindings: [], permissions: [] },
+    });
+    draw("/next/groups/g1");
+    await waitFor(() => expect(screen.getByTestId("member-db-1")).toBeInTheDocument());
+    // What it answers with, said the way the server logs it.
+    expect(screen.getByTestId("group-selector")).toHaveTextContent("tag=role=db");
+    // What names it elsewhere, with the campaign as a way in.
+    expect(within(screen.getByTestId("uses-patch the lab")).getByRole("link", { name: "patch the lab" }))
+      .toHaveAttribute("href", "/next/campaigns/c1");
+    expect(screen.getByTestId("uses-baseline")).toHaveTextContent("policy");
+    // And what it resolves to now, each host a way into its own screen.
+    expect(within(screen.getByTestId("member-db-1")).getByRole("link", { name: "db-1" }))
+      .toHaveAttribute("href", "/next/hosts/h1");
+    expect(screen.getByTestId("kpi-group-hosts")).toHaveTextContent("7");
+    // The catalogue is not drawn underneath it.
+    expect(screen.queryByTestId("group-search")).not.toBeInTheDocument();
+  });
+
+  it("keeps a size nobody could give unknown on the group's own screen too", async () => {
+    Object.assign(answers, {
+      "/api/v1/host-groups": { items: [], count: 0 },
+      "/api/v1/host-groups/g1": group({ member_count: undefined, unresolvable: "the group it names is gone" }),
+      "/api/v1/host-groups/g1/hosts": { items: [], count: 0, total: 0 },
+    });
+    draw("/next/groups/g1");
+    await waitFor(() => expect(screen.getByTestId("kpi-group-hosts")).toBeInTheDocument());
+    const hosts = screen.getByTestId("kpi-group-hosts");
+    expect(hosts).toHaveAttribute("data-state", "unknown");
+    expect(within(hosts).getByText("—")).toBeInTheDocument();
+    expect(hosts).not.toHaveTextContent("0");
+    expect(screen.getByText(/The selector does not resolve/)).toHaveTextContent("the group it names is gone");
+  });
+
+  it("says an identifier naming nothing names nothing, and offers the catalogue", async () => {
+    Object.assign(answers, {
+      "/api/v1/host-groups": { items: [group({})], count: 1 },
+      "/api/v1/host-groups/ghost": new ApiError(404, "not_found", "no such group"),
+    });
+    draw("/next/groups/ghost");
+    await waitFor(() => expect(screen.getByText(/No group with the identifier ghost/)).toBeInTheDocument());
+    // No detail card over nothing, and a way to the list.
+    expect(screen.queryByTestId("group-selector")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "All groups" })).toHaveAttribute("href", "/next/groups");
+  });
+
+  it("puts the group picked from a row in the address", async () => {
+    Object.assign(answers, {
+      "/api/v1/host-groups": { items: [group({})], count: 1 },
+      "/api/v1/host-groups/g1": group({}),
+      "/api/v1/host-groups/g1/hosts": { items: [], count: 0, total: 0 },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("group-databases")).toBeInTheDocument());
+    expect(screen.getByTestId("where")).toHaveTextContent("/next/groups");
+    fireEvent.click(within(screen.getByTestId("group-databases")).getByRole("link", { name: "databases" }));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/next/groups/g1"));
+    // And the group itself opens where the catalogue was: one navigation,
+    // not a reload of the panel.
+    await waitFor(() => expect(screen.getByTestId("group-selector")).toBeInTheDocument());
+  });
+
+  it("hands the group's name to the workspaces that take one", () => {
+    expect(campaignAddress("databases")).toBe("/next/bulk?name=databases&group=databases");
+    expect(readAddress("databases")).toBe("/next/reads?action=journal.read&group=databases");
+  });
+
+  it("calls a connection nobody could read unknown, not offline", () => {
+    expect(connectionTone("online")).toBe("ok");
+    expect(connectionTone("offline")).toBe("error");
+    expect(connectionTone("stale")).toBe("warn");
+    expect(connectionTone(undefined)).toBe("unknown");
   });
 });
 

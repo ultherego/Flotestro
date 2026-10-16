@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
+import { ApiError } from "../../lib/api";
 import {
   Secrets, filterSecrets, reasonGiven, secretAddress, secretReference, storeCounts, destroyable,
   REASON_MIN_LENGTH,
@@ -71,12 +71,32 @@ const reader = { subject: "t", kind: "user", roles: [], bindings: [], permission
 /** A value no test may ever find on the screen. */
 const VALUE = "ghp-never-printed-0123456789";
 
-function draw() {
+/** Where the panel stands now, so a click can be read as an address. */
+function Where() {
+  const where = useLocation();
+  return <span data-testid="where">{where.pathname}</span>;
+}
+
+/**
+ * The screen under the two addresses it answers on: the store, and one
+ * secret. The name is the identifier in both, because the value is the
+ * identifier of nothing and may never stand in an address.
+ */
+function draw(at = "/next/secrets") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[at]}>
+        <ToastProvider>
+          <Routes>
+            <Route path="/next/secrets" element={<Secrets />} />
+            <Route path="/next/secrets/:name" element={<Secrets />} />
+          </Routes>
+          <Where />
+        </ToastProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
-  return render(<Secrets />, { wrapper });
 }
 
 afterEach(() => {
@@ -187,6 +207,106 @@ describe("the secret store", () => {
     draw();
     await waitFor(() =>
       expect(screen.getByText("You do not have permission to read the secret store.")).toBeInTheDocument());
+  });
+});
+
+describe("one secret from the address", () => {
+  const version = (over: Record<string, unknown> = {}) => ({
+    version: 2, size_bytes: 40, created_by: "tszymanski", created_at: "2026-10-01T08:00:00Z",
+    ...over,
+  });
+  const history = (over: Record<string, unknown> = {}) => secret({
+    versions: [version(), version({ version: 1, created_at: "2026-09-01T08:00:00Z" })],
+    ...over,
+  });
+
+  it("opens the secret the address names: its metadata, its versions, and no value anywhere", async () => {
+    Object.assign(answers, {
+      "/api/v1/secrets": { items: [secret({})] },
+      // The server does not send a value; if it ever did, nothing here
+      // may draw it.
+      "/api/v1/secrets/repo.token": { ...history(), value: VALUE },
+      "/api/v1/whoami": writer,
+    });
+    draw("/next/secrets/repo.token");
+    await waitFor(() => expect(screen.getByTestId("version-2")).toBeInTheDocument());
+    expect(screen.getByTestId("version-1")).toBeInTheDocument();
+    expect(within(screen.getByTestId("version-2")).getByText("current")).toBeInTheDocument();
+    expect(screen.getByTestId("kpi-secret-version")).toHaveTextContent("2");
+    // The reference is what a reader takes away, by name and pinned.
+    expect(screen.getByTestId("reference-current")).toHaveTextContent('{"name":"repo.token"}');
+    expect(screen.getByTestId("reference-pinned")).toHaveTextContent('{"name":"repo.token","version":2}');
+    // The one rule of the whole screen: no value, on the page or in the
+    // address.
+    expect(document.body.textContent).not.toContain(VALUE);
+    expect(screen.getByTestId("where")).toHaveTextContent("/next/secrets/repo.token");
+    expect(screen.getByTestId("where").textContent).not.toContain(VALUE);
+    // The store's own list is not drawn underneath it.
+    expect(screen.queryByTestId("secrets-table")).not.toBeInTheDocument();
+  });
+
+  it("says a name that is in no store is in no store, and offers the store", async () => {
+    Object.assign(answers, {
+      "/api/v1/secrets": { items: [secret({})] },
+      "/api/v1/secrets/ghost.token": new ApiError(404, "not_found", "no such secret"),
+      "/api/v1/whoami": writer,
+    });
+    draw("/next/secrets/ghost.token");
+    await waitFor(() => expect(screen.getByText(/No secret named ghost.token/)).toBeInTheDocument());
+    expect(screen.queryByTestId("secret-versions")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "All secrets" })).toHaveAttribute("href", "/next/secrets");
+  });
+
+  it("puts the secret picked from a row in the address", async () => {
+    Object.assign(answers, {
+      "/api/v1/secrets": { items: [secret({})] },
+      "/api/v1/secrets/repo.token": history(),
+      "/api/v1/whoami": writer,
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("secret-repo.token")).toBeInTheDocument());
+    expect(screen.getByTestId("where")).toHaveTextContent("/next/secrets");
+    fireEvent.click(within(screen.getByTestId("secret-repo.token")).getByRole("link", { name: "repo.token" }));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/next/secrets/repo.token"));
+    await waitFor(() => expect(screen.getByTestId("secret-versions")).toBeInTheDocument());
+  });
+
+  it("destroys a version's content only with a reason and an acknowledgement, and sends the reason", async () => {
+    Object.assign(answers, {
+      "/api/v1/secrets": { items: [secret({})] },
+      "/api/v1/secrets/repo.token": history(),
+      "/api/v1/whoami": writer,
+    });
+    Object.assign(writes, { "/api/v1/secrets/repo.token/versions/1": history() });
+    draw("/next/secrets/repo.token");
+    await waitFor(() => expect(screen.getByTestId("destroy-1")).toBeInTheDocument());
+    // The current version is not offered while the secret is still issuable.
+    expect(screen.queryByTestId("destroy-2")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("destroy-1"));
+    const confirm = screen.getByTestId("destroy-confirm");
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByTestId("destroy-reason"), { target: { value: "rotated away months ago" } });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toMatchObject({
+      method: "DELETE",
+      path: "/api/v1/secrets/repo.token/versions/1",
+      body: { reason: "rotated away months ago" },
+    });
+  });
+
+  it("offers no destruction to a sign-in that may only write", async () => {
+    Object.assign(answers, {
+      "/api/v1/secrets": { items: [secret({})] },
+      "/api/v1/secrets/repo.token": history(),
+      "/api/v1/whoami": reader,
+    });
+    draw("/next/secrets/repo.token");
+    await waitFor(() => expect(screen.getByTestId("version-1")).toBeInTheDocument());
+    expect(screen.queryByTestId("destroy-1")).not.toBeInTheDocument();
   });
 });
 

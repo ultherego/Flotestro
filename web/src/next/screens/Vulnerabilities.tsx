@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, fetchWithCredentials } from "../../lib/api";
 import { exportAddress, exportFileName } from "../../components/ExportButton";
@@ -10,9 +10,9 @@ import { useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Band, Bars, Banner, Card, Check, Empty, Field, Fields, Find, Kpi, Meter, Modal,
-  Note, Pager, Pill, Problem, Ring, Seg, Table, Tags, Toolbar, TwoLine,
-  type Segment, type Tone,
+  Actions, Band, Bars, Banner, Bones, Button, Card, Check, Fact, Facts, Field, Fields, Find, Empty,
+  Grid, Kpi, Kpis, Meter, Modal, Note, Pager, Pill, Problem, Ring, Screen, Seg, Stack, Table, Tag,
+  Tags, Toolbar, TwoLine, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -212,7 +212,20 @@ export function packagesPreview(packages: string[], shown = 4): { shown: string[
 
 const PAGE = 50;
 
+/**
+ * The fleet's CVE picture, or one advisory in it.
+ *
+ * `/next/vulnerabilities` is the fleet and
+ * `/next/vulnerabilities/<cve>` is one advisory across it, so the CVE
+ * somebody is working through is a link they can hand to whoever will
+ * patch it.
+ */
 export function Vulnerabilities() {
+  const { cve = "" } = useParams();
+  return cve ? <OneAdvisory cve={cve} /> : <VulnerabilityList />;
+}
+
+function VulnerabilityList() {
   const t = useT();
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -780,6 +793,443 @@ function ExportHosts({ query }: { query: URLSearchParams }) {
     <button type="button" className="fl-quiet fl-small" onClick={download} disabled={busy} data-testid="export">
       {busy ? t("Exporting…") : t("Export CSV")}
     </button>
+  );
+}
+
+/* --------------------------------------------------------- one advisory */
+
+/** What the upstream database says about the vulnerability itself. It is
+ *  enrichment: it may be missing, and it decides nothing about any host. */
+type Details = {
+  cve: string;
+  source: string;
+  cvss_score?: number;
+  cvss_severity?: string;
+  cvss_vector?: string;
+  cvss_version?: string;
+  summary?: string;
+  published_at?: string;
+  modified_at?: string;
+};
+
+/** A vendor advisory that names the CVE, as the feed provides it. */
+type Reference = {
+  provider: string;
+  advisory_id: string;
+  title?: string;
+  url?: string;
+  status?: string;
+  release?: string;
+  published_at?: string;
+};
+
+/** One finding of the CVE on one host: one package on one machine. */
+export type CVEHostRow = {
+  host_id: string;
+  hostname: string;
+  site?: string;
+  environment?: string;
+  provider: string;
+  advisory_id: string;
+  package: string;
+  source_package?: string;
+  architecture?: string;
+  installed_version?: string;
+  fixed_version?: string;
+  state: string;
+  reason_code?: string;
+  vendor_fix: string;
+  repository_candidate: string;
+  vendor_severity?: string;
+  severity: string;
+  evaluated_at: string;
+};
+
+/** One CVE as the server reports it across the hosts the reader may see. */
+type Report = {
+  cve: string;
+  details?: Details;
+  severity: string;
+  references: Reference[];
+  hosts: CVEHostRow[];
+  hosts_total: number;
+  affected_hosts: number;
+  undecided_hosts: number;
+  hosts_with_vendor_fix: number;
+  packages: string[];
+  truncated: boolean;
+};
+
+/** Why a finding stays undecided, in the operator's language and not in codes. */
+export const FINDING_REASONS: Record<string, string> = {
+  feed_missing: "no security feed for this distribution",
+  family_unsupported: "this system family is not supported",
+  feed_stale: "the feed is older than the policy allows",
+  release_unsupported: "this release is not covered by the feed",
+  package_origin_unknown: "the package does not come from the distribution",
+  source_package_unknown: "the source package is unknown",
+  vendor_investigating: "the vendor has not decided yet",
+  version_unparseable: "the version cannot be compared",
+  distribution_eol: "this release is past end of life",
+};
+
+/** One patch order: the hosts that share a set of affected packages. */
+export type PatchGroup = { packages: string[]; hosts: string[]; address: string };
+
+/** The bulk workspace with a patch of these packages on these hosts. */
+export function patchAddress(cve: string, packages: string[], hosts: string[]): string {
+  const params = new URLSearchParams({
+    action: "packages.upgrade",
+    name: `Patch ${cve}`,
+    payload: JSON.stringify({ package_upgrade: { packages } }, null, 2),
+  });
+  for (const host of hosts) params.append("host_id", host);
+  return `/next/bulk?${params}`;
+}
+
+/**
+ * The orders a patch of this CVE needs, one per set of packages.
+ *
+ * One order carrying the union of every host's packages is wrong for
+ * every host that is not affected in all of it: the host is handed names
+ * it does not have, which the package manager refuses outright. A host
+ * is sent the packages it is affected in and no others, and the screen
+ * says how many orders that comes to. The largest group comes first: it
+ * is the one most of the fleet needs.
+ */
+export function patchGroups(
+  cve: string,
+  rows: Pick<CVEHostRow, "host_id" | "package" | "state" | "vendor_fix">[],
+): PatchGroup[] {
+  const perHost = new Map<string, Set<string>>();
+  for (const row of rows) {
+    if (row.state !== "affected" || row.vendor_fix !== "known" || !row.package) continue;
+    const packages = perHost.get(row.host_id) ?? new Set<string>();
+    packages.add(row.package);
+    perHost.set(row.host_id, packages);
+  }
+  const grouped = new Map<string, { packages: string[]; hosts: string[] }>();
+  for (const [host, packages] of perHost) {
+    const sorted = [...packages].sort();
+    const key = sorted.join("\u0000");
+    const group = grouped.get(key) ?? { packages: sorted, hosts: [] };
+    group.hosts.push(host);
+    grouped.set(key, group);
+  }
+  return [...grouped.values()]
+    .sort((a, b) => b.hosts.length - a.hosts.length || a.packages.join().localeCompare(b.packages.join()))
+    .map((group) => ({ ...group, address: patchAddress(cve, group.packages, group.hosts) }));
+}
+
+/**
+ * One advisory across the fleet: which hosts carry it, in which packages,
+ * and what the vendor has released for it.
+ *
+ * The three counts are three decisions and not one sum: hosts to move
+ * today, hosts to watch until the vendor releases something, and hosts
+ * nothing could be decided about. The last of those is the reason this
+ * screen never adds them up.
+ */
+function OneAdvisory({ cve }: { cve: string }) {
+  const t = useT();
+  const navigate = useNavigate();
+  const report = useQuery({
+    queryKey: ["vulnerabilities", "cve", cve],
+    queryFn: () => api.get<Report>(`/api/v1/vulnerabilities/cves/${encodeURIComponent(cve)}`),
+    retry: false,
+  });
+
+  const help = (
+    <p>
+      {t("What each distribution published about this CVE, and which of your hosts it reaches. The vendor decides which package version carries the fix, so a host can be exposed on one family and not on another running the same software.")}
+    </p>
+  );
+
+  if (report.error) {
+    const missing = report.error instanceof ApiError && report.error.status === 404;
+    return (
+      <Screen title={cve} icon="vulnerabilities" help={help}>
+        <Card>
+          {missing
+            ? (
+              <Empty icon="vulnerabilities" action={<Link to="/next/vulnerabilities">{t("All vulnerabilities")}</Link>}>
+                {t("No host you can see carries {cve} and no feed the panel holds describes it.", { cve })}
+              </Empty>
+            )
+            : <Problem>{String(report.error)}</Problem>}
+        </Card>
+      </Screen>
+    );
+  }
+  if (!report.data) {
+    return (
+      <Screen title={cve} icon="vulnerabilities" help={help}>
+        <Card><Bones rows={4} /></Card>
+      </Screen>
+    );
+  }
+
+  const data = report.data;
+  const details = data.details;
+  const patches = patchGroups(data.cve, data.hosts);
+  const reasonOf = (code?: string) => (code ? (FINDING_REASONS[code] ? t(FINDING_REASONS[code]) : code) : "");
+  const noFix = Math.max(0, data.affected_hosts - data.hosts_with_vendor_fix);
+  const spread: Segment[] = [
+    { label: t("Vendor fix released"), value: data.hosts_with_vendor_fix, tone: "error" },
+    { label: t("No fix yet"), value: noFix, tone: "warn" },
+    { label: t("Not established"), value: data.undecided_hosts, tone: "unknown" },
+  ];
+
+  return (
+    <Screen
+      title={data.cve}
+      icon="vulnerabilities"
+      help={help}
+      lead={
+        <>
+          <Pill tone={severityTone(data.severity)}>{t(data.severity)}</Pill>{" "}
+          {details?.source && <><Tag>{details.source}</Tag>{" "}</>}
+          <Tag>{t("{n} hosts affected", { n: data.affected_hosts })}</Tag>
+        </>
+      }
+      actions={
+        <>
+          {patches.length === 0
+            ? (
+              <Button
+                kind="quiet"
+                disabled
+                title={t("No affected host has a vendor fix for this CVE.")}
+                testId="patch-none"
+              >
+                {t("Patch these hosts")}
+              </Button>
+            )
+            : patches.map((group) => (
+              <Button
+                key={group.packages.join()}
+                kind="quiet"
+                onClick={() => navigate(group.address)}
+                title={group.packages.join(", ")}
+                testId={`patch-${group.packages.join("+")}`}
+              >
+                {patches.length === 1
+                  ? t("Patch these hosts")
+                  : t("Patch {n} hosts", { n: group.hosts.length })}
+              </Button>
+            ))}
+          <Button kind="quiet" onClick={() => navigate("/next/vulnerabilities")} testId="all-vulnerabilities">
+            {t("All vulnerabilities")}
+          </Button>
+        </>
+      }
+      banner={
+        <>
+          {patches.length > 1 && (
+            <Banner tone="info">
+              {t("These hosts are not affected in the same packages, so patching them takes {n} orders: each host is sent what it is affected in and nothing else. Point at an order to read its packages.", { n: patches.length })}
+            </Banner>
+          )}
+          {data.truncated && (
+            <Banner tone="warn">
+              {t("This CVE is on more hosts than the page lists: {shown} of {total} rows. The counts and the patch orders cover the rows shown.", {
+                shown: data.hosts.length, total: data.hosts_total,
+              })}
+            </Banner>
+          )}
+        </>
+      }
+    >
+      <Kpis>
+        <Kpi
+          hero
+          icon="vulnerabilities"
+          label={t("Hosts affected")}
+          value={data.affected_hosts}
+          tone={data.affected_hosts ? "error" : "ok"}
+          note={t("of {total} hosts the panel judged for this CVE", { total: data.hosts_total })}
+          testId="kpi-cve-hosts"
+        />
+        <Kpi
+          icon="bulk"
+          label={t("Vendor fix released")}
+          value={data.hosts_with_vendor_fix}
+          tone={data.hosts_with_vendor_fix ? "error" : "ok"}
+          note={t("hosts that can be moved today")}
+          testId="kpi-cve-fix"
+        />
+        <Kpi
+          icon="security"
+          label={t("No fix yet")}
+          value={noFix}
+          tone={noFix ? "warn" : "ok"}
+          note={t("nothing to apply; mitigate or wait for the vendor")}
+          testId="kpi-cve-nofix"
+        />
+        {/* Not a nought: these are the hosts nothing could be decided
+            about, and counting them as clean is the one mistake this
+            whole screen exists to avoid. */}
+        <Kpi
+          icon="overview"
+          label={t("Not established")}
+          value={data.undecided_hosts}
+          tone={data.undecided_hosts ? "unknown" : "ok"}
+          note={t("nothing could be decided for these hosts")}
+          testId="kpi-cve-undecided"
+        />
+      </Kpis>
+
+      <Grid>
+        <Card
+          span={5}
+          title={t("Severity")}
+          note={t("The worst rating a vendor gave it on your hosts; the upstream score stands beside it and never instead of it.")}
+        >
+          <Stack>
+            <Facts>
+              <Fact label={t("Vendor rating")}>
+                <Pill tone={severityTone(data.severity)}>{t(data.severity)}</Pill>
+              </Fact>
+              <Fact label={t("CVSS")}>
+                {details?.cvss_score === undefined
+                  ? <Pill tone="unknown">{t("not known")}</Pill>
+                  : (
+                    <TwoLine sub={details.cvss_version ? t("version {n}", { n: details.cvss_version }) : undefined}>
+                      {details.cvss_score.toFixed(1)}
+                      {details.cvss_severity ? ` · ${details.cvss_severity}` : ""}
+                    </TwoLine>
+                  )}
+              </Fact>
+              <Fact label={t("Source")}>{details?.source || "—"}</Fact>
+              <Fact label={t("Published")}>
+                {details?.published_at
+                  ? <span title={absoluteTime(details.published_at)}>{relativeTime(details.published_at)}</span>
+                  : "—"}
+              </Fact>
+              <Fact label={t("Modified")}>
+                {details?.modified_at
+                  ? <span title={absoluteTime(details.modified_at)}>{relativeTime(details.modified_at)}</span>
+                  : "—"}
+              </Fact>
+              <Fact label={t("Vector")} mono>{details?.cvss_vector || "—"}</Fact>
+            </Facts>
+            <Note>
+              {details?.summary
+                || t("The upstream database has no description of this CVE yet; the vendor advisories below say what it concerns.")}
+            </Note>
+          </Stack>
+        </Card>
+
+        <Card
+          span={7}
+          title={t("Hosts")}
+          note={t("Three counts and not one sum: hosts to move today, hosts to watch until the vendor releases something, and hosts nothing could be decided for.")}
+        >
+          <Stack>
+            <Band segments={spread} testId="cve-hosts-split" />
+            <Note>
+              {data.packages.length > 0
+                ? t("Packages: {list}", { list: data.packages.join(", ") })
+                : t("No host you can see carries this CVE.")}
+            </Note>
+          </Stack>
+        </Card>
+
+        <Card
+          span={12}
+          title={t("Vendor advisories")}
+          note={t("What each distribution published about this CVE. The vendor decides which version carries the fix; an advisory without a link came from a host's own repository metadata.")}
+          flush
+        >
+          <Table
+            rows={data.references}
+            keyOf={(one) => `${one.provider}-${one.advisory_id}-${one.release ?? ""}`}
+            rowTestId={(one) => `advisory-${one.advisory_id}`}
+            testId="cve-advisories"
+            empty={t("No vendor advisory names this CVE in the data the panel holds.")}
+            columns={[
+              { key: "provider", head: t("Provider"), cell: (one) => one.provider },
+              { key: "advisory", head: t("Advisory"), tight: true, cell: (one) => (
+                one.url
+                  ? <a href={one.url} target="_blank" rel="noreferrer noopener">{one.advisory_id}</a>
+                  : <code>{one.advisory_id}</code>
+              ) },
+              { key: "title", head: t("Title"), cell: (one) => one.title || "—" },
+              { key: "status", head: t("State"), cell: (one) => (
+                one.status
+                  ? <Pill tone={one.status === "fixed" ? "ok" : one.status === "open" ? "warn" : "neutral"}>{t(one.status)}</Pill>
+                  : "—"
+              ) },
+              { key: "release", head: t("Release"), minor: true, cell: (one) => one.release || "—" },
+              { key: "published", head: t("Published"), minor: true, cell: (one) => (
+                one.published_at
+                  ? <span title={absoluteTime(one.published_at)}>{relativeTime(one.published_at)}</span>
+                  : "—"
+              ) },
+            ]}
+          />
+        </Card>
+
+        <Card
+          span={12}
+          title={t("Affected hosts")}
+          note={t("One row per package per host: a host with two vulnerable packages stands twice. The state is the vendor's answer for that package on that host.")}
+          flush
+        >
+          <Table
+            rows={data.hosts}
+            keyOf={(one) => `${one.host_id}-${one.advisory_id}-${one.package}-${one.installed_version ?? ""}`}
+            rowTestId={(one) => `finding-${one.hostname || one.host_id}-${one.package}`}
+            testId="cve-hosts"
+            empty={t("No host you can see carries this CVE.")}
+            columns={[
+              { key: "host", head: t("Host"), cell: (one) => (
+                <TwoLine sub={[one.site, one.environment].filter(Boolean).join(" / ") || undefined}>
+                  <Link to={`/next/hosts/${one.host_id}/vulnerabilities`}>
+                    {one.hostname || one.host_id.slice(0, 8)}
+                  </Link>
+                </TwoLine>
+              ) },
+              { key: "package", head: t("Package"), tight: true, cell: (one) => (
+                <TwoLine sub={one.source_package && one.source_package !== one.package
+                  ? t("source: {name}", { name: one.source_package })
+                  : undefined}>
+                  <code>{one.package}</code>
+                </TwoLine>
+              ) },
+              { key: "installed", head: t("Installed"), minor: true, tight: true, cell: (one) => (
+                one.installed_version ? <code>{one.installed_version}</code> : "—"
+              ) },
+              { key: "fixed", head: t("Fixed in"), tight: true, cell: (one) => (
+                one.fixed_version ? <code>{one.fixed_version}</code> : <Pill tone="warn">{t("no fix")}</Pill>
+              ) },
+              { key: "state", head: t("State"), cell: (one) => (
+                one.state === "affected"
+                  ? <Pill tone="error">{t("affected")}</Pill>
+                  : <Pill tone="unknown" title={reasonOf(one.reason_code)}>{t("not established")}</Pill>
+              ) },
+              { key: "severity", head: t("Severity"), cell: (one) => (
+                <Pill tone={severityTone(one.severity)} title={one.vendor_severity}>{t(one.severity)}</Pill>
+              ) },
+              { key: "fix", head: t("Vendor fix"), minor: true, cell: (one) => (
+                one.vendor_fix === "known"
+                  ? <Pill tone="ok">{t("published")}</Pill>
+                  : one.vendor_fix === "unavailable"
+                    ? <Pill tone="warn">{t("none")}</Pill>
+                    : <Pill tone="unknown">{t("not known")}</Pill>
+              ) },
+              { key: "repository", head: t("In repositories"), minor: true, cell: (one) => (
+                one.repository_candidate === "visible"
+                  ? <Pill tone="ok">{t("visible here")}</Pill>
+                  : one.repository_candidate === "absent"
+                    ? <Pill tone="warn">{t("not offered")}</Pill>
+                    : <Pill tone="unknown">{t("plan an update to find out")}</Pill>
+              ) },
+            ]}
+          />
+        </Card>
+      </Grid>
+    </Screen>
   );
 }
 
