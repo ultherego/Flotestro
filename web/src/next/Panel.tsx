@@ -4,6 +4,7 @@ import { Dashboard } from "./screens/Dashboard";
 import { Hosts } from "./screens/Hosts";
 import { HostWorkspace } from "./screens/host/Workspace";
 import { Campaigns } from "./screens/Campaigns";
+import { Security } from "./screens/Security";
 import { Empty, Head } from "./kit";
 import { useT } from "../i18n";
 
@@ -25,6 +26,7 @@ const TITLES: Record<string, string> = {
   dashboard: "Fleet dashboard",
   hosts: "Hosts",
   campaigns: "Campaigns",
+  security: "Security",
 };
 
 export function NextPanel() {
@@ -42,6 +44,7 @@ export function NextPanel() {
         <Route path="/next/hosts/:id" element={<HostWorkspace />} />
         <Route path="/next/hosts/:id/:module" element={<HostWorkspace />} />
         <Route path="/next/campaigns" element={<Campaigns />} />
+        <Route path="/next/security" element={<Security />} />
         <Route path="*" element={<NotYet />} />
       </Routes>
     </Shell>

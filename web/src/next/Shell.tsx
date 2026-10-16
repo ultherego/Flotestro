@@ -1,7 +1,11 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { api, BEARER_TOKEN_KEY } from "../lib/api";
+import { usePreferences } from "../lib/preferences";
+import { useScale, SCALES } from "../lib/scale";
+import { useTheme, THEMES } from "../lib/theme";
+import { LOCALES, useLocale } from "../i18n";
 import { useCapabilities } from "../lib/capabilities";
 import { fleetNavigation, type NavGroup } from "../lib/navigation";
 import type { IconName } from "../components/icons";
@@ -122,10 +126,7 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
             <span className="fl-search-key">Ctrl K</span>
           </span>
           <Link to="/next/settings" className="fl-iconbtn" aria-label={t("Settings")}><Icon name="settings" /></Link>
-          <button type="button" className="fl-user" data-testid="user">
-            <span className="fl-avatar" aria-hidden="true">{(name || "?").slice(0, 1).toUpperCase()}</span>
-            <span className="fl-user-name">{name}</span>
-          </button>
+          <UserMenu name={name} roles={me.data?.roles ?? []} subject={me.data?.subject ?? ""} />
         </header>
 
         <main className="fl-screen" id="fl-main" tabIndex={-1}>
@@ -135,6 +136,145 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
       </div>
     </div>
   );
+}
+
+/**
+ * Who is at the screen, and everything they set for themselves: the
+ * theme, the size of the text, the language, and the way out.
+ *
+ * The theme and the language are kept on the server under the person's
+ * identity, so they follow them to another browser; the size of the text
+ * is this browser's, because it answers to this screen and no other. Both
+ * are written through the same places the panel already keeps them - a
+ * second copy of either would be a second answer.
+ */
+function UserMenu({ name, roles, subject }: { name: string; roles: string[]; subject: string }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const holder = useRef<HTMLDivElement>(null);
+  const { theme, setTheme } = useTheme();
+  const { scale, setScale } = useScale();
+  const { locale, setLocale } = useLocale();
+  const { save } = usePreferences();
+
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: globalThis.MouseEvent) => {
+      if (!holder.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const escape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+
+  return (
+    <div className="fl-menu-anchor" ref={holder}>
+      <button
+        type="button"
+        className="fl-user"
+        onClick={() => setOpen((on) => !on)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        data-testid="user"
+      >
+        <span className="fl-avatar" aria-hidden="true">{(name || "?").slice(0, 1).toUpperCase()}</span>
+        <span className="fl-user-name">{name}</span>
+        <Icon name="chevron" />
+      </button>
+      {open && (
+        <div className="fl-menu" role="menu" data-testid="user-menu">
+          <div className="fl-menu-who">
+            <span className="fl-name">{name}</span>
+            <span className="fl-menu-subject">{subject}</span>
+            <span className="fl-tags">
+              {roles.length > 0
+                ? roles.map((role) => <span className="fl-tag" key={role}>{role}</span>)
+                : <span className="fl-tag">{t("no roles")}</span>}
+            </span>
+          </div>
+
+          <div className="fl-menu-set">
+            <span className="fl-menu-label">{t("Theme")}</span>
+            <div className="fl-seg">
+              {THEMES.map((one) => (
+                <button
+                  key={one.code}
+                  type="button"
+                  className={one.code === theme ? "fl-on" : undefined}
+                  title={t(one.description)}
+                  data-testid={`theme-${one.code}`}
+                  onClick={() => { setTheme(one.code); void save({ theme: one.code }); }}
+                >
+                  {t(one.label)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="fl-menu-set">
+            <span className="fl-menu-label">{t("Text size")}</span>
+            <div className="fl-seg">
+              {SCALES.map((one) => (
+                <button
+                  key={one.code}
+                  type="button"
+                  className={one.code === scale ? "fl-on" : undefined}
+                  title={t(one.description)}
+                  data-testid={`scale-${one.code}`}
+                  onClick={() => setScale(one.code)}
+                >
+                  {one.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="fl-menu-set">
+            <span className="fl-menu-label">{t("Language")}</span>
+            <div className="fl-seg">
+              {LOCALES.map((one) => (
+                <button
+                  key={one.code}
+                  type="button"
+                  className={one.code === locale ? "fl-on" : undefined}
+                  data-testid={`locale-${one.code}`}
+                  onClick={() => { setLocale(one.code); void save({ language: one.code }); }}
+                >
+                  {one.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <Link to="/next/profile" className="fl-menu-item" role="menuitem">
+            {t("All of my settings")}
+          </Link>
+          <button type="button" className="fl-quiet fl-menu-out" onClick={signOut} data-testid="sign-out">
+            <Icon name="sign-out" />
+            {t("Sign out")}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Leaving. Dropping the panel's own session is not enough: without
+ * signing out at the provider the next visit signs the person straight
+ * back in without asking, which is not what anybody means by "sign out".
+ */
+async function signOut(event: ReactMouseEvent) {
+  event.preventDefault();
+  try { sessionStorage.removeItem(BEARER_TOKEN_KEY); } catch { /* nothing kept */ }
+  const result = await api.post<{ logout_url: string }>("/auth/logout");
+  window.location.href = result.logout_url || "/";
 }
 
 /**

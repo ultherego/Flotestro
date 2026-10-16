@@ -322,6 +322,40 @@
   font-weight: 700;
 }
 .fl-app .fl-user-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A menu hung under what opened it. */
+.fl-app .fl-menu-anchor { position: relative; min-width: 0; }
+.fl-app .fl-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--x2));
+  z-index: 40;
+  width: 300px;
+  max-height: 80vh;
+  overflow: auto;
+  display: grid;
+  gap: var(--x3);
+  padding: var(--x4);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+}
+.fl-app .fl-menu-who { display: grid; gap: var(--x1); padding-bottom: var(--x3); border-bottom: 1px solid var(--line-soft); }
+.fl-app .fl-menu-subject { color: var(--ink-faint); font-family: var(--font-mono); font-size: 11.5px; overflow-wrap: anywhere; }
+.fl-app .fl-menu-set { display: grid; gap: var(--x2); }
+.fl-app .fl-menu-label { color: var(--ink-faint); font-size: 10px; font-weight: 700; letter-spacing: 0.11em; text-transform: uppercase; }
+.fl-app .fl-menu-set .fl-seg { width: 100%; }
+.fl-app .fl-menu-set .fl-seg button { flex: 1 1 0; min-width: 0; padding: 0 var(--x2); }
+.fl-app .fl-menu-item {
+  display: block;
+  padding: var(--x2) var(--x3);
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  font-size: 13px;
+}
+.fl-app .fl-menu-item:hover { background: var(--hover); text-decoration: none; }
+.fl-app .fl-menu-out { width: 100%; }
+
 .fl-app .fl-rail-backdrop { position: fixed; inset: 0; z-index: 19; background: rgba(0, 0, 0, 0.55); }
 
 /* The head of a screen. */
@@ -908,3 +942,75 @@
   .fl-app { --gap: 28px; font-size: 15px; --rail: 300px; }
   .fl-app .fl-kpi-value { font-size: 40px; }
 }
+
+/* --- The form, the tabs and the dialog ---------------------------------- */
+
+.fl-app .fl-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: var(--x4); }
+.fl-app .fl-field { display: flex; flex-direction: column; gap: var(--x1); min-width: 0; font-size: 13px; }
+.fl-app .fl-field.fl-wide { grid-column: 1 / -1; }
+.fl-app .fl-field-label { color: var(--ink); font-weight: 550; }
+.fl-app .fl-field-hint { color: var(--ink-faint); font-size: 11.5px; max-width: 80ch; }
+.fl-app .fl-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--x2); min-width: 0; }
+.fl-app .fl-actions.fl-right { justify-content: flex-end; }
+.fl-app .fl-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--x3);
+  padding: var(--x3) var(--x4);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--tone, var(--warn));
+  border-radius: var(--r);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 13px;
+}
+.fl-app .fl-banner-text { flex: 1 1 auto; min-width: 0; }
+
+.fl-app .fl-tabs { display: flex; flex-wrap: wrap; gap: var(--x1); border-bottom: 1px solid var(--line); }
+.fl-app .fl-tabs .fl-tab {
+  height: 38px;
+  padding: 0 var(--x4);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--ink-muted);
+  font-weight: 550;
+}
+.fl-app .fl-tabs .fl-tab:hover { color: var(--ink); background: none; filter: none; }
+.fl-app .fl-tabs .fl-tab.fl-on { color: var(--brand-ink); border-bottom-color: var(--brand); font-weight: 650; }
+.fl-app .fl-tab-count {
+  margin-left: var(--x2);
+  padding: 0 6px;
+  border-radius: var(--pill);
+  background: var(--raised);
+  color: var(--ink-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.fl-app .fl-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: var(--gap);
+  background: rgba(0, 0, 0, 0.6);
+}
+.fl-app .fl-modal {
+  width: min(560px, 100%);
+  max-height: 86vh;
+  overflow: auto;
+  display: grid;
+  gap: var(--x4);
+  padding: var(--x6);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+}
+.fl-app .fl-modal-title { font-size: 16px; font-weight: 650; letter-spacing: -0.01em; }
+.fl-app .fl-modal-body { display: grid; gap: var(--x3); color: var(--ink-muted); font-size: 13px; min-width: 0; }

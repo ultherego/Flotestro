@@ -686,3 +686,122 @@ export function Ring({ share, label, tone = "accent", legend }: {
     </div>
   );
 }
+
+/* ----------------------------------------------------------- the form */
+
+/** The fields of a form, in columns that fold into one when narrow. */
+export function Fields({ children }: { children: ReactNode }) {
+  return <div className="fl-fields">{children}</div>;
+}
+
+export function Field({ label, hint, wide = false, children }: {
+  label: ReactNode;
+  hint?: ReactNode;
+  /** A field that needs the whole width: a path, a reason, a list. */
+  wide?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <label className={join("fl-field", wide && "fl-wide")}>
+      <span className="fl-field-label">{label}</span>
+      {children}
+      {hint && <span className="fl-field-hint">{hint}</span>}
+    </label>
+  );
+}
+
+/** A checkbox with its sentence; the box lines up with the first line. */
+export function Check({ checked, onChange, disabled, children }: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <label className="fl-check">
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
+      <span>{children}</span>
+    </label>
+  );
+}
+
+/** The buttons of a form or a card, the one that does the thing first. */
+export function Actions({ children, right = false }: { children: ReactNode; right?: boolean }) {
+  return <div className={join("fl-actions", right && "fl-right")}>{children}</div>;
+}
+
+/** A line the reader has to take account of before going on. */
+export function Banner({ tone = "warn", children, actions }: {
+  tone?: Tone;
+  children: ReactNode;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className={join("fl-banner", toneClass(tone))} role="status">
+      <span className="fl-banner-text">{children}</span>
+      {actions && <div className="fl-actions">{actions}</div>}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------- the tabs */
+
+/**
+ * The tabs of a screen that holds several of one kind of thing.
+ *
+ * They are tabs and not a second navigation: the rail says where in the
+ * panel the reader is, and these say which part of this screen they are
+ * reading. A screen with more than about seven wants a rail of its own.
+ */
+export function Tabs<T extends string>({ value, onChange, tabs }: {
+  value: T;
+  onChange: (value: T) => void;
+  tabs: { value: T; label: ReactNode; count?: number }[];
+}) {
+  return (
+    <div className="fl-tabs" role="tablist">
+      {tabs.map((tab) => (
+        <button
+          key={tab.value}
+          type="button"
+          role="tab"
+          aria-selected={tab.value === value}
+          className={tab.value === value ? "fl-tab fl-on" : "fl-tab"}
+          onClick={() => onChange(tab.value)}
+        >
+          {tab.label}
+          {tab.count !== undefined && <span className="fl-tab-count">{tab.count}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------- the dialog */
+
+/**
+ * A question that has to be answered before anything else happens.
+ *
+ * It is for a decision, never for a form somebody might want to read the
+ * screen behind: what is destructive, what needs a reason for the trail,
+ * what cannot be undone. Everything else belongs on the page.
+ */
+export function Modal({ title, children, onClose, actions }: {
+  title: ReactNode;
+  children: ReactNode;
+  onClose: () => void;
+  actions: ReactNode;
+}) {
+  return (
+    <div
+      className="fl-modal-backdrop"
+      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
+    >
+      <section className="fl-modal" role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : undefined}>
+        <h2 className="fl-modal-title">{title}</h2>
+        <div className="fl-modal-body">{children}</div>
+        <div className="fl-actions fl-right">{actions}</div>
+      </section>
+    </div>
+  );
+}
