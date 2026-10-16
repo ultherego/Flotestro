@@ -212,6 +212,13 @@
   border-radius: 0 3px 3px 0;
   background: var(--brand);
 }
+/* The way back out of a host, at the head of its own rail. */
+.fl-app .fl-navitem.fl-back { color: var(--ink-faint); margin-bottom: var(--x3); }
+.fl-app .fl-navitem.fl-back:hover { color: var(--ink); }
+/* A module this host has no backing for: listed, dimmed, and saying why
+   on hover. Leaving it out would read as a panel that forgot it. */
+.fl-app .fl-navitem.fl-off { color: var(--ink-faint); opacity: 0.55; cursor: not-allowed; }
+.fl-app .fl-navitem.fl-off:hover { background: none; }
 .fl-app .fl-navitem-count {
   flex: none;
   min-width: 20px;

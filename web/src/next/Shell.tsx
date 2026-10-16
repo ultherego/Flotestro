@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useCapabilities } from "../lib/capabilities";
 import { fleetNavigation, type NavGroup } from "../lib/navigation";
+import type { IconName } from "../components/icons";
 import type { Whoami } from "../lib/types";
 import { Icon } from "../components/icons";
 import { LogoMark } from "../components/Logo";
@@ -23,7 +24,28 @@ import { Problem } from "./kit";
 /** Where the reader is, for the bar: the section, and the host if on one. */
 export type Trail = { section: string; to?: string; here?: string };
 
-export function Shell({ trail, children }: { trail: Trail; children: ReactNode }) {
+/** One place the rail leads to. */
+export type RailItem = {
+  to: string;
+  label: string;
+  icon: IconName;
+  /** The reason it leads nowhere here; it stays listed, dimmed. */
+  unavailable?: string;
+};
+
+/**
+ * The rail has two faces and never both at once: the fleet, and one host.
+ *
+ * A host page replaces the places of the fleet with the modules of that
+ * machine, and offers the way back. Two rails side by side would be two
+ * answers to "where am I", which is the one question a rail exists for.
+ */
+export type Face = {
+  groups: { key: string; label?: string; items: RailItem[] }[];
+  back?: { to: string; label: string };
+};
+
+export function Shell({ trail, face, children }: { trail: Trail; face?: Face; children: ReactNode }) {
   const t = useT();
   const capabilities = useCapabilities();
   const location = useLocation();
@@ -40,7 +62,18 @@ export function Shell({ trail, children }: { trail: Trail; children: ReactNode }
     retry: false,
   });
   const permissions = new Set(me.data?.permissions ?? []);
-  const groups = fleetNavigation(permissions, capabilities);
+  // Every place of the new panel lives under /next while it is being
+  // written; the fleet's navigation model names the addresses it will have.
+  const fleet: Face = {
+    groups: fleetNavigation(permissions, capabilities)
+      .filter((group) => group.items.length > 0)
+      .map((group: NavGroup) => ({
+        key: group.key,
+        label: group.label,
+        items: group.items.map((item) => ({ to: `/next${item.to}`, label: item.label, icon: item.icon })),
+      })),
+  };
+  const shown = face ?? fleet;
   const name = me.data?.display_name || me.data?.subject || "";
 
   return (
@@ -56,9 +89,13 @@ export function Shell({ trail, children }: { trail: Trail; children: ReactNode }
             <span className="fl-brand-name">Flotestro</span>
           </Link>
           <nav className="fl-nav" aria-label={t("Main navigation")}>
-            {groups.filter((group) => group.items.length > 0).map((group) => (
-              <Rail key={group.key} group={group} />
-            ))}
+            {shown.back && (
+              <Link to={shown.back.to} className="fl-navitem fl-back">
+                <Icon name="back" />
+                <span className="fl-navitem-label">{t(shown.back.label)}</span>
+              </Link>
+            )}
+            {shown.groups.map((group) => <Rail key={group.key} group={group} />)}
           </nav>
         </aside>
         {drawer && <div className="fl-rail-backdrop" onClick={() => setDrawer(false)} />}
@@ -105,22 +142,27 @@ export function Shell({ trail, children }: { trail: Trail; children: ReactNode }
  * an item that is where the reader already is wears the accent and a bar
  * at its edge, and nothing else on the screen wears that.
  */
-function Rail({ group }: { group: NavGroup }) {
+function Rail({ group }: { group: Face["groups"][number] }) {
   const t = useT();
   const location = useLocation();
   return (
     <div className="fl-navgroup">
       {group.label && <span className="fl-navgroup-label">{t(group.label)}</span>}
       {group.items.map((item) => {
-        // Every place of the new panel lives under /next while it is being
-        // written; the navigation model names the addresses it will have.
-        const to = `/next${item.to}`;
         // /next alone is the dashboard, so the item that leads there is the
         // one the reader is standing on.
-        const here = location.pathname.replace(/^\/next/, "") || "/dashboard";
-        const on = item.active ? item.active(here) : here === item.to;
+        const here = location.pathname === "/next" ? "/next/dashboard" : location.pathname;
+        const on = here === item.to;
+        if (item.unavailable) {
+          return (
+            <span key={item.to} className="fl-navitem fl-off" title={t(item.unavailable)}>
+              <Icon name={item.icon} />
+              <span className="fl-navitem-label">{t(item.label)}</span>
+            </span>
+          );
+        }
         return (
-          <NavLink key={item.to} to={to} className={on ? "fl-navitem fl-on" : "fl-navitem"} title={t(item.label)}>
+          <NavLink key={item.to} to={item.to} className={on ? "fl-navitem fl-on" : "fl-navitem"} title={t(item.label)}>
             <Icon name={item.icon} />
             <span className="fl-navitem-label">{t(item.label)}</span>
           </NavLink>

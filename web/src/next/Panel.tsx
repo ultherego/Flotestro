@@ -2,6 +2,7 @@ import { Route, Routes, useLocation } from "react-router-dom";
 import { Shell } from "./Shell";
 import { Dashboard } from "./screens/Dashboard";
 import { Hosts } from "./screens/Hosts";
+import { HostWorkspace } from "./screens/host/Workspace";
 import { Empty, Head } from "./kit";
 import { useT } from "../i18n";
 
@@ -34,6 +35,10 @@ export function NextPanel() {
         <Route path="/next" element={<Dashboard />} />
         <Route path="/next/dashboard" element={<Dashboard />} />
         <Route path="/next/hosts" element={<Hosts />} />
+        {/* One machine: the rail becomes its modules, and the workspace
+            draws the one named in the address. */}
+        <Route path="/next/hosts/:id" element={<HostWorkspace />} />
+        <Route path="/next/hosts/:id/:module" element={<HostWorkspace />} />
         <Route path="*" element={<NotYet />} />
       </Routes>
     </Shell>
