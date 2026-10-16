@@ -615,9 +615,11 @@ export function Chart({ labels, series, everyLabel = 3, height = 150 }: {
         {totals[peak] > 0 && (
           <span
             className="fl-chart-bubble"
+            /* Never above the plot: the tallest column's reading would
+               otherwise hang over the card's own title. */
             style={{
               left: `${((peak + 0.5) / Math.max(1, columns)) * 100}%`,
-              top: `${(1 - totals[peak] / top) * height - 6}px`,
+              top: `${Math.max(16, (1 - totals[peak] / top) * height - 6)}px`,
             }}
           >
             {totals[peak]}

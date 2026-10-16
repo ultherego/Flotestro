@@ -739,7 +739,7 @@
    screen is paid for on every screen. */
 .fl-app .fl-chart { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--x2) var(--x3); min-width: 0; }
 .fl-app .fl-chart-scale { display: flex; flex-direction: column; justify-content: space-between; color: var(--ink-faint); font-size: 10.5px; text-align: right; font-variant-numeric: tabular-nums; }
-.fl-app .fl-chart-plot { position: relative; min-width: 0; }
+.fl-app .fl-chart-plot { position: relative; min-width: 0; padding-top: 18px; }
 .fl-app .fl-chart-plot svg { width: 100%; display: block; overflow: visible; }
 .fl-app .fl-chart-rule { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .fl-app .fl-chart-bar { fill: var(--tone, var(--brand)); }

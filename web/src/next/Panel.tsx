@@ -2,6 +2,7 @@ import { Route, Routes, useLocation } from "react-router-dom";
 import { Shell } from "./Shell";
 import { Dashboard } from "./screens/Dashboard";
 import { Hosts } from "./screens/Hosts";
+import { Access } from "./screens/Access";
 import { Teams } from "./screens/Teams";
 import { Tags } from "./screens/Tags";
 import { Groups } from "./screens/Groups";
@@ -84,6 +85,7 @@ export function NextPanel() {
         <Route path="/next/groups" element={<Groups />} />
         <Route path="/next/tags" element={<Tags />} />
         <Route path="/next/teams" element={<Teams />} />
+        <Route path="/next/access" element={<Access />} />
         <Route path="*" element={<NotYet />} />
       </Routes>
     </Shell>
