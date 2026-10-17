@@ -181,6 +181,9 @@ test.describe("the finder", () => {
 
   test("the finder opens a place and lands on it", async ({ page }) => {
     await page.goto("/dashboard");
+    // The shortcut is bound once the shell is drawn; a key pressed before
+    // that goes nowhere and the test waits for a box that never opens.
+    await expect(page.getByTestId("open-finder")).toBeVisible();
     await page.keyboard.press("Control+k");
     await page.getByTestId("finder-field").fill("Jobs");
     await page.getByTestId("finder-place:/jobs").click();
