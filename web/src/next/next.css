@@ -45,7 +45,7 @@
   --fl-pad: var(--s7);
   --row: 76px;
 
-  --fl-card: color-mix(in srgb, var(--bg-panel) 94%, var(--text) 6%);
+  --fl-card: color-mix(in srgb, var(--bg-panel) 91%, var(--text) 9%);
   /* The light falls from the top left, as it does on the headline tile
      the owner pointed at. It is three parts in a hundred: enough that a
      card has a face, little enough that twenty of them on a screen do
@@ -2097,6 +2097,1418 @@
   display: grid;
   /* The same measure as a block of facts: a form whose fields run the
      width of a 4K screen is a form nobody can follow down. */
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--s4);
+}
+
+.fl-app .fl-card-body > .fl-fields,
+.fl-app .fl-form > .fl-fields {
+  padding: var(--s5);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: linear-gradient(152deg,
+    color-mix(in srgb, var(--text) 4%, var(--bg-panel)),
+    var(--bg-panel) 68%);
+}
+.fl-app .fl-field { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+.fl-app .fl-field.fl-wide { grid-column: 1 / -1; }
+
+.fl-app .fl-field-label {
+  font-size: var(--t-label);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-field-hint { font-size: var(--t-small); color: var(--text-faint); }
+
+.fl-app .fl-screen input:not([type="checkbox"]):not([type="radio"]):not(.fl-find input):not(.fl-finder-field input),
+.fl-app .fl-screen select,
+.fl-app .fl-screen textarea {
+  width: 100%;
+  min-height: 34px;
+  padding: var(--s2) var(--s3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: var(--t-small);
+  transition: border-color var(--fl-quick);
+}
+
+.fl-app .fl-screen input:focus,
+.fl-app .fl-screen select:focus,
+.fl-app .fl-screen textarea:focus { border-color: var(--accent); outline: none; }
+
+.fl-app .fl-check { display: flex; align-items: center; gap: var(--s2); font-size: var(--t-small); cursor: pointer; }
+.fl-app .fl-check input { width: 15px; height: 15px; min-height: 0; accent-color: var(--accent); cursor: pointer; }
+
+.fl-app .fl-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.fl-app .fl-actions.fl-right { justify-content: flex-end; }
+
+/* Facts form a block, they do not spread. The track used to be `1fr`, so
+   four facts in a wide card were pulled to four columns of three hundred
+   pixels and the card read as four lonely things rather than as one
+   paragraph of detail. A track is now as wide as what stands in it, no
+   wider than a readable measure, and the block is left-aligned with the
+   leftover space left over. */
+.fl-app .fl-facts {
+  display: grid;
+  /* A measure, not a screen. `auto-fit` across a 4K card made nine
+     columns of it, so a label and its value stood a metre apart and the
+     eye had to travel to put them back together - the owner's words were
+     that he did not want to read it. Four columns is as wide as a block
+     of detail stays readable; the rest of the card is left over, which
+     is what leftover space is for. */
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  /* A fact that takes two tracks and does not fit in what is left of a
+     row would otherwise leave the rest of that row blank, which is the
+     scatter again by another route. The short facts behind it fill the
+     hole instead. */
+  grid-auto-flow: row dense;
+  gap: var(--s4) var(--s5);
+  margin: 0;
+}
+
+.fl-app .fl-fact { min-width: 0; }
+
+/* A value read as one word - a machine id, a boot id, a path - takes two
+   tracks rather than being broken across two lines, where a reader has
+   no way to tell a wrap from a second value. Narrower than that it ends
+   in an ellipsis and carries the whole of itself as its own title. */
+.fl-app .fl-whole { max-width: none; grid-column: span 2; }
+
+.fl-app .fl-whole dd {
+  font-size: 12px;
+  display: block;
+  line-height: 28px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fl-app .fl-fact dt {
+  font-size: var(--t-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-fact dd {
+  margin: 2px 0 0;
+  min-height: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s2);
+  font-size: var(--t-body);
+  overflow-wrap: anywhere;
+}
+
+.fl-app .fl-rows { display: inline-flex; align-items: center; gap: var(--s2); font-size: var(--t-small); color: var(--text-faint); }
+.fl-app .fl-rows select { width: auto; min-width: 70px; }
+
+.fl-app .fl-pager { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s1); }
+.fl-app .fl-pager button { min-width: 32px; height: 30px; padding: 0 var(--s2); font-variant-numeric: tabular-nums; }
+.fl-app .fl-pager button.fl-on { background: var(--accent-soft); color: var(--accent-text); border: 1px solid transparent; font-weight: 700; }
+.fl-app .fl-pager-gap { color: var(--text-faint); padding: 0 var(--s1); }
+
+/* ---------------------------------------------------------------------
+   16. A window over the page
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: var(--s5);
+  background: color-mix(in srgb, var(--bg-sunken) 72%, transparent);
+  backdrop-filter: blur(3px);
+  animation: fl-fade 160ms ease-out;
+}
+
+.fl-app .fl-modal {
+  width: min(620px, 100%);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  box-shadow: var(--fl-lift-high);
+  animation: fl-rise 180ms cubic-bezier(0.2, 0, 0.1, 1);
+}
+
+.fl-app .fl-modal-title {
+  padding: var(--s4) var(--s5);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fl-card-title);
+  font-weight: 650;
+}
+
+.fl-app .fl-modal-body { flex: 1 1 auto; overflow: auto; padding: var(--s5); }
+.fl-app .fl-modal > .fl-actions { padding: var(--s4) var(--s5); border-top: 1px solid var(--border); }
+
+/* ---------------------------------------------------------------------
+   17. Arranging the screen
+
+   The bar that turns it on, the handle a container is moved by and the
+   corner it is sized by. Nothing moves until the mode is on, so a board
+   is a board the rest of the time.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-arrange {
+  position: sticky;
+  top: var(--fl-bar);
+  z-index: 15;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s4);
+  padding: var(--s2);
+  border-radius: var(--radius);
+  border: 1px dashed var(--border-strong);
+  background: var(--bg-raised);
+  box-shadow: var(--fl-lift);
+}
+
+.fl-app .fl-arrange-what { flex: 1 1 auto; min-width: 0; font-size: var(--t-small); color: var(--text-faint); }
+.fl-app .fl-arrange select { width: auto; }
+/* ------------------------------------------------------------------
+   The two boards.
+
+   A fixed board (.fl-pin) is a wall of tiles: twelve columns of fixed
+   rows, each container exactly the cells it was given. Reading it and
+   arranging it are one grid, so there is nothing to differ.
+
+   A page board (.fl-flowing) lets a container be as tall as what is in it,
+   and a row is as tall as its tallest. `dense` lets a narrow one take
+   the hole a wide one left.
+   ------------------------------------------------------------------ */
+.fl-app .fl-placed { align-items: stretch; }
+.fl-app .fl-pin { grid-auto-rows: var(--row); }
+.fl-app .fl-placed.fl-flowing { grid-auto-rows: auto; grid-auto-flow: row dense; }
+.fl-app .fl-placed.fl-flowing .fl-card-body { overflow: visible; }
+
+.fl-app .fl-held { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.fl-app .fl-held-body { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.fl-app .fl-held-body > * { flex: 1 1 auto; min-height: 0; }
+/* A notice is a line, not a box the height of its cell. */
+.fl-app .fl-held-body > .fl-banner,
+.fl-app .fl-held-body > .fl-problem { flex: 0 0 auto; }
+
+/* Below the width where twelfths mean anything the board is one card after
+   another, each as tall as what is in it; a block container makes the
+   places written on the containers inert. */
+@media (max-width: 999px) {
+  .fl-app .fl-placed { display: block; }
+  .fl-app .fl-held { display: block; }
+  .fl-app .fl-held-body > * { height: auto; }
+  .fl-app .fl-held + .fl-held { margin-top: var(--fl-gutter); }
+  .fl-app .fl-placed .fl-card-body { overflow: visible; }
+}
+
+/* Arranging. The content is left alone and only looked at. */
+.fl-app .fl-editing .fl-held-body { pointer-events: none; user-select: none; }
+.fl-app .fl-editing .fl-held {
+  outline: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 4px;
+  border-radius: var(--radius-card);
+}
+.fl-app .fl-dragging { z-index: 5; }
+.fl-app .fl-dragging .fl-held-body { box-shadow: var(--fl-lift-high); opacity: 0.9; }
+.fl-app .fl-holding { user-select: none; cursor: grabbing; }
+
+/* The bar of a container being arranged. On a fixed board it lies over the
+   top of the container, so nothing moves; on a page board it stands above. */
+.fl-app .fl-grip {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s1) var(--s2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
+  border: 1px solid var(--border-strong);
+  font-size: var(--t-small);
+  color: var(--text-muted);
+}
+.fl-app .fl-pin .fl-grip { position: absolute; inset: var(--s2) var(--s2) auto var(--s2); z-index: 6; backdrop-filter: blur(4px); }
+.fl-app .fl-flowing .fl-grip { flex: 0 0 auto; margin-bottom: var(--s2); }
+.fl-app .fl-grip-handle {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) 0;
+  cursor: grab;
+  touch-action: none;
+}
+.fl-app .fl-grip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-app .fl-grip-width { flex: 0 0 auto; display: inline-flex; align-items: center; gap: var(--s1); }
+.fl-app .fl-grip-width button { min-width: 28px; height: 28px; padding: 0; }
+.fl-app .fl-grip-size { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; color: var(--text-faint); }
+
+/* The edges: strips to pull, never a button the height of the cell. */
+.fl-app .fl-edge,
+.fl-app .fl-edge-low,
+.fl-app .fl-edge-corner { position: absolute; touch-action: none; z-index: 7; }
+.fl-app .fl-edge { top: 0; bottom: 0; right: -7px; width: 14px; cursor: ew-resize; }
+.fl-app .fl-edge-low { left: 0; right: 0; bottom: -7px; height: 14px; cursor: ns-resize; }
+.fl-app .fl-edge::after,
+.fl-app .fl-edge-low::after { content: ""; position: absolute; border-radius: 2px; background: var(--accent); opacity: 0.6; }
+.fl-app .fl-edge::after { top: 50%; left: 5px; width: 4px; height: 40px; margin-top: -20px; }
+.fl-app .fl-edge-low::after { left: 50%; top: 5px; height: 4px; width: 40px; margin-left: -20px; }
+.fl-app .fl-edge:hover::after,
+.fl-app .fl-edge-low:hover::after { opacity: 1; }
+.fl-app .fl-edge-corner { right: -7px; bottom: -7px; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); opacity: 0.7; cursor: nwse-resize; }
+.fl-app .fl-edge-corner:hover { opacity: 1; }
+
+/* What a screen may group inside a card without inventing a layout. */
+.fl-app .fl-zones { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--s4); }
+
+/* ---------------------------------------------------------------------
+   18. Narrow screens
+
+   The rail leaves the flow and opens over the page. Everything else is
+   already told to reflow by the grid above, so nothing here names a
+   screen of the panel.
+   ------------------------------------------------------------------ */
+
+@media (max-width: 860px) {
+  .fl-app { --fl-pad: var(--s4); }
+  .fl-app .fl-page { margin-left: 0; }
+  .fl-app .fl-rail { transform: translateX(-100%); box-shadow: var(--fl-lift-high); }
+  .fl-app .fl-rail.fl-open { transform: none; }
+  .fl-app .fl-head-title { font-size: 24px; overflow-wrap: anywhere; }
+  /* Actions drop under the name instead of squeezing it to a column. */
+  .fl-app .fl-head { flex-wrap: wrap; }
+  .fl-app .fl-head-text { flex: 1 1 calc(100% - 60px); }
+  .fl-app .fl-head-actions { flex: 1 1 100%; }
+  .fl-app .fl-page { overflow-x: clip; }
+  .fl-app .fl-search { flex: 1 1 auto; }
+  .fl-app .fl-search-key, .fl-app .fl-crumbs { display: none; }
+  .fl-app .fl-user-name { display: none; }
+}
+
+@media (min-width: 861px) {
+  .fl-app .fl-bar > .fl-iconbtn:first-child { display: none; }
+}
+
+/* ---------------------------------------------------------------------
+   19. The finder
+
+   One key reaches anywhere: the places of the panel and the hosts of the
+   fleet in one list. It sits high on the screen rather than in the
+   middle, because the eye is already at the bar when it opens.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-finder-backdrop { place-items: start center; padding-top: 12vh; }
+
+.fl-app .fl-finder {
+  width: min(620px, 100%);
+  max-height: 64vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  box-shadow: var(--fl-lift-high);
+  overflow: hidden;
+  animation: fl-rise 160ms cubic-bezier(0.2, 0, 0.1, 1);
+}
+
+.fl-app .fl-finder-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 0 var(--s4);
+  border-bottom: 1px solid var(--border);
+}
+
+.fl-app .fl-finder-field svg { flex: 0 0 auto; width: 16px; height: 16px; color: var(--text-faint); }
+
+.fl-app .fl-finder-field input {
+  flex: 1 1 auto;
+  height: 52px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: var(--t-lead);
+  outline: none;
+}
+
+.fl-app .fl-finder-field input::placeholder { color: var(--text-faint); }
+.fl-app .fl-finder-field .fl-search-key { position: static; }
+.fl-app .fl-finder-found { flex: 1 1 auto; overflow-y: auto; padding: var(--s2); }
+.fl-app .fl-finder-none { padding: var(--s6); text-align: center; font-size: var(--t-small); color: var(--text-faint); }
+
+.fl-app .fl-finder-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding-right: var(--s2);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition: background var(--fl-quick), color var(--fl-quick);
+}
+
+.fl-app .fl-finder-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  color: inherit;
+  text-decoration: none;
+}
+
+.fl-app .fl-finder-keep { height: 26px; padding: 0 var(--s2); opacity: 0.55; }
+.fl-app .fl-finder-keep:hover { opacity: 1; }
+.fl-app .fl-finder-keep[aria-pressed="true"] { opacity: 1; color: var(--accent-text); }
+.fl-app .fl-finder-keep svg { width: 13px; height: 13px; }
+
+.fl-app .fl-finder-row svg { flex: 0 0 auto; width: 15px; height: 15px; }
+.fl-app .fl-finder-row.fl-on { background: var(--accent-soft); color: var(--accent-text); }
+.fl-app .fl-finder-row:hover { text-decoration: none; }
+.fl-app .fl-finder-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-body); }
+.fl-app .fl-finder-note { flex: 0 0 auto; font-size: var(--t-small); color: var(--text-faint); }
+
+/* ---------------------------------------------------------------------
+   20. Something to copy, and one of several
+
+   A command, a configuration, a fingerprint: read-only, keeping its own
+   line breaks, scrolling rather than wrapping - a command broken across
+   two lines reads as two commands - and carrying the way to take it.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-readout { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+.fl-app .fl-readout-head { display: flex; align-items: center; gap: var(--s3); }
+
+.fl-app .fl-readout-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--t-label);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-readout-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.fl-app .fl-readout-body mark.fl-mark-now {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.fl-app .fl-readout-body mark {
+  background: color-mix(in srgb, var(--accent) 34%, transparent);
+  color: var(--text);
+  border-radius: 2px;
+}
+
+.fl-app .fl-readout-body {
+  margin: 0;
+  padding: var(--s3) var(--s4);
+  max-height: 18em;
+  overflow: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--t-small);
+  line-height: 1.6;
+  white-space: pre;
+  tab-size: 2;
+}
+
+/* One of several, each with its own sentence: a choice made once and
+   understood first, where a Seg is one changed back and forth. */
+.fl-app .fl-choice { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+
+.fl-app .fl-choice-one {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  padding: var(--s3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  cursor: pointer;
+  transition: border-color var(--fl-quick), background var(--fl-quick);
+}
+
+.fl-app .fl-choice-one:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+.fl-app .fl-choice-one:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.fl-app .fl-choice-one.fl-off { opacity: 0.5; cursor: not-allowed; }
+
+.fl-app .fl-choice-one input {
+  width: 15px;
+  height: 15px;
+  min-height: 0;
+  margin-top: 2px;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.fl-app .fl-choice-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fl-app .fl-choice-name { font-size: var(--t-body); font-weight: 600; }
+
+/* ---------------------------------------------------------------------
+   21. The way in
+
+   The first thing anybody sees of this product. It is set a size larger
+   than the panel behind it, because a person typing a password reads one
+   line at a time rather than scanning a board, and it stands on a ground
+   lit from two corners instead of on an empty page.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-door {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--s6);
+  font-size: var(--t-lead);
+  background:
+    radial-gradient(70rem 46rem at 10% -14%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 58%),
+    radial-gradient(56rem 40rem at 108% 112%, color-mix(in srgb, var(--blue) 24%, transparent), transparent 60%),
+    radial-gradient(40rem 30rem at 86% 4%, color-mix(in srgb, var(--lavender) 14%, transparent), transparent 64%),
+    var(--bg);
+}
+
+.fl-app .fl-door-card {
+  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  padding: var(--s7) var(--s6) var(--s6);
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--fl-face);
+  box-shadow: var(--fl-lift-high);
+}
+
+.fl-app .fl-door-head { display: flex; flex-direction: column; align-items: center; gap: var(--s2); text-align: center; }
+
+.fl-app .fl-door-mark {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  background: var(--fl-brand);
+  color: var(--fl-brand-ink);
+}
+
+.fl-app .fl-door-name { font-size: 26px; font-weight: 650; letter-spacing: -0.02em; }
+.fl-app .fl-door-lead { font-size: var(--t-body); color: var(--text-faint); }
+.fl-app .fl-door-form { display: flex; flex-direction: column; gap: var(--s4); }
+.fl-app .fl-door-wide { width: 100%; justify-content: center; height: 42px; font-size: var(--t-body); }
+
+/* The door is outside the screen, so the rule that makes a bare button
+   the filled one does not reach it. The one that signs a person in says
+   so for itself. */
+.fl-app .fl-door button[type="submit"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 650;
+  transition: filter var(--fl-quick), opacity var(--fl-quick);
+}
+
+.fl-app .fl-door button[type="submit"]:hover { filter: brightness(1.08); }
+.fl-app .fl-door button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* A field on this screen is a size larger than one inside the panel. */
+.fl-app .fl-door input {
+  width: 100%;
+  height: 42px;
+  padding: 0 var(--s4);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: var(--t-lead);
+  transition: border-color var(--fl-quick);
+}
+
+.fl-app .fl-door input:focus { border-color: var(--accent); outline: none; }
+.fl-app .fl-door .fl-field-label { font-size: var(--t-small); }
+
+.fl-app .fl-door-or {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  color: var(--text-faint);
+  font-size: var(--t-small);
+}
+
+.fl-app .fl-door-or::before,
+.fl-app .fl-door-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--border); }
+
+.fl-app .fl-door-more { display: flex; flex-direction: column; gap: var(--s3); font-size: var(--t-small); }
+
+.fl-app .fl-door-more summary {
+  cursor: pointer;
+  color: var(--text-faint);
+  transition: color var(--fl-quick);
+}
+
+.fl-app .fl-door-more summary:hover { color: var(--text); }
+.fl-app .fl-door-more[open] summary { margin-bottom: var(--s1); }
+
+/* ---------------------------------------------------------------------
+   22. The selector of machines
+
+   The box in the bar that lists hosts and nothing else. The finder
+   reaches anything and is opened from the keyboard; this is for the hand
+   and for the question an operator asks twenty times a day - the same
+   thing, on that other machine.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 34px;
+  max-width: 220px;
+  padding: 0 var(--s2) 0 var(--s3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-size: var(--t-small);
+  transition: border-color var(--fl-quick), background var(--fl-quick), color var(--fl-quick);
+}
+
+.fl-app .fl-pick:hover { border-color: var(--border-strong); background: var(--bg-hover); color: var(--text); }
+.fl-app .fl-pick > svg { flex: 0 0 auto; width: 14px; height: 14px; }
+.fl-app .fl-pick > svg:last-child { opacity: 0.6; width: 11px; height: 11px; }
+
+.fl-app .fl-pick-current {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.fl-app .fl-pick-menu { min-width: 320px; padding: 0; overflow: hidden; }
+.fl-app .fl-pick-field { border-bottom: 1px solid var(--border); padding: 0 var(--s3); }
+.fl-app .fl-pick-field input { height: 40px; font-size: var(--t-body); }
+.fl-app .fl-pick-list { max-height: 52vh; overflow-y: auto; padding: var(--s2); }
+.fl-app .fl-pick-group + .fl-pick-group { margin-top: var(--s2); }
+
+.fl-app .fl-pick-head {
+  display: block;
+  padding: var(--s2) var(--s3) var(--s1);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fl-app .fl-pick-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  border-radius: var(--radius-sm);
+  transition: background var(--fl-quick);
+}
+
+.fl-app .fl-pick-row:hover { background: var(--bg-hover); }
+
+.fl-app .fl-pick-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  color: var(--text-muted);
+  font-size: var(--t-body);
+  text-align: left;
+}
+
+.fl-app .fl-pick-row:hover .fl-pick-open { color: var(--text); }
+.fl-app .fl-pick-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-app .fl-pick-keep { height: 26px; padding: 0 var(--s2); opacity: 0.5; }
+.fl-app .fl-pick-keep:hover { opacity: 1; }
+.fl-app .fl-pick-keep[aria-pressed="true"] { opacity: 1; color: var(--accent-text); }
+.fl-app .fl-pick-keep svg { width: 13px; height: 13px; }
+
+/* The machine in the trail, with how it is answering and the address. */
+.fl-app .fl-crumbs-host {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+  padding: 2px var(--s2);
+  border-radius: var(--radius-sm);
+  transition: background var(--fl-quick);
+}
+
+.fl-app .fl-crumbs-host:hover { background: var(--bg-hover); text-decoration: none; }
+.fl-app .fl-crumbs-name { color: var(--text); font-weight: 600; }
+.fl-app .fl-crumbs-where { font-family: var(--font-mono); font-size: var(--t-label); color: var(--text-faint); }
+
+@media (max-width: 1200px) {
+  .fl-app .fl-crumbs-where { display: none; }
+}
+
+/* The control that stays, shut, with the reason it would be refused. */
+.fl-app .fl-guard { display: inline-flex; flex-direction: column; gap: var(--s1); min-width: 0; }
+
+/* A value the server will not say twice. */
+.fl-app .fl-shownonce {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s4);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--tone, var(--warn)) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone, var(--warn)) 32%, transparent);
+}
+
+.fl-app .fl-shownonce-head { display: flex; align-items: center; gap: var(--s3); }
+
+.fl-app .fl-shownonce-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--t-body);
+  font-weight: 650;
+  color: var(--tone-text, var(--warn-text));
+}
+
+/* ---------------------------------------------------------------------
+   23. What a table can do besides list
+
+   A row that opens under itself, a row the cards beside it are about,
+   a tree of rows, and the columns a reader folds away. All four are
+   things the panel being replaced could do, and a table that cannot do
+   them sends the reader somewhere else to read what belongs here.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-row-marked > td { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.fl-app .fl-row-open > td { border-bottom-color: transparent; }
+
+.fl-app .fl-row-detail > td {
+  padding: 0 var(--s5) var(--s4);
+  background: color-mix(in srgb, var(--bg-sunken) 60%, transparent);
+}
+
+/* What a row says without being asked: quieter than the row above it,
+   because it is read on the way past rather than looked up. */
+.fl-app .fl-row-under > td {
+  padding: 0 var(--s5) var(--s3);
+  font-size: var(--t-small);
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border);
+}
+
+/* A tree inside a table: the depth is a width, not an indentation
+   character, so a name still reads as a name when it is copied. */
+.fl-app .fl-indent { display: inline-block; vertical-align: middle; }
+.fl-app .fl-indent[data-depth="1"] { width: 16px; }
+.fl-app .fl-indent[data-depth="2"] { width: 32px; }
+.fl-app .fl-indent[data-depth="3"] { width: 48px; }
+.fl-app .fl-indent[data-depth="4"] { width: 64px; }
+.fl-app .fl-indent[data-depth="5"] { width: 80px; }
+.fl-app .fl-indent[data-depth="6"] { width: 96px; }
+.fl-app .fl-indent[data-depth="7"] { width: 112px; }
+.fl-app .fl-indent[data-depth="8"] { width: 128px; }
+
+.fl-app .fl-columns { position: relative; display: flex; justify-content: flex-end; padding: 0 var(--s5) var(--s2); }
+
+.fl-app .fl-columns-list {
+  position: absolute;
+  top: calc(100% + var(--s1));
+  right: var(--s5);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  box-shadow: var(--fl-lift-high);
+}
+
+/* What a change would do to a file: the eye finds the two lines that
+   differ without reading the rest. */
+.fl-app .fl-diff { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+
+.fl-app .fl-diff-body {
+  margin: 0;
+  padding: var(--s3) 0;
+  max-height: 24em;
+  overflow: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  font-family: var(--font-mono);
+  font-size: var(--t-small);
+  line-height: 1.6;
+}
+
+.fl-app .fl-diff-line { display: block; padding: 0 var(--s4); white-space: pre; color: var(--text-muted); }
+.fl-app .fl-diff-in { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok-text); }
+.fl-app .fl-diff-out { background: color-mix(in srgb, var(--error) 14%, transparent); color: var(--error-text); }
+.fl-app .fl-diff-where { color: var(--text-faint); }
+
+/* ---------------------------------------------------------------------
+   N. The panel on paper
+
+   The Reports screen is printed. What the reader prints is the panel,
+   not a document: the rail, the top bar, the buttons and every scroller
+   are the screen's furniture and none of it belongs on the sheet.
+
+   One of these rules matters more than the rest. A card's body and a
+   table's wrapper scroll on screen, and a scroller prints only what
+   happens to be in view - so a report of two hundred rows comes out as
+   the first fifteen with nothing on the sheet to say the rest existed.
+   That is the failure this block is here to stop.
+   ------------------------------------------------------------------ */
+
+@media print {
+  /* Where the reader is, and what they could do from here: neither is
+     part of the report. */
+  .fl-app .fl-rail,
+  .fl-app .fl-rail-backdrop,
+  .fl-app .fl-bar,
+  .fl-app .fl-skip,
+  .fl-app .fl-arrange,
+  .fl-app .fl-grip,
+  .fl-app .fl-finder,
+  .fl-app .fl-finder-backdrop,
+  .fl-app .fl-modal-backdrop,
+  .fl-app .fl-menu,
+  .fl-app .fl-head-actions,
+  .fl-app .fl-helpmark,
+  .fl-app .fl-card-tools,
+  .fl-app .fl-card-bar,
+  .fl-app .fl-toolbar,
+  .fl-app .fl-columns,
+  .fl-app .fl-pager,
+  .fl-app .fl-rows,
+  .fl-app .fl-seg,
+  .fl-app .fl-actions,
+  .ui-toasts { display: none !important; }
+
+  /* The page is the sheet: no rail to leave room for, no viewport to be
+     as tall as, no window padding. */
+  .fl-app,
+  .fl-app .fl-page { min-height: 0; }
+  .fl-app .fl-page,
+  .fl-app .fl-folded .fl-page { margin-left: 0; }
+  .fl-app .fl-screen { padding: 0; }
+
+  /* The board is a grid of fixed rows on screen; on paper it is one
+     card after another, each as tall as what is in it. */
+  .fl-app .fl-placed { display: block; }
+  .fl-app .fl-held,
+  .fl-app .fl-held-body > * { height: auto; }
+  .fl-app .fl-held + .fl-held { margin-top: var(--s5); }
+
+  /* Nothing scrolls on paper, and nothing is cut off by a height that
+     was there to make a card fit a screen. */
+  .fl-app .fl-card-body,
+  .fl-app .fl-placed .fl-card-body,
+  .fl-app .fl-tablewrap,
+  .fl-app .fl-card-body > .fl-tablewrap,
+  .fl-app .fl-readout-body {
+    overflow: visible;
+    max-height: none;
+  }
+
+  /* A sticky head lands in the middle of the rows on the second sheet;
+     a real table head repeats at the top of each instead. */
+  .fl-app .fl-table th { position: static; }
+  .fl-app .fl-table thead { display: table-header-group; }
+  .fl-app .fl-table tr { break-inside: avoid; }
+
+  /* A card is a step above the floor on screen; on paper it is a block
+     that is not broken across two sheets. */
+  .fl-app .fl-card {
+    break-inside: avoid;
+    box-shadow: none;
+    margin-bottom: var(--s5);
+  }
+  .fl-app .fl-card::before { display: none; }
+
+  /* An address nobody can click is text; the colour of a link says
+     nothing on a sheet of paper. */
+  .fl-app a { color: inherit; text-decoration: none; }
+}
+
+/* ---------------------------------------------------------------------
+   19. Readability
+
+   Content inside a container ran together: the same grey for a label and
+   for what it labels, rows with nothing between them, a facts block that
+   was one paragraph. Each of these is said once here, for the whole
+   panel, so no screen has to.
+   ------------------------------------------------------------------ */
+
+/* A container has an edge you can see, and a head that is separate from
+   what is under it. */
+.fl-app .fl-card { border-color: color-mix(in srgb, var(--text) 13%, transparent); }
+.fl-app .fl-card-head {
+  padding: var(--s4) var(--s5) var(--s3);
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
+}
+.fl-app .fl-card-title { font-size: 16px; font-weight: 650; }
+.fl-app .fl-card-note { color: var(--text-muted); }
+.fl-app .fl-card-body { padding-top: var(--s4); }
+.fl-app .fl-flush .fl-card-body { padding-top: 0; }
+
+/* A fact is a small panel of its own: a label, and under it the value in
+   the brightest text there is. Twenty facts in one container are twenty
+   things, not a paragraph. */
+.fl-app .fl-fact {
+  padding: var(--s2) var(--s3);
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--text) 9%, transparent);
+  background: color-mix(in srgb, var(--text) 3.5%, transparent);
+}
+.fl-app .fl-facts { gap: var(--s3); }
+.fl-app .fl-fact dt { color: var(--text-muted); font-weight: 600; }
+.fl-app .fl-fact dd { font-size: 15px; font-weight: 500; color: var(--text); }
+.fl-app .fl-fact dd .fl-faint { font-weight: 400; }
+
+/* A table has a head that reads as a head, rows that can be told apart,
+   and a row that answers the pointer. */
+.fl-app .fl-table th {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--text-muted);
+}
+.fl-app .fl-table td { border-bottom-color: color-mix(in srgb, var(--text) 9%, transparent); }
+.fl-app .fl-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text) 2.5%, transparent); }
+.fl-app .fl-table tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+
+/* A container that holds several headed parts shows each in a panel of its
+   own, so one part does not run into the next. Whatever starts with a
+   heading is such a part. */
+.fl-app .fl-card-body :has(> .fl-subhead:first-child):not(.fl-card-body):not(.fl-facts) {
+  padding: var(--s4);
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--text) 9%, transparent);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+}
+.fl-app .fl-subhead {
+  display: block;
+  margin-bottom: var(--s3);
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text-muted);
+}
+
+/* A list of things that need somebody, inside a card. */
+/* The label, its count and the word for an uncounted one are three
+   tracks of one grid, so the counts line up in a column beside the
+   labels they answer. A row that was a flex line with a growing label
+   put the two at opposite edges of the card, four hundred pixels apart,
+   and the pair stopped reading as a pair. */
+.fl-app .fl-needs {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) max-content 1fr;
+}
+
+.fl-app .fl-needs-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  gap: var(--s4);
+  padding: var(--s3) var(--s5);
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  transition: background var(--fl-quick);
+}
+
+.fl-app .fl-needs-row:last-child { border-bottom: 0; }
+.fl-app .fl-needs-row:hover { background: var(--bg-hover); text-decoration: none; }
+.fl-app .fl-needs-label { min-width: 0; font-size: var(--t-body); }
+
+.fl-app .fl-needs-count {
+  min-width: 2ch;
+  text-align: right;
+  font-size: var(--t-lead);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--tone-text, var(--text));
+}
+
+.fl-app .fl-needs-why { font-size: var(--t-small); color: var(--text-faint); }
+
+/* ---------------------------------------------------------------------
+   13. Small things that say a state
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  padding: 2px var(--s2);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tone, var(--text-faint)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone, var(--text-faint)) 26%, transparent);
+  color: var(--tone-text, var(--text-muted));
+  font-size: var(--t-label);
+  font-weight: 650;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.fl-app .fl-pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tone, var(--text-faint));
+}
+
+.fl-app .fl-pill.fl-nodot::before { display: none; }
+.fl-app .fl-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--tone, var(--unknown)); }
+.fl-app .fl-tags { display: flex; flex-wrap: wrap; gap: var(--s1); }
+
+.fl-app .fl-tag {
+  padding: 1px var(--s2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  font-size: var(--t-label);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+/* A copy button that stands among tags is one of them: the same height,
+   the same mono label, the same border. It was a 30px button with a
+   different font between 22px tags, which read as a thing that did not
+   belong to the row - and, on a panel without a secure context, did
+   nothing when pressed. */
+.fl-app .fl-copy {
+  height: auto;
+  padding: 1px var(--s2);
+  gap: var(--s1);
+  background: var(--bg-sunken);
+  font-family: var(--font-mono);
+  font-size: var(--t-label);
+  color: var(--text-muted);
+}
+.fl-app .fl-copy svg { width: 12px; height: 12px; }
+.fl-app .fl-copy:hover { color: var(--text); background: var(--bg-hover); }
+
+/* The facts under a heading: a label over its value, side by side. */
+.fl-app .fl-strip { display: flex; flex-wrap: wrap; gap: var(--s3) var(--s6); align-items: flex-start; max-width: none; }
+.fl-app .fl-head-lead:has(.fl-strip) { max-width: none; display: flex; flex-direction: column; gap: var(--s3); }
+.fl-app .fl-stripitem { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fl-app .fl-stripitem-label {
+  font-size: var(--t-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.fl-app .fl-stripitem-value {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+  font-size: var(--t-body);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.fl-app .fl-copy-icon {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.fl-app .fl-copy-icon svg { flex: none; width: 14px; height: 14px; min-width: 14px; }
+
+/* The words a screen may use, and the only ones. */
+.fl-app .fl-note { font-size: var(--t-small); color: var(--text-faint); }
+.fl-app .fl-faint { color: var(--text-faint); }
+.fl-app .fl-small { font-size: var(--t-small); }
+.fl-app .fl-mono { font-family: var(--font-mono); font-size: var(--t-small); overflow-wrap: anywhere; }
+
+/* A block of verbatim text looks the same wherever it is written, so a
+   screen that reached for a bare <pre> rather than a Readout still
+   inherits the appearance rather than drawing unstyled text on the
+   page. */
+.fl-app pre.fl-mono,
+.fl-app .fl-card-body > pre {
+  margin: 0;
+  padding: var(--s3) var(--s4);
+  max-height: 24em;
+  overflow: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--t-small);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+.fl-app .fl-nowrap { white-space: nowrap; }
+.fl-app .fl-truncate { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.fl-app .fl-subhead {
+  display: block;
+  margin-bottom: var(--s2);
+  font-size: var(--t-label);
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------
+   14. Nothing here, something wrong, not yet arrived
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s7) var(--s5);
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--t-small);
+}
+
+.fl-app .fl-empty-mark {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+}
+
+.fl-app .fl-empty-mark svg { width: 18px; height: 18px; }
+.fl-app .fl-empty-actions { display: flex; gap: var(--s2); }
+
+.fl-app .fl-problem {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  padding: var(--s4);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--error) 34%, transparent);
+  color: var(--error-text);
+  font-size: var(--t-body);
+}
+
+.fl-app .fl-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--tone, var(--warn)) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone, var(--warn)) 30%, transparent);
+  color: var(--tone-text, var(--warn-text));
+  font-size: var(--t-body);
+}
+
+.fl-app .fl-banner-text { flex: 1 1 auto; min-width: 0; }
+
+/* What has not arrived breathes. "Loading…" is a word where a shape is
+   wanted, and the shape is what tells the reader the page is the right
+   one before the numbers land. */
+.fl-app .fl-bone {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--bg-sunken) 25%, var(--bg-hover) 37%, var(--bg-sunken) 63%);
+  background-size: 400% 100%;
+  animation: fl-shimmer 1.4s ease-in-out infinite;
+}
+
+.fl-app .fl-bones { display: flex; flex-direction: column; gap: var(--s3); }
+
+@keyframes fl-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+@keyframes fl-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes fl-fade { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .fl-app *, .fl-app *::before, .fl-app *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   15. Things to press and things to fill in
+   ------------------------------------------------------------------ */
+
+.fl-app button { font: inherit; cursor: pointer; }
+.fl-app button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* The button that does the thing. Anything that is not one of the named
+   quieter kinds is this, so a screen cannot accidentally ship a button
+   with no appearance at all. */
+.fl-app .fl-screen button:not(.fl-quiet):not(.fl-plain):not(.fl-word):not(.fl-iconbtn):not(.fl-helpmark):not(.fl-tab):not(.fl-corner):not(.fl-seg button),
+.fl-app .fl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 34px;
+  padding: 0 var(--s4);
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  /* The one button that commits something wears a gradient, so the eye
+     finds it without reading: flat accent made every button on a form
+     look the same weight as the one that acts. */
+  background: linear-gradient(160deg,
+    color-mix(in srgb, var(--text) 10%, var(--accent)),
+    var(--accent) 72%);
+  color: var(--accent-contrast);
+  font-size: var(--t-small);
+  font-weight: 650;
+  text-decoration: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: filter var(--fl-quick), box-shadow var(--fl-quick);
+}
+
+.fl-app .fl-screen button:not(.fl-quiet):not(.fl-plain):not(.fl-word):not(.fl-iconbtn):not(.fl-helpmark):not(.fl-tab):not(.fl-corner):not(.fl-seg button):hover,
+.fl-app .fl-btn:hover { filter: brightness(1.08); text-decoration: none; }
+
+.fl-app .fl-quiet {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  height: 34px;
+  padding: 0 var(--s4);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: var(--t-small);
+  font-weight: 600;
+  text-decoration: none;
+  transition: background var(--fl-quick), border-color var(--fl-quick);
+}
+
+.fl-app .fl-quiet:hover { background: var(--bg-hover); border-color: var(--border-strong); text-decoration: none; }
+.fl-app .fl-quiet.fl-small { height: 28px; padding: 0 var(--s3); }
+
+.fl-app .fl-plain {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 30px;
+  padding: 0 var(--s3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--t-small);
+  transition: background var(--fl-quick), color var(--fl-quick);
+}
+
+.fl-app .fl-plain:hover { background: var(--bg-hover); color: var(--text); }
+
+.fl-app .fl-word {
+  height: auto;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--accent-text);
+  font-size: var(--t-small);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.fl-app .fl-danger { background: var(--error) !important; color: var(--error-contrast) !important; border-color: transparent !important; }
+
+.fl-app .fl-lead { padding: var(--s4) var(--s5); border-bottom: 1px solid var(--border); }
+.fl-app .fl-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); margin-bottom: var(--s4); }
+
+/* The bar that steers a list stands between the card's head and the part
+   that scrolls, so neither it nor the table's head can scroll away -
+   however many lines it wraps onto. */
+.fl-app .fl-card-bar {
+  flex: 0 0 auto;
+  padding: var(--s3) var(--s5);
+  border-bottom: 1px solid var(--border);
+  background: var(--fl-card);
+}
+
+.fl-app .fl-card-bar .fl-toolbar { margin-bottom: 0; }
+.fl-app .fl-toolbar-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+
+.fl-app .fl-find { position: relative; flex: 0 1 280px; display: flex; align-items: center; }
+
+.fl-app .fl-find svg {
+  position: absolute;
+  left: var(--s3);
+  width: 14px;
+  height: 14px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.fl-app .fl-toolbar select,
+.fl-app .fl-card-bar select { width: auto; min-width: 140px; max-width: 320px; }
+
+/* The same for a box somebody types in. Without this it keeps the full
+   width every field inside a screen has, and a bar of four filters comes
+   out as four lines stacked down the card - which is what the jobs list
+   looked like until this rule. The search box sizes itself and is left
+   alone. */
+.fl-app .fl-toolbar input:not([type="checkbox"]):not([type="radio"]):not(.fl-find input),
+.fl-app .fl-card-bar input:not([type="checkbox"]):not([type="radio"]):not(.fl-find input) {
+  width: auto;
+  flex: 0 1 200px;
+  min-width: 120px;
+  max-width: 320px;
+}
+
+.fl-app .fl-find input,
+.fl-app .fl-toolbar .fl-find input {
+  width: 100%;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 var(--s3) 0 var(--s7);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: var(--t-small);
+  transition: border-color var(--fl-quick);
+}
+
+.fl-app .fl-find input:focus { border-color: var(--accent); outline: none; }
+
+.fl-app .fl-seg { display: inline-flex; padding: 2px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-sunken); }
+
+.fl-app .fl-seg button {
+  height: 26px;
+  padding: 0 var(--s3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--t-small);
+  font-weight: 600;
+  transition: background var(--fl-quick), color var(--fl-quick);
+}
+
+.fl-app .fl-seg button:hover { color: var(--text); }
+.fl-app .fl-seg button.fl-on { background: var(--bg-raised); color: var(--text); box-shadow: var(--shadow-soft); }
+
+/* The tabs wrap where there is no room; they do not scroll. A row of
+   nine that fits in a third of the window still drew a scrollbar under
+   itself on a desktop that shows them always. Below the breakpoint,
+   where wrapping would take four lines, they scroll - without the bar,
+   because the row is plainly cut off and the bar says nothing. */
+.fl-app .fl-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--s5);
+}
+
+@media (max-width: 860px) {
+  .fl-app .fl-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .fl-app .fl-tabs::-webkit-scrollbar { display: none; }
+}
+
+.fl-app .fl-tab {
+  flex: none;
+  white-space: nowrap;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 38px;
+  padding: 0 var(--s4);
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--t-body);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: color var(--fl-quick);
+}
+
+.fl-app .fl-tab:hover { color: var(--text); }
+.fl-app .fl-tab.fl-on { color: var(--accent-text); }
+
+.fl-app .fl-tab.fl-on::after {
+  content: "";
+  position: absolute;
+  left: var(--s3);
+  right: var(--s3);
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+}
+
+.fl-app .fl-tab-count {
+  min-width: 18px;
+  padding: 0 5px;
+  height: 17px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A form is a thing somebody acts on, so it sits on a face of its own
+   rather than running on as more of the card's prose: a hairline, a
+   gradient a shade off the card under it, and room of its own. The
+   owner's words were that the forms should look modern; this is that,
+   said once here so no screen says it differently. */
+.fl-app .fl-fields {
+  display: grid;
+  /* The same measure as a block of facts: a form whose fields run the
+     width of a 4K screen is a form nobody can follow down. */
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: var(--s4);
 }
@@ -2957,3 +4369,62 @@
      nothing on a sheet of paper. */
   .fl-app a { color: inherit; text-decoration: none; }
 }
+
+/* ---------------------------------------------------------------------
+   19. Readability
+
+   Content inside a container ran together: the same grey for a label and
+   for what it labels, rows with nothing between them, a facts block that
+   was one paragraph. Each of these is said once here, for the whole
+   panel, so no screen has to.
+   ------------------------------------------------------------------ */
+
+/* A container has an edge you can see, and a head that is separate from
+   what is under it. */
+.fl-app .fl-card { border-color: color-mix(in srgb, var(--text) 13%, transparent); }
+.fl-app .fl-card-head {
+  padding: var(--s4) var(--s5) var(--s3);
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
+}
+.fl-app .fl-card-title { font-size: 16px; font-weight: 650; }
+.fl-app .fl-card-note { color: var(--text-muted); }
+.fl-app .fl-card-body { padding-top: var(--s4); }
+.fl-app .fl-flush .fl-card-body { padding-top: 0; }
+
+/* A fact is a small panel of its own: a label, and under it the value in
+   the brightest text there is. Twenty facts in one container are twenty
+   things, not a paragraph. */
+.fl-app .fl-fact {
+  padding: var(--s3) var(--s4);
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--text) 9%, transparent);
+  background: color-mix(in srgb, var(--text) 3.5%, transparent);
+}
+.fl-app .fl-facts { gap: var(--s3); }
+.fl-app .fl-fact dt { color: var(--text-muted); font-weight: 600; }
+.fl-app .fl-fact dd { font-size: 15px; font-weight: 500; color: var(--text); }
+.fl-app .fl-fact dd .fl-faint { font-weight: 400; }
+
+/* A table has a head that reads as a head, rows that can be told apart,
+   and a row that answers the pointer. */
+.fl-app .fl-table th {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--text-muted);
+}
+.fl-app .fl-table td { border-bottom-color: color-mix(in srgb, var(--text) 9%, transparent); }
+.fl-app .fl-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text) 2.5%, transparent); }
+.fl-app .fl-table tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+
+/* A heading inside a container is a heading. */
+.fl-app .fl-subhead {
+  padding-bottom: var(--s1);
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text-muted);
+}
+
+/* A list of things that need somebody: rows, with something between them. */
+.fl-app .fl-needs-row { border-bottom-color: color-mix(in srgb, var(--text) 9%, transparent); }
+
+/* Notes are readable; faint is for what can be missed. */
+.fl-app .fl-note { color: var(--text-muted); }
+.fl-app .fl-fact.fl-whole dd { font-size: 12px; }
