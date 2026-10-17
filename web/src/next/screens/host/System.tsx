@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../../lib/api";
 import { absoluteTime, bytes, relativeTime } from "../../../lib/format";
@@ -153,7 +154,7 @@ export function System({ host }: { host: Host }) {
       {tab !== "history" && (
         <Grid>
           {tab === "state" && (
-<C span={12}>
+<C span={6}>
             <Card title={t("Operating system")} foot={freshness}>
               <Facts>
                 <Fact label={t("Distribution")}>{fact("distribution", snapshot.distribution?.pretty_name || snapshot.os?.pretty_name)}</Fact>
@@ -169,7 +170,7 @@ export function System({ host }: { host: Host }) {
           </C>
 )}
           {tab === "state" && (
-<C span={12}>
+<C span={6}>
             <Card title={t("Kernel")}>
               <Facts>
                 <Fact label={t("Release")}>{fact("kernel", snapshot.kernel?.release || snapshot.os?.kernel)}</Fact>
@@ -188,7 +189,7 @@ export function System({ host }: { host: Host }) {
           </C>
 )}
           {tab === "hardware" && (
-<C span={12}>
+<C span={6}>
             <Card
               title={t("Processor")}
               foot={snapshot.cpu?.flag_count !== undefined
@@ -215,7 +216,7 @@ export function System({ host }: { host: Host }) {
           </C>
 )}
           {tab === "hardware" && (
-<C span={12}>
+<C span={6}>
             <Card title={t("Memory and root filesystem")}>
               <Facts>
                 <Fact label={t("Memory")}>
@@ -249,7 +250,7 @@ export function System({ host }: { host: Host }) {
           </C>
 )}
           {tab === "hardware" && (
-<C span={12}>
+<C span={6}>
             <Card
               title={t("Machine")}
               note={t("The identity from the DMI tables. The serial numbers and the UUID are readable by root alone, so they come through the helper.")}
@@ -272,7 +273,7 @@ export function System({ host }: { host: Host }) {
           </C>
 )}
           {tab === "hardware" && (
-<C span={12}>
+<C span={6}>
             <Card title={t("Firmware and boot")}>
               <Facts>
                 <Fact label={t("Boot mode")}>
@@ -322,7 +323,7 @@ export function System({ host }: { host: Host }) {
                     key: "adapter", head: t("Adapter"), tight: true, cell: (one) => {
                       const segment = adapterSegment(one.name);
                       return segment
-                        ? <Tag to={`/hosts/${host.id}/${segment}`}>{one.name}</Tag>
+                        ? <Link to={`/hosts/${host.id}/${segment}`} title={t("open this module")}>{one.name}</Link>
                         : one.name;
                     },
                   },
