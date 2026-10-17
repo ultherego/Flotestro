@@ -1331,6 +1331,10 @@
 
 /* One line of light along the top edge, as a card has: it says the thing
    is raised off the page without drawing a second border. */
+/* Beside a reading, a form takes the whole of its cell: the measure cap
+   would leave a strip of bare floor between the two. */
+.fl-app [class^="fl-c"] > .fl-form { max-width: none; height: 100%; }
+
 .fl-app .fl-form { position: relative; overflow: hidden; }
 .fl-app .fl-form::before {
   content: "";
