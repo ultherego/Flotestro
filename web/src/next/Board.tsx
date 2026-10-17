@@ -177,7 +177,10 @@ export function Board({ screen, catalogue, drawn, notices }: {
      the owner's words, and he is right. A container is as tall as its
      cell and its content scrolls inside it; the corner is there to
      change that. */
-  const placed = settle(placeAll(shown), "");
+  const settled = settle(placeAll(shown), "");
+  const placed = editing !== null
+    ? settled
+    : [...settled].sort((a, b) => (a.y ?? 0) - (b.y ?? 0) || (a.x ?? 0) - (b.x ?? 0));
   const titleOf = (key: string) => catalogue.find((one) => one.key === key)?.title ?? key;
   const absent = catalogue.filter((one) => known.has(one.key) && !shown.some((on) => on.key === one.key));
 
@@ -308,7 +311,7 @@ export function Board({ screen, catalogue, drawn, notices }: {
         className={[
           "fl-grid",
           "fl-placed",
-          editing !== null ? "fl-editing" : "",
+          editing !== null ? "fl-editing" : "fl-flowing",
           hold ? "fl-holding" : "",
         ].join(" ").trim()}
         onPointerMove={hold ? moveTo : undefined}
@@ -317,10 +320,18 @@ export function Board({ screen, catalogue, drawn, notices }: {
         data-testid="board"
       >
         {placed.map((one) => {
-          const style = {
-            gridColumn: `${(one.x ?? 0) + 1} / span ${one.width}`,
-            gridRow: `${(one.y ?? 0) + 1} / span ${one.height ?? 2}`,
-          };
+          // Reading, a container is as tall as what is in it; arranging, it
+          // is a cell of fixed rows. The saved places still decide the ORDER
+          // and the WIDTH either way - only the height stops being a number
+          // somebody had to guess. A guessed number cannot be right: measured
+          // at three window widths, 65 of 318 containers changed height by
+          // more than a line, one of them from 171px to 843px.
+          const style = editing !== null
+            ? {
+                gridColumn: `${(one.x ?? 0) + 1} / span ${one.width}`,
+                gridRow: `${(one.y ?? 0) + 1} / span ${one.height ?? 2}`,
+              }
+            : { gridColumn: `span ${one.width}` };
           return (
             <div
               key={one.key}

@@ -869,13 +869,12 @@ function EditGroup({ group, etag, onDone }: { group: GroupDetail; etag: string; 
   });
 
   return (
-    <Card
-      span={12}
+    <Form
       title={t("Edit group")}
       note={dynamic
         ? t("The name a selector names it by, the description, and the rule the server compiles.")
         : t("The name a selector names it by and the description; the members are edited on their own.")}
-      foot={
+      actions={
         <Actions>
           <Button
             onClick={() => { setMessage(""); save.mutate(); }}
@@ -960,7 +959,7 @@ function EditGroup({ group, etag, onDone }: { group: GroupDetail; etag: string; 
           ))}
         {dynamic && <SelectorPreview selector={parsed.selector} />}
       </Stack>
-    </Card>
+    </Form>
   );
 }
 
@@ -995,11 +994,10 @@ function EditMembers({ id, chosen, onChosen, onDone }: {
   });
 
   return (
-    <Card
-      span={12}
+    <Form
       title={t("Members")}
       note={t("The list is replaced whole: a host left unticked leaves the group.")}
-      foot={
+      actions={
         <Actions>
           <Button onClick={() => { setMessage(""); save.mutate(); }} disabled={save.isPending} testId="save-members">
             {save.isPending ? t("Saving…") : t("Save members ({n})", { n: chosen.size })}
@@ -1010,7 +1008,7 @@ function EditMembers({ id, chosen, onChosen, onDone }: {
       }
     >
       <MemberChooser chosen={chosen} onChange={onChosen} testId="edit-member-search" />
-    </Card>
+    </Form>
   );
 }
 
@@ -1219,9 +1217,9 @@ function OneGroup({ id }: { id: string }) {
       <Grid>
         {/* The form is rebuilt whenever the version under it moves, so a
             record somebody else changed is never edited from a stale copy. */}
-        {editing && <EditGroup key={etag} group={one} etag={etag} onDone={() => setEditing(false)} />}
+        {editing && <C span={12}><EditGroup key={etag} group={one} etag={etag} onDone={() => setEditing(false)} /></C>}
         {editingMembers && (
-          <EditMembers id={id} chosen={members} onChosen={setMembers} onDone={() => setEditingMembers(false)} />
+          <C span={12}><EditMembers id={id} chosen={members} onChosen={setMembers} onDone={() => setEditingMembers(false)} /></C>
         )}
 
         <Card span={5} title={t("Group")} note={one.description || t("Nobody wrote what it is for.")}>

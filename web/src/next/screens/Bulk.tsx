@@ -32,7 +32,7 @@ import {
 import { FacetList } from "../../components/FacetList";
 import { useT, type Translate } from "../../i18n";
 import {
-  Actions, Banner, Bones, Card, Check, Dot, Empty, Fact, Facts, Field, Fields, Find, Form, Grid, Note, Pill, Problem, Screen, Seg, Stack, Table, Tabs, Tag, Tags, Toolbar, TwoLine, type Tone,
+  Actions, Banner, Bones, C, Card, Check, Dot, Empty, Fact, Facts, Field, Fields, Find, Form, Grid, Note, Pill, Problem, Screen, Seg, Stack, Table, Tabs, Tag, Tags, Toolbar, TwoLine, type Tone,
 } from "../kit";
 
 /**
@@ -264,6 +264,7 @@ export function Bulk() {
           </Stack>
         </Card>
 
+        <C span={12}>
         {step === 0 && (
           <ScopeStep order={order} change={change} bulk={bulk} refusals={refusals}
                      preview={preview.data} refusal={refusal} nav={nav} />
@@ -300,6 +301,7 @@ export function Bulk() {
         )}
         {step === 6 && <PlansStep campaignID={campaignID} campaign={campaign.data} nav={nav} />}
         {step === 7 && <ApprovalStep campaignID={campaignID} campaign={campaign.data} nav={nav} />}
+        </C>
       </Grid>
     </Screen>
   );
@@ -1579,22 +1581,13 @@ function RolloutStep({ order, change, targets, declaredPolicy, nav }: {
   const offered = OFFLINE_POLICIES.filter((policy, index) =>
     index >= declaredIndex && (policy !== "replan_on_reconnect" || declaredPolicy === "replan_on_reconnect"));
   return (
-    <Card
-      span={12}
+    <Form
       title={`4. ${t("Rollout")}`}
       note={t("Decide how many hosts change at once and when the campaign stops itself; the defaults suit a first campaign. A canary goes first as wave zero, the rest follow in waves, and a host waiting for capacity says so instead of standing still.")}
       tools={<Link to="/budgets" className="fl-quiet fl-small">{t("See the budgets.")}</Link>}
-      foot={
-        <Stack>
-          <Note>
-            {t("{targets} hosts, canary {canary}, then waves of {wave} with at most {concurrent} at a time.", {
-              targets, canary: order.canary, wave: order.wave, concurrent: order.concurrent,
-            })}
-          </Note>
-          {nav}
-        </Stack>
-      }
+      actions={nav}
     >
+      <Stack>
       <Fields>
         <Field label={t("Canary hosts")} hint={t("How many hosts go first, alone, before any wave; 0 skips the canary.")}>
           <input type="number" min={0} value={order.canary} data-testid="canary"
@@ -1679,7 +1672,13 @@ function RolloutStep({ order, change, targets, declaredPolicy, nav }: {
           </Check>
         </Field>
       </Fields>
-    </Card>
+      <Note>
+        {t("{targets} hosts, canary {canary}, then waves of {wave} with at most {concurrent} at a time.", {
+          targets, canary: order.canary, wave: order.wave, concurrent: order.concurrent,
+        })}
+      </Note>
+      </Stack>
+    </Form>
   );
 }
 

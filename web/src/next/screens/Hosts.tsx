@@ -10,7 +10,7 @@ import { formatSort, parseSort, usePageSize } from "../../components/SortableTab
 import { useTeams } from "../../lib/teams";
 import { useT } from "../../i18n";
 import {
-  Actions, Bars, Bones, Button, Card, Check, Dot, Download, Empty, Field, Fields, Find, Grid, HeadActions,
+  Actions, Bars, Bones, Button, C, Card, Check, Dot, Download, Empty, Field, Fields, Find, Form, Grid, HeadActions,
   Meter, Modal, Note, Pill, Problem, RowsPerPage, Seg, Stack, Table, Tag, Tags, Toolbar, TwoLine,
   type Column, type Tone,
 } from "../kit";
@@ -380,191 +380,6 @@ export function Hosts() {
       {canAdd && <HeadActions>{addHost}</HeadActions>}
 
       <Grid>
-        {/* Everything the three controls in the bar do not cover is folded
-            away until somebody wants it - or until one of them is set,
-            which opens the block and keeps it open. */}
-        {showMore && (
-          <Card
-            span={12}
-            title={t("More filters")}
-            note={t("Every one of these narrows the list on the server.")}
-            tools={
-              <Button kind="quiet" testId="fold-filters" onClick={() => setUnfolded(false)} disabled={foldedActive > 0}>
-                {t("Fold away")}
-              </Button>
-            }
-          >
-            <Fields>
-              {/* The sites, environments and owners are suggested from the
-                  facets: the fleet's own values, not a list to maintain. */}
-              <Field label={t("Site")}>
-                <input
-                  placeholder={t("site")} value={filters.site} list="next-hosts-sites"
-                  onChange={(event) => setFilter("site", event.target.value)} data-testid="filter-site"
-                />
-                <datalist id="next-hosts-sites">
-                  {facetKeys(a?.by_site).map((key) => <option key={key} value={key} />)}
-                </datalist>
-              </Field>
-              <Field label={t("Environment")}>
-                <input
-                  placeholder={t("environment")} value={filters.environment} list="next-hosts-environments"
-                  onChange={(event) => setFilter("environment", event.target.value)} data-testid="filter-environment"
-                />
-                <datalist id="next-hosts-environments">
-                  {facetKeys(a?.by_environment).map((key) => <option key={key} value={key} />)}
-                </datalist>
-              </Field>
-              <Field label={t("Owner")}>
-                <input
-                  placeholder={t("owner")} value={filters.owner} list="next-hosts-owners"
-                  onChange={(event) => setFilter("owner", event.target.value)} data-testid="filter-owner"
-                />
-                <datalist id="next-hosts-owners">
-                  {ownerKeys.map((key) => <option key={key} value={key} />)}
-                </datalist>
-              </Field>
-              <Field label={t("Tags")} hint={t("every listed tag has to be on the host")}>
-                <input
-                  placeholder={t("tags, e.g. role=db tier=gold")}
-                  value={filters.tags}
-                  onChange={(event) => setFilter("tags", event.target.value)}
-                  data-testid="filter-tags"
-                />
-              </Field>
-              <Field label={t("Lifecycle")}>
-                <select value={filters.lifecycle_state} onChange={(event) => setFilter("lifecycle_state", event.target.value)} data-testid="filter-lifecycle">
-                  <option value="">{t("lifecycle: any")}</option>
-                  <option value="active">{t("active")}</option>
-                  <option value="quarantined">{t("quarantined")}</option>
-                  <option value="recovery">{t("recovery")}</option>
-                  <option value="retiring">{t("retiring")}</option>
-                  <option value="retired">{t("retired")}</option>
-                </select>
-              </Field>
-              <Field label={t("Maintenance")}>
-                <select value={filters.maintenance} onChange={(event) => setFilter("maintenance", event.target.value)} data-testid="filter-maintenance">
-                  <option value="">{t("maintenance: any")}</option>
-                  <option value="true">{t("in a maintenance window")}</option>
-                  <option value="false">{t("outside a maintenance window")}</option>
-                </select>
-              </Field>
-              <Field label={t("Capability")}>
-                <select value={filters.capability} onChange={(event) => setFilter("capability", event.target.value)} data-testid="filter-capability">
-                  <option value="">{t("capability: any")}</option>
-                  {CAPABILITIES.map((name) => <option key={name} value={name}>{name}</option>)}
-                </select>
-              </Field>
-              {/* What the host's helper does with a request carrying no capability of
-                  the panel. Only enforce refuses one, so the other values are the
-                  hosts a migration still has to reach. */}
-              <Field label={t("Helper mode")}>
-                <select value={filters.helper_mode} onChange={(event) => setFilter("helper_mode", event.target.value)} data-testid="filter-helper-mode">
-                  <option value="">{t("helper mode: any")}</option>
-                  <option value="enforce">{t("enforce: an unsigned request is refused")}</option>
-                  <option value="prefer">{t("prefer: an unsigned request is carried out")}</option>
-                  <option value="observe">{t("observe: nothing is refused")}</option>
-                  <option value="unknown">{t("unknown: the host has not said")}</option>
-                </select>
-              </Field>
-              <Field label={t("Channel")}>
-                <select value={filters.channel} onChange={(event) => setFilter("channel", event.target.value)} data-testid="filter-channel">
-                  <option value="">{t("channel: any")}</option>
-                  {RELEASE_CHANNELS.map((name) => <option key={name} value={name}>{name}</option>)}
-                </select>
-              </Field>
-              <Field label={t("Reboot")}>
-                <select value={filters.reboot_required} onChange={(event) => setFilter("reboot_required", event.target.value)} data-testid="filter-reboot">
-                  <option value="">{t("reboot: any")}</option>
-                  <option value="true">{t("reboot required")}</option>
-                  <option value="false">{t("no reboot required")}</option>
-                </select>
-              </Field>
-              <Field label={t("Security updates")}>
-                <select value={filters.security_updates} onChange={(event) => setFilter("security_updates", event.target.value)} data-testid="filter-security">
-                  <option value="">{t("security updates: any")}</option>
-                  <option value="true">{t("security updates waiting")}</option>
-                  <option value="false">{t("no security updates")}</option>
-                </select>
-              </Field>
-              <Field label={t("Directory domain")} hint={t("the directory domain the host is joined to, e.g. corp.example")}>
-                <input
-                  placeholder={t("directory domain")} value={filters.identity_domain}
-                  onChange={(event) => setFilter("identity_domain", event.target.value)} data-testid="filter-identity-domain"
-                />
-              </Field>
-              <Field label={t("Failure domain")} hint={t("the rack, zone or cluster an operator placed the host in, e.g. rack-a")}>
-                <input
-                  placeholder={t("failure domain")} value={filters.failure_domain}
-                  onChange={(event) => setFilter("failure_domain", event.target.value)} data-testid="filter-failure-domain"
-                />
-              </Field>
-              {/* The route: a relay by name for whoever may list them, the
-                  identifier for the rest. */}
-              <Field label={t("Relay")}>
-                {canSeeRelays ? (
-                  <select value={filters.relay} onChange={(event) => setFilter("relay", event.target.value)} data-testid="filter-relay">
-                    <option value="">{t("relay: any")}</option>
-                    {(relays.data?.items ?? []).map((one) => <option key={one.id} value={one.id}>{one.name}</option>)}
-                    {filters.relay && !relays.data?.items.some((one) => one.id === filters.relay) && (
-                      <option value={filters.relay}>{filters.relay}</option>
-                    )}
-                  </select>
-                ) : (
-                  <input
-                    placeholder={t("relay identifier")} value={filters.relay}
-                    onChange={(event) => setFilter("relay", event.target.value)} data-testid="filter-relay-id"
-                  />
-                )}
-              </Field>
-              {/* The team: who the hosts belong to, which is not where they
-                  stand. The last entry is the list an administrator works
-                  through after the teams are created - the hosts nobody has
-                  placed in one, reachable through their site alone. */}
-              <Field label={t("Team")} hint={t("the team the hosts belong to; a team is a boundary of authority, not a label")}>
-                <select value={filters.team} onChange={(event) => setFilter("team", event.target.value)} data-testid="filter-team">
-                  <option value="">{t("team: any")}</option>
-                  {(teams.data?.items ?? []).map((one) => <option key={one.id} value={one.id}>{one.name}</option>)}
-                  <option value="none">{t("no team")}</option>
-                  {filters.team && filters.team !== "none" && !teams.data?.items.some((one) => one.id === filters.team) && (
-                    <option value={filters.team}>{filters.team}</option>
-                  )}
-                </select>
-              </Field>
-              {/* The "needs attention" boxes: each is the filter a dashboard
-                  tile links here with, ticked means "only these". */}
-              <Field label={t("Needs attention")} wide>
-                <Check
-                  checked={filters.failed_units === "true"}
-                  onChange={(on) => setFilter("failed_units", on ? "true" : "")}
-                >
-                  <span title={t("hosts with at least one failed unit")}>{t("failed units")}</span>
-                </Check>
-                <Check
-                  checked={filters.package_db_broken === "true"}
-                  onChange={(on) => setFilter("package_db_broken", on ? "true" : "")}
-                >
-                  <span title={t("hosts whose package database the last operation found broken")}>
-                    {t("package database broken")}
-                  </span>
-                </Check>
-                <Check
-                  checked={filters.sssd_offline === "true"}
-                  onChange={(on) => setFilter("sssd_offline", on ? "true" : "")}
-                >
-                  <span title={t("domain-joined hosts whose SSSD reports itself offline")}>{t("SSSD offline")}</span>
-                </Check>
-                <Check
-                  checked={filters.agent_behind === "true"}
-                  onChange={(on) => setFilter("agent_behind", on ? "true" : "")}
-                >
-                  <span title={t("hosts whose agent is older than the newest one in the fleet")}>{t("agent behind")}</span>
-                </Check>
-              </Field>
-            </Fields>
-          </Card>
-        )}
-
         <Card span={9} flush
           title={t("The fleet")}
           note={
@@ -668,12 +483,24 @@ export function Hosts() {
                 { value: "unknown", label: `${t("Unknown")} ${count("unknown")}` },
               ]}
             />
-            {!showMore && (
+            {showMore ? (
+              <Button kind="quiet" testId="fold-filters" onClick={() => setUnfolded(false)} disabled={foldedActive > 0}
+                      title={t("Every one of these narrows the list on the server.")}>
+                {t("Fold away")}
+              </Button>
+            ) : (
               <Button kind="quiet" testId="more-filters" onClick={() => setUnfolded(true)}>
                 {t("More filters")}
               </Button>
             )}
           </Toolbar>
+
+          {showMore && (
+            <MoreFilters
+              filters={filters} setFilter={setFilter} activity={a}
+              teams={teams.data?.items ?? []} relays={relays.data?.items ?? []} canSeeRelays={canSeeRelays} ownerKeys={ownerKeys}
+            />
+          )}
 
           {!hosts.isLoading && rows.length === 0 ? (
             <Empty action={canAdd ? addHost : undefined}>{t("No host matches the filters.")}</Empty>
@@ -937,12 +764,12 @@ export function Hosts() {
         </Card>
 
         {editing && chosen.length > 0 && (
-          <Metadata
+          <C span={12}><Metadata
             hosts={chosen}
             canTag={canTag}
             canMaintain={canMaintain}
             onClose={() => setEditing(false)}
-          />
+          /></C>
         )}
       </Grid>
     </>
@@ -1053,12 +880,24 @@ function Metadata({ hosts, canTag, canMaintain, onClose }: {
   const moves = draft.site.trim() !== "" || draft.environment.trim() !== "";
 
   return (
-    <Card
-      span={12}
+    <Form
       title={t("Set metadata on {n} hosts", { n: hosts.length })}
       note={t("What the panel records about these hosts by hand. A field left empty changes nothing; every host is judged in its own scope and answered on its own.")}
       tools={<Button kind="quiet" testId="metadata-close" onClick={onClose}>{t("Close")}</Button>}
+      actions={
+        <Actions>
+          <Button
+            testId="bulk-apply"
+            disabled={!ready || submit.isPending}
+            title={ready ? undefined : t("Nothing is set yet, so there is nothing to apply.")}
+            onClick={() => { setMessage(""); setConfirming(true); }}
+          >
+            {t("Apply to {n} hosts…", { n: hosts.length })}
+          </Button>
+        </Actions>
+      }
     >
+      <Stack>
       <Fields>
         {canTag && (
           <>
@@ -1156,16 +995,6 @@ function Metadata({ hosts, canTag, canMaintain, onClose }: {
           {t("A move changes who may manage the host, which budgets its changes load and which groups it stands in, from the next order on; nothing already planned is re-evaluated.")}
         </Note>
       )}
-      <Actions>
-        <Button
-          testId="bulk-apply"
-          disabled={!ready || submit.isPending}
-          title={ready ? undefined : t("Nothing is set yet, so there is nothing to apply.")}
-          onClick={() => { setMessage(""); setConfirming(true); }}
-        >
-          {t("Apply to {n} hosts…", { n: hosts.length })}
-        </Button>
-      </Actions>
       {message && <Note>{message}</Note>}
 
       {answer && (
@@ -1230,7 +1059,194 @@ function Metadata({ hosts, canTag, canMaintain, onClose }: {
           </Fields>
         </Modal>
       )}
-    </Card>
+      </Stack>
+    </Form>
+  );
+}
+
+/** The filters the bar has no room for. They narrow the list under them, so they stand over its table. */
+function MoreFilters({ filters, setFilter, activity, teams, relays, canSeeRelays, ownerKeys }: {
+  filters: HostFilters;
+  setFilter: (key: keyof HostFilters, value: string) => void;
+  activity: FleetActivity | undefined;
+  teams: { id: string; name: string }[];
+  relays: Relay[];
+  canSeeRelays: boolean;
+  ownerKeys: string[];
+}) {
+  const t = useT();
+  const facetKeys = (items?: { key: string }[]) => (items ?? []).map((one) => one.key).filter(Boolean);
+  return (
+    <>
+      <Fields>
+        {/* The sites, environments and owners are suggested from the
+            facets: the fleet's own values, not a list to maintain. */}
+        <Field label={t("Site")}>
+          <input
+            placeholder={t("site")} value={filters.site} list="next-hosts-sites"
+            onChange={(event) => setFilter("site", event.target.value)} data-testid="filter-site"
+          />
+          <datalist id="next-hosts-sites">
+            {facetKeys(activity?.by_site).map((key) => <option key={key} value={key} />)}
+          </datalist>
+        </Field>
+        <Field label={t("Environment")}>
+          <input
+            placeholder={t("environment")} value={filters.environment} list="next-hosts-environments"
+            onChange={(event) => setFilter("environment", event.target.value)} data-testid="filter-environment"
+          />
+          <datalist id="next-hosts-environments">
+            {facetKeys(activity?.by_environment).map((key) => <option key={key} value={key} />)}
+          </datalist>
+        </Field>
+        <Field label={t("Owner")}>
+          <input
+            placeholder={t("owner")} value={filters.owner} list="next-hosts-owners"
+            onChange={(event) => setFilter("owner", event.target.value)} data-testid="filter-owner"
+          />
+          <datalist id="next-hosts-owners">
+            {ownerKeys.map((key) => <option key={key} value={key} />)}
+          </datalist>
+        </Field>
+        <Field label={t("Tags")} hint={t("every listed tag has to be on the host")}>
+          <input
+            placeholder={t("tags, e.g. role=db tier=gold")}
+            value={filters.tags}
+            onChange={(event) => setFilter("tags", event.target.value)}
+            data-testid="filter-tags"
+          />
+        </Field>
+        <Field label={t("Lifecycle")}>
+          <select value={filters.lifecycle_state} onChange={(event) => setFilter("lifecycle_state", event.target.value)} data-testid="filter-lifecycle">
+            <option value="">{t("lifecycle: any")}</option>
+            <option value="active">{t("active")}</option>
+            <option value="quarantined">{t("quarantined")}</option>
+            <option value="recovery">{t("recovery")}</option>
+            <option value="retiring">{t("retiring")}</option>
+            <option value="retired">{t("retired")}</option>
+          </select>
+        </Field>
+        <Field label={t("Maintenance")}>
+          <select value={filters.maintenance} onChange={(event) => setFilter("maintenance", event.target.value)} data-testid="filter-maintenance">
+            <option value="">{t("maintenance: any")}</option>
+            <option value="true">{t("in a maintenance window")}</option>
+            <option value="false">{t("outside a maintenance window")}</option>
+          </select>
+        </Field>
+        <Field label={t("Capability")}>
+          <select value={filters.capability} onChange={(event) => setFilter("capability", event.target.value)} data-testid="filter-capability">
+            <option value="">{t("capability: any")}</option>
+            {CAPABILITIES.map((name) => <option key={name} value={name}>{name}</option>)}
+          </select>
+        </Field>
+        {/* What the host's helper does with a request carrying no capability of
+            the panel. Only enforce refuses one, so the other values are the
+            hosts a migration still has to reach. */}
+        <Field label={t("Helper mode")}>
+          <select value={filters.helper_mode} onChange={(event) => setFilter("helper_mode", event.target.value)} data-testid="filter-helper-mode">
+            <option value="">{t("helper mode: any")}</option>
+            <option value="enforce">{t("enforce: an unsigned request is refused")}</option>
+            <option value="prefer">{t("prefer: an unsigned request is carried out")}</option>
+            <option value="observe">{t("observe: nothing is refused")}</option>
+            <option value="unknown">{t("unknown: the host has not said")}</option>
+          </select>
+        </Field>
+        <Field label={t("Channel")}>
+          <select value={filters.channel} onChange={(event) => setFilter("channel", event.target.value)} data-testid="filter-channel">
+            <option value="">{t("channel: any")}</option>
+            {RELEASE_CHANNELS.map((name) => <option key={name} value={name}>{name}</option>)}
+          </select>
+        </Field>
+        <Field label={t("Reboot")}>
+          <select value={filters.reboot_required} onChange={(event) => setFilter("reboot_required", event.target.value)} data-testid="filter-reboot">
+            <option value="">{t("reboot: any")}</option>
+            <option value="true">{t("reboot required")}</option>
+            <option value="false">{t("no reboot required")}</option>
+          </select>
+        </Field>
+        <Field label={t("Security updates")}>
+          <select value={filters.security_updates} onChange={(event) => setFilter("security_updates", event.target.value)} data-testid="filter-security">
+            <option value="">{t("security updates: any")}</option>
+            <option value="true">{t("security updates waiting")}</option>
+            <option value="false">{t("no security updates")}</option>
+          </select>
+        </Field>
+        <Field label={t("Directory domain")} hint={t("the directory domain the host is joined to, e.g. corp.example")}>
+          <input
+            placeholder={t("directory domain")} value={filters.identity_domain}
+            onChange={(event) => setFilter("identity_domain", event.target.value)} data-testid="filter-identity-domain"
+          />
+        </Field>
+        <Field label={t("Failure domain")} hint={t("the rack, zone or cluster an operator placed the host in, e.g. rack-a")}>
+          <input
+            placeholder={t("failure domain")} value={filters.failure_domain}
+            onChange={(event) => setFilter("failure_domain", event.target.value)} data-testid="filter-failure-domain"
+          />
+        </Field>
+        {/* The route: a relay by name for whoever may list them, the
+            identifier for the rest. */}
+        <Field label={t("Relay")}>
+          {canSeeRelays ? (
+            <select value={filters.relay} onChange={(event) => setFilter("relay", event.target.value)} data-testid="filter-relay">
+              <option value="">{t("relay: any")}</option>
+              {(relays).map((one) => <option key={one.id} value={one.id}>{one.name}</option>)}
+              {filters.relay && !relays.some((one) => one.id === filters.relay) && (
+                <option value={filters.relay}>{filters.relay}</option>
+              )}
+            </select>
+          ) : (
+            <input
+              placeholder={t("relay identifier")} value={filters.relay}
+              onChange={(event) => setFilter("relay", event.target.value)} data-testid="filter-relay-id"
+            />
+          )}
+        </Field>
+        {/* The team: who the hosts belong to, which is not where they
+            stand. The last entry is the list an administrator works
+            through after the teams are created - the hosts nobody has
+            placed in one, reachable through their site alone. */}
+        <Field label={t("Team")} hint={t("the team the hosts belong to; a team is a boundary of authority, not a label")}>
+          <select value={filters.team} onChange={(event) => setFilter("team", event.target.value)} data-testid="filter-team">
+            <option value="">{t("team: any")}</option>
+            {(teams).map((one) => <option key={one.id} value={one.id}>{one.name}</option>)}
+            <option value="none">{t("no team")}</option>
+            {filters.team && filters.team !== "none" && !teams.some((one) => one.id === filters.team) && (
+              <option value={filters.team}>{filters.team}</option>
+            )}
+          </select>
+        </Field>
+        {/* The "needs attention" boxes: each is the filter a dashboard
+            tile links here with, ticked means "only these". */}
+        <Field label={t("Needs attention")} wide>
+          <Check
+            checked={filters.failed_units === "true"}
+            onChange={(on) => setFilter("failed_units", on ? "true" : "")}
+          >
+            <span title={t("hosts with at least one failed unit")}>{t("failed units")}</span>
+          </Check>
+          <Check
+            checked={filters.package_db_broken === "true"}
+            onChange={(on) => setFilter("package_db_broken", on ? "true" : "")}
+          >
+            <span title={t("hosts whose package database the last operation found broken")}>
+              {t("package database broken")}
+            </span>
+          </Check>
+          <Check
+            checked={filters.sssd_offline === "true"}
+            onChange={(on) => setFilter("sssd_offline", on ? "true" : "")}
+          >
+            <span title={t("domain-joined hosts whose SSSD reports itself offline")}>{t("SSSD offline")}</span>
+          </Check>
+          <Check
+            checked={filters.agent_behind === "true"}
+            onChange={(on) => setFilter("agent_behind", on ? "true" : "")}
+          >
+            <span title={t("hosts whose agent is older than the newest one in the fleet")}>{t("agent behind")}</span>
+          </Check>
+        </Field>
+      </Fields>
+    </>
   );
 }
 

@@ -222,12 +222,6 @@ describe("what may stand on a board", () => {
    * these titles are expressions and a name would be the fragile part.
    */
   const stillWrong: Record<string, number> = {
-    "Bulk.tsx": 1,
-    "Directory.tsx": 7,
-    "Groups.tsx": 1,
-    "Hosts.tsx": 2,
-    "Reads.tsx": 1,
-    "Schedules.tsx": 1,
   };
 
   /** Each `<Card …>` of a file, from its opening tag to its own close. */

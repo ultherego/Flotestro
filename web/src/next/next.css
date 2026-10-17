@@ -2210,6 +2210,22 @@
 .fl-app .fl-arrange-what { flex: 1 1 auto; min-width: 0; font-size: var(--t-small); color: var(--text-faint); }
 .fl-app .fl-arrange select { width: auto; }
 .fl-app .fl-placed { grid-auto-rows: var(--row); align-items: stretch; }
+
+/* Reading a board: no fixed rows. Each container is as tall as its content
+   and a row is as tall as its tallest, which is what a wall of cards is.
+   Arranging keeps the fixed rows, because dragging needs a grid to snap to. */
+.fl-app .fl-placed.fl-flowing {
+  grid-auto-rows: auto;
+  align-items: stretch;
+  /* A container that does not fit beside the one before it goes to the
+     next row, and the one after it that DOES fit takes the hole. Without
+     `dense` a four-wide card followed by a twelve-wide one stood alone
+     with eight columns of empty floor beside it. */
+  grid-auto-flow: row dense;
+}
+.fl-app .fl-placed.fl-flowing .fl-held { height: auto; }
+.fl-app .fl-placed.fl-flowing .fl-held > * { height: 100%; min-height: 0; }
+.fl-app .fl-placed.fl-flowing .fl-card-body { overflow: visible; }
 .fl-app .fl-held { position: relative; min-width: 0; min-height: 0; }
 .fl-app .fl-held > * { height: 100%; }
 

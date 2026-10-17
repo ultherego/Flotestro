@@ -17,7 +17,7 @@ import { useT, type Translate } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Band, Bars, Bones, Card, Check, Dot, Empty, Field, Fields, Find, Grid, HeadActions, Modal, Note, Pill, Problem, Seg, Stack, Table, Tabs, Tag, Tags, Toolbar, TwoLine, type Segment, type Tone,
+  Actions, Band, Bars, Bones, Card, Check, Dot, Empty, Field, Fields, Find, Form, Grid, HeadActions, Modal, Note, Pill, Problem, Seg, Stack, Table, Tabs, Tag, Tags, Toolbar, TwoLine, useTab, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -29,6 +29,9 @@ import {
  * comes back is merged here - as one timeline for a read of lines, or as
  * one host's typed result at a time for a read that answers in a shape.
  */
+
+/** The sub-tabs: the reads, and the form that orders one. */
+const READ_TABS = ["reads", "new"] as const;
 
 export function Reads() {
   const { id } = useParams();
@@ -64,7 +67,9 @@ function ReadList() {
   const [prefill] = useSearchParams();
   // A link from a host page opens the form already filled in; the plain
   // address opens on the list.
-  const [building, setBuilding] = useState(prefill.has("action"));
+  const [tab, go] = useTab(READ_TABS);
+  const building = tab === "new";
+  useEffect(() => { if (prefill.has("action")) go("new"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The list grows page by page from the newest read, so an operator who
   // reads a lot keeps the old fan-outs one click away rather than losing
@@ -107,15 +112,21 @@ function ReadList() {
       <HeadActions><button
             type="button"
             className={building ? "fl-quiet" : undefined}
-            onClick={() => setBuilding(!building)}
+            onClick={() => go(building ? "reads" : "new")}
             data-testid="new-read"
           >
             {building ? t("Hide the form") : t("New read")}
           </button></HeadActions>
-      <Board screen={READS_SCREEN} catalogue={READS} drawn={{
-        // A container with nothing to draw is left off the grid, so the
-        // form takes its place only while it is open.
-        form: building && <NewRead onDone={() => setBuilding(false)} />,
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "reads", label: t("Reads") },
+          { value: "new", label: t("New read") },
+        ]}
+      />
+      {building && <NewRead onDone={() => go("reads")} />}
+      {!building && <Board screen={READS_SCREEN} catalogue={READS} drawn={{
         states: (
           <Card
             title={t("Hosts by state")}
@@ -183,7 +194,7 @@ function ReadList() {
                 : <Bars items={byOperation.map(([action, n]) => ({ label: <code>{action}</code>, value: n }))} />}
           </Card>
         ),
-      }} />
+      }} />}
     </>
   );
 }
@@ -327,10 +338,10 @@ function NewRead({ onDone }: { onDone: () => void }) {
   const ready = Boolean(chosen) && payload.value !== undefined && named && !tooMany;
 
   return (
-    <Card
+    <Form
       title={t("New read")}
       note={t("Every host gets an ordinary job with this payload; the results are merged here. A read needs no approval.")}
-      foot={
+      actions={
         <Actions>
           <button type="button" onClick={() => create.mutate()} disabled={!ready || create.isPending} data-testid="order-read">
             {create.isPending ? t("Ordering…") : t("Read")}
@@ -437,7 +448,7 @@ function NewRead({ onDone }: { onDone: () => void }) {
           )}
         </Stack>
       )}
-    </Card>
+    </Form>
   );
 }
 
@@ -951,7 +962,6 @@ function Result({ action, host }: { action: string; host: ReadFanOutHost }) {
 export const READS_SCREEN = "next_reads";
 
 export const READS: BoardEntry[] = [
-  { key: "form", title: "New read", width: 12, height: 11 },
   { key: "states", title: "Hosts by state", width: 12, height: 2 },
   { key: "list", title: "Your reads", width: 9, height: 7 },
   { key: "operations", title: "By operation", width: 3, height: 5 },

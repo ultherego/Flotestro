@@ -13,7 +13,7 @@ import { useT, type Translate } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Kpi, Kpis,
+  Actions, Banner, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Form, Kpi, Kpis,
   Modal, Note, Pill, Presets, Problem, Row, Stack, Table, Toolbar, TwoLine, type Tone,
 } from "../kit";
 import { campaignTone } from "./Campaigns";
@@ -470,6 +470,190 @@ export function Schedules() {
         </Banner>
       )}
 
+      {editing && (
+      <Form
+        title={editingID ? t("Edit the schedule") : t("New schedule")}
+        note={t("The order is the body of a campaign as the Bulk workspace sends it. It is checked now for what can never be placed, and at every moment for everything else - the hosts, the rights, the window - with the refusal kept on the schedule.")}
+        actions={
+          <Actions>
+            <Button
+              onClick={() => { if (check?.body) save.mutate(check.body); }}
+              disabled={save.isPending || !check?.body}
+              testId="schedule-save"
+            >
+              {save.isPending ? t("Saving…") : editingID ? t("Save the schedule") : t("Create the schedule")}
+            </Button>
+            <Button kind="quiet" onClick={() => { setEditing(null); setEditingID(""); }} testId="schedule-cancel">
+              {t("Cancel")}
+            </Button>
+            {check?.problem && <Note>{problemWords(t, check.problem)}</Note>}
+          </Actions>
+        }
+      >
+        <Stack>
+          <Fields>
+            <Field label={t("Name")}>
+              <input
+                value={editing.name}
+                onChange={(event) => setEditing({ ...editing, name: event.target.value })}
+                data-testid="schedule-name"
+              />
+            </Field>
+            <Field
+              label={t("Timezone")}
+              hint={t("The IANA zone the hours of the recurrence are read in; the first run is typed in the browser's zone.")}
+            >
+              <input
+                className="fl-mono"
+                value={editing.timezone}
+                onChange={(event) => setEditing({ ...editing, timezone: event.target.value })}
+                data-testid="schedule-timezone"
+              />
+            </Field>
+            <Field
+              label={t("First run")}
+              hint={editing.recurrence.freq
+                ? t("Optional with a recurrence: the earliest moment the rule may name.")
+                : t("The one moment the order is placed at, in the browser's zone.")}
+            >
+              <input
+                type="datetime-local"
+                value={editing.startAt}
+                onChange={(event) => setEditing({ ...editing, startAt: event.target.value })}
+                data-testid="schedule-start"
+              />
+            </Field>
+            <Field label={t("Repeats")}>
+              <select
+                value={editing.recurrence.freq}
+                onChange={(event) => setEditing({
+                  ...editing,
+                  recurrence: { ...editing.recurrence, freq: event.target.value as RecurrenceForm["freq"] },
+                })}
+                data-testid="schedule-freq"
+              >
+                <option value="">{t("does not repeat")}</option>
+                <option value="MONTHLY">{t("monthly")}</option>
+                <option value="WEEKLY">{t("weekly")}</option>
+              </select>
+            </Field>
+            {editing.recurrence.freq === "MONTHLY" && (
+              <Field
+                label={t("Day of the month")}
+                hint={t("A month without that day is skipped: the 31st names nothing in April.")}
+              >
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={editing.recurrence.monthDay}
+                  onChange={(event) => setEditing({
+                    ...editing,
+                    recurrence: { ...editing.recurrence, monthDay: Number(event.target.value) },
+                  })}
+                  data-testid="schedule-monthday"
+                />
+              </Field>
+            )}
+            {editing.recurrence.freq && (
+              <>
+                <Field label={t("Hour")}>
+                  <input
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={editing.recurrence.hour}
+                    onChange={(event) => setEditing({
+                      ...editing,
+                      recurrence: { ...editing.recurrence, hour: Number(event.target.value) },
+                    })}
+                    data-testid="schedule-hour"
+                  />
+                </Field>
+                <Field label={t("Minute")}>
+                  <input
+                    type="number"
+                    min={0}
+                    max={59}
+                    value={editing.recurrence.minute}
+                    onChange={(event) => setEditing({
+                      ...editing,
+                      recurrence: { ...editing.recurrence, minute: Number(event.target.value) },
+                    })}
+                    data-testid="schedule-minute"
+                  />
+                </Field>
+              </>
+            )}
+          </Fields>
+
+          {/* The weekdays are a set and not a choice of one, so they are
+              seven switches rather than a Seg. Each carries its own
+              label; a label inside a Field's label would name the field
+              twice and neither of them well. */}
+          {editing.recurrence.freq === "WEEKLY" && (
+            <Stack>
+              <Note>{t("Weekdays")}</Note>
+              <Row>
+                {WEEKDAYS.map((day) => (
+                  <Check
+                    key={day}
+                    checked={editing.recurrence.weekdays.includes(day)}
+                    onChange={(on) => setEditing({
+                      ...editing,
+                      recurrence: {
+                        ...editing.recurrence,
+                        weekdays: on
+                          ? [...editing.recurrence.weekdays, day]
+                          : editing.recurrence.weekdays.filter((present) => present !== day),
+                      },
+                    })}
+                  >
+                    {day}
+                  </Check>
+                ))}
+              </Row>
+            </Stack>
+          )}
+
+          <Fields>
+            <Field
+              label={t("Order (JSON)")}
+              wide
+              hint={t("What POST /api/v1/campaigns takes: name, action, payload, selector and the rollout policy. The reason below is carried into it when it names none.")}
+            >
+              <textarea
+                rows={12}
+                className="fl-mono"
+                spellCheck={false}
+                value={editing.orderText}
+                onChange={(event) => setEditing({ ...editing, orderText: event.target.value })}
+                data-testid="schedule-order"
+              />
+            </Field>
+            <Field
+              label={t("Reason or change reference")}
+              wide
+              hint={t("Kept in the audit trail with the schedule and shown to the approver of every campaign it places.")}
+            >
+              <input
+                value={editing.reason}
+                onChange={(event) => setEditing({ ...editing, reason: event.target.value })}
+                data-testid="schedule-reason"
+              />
+            </Field>
+          </Fields>
+
+          <Check
+            checked={editing.enabled}
+            onChange={(on) => setEditing({ ...editing, enabled: on })}
+          >
+            {t("enabled")}
+          </Check>
+        </Stack>
+      </Form>
+      )}
+
       <Board screen={SCHEDULES_SCREEN} catalogue={SCHEDULES} drawn={{
         counts: (
           <Kpis>
@@ -502,190 +686,6 @@ export function Schedules() {
             />
           </Kpis>
         ),
-
-        form: editing ? (
-          <Card
-            title={editingID ? t("Edit the schedule") : t("New schedule")}
-            note={t("The order is the body of a campaign as the Bulk workspace sends it. It is checked now for what can never be placed, and at every moment for everything else - the hosts, the rights, the window - with the refusal kept on the schedule.")}
-            foot={
-              <Actions>
-                <Button
-                  onClick={() => { if (check?.body) save.mutate(check.body); }}
-                  disabled={save.isPending || !check?.body}
-                  testId="schedule-save"
-                >
-                  {save.isPending ? t("Saving…") : editingID ? t("Save the schedule") : t("Create the schedule")}
-                </Button>
-                <Button kind="quiet" onClick={() => { setEditing(null); setEditingID(""); }} testId="schedule-cancel">
-                  {t("Cancel")}
-                </Button>
-                {check?.problem && <Note>{problemWords(t, check.problem)}</Note>}
-              </Actions>
-            }
-          >
-            <Stack>
-              <Fields>
-                <Field label={t("Name")}>
-                  <input
-                    value={editing.name}
-                    onChange={(event) => setEditing({ ...editing, name: event.target.value })}
-                    data-testid="schedule-name"
-                  />
-                </Field>
-                <Field
-                  label={t("Timezone")}
-                  hint={t("The IANA zone the hours of the recurrence are read in; the first run is typed in the browser's zone.")}
-                >
-                  <input
-                    className="fl-mono"
-                    value={editing.timezone}
-                    onChange={(event) => setEditing({ ...editing, timezone: event.target.value })}
-                    data-testid="schedule-timezone"
-                  />
-                </Field>
-                <Field
-                  label={t("First run")}
-                  hint={editing.recurrence.freq
-                    ? t("Optional with a recurrence: the earliest moment the rule may name.")
-                    : t("The one moment the order is placed at, in the browser's zone.")}
-                >
-                  <input
-                    type="datetime-local"
-                    value={editing.startAt}
-                    onChange={(event) => setEditing({ ...editing, startAt: event.target.value })}
-                    data-testid="schedule-start"
-                  />
-                </Field>
-                <Field label={t("Repeats")}>
-                  <select
-                    value={editing.recurrence.freq}
-                    onChange={(event) => setEditing({
-                      ...editing,
-                      recurrence: { ...editing.recurrence, freq: event.target.value as RecurrenceForm["freq"] },
-                    })}
-                    data-testid="schedule-freq"
-                  >
-                    <option value="">{t("does not repeat")}</option>
-                    <option value="MONTHLY">{t("monthly")}</option>
-                    <option value="WEEKLY">{t("weekly")}</option>
-                  </select>
-                </Field>
-                {editing.recurrence.freq === "MONTHLY" && (
-                  <Field
-                    label={t("Day of the month")}
-                    hint={t("A month without that day is skipped: the 31st names nothing in April.")}
-                  >
-                    <input
-                      type="number"
-                      min={1}
-                      max={31}
-                      value={editing.recurrence.monthDay}
-                      onChange={(event) => setEditing({
-                        ...editing,
-                        recurrence: { ...editing.recurrence, monthDay: Number(event.target.value) },
-                      })}
-                      data-testid="schedule-monthday"
-                    />
-                  </Field>
-                )}
-                {editing.recurrence.freq && (
-                  <>
-                    <Field label={t("Hour")}>
-                      <input
-                        type="number"
-                        min={0}
-                        max={23}
-                        value={editing.recurrence.hour}
-                        onChange={(event) => setEditing({
-                          ...editing,
-                          recurrence: { ...editing.recurrence, hour: Number(event.target.value) },
-                        })}
-                        data-testid="schedule-hour"
-                      />
-                    </Field>
-                    <Field label={t("Minute")}>
-                      <input
-                        type="number"
-                        min={0}
-                        max={59}
-                        value={editing.recurrence.minute}
-                        onChange={(event) => setEditing({
-                          ...editing,
-                          recurrence: { ...editing.recurrence, minute: Number(event.target.value) },
-                        })}
-                        data-testid="schedule-minute"
-                      />
-                    </Field>
-                  </>
-                )}
-              </Fields>
-
-              {/* The weekdays are a set and not a choice of one, so they are
-                  seven switches rather than a Seg. Each carries its own
-                  label; a label inside a Field's label would name the field
-                  twice and neither of them well. */}
-              {editing.recurrence.freq === "WEEKLY" && (
-                <Stack>
-                  <Note>{t("Weekdays")}</Note>
-                  <Row>
-                    {WEEKDAYS.map((day) => (
-                      <Check
-                        key={day}
-                        checked={editing.recurrence.weekdays.includes(day)}
-                        onChange={(on) => setEditing({
-                          ...editing,
-                          recurrence: {
-                            ...editing.recurrence,
-                            weekdays: on
-                              ? [...editing.recurrence.weekdays, day]
-                              : editing.recurrence.weekdays.filter((present) => present !== day),
-                          },
-                        })}
-                      >
-                        {day}
-                      </Check>
-                    ))}
-                  </Row>
-                </Stack>
-              )}
-
-              <Fields>
-                <Field
-                  label={t("Order (JSON)")}
-                  wide
-                  hint={t("What POST /api/v1/campaigns takes: name, action, payload, selector and the rollout policy. The reason below is carried into it when it names none.")}
-                >
-                  <textarea
-                    rows={12}
-                    className="fl-mono"
-                    spellCheck={false}
-                    value={editing.orderText}
-                    onChange={(event) => setEditing({ ...editing, orderText: event.target.value })}
-                    data-testid="schedule-order"
-                  />
-                </Field>
-                <Field
-                  label={t("Reason or change reference")}
-                  wide
-                  hint={t("Kept in the audit trail with the schedule and shown to the approver of every campaign it places.")}
-                >
-                  <input
-                    value={editing.reason}
-                    onChange={(event) => setEditing({ ...editing, reason: event.target.value })}
-                    data-testid="schedule-reason"
-                  />
-                </Field>
-              </Fields>
-
-              <Check
-                checked={editing.enabled}
-                onChange={(on) => setEditing({ ...editing, enabled: on })}
-              >
-                {t("enabled")}
-              </Check>
-            </Stack>
-          </Card>
-        ) : undefined,
 
         schedules: (
           <Card
@@ -998,7 +998,6 @@ export const SCHEDULES_SCREEN = "next_schedules";
 
 export const SCHEDULES: BoardEntry[] = [
   { key: "counts", title: "Schedules at a glance", width: 12, height: 2 },
-  { key: "form", title: "The schedule", width: 12, height: 9 },
   { key: "schedules", title: "Schedules", width: 12, height: 7 },
   { key: "calendar", title: "Maintenance calendar", width: 12, height: 7 },
 ];
