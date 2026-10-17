@@ -219,9 +219,9 @@ export function Policies({ host }: { host: Host }) {
 
 /** The containers this module can draw, and the shape each ships with. */
 export const HOST_POLICIES: BoardEntry[] = [
-  { key: "verdicts", title: "Verdicts", width: 7, height: 2 },
-  { key: "policies", title: "Policies that select this host", width: 5, height: 2 },
-  { key: "rules", title: "Rules", width: 12, height: 4 },
+  { key: "verdicts", title: "Verdicts", width: 7, height: 4 },
+  { key: "policies", title: "Policies that select this host", width: 5, height: 4 },
+  { key: "rules", title: "Rules", width: 12, height: 7 },
 ];
 
 /** The name this module's arrangement is stored under. */

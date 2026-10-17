@@ -997,8 +997,8 @@ function DayEntry({ entry, day }: { entry: CalendarEntry; day: string }) {
 export const SCHEDULES_SCREEN = "next_schedules";
 
 export const SCHEDULES: BoardEntry[] = [
-  { key: "counts", title: "Schedules at a glance", width: 12, height: 1 },
-  { key: "form", title: "The schedule", width: 12, height: 5 },
-  { key: "schedules", title: "Schedules", width: 12, height: 4 },
-  { key: "calendar", title: "Maintenance calendar", width: 12, height: 4 },
+  { key: "counts", title: "Schedules at a glance", width: 12, height: 2 },
+  { key: "form", title: "The schedule", width: 12, height: 9 },
+  { key: "schedules", title: "Schedules", width: 12, height: 7 },
+  { key: "calendar", title: "Maintenance calendar", width: 12, height: 7 },
 ];

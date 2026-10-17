@@ -173,9 +173,9 @@ export const REPORTS_SCREEN = "next_reports";
 
 /** The containers of the board, and the width each ships with. */
 export const REPORTS: BoardEntry[] = [
-  { key: "patch_status", title: "Patch status", width: 12, height: 6 },
-  { key: "campaigns", title: "Campaigns", width: 12, height: 6 },
-  { key: "compliance", title: "Compliance", width: 12, height: 7 },
+  { key: "patch_status", title: "Patch status", width: 12, height: 11 },
+  { key: "campaigns", title: "Campaigns", width: 12, height: 11 },
+  { key: "compliance", title: "Compliance", width: 12, height: 13 },
 ];
 
 export function Reports() {

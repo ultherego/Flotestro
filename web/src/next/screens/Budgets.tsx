@@ -826,13 +826,13 @@ function DeleteBudget({ budget, onClose }: { budget: BudgetState; onClose: () =>
 export const BUDGETS_SCREEN = "next_budgets";
 
 export const BUDGETS: BoardEntry[] = [
-  { key: "keys", title: "How many keys", width: 3, height: 1 },
-  { key: "saturated", title: "Saturated", width: 3, height: 1 },
-  { key: "waiting_jobs", title: "Waiting jobs", width: 3, height: 1 },
-  { key: "waiting_hosts", title: "Waiting hosts", width: 3, height: 1 },
-  { key: "capacity", title: "Capacity", width: 6, height: 2 },
-  { key: "by_family", title: "By family", width: 3, height: 2 },
-  { key: "by_class", title: "By class", width: 3, height: 2 },
-  { key: "list", title: "Budgets", width: 12, height: 5 },
-  { key: "budget", title: "The budget", width: 12, height: 4 },
+  { key: "keys", title: "How many keys", width: 3, height: 2 },
+  { key: "saturated", title: "Saturated", width: 3, height: 2 },
+  { key: "waiting_jobs", title: "Waiting jobs", width: 3, height: 2 },
+  { key: "waiting_hosts", title: "Waiting hosts", width: 3, height: 2 },
+  { key: "capacity", title: "Capacity", width: 6, height: 4 },
+  { key: "by_family", title: "By family", width: 3, height: 4 },
+  { key: "by_class", title: "By class", width: 3, height: 4 },
+  { key: "list", title: "Budgets", width: 12, height: 9 },
+  { key: "budget", title: "The budget", width: 12, height: 7 },
 ];

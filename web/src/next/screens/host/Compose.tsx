@@ -459,11 +459,11 @@ export const HOST_COMPOSE_SCREEN = "next_host_compose";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const HOST_COMPOSE: BoardEntry[] = [
-  { key: "deployments", title: "Deployments", width: 8, height: 2 },
-  { key: "changes_by_kind", title: "What the plan would change", width: 4, height: 2 },
-  { key: "project", title: "Project", width: 7, height: 4 },
-  { key: "history", title: "History", width: 5, height: 4 },
-  { key: "plan", title: "Plan", width: 6, height: 3 },
-  { key: "services", title: "Services after deployment", width: 6, height: 3 },
-  { key: "deploy", title: "Deploy this plan", width: 12, height: 2 },
+  { key: "deployments", title: "Deployments", width: 8, height: 4 },
+  { key: "changes_by_kind", title: "What the plan would change", width: 4, height: 4 },
+  { key: "project", title: "Project", width: 7, height: 7 },
+  { key: "history", title: "History", width: 5, height: 7 },
+  { key: "plan", title: "Plan", width: 6, height: 5 },
+  { key: "services", title: "Services after deployment", width: 6, height: 5 },
+  { key: "deploy", title: "Deploy this plan", width: 12, height: 4 },
 ];

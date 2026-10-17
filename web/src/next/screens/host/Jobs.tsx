@@ -520,8 +520,8 @@ export const HOST_JOBS_SCREEN = "next_host_jobs";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const HOST_JOBS: BoardEntry[] = [
-  { key: "outcomes", title: "Outcomes", width: 5, height: 2 },
-  { key: "modules", title: "By module", width: 4, height: 2 },
-  { key: "requesters", title: "Requested by", width: 3, height: 2 },
-  { key: "jobs", title: "Jobs", width: 12, height: 6 },
+  { key: "outcomes", title: "Outcomes", width: 5, height: 4 },
+  { key: "modules", title: "By module", width: 4, height: 4 },
+  { key: "requesters", title: "Requested by", width: 3, height: 4 },
+  { key: "jobs", title: "Jobs", width: 12, height: 11 },
 ];

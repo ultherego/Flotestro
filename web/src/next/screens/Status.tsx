@@ -892,20 +892,20 @@ export const STATUS_SCREEN = "next_status";
  * server's answer, so they are added to the catalogue as they arrive.
  */
 export const STATUS: BoardEntry[] = [
-  { key: "judged", title: "Parts judged", width: 4, height: 1 },
-  { key: "fine", title: "Fine", width: 2, height: 1 },
-  { key: "wanting", title: "Need a look", width: 2, height: 1 },
-  { key: "not_judged", title: "Not judged", width: 2, height: 1 },
-  { key: "latency", title: "Database round trip", width: 2, height: 1 },
+  { key: "judged", title: "Parts judged", width: 4, height: 2 },
+  { key: "fine", title: "Fine", width: 2, height: 2 },
+  { key: "wanting", title: "Need a look", width: 2, height: 2 },
+  { key: "not_judged", title: "Not judged", width: 2, height: 2 },
+  { key: "latency", title: "Database round trip", width: 2, height: 2 },
   // A pie over four outcomes, a square per part and one arc: each is a
   // drawing of a fixed size with a short legend under it.
-  { key: "division", title: "How the parts divide", width: 4, height: 2 },
-  { key: "squares", title: "Every part at a glance", width: 4, height: 2 },
-  { key: "pool", title: "The database pool", width: 4, height: 2 },
+  { key: "division", title: "How the parts divide", width: 4, height: 4 },
+  { key: "squares", title: "Every part at a glance", width: 4, height: 4 },
+  { key: "pool", title: "The database pool", width: 4, height: 4 },
   // A row per part that is not fine: at worst every part of the panel.
-  { key: "attention", title: "Parts that need a look", width: 12, height: 3 },
+  { key: "attention", title: "Parts that need a look", width: 12, height: 5 },
   // Two charts of 120 pixels each, with their labels.
-  { key: "since", title: "Since this screen was opened", width: 12, height: 3 },
+  { key: "since", title: "Since this screen was opened", width: 12, height: 5 },
 ];
 
 /**

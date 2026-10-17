@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import type { ReactElement } from "react";
-import { Band, Bars, Card, Chart, Diff, Find, Flow, Head, Kpi, Menu, MenuItem, Needs, Pie, Pill, Readout, Ring, Squares, Table, Tile, Toolbar, pageNumbers, stacked } from "./kit";
+import { Actions, Band, Bars, Button, Card, Chart, Diff, Fact, Facts, Find, Flow, Form, Head, Kpi, Menu, MenuItem, Needs, pageNumbers, Pie, Pill, Readout, Reasons, Ring, Section, Squares, stacked, Table, Tile, Toolbar } from "./kit";
 
 /**
  * The kit decides what the panel looks like, so the rules a screen must
@@ -223,6 +223,79 @@ describe("what needs somebody", () => {
     expect(row).toHaveTextContent("—");
     expect(row).toHaveTextContent("not counted");
   });
+
+  it("keeps the count next to the label it answers", () => {
+    draw(<Needs items={[{ label: "Updates waiting", value: 18 }, { label: "Failed units", value: 0 }]} />);
+    const label = screen.getByText("Updates waiting");
+    // The two were the ends of a flex row, so the card put four hundred
+    // pixels between a label and its own number and the pair stopped
+    // reading as a pair. The count is the label's next neighbour, and
+    // the grid lines the counts up in a column of their own.
+    expect(label.nextElementSibling?.className).toContain("fl-needs-count");
+    expect(label.nextElementSibling).toHaveTextContent("18");
+    expect(document.querySelector(".fl-needs-label")?.className).not.toContain("fl-grow");
+  });
+
+  it("puts the word for an uncounted one after the dash, not before it", () => {
+    draw(<Needs items={[{ label: "Reboot required" }]} />);
+    const count = document.querySelector(".fl-needs-count") as HTMLElement;
+    // The dash keeps the column the numbers line up in; the explanation
+    // stands to the side of it.
+    expect(count).toHaveTextContent("—");
+    expect(count.nextElementSibling?.className).toContain("fl-needs-why");
+  });
+});
+
+describe("a fact read as one word", () => {
+  it("never lets a machine id be broken in two", () => {
+    draw(
+      <Facts>
+        <Fact label="Machine ID" mono>1c0cc8cf0b1a4171a51dbc7acba3c6ef</Fact>
+      </Facts>,
+    );
+    const fact = screen.getByText("Machine ID").closest(".fl-fact") as HTMLElement;
+    // Wrapped, "1c0cc8cf0b1a4171a51dbc7acba" over "3c6ef" reads as two
+    // values. The fact takes two columns of the block instead, and
+    // carries the whole of the value as its own title for where even
+    // that is too narrow.
+    expect(fact.className).toContain("fl-whole");
+    expect(fact.querySelector("dd")).toHaveAttribute("title", "1c0cc8cf0b1a4171a51dbc7acba3c6ef");
+  });
+
+  it("does not claim two columns for a value nobody reported", () => {
+    draw(<Facts><Fact label="Boot ID" mono>{null}</Fact></Facts>);
+    const fact = screen.getByText("Boot ID").closest(".fl-fact") as HTMLElement;
+    expect(fact.className).not.toContain("fl-whole");
+    expect(fact).toHaveTextContent("—");
+  });
+
+  it("reads a dash a screen wrote by hand as the unknown it meant", () => {
+    draw(<Facts><Fact label="Serial number" mono>—</Fact></Facts>);
+    const fact = screen.getByText("Serial number").closest(".fl-fact") as HTMLElement;
+    // Set in the face of a serial number, a dash reads as a value.
+    expect(fact.querySelector("dd")?.className).toContain("fl-faint");
+    expect(fact.querySelector("dd")?.className).not.toContain("fl-mono");
+  });
+});
+
+describe("what is not here and why", () => {
+  it("says the thing's own sentence beside its name", () => {
+    draw(
+      <Reasons
+        testId="missing"
+        items={[
+          { name: "docker", reason: "this host has no Docker socket", to: "/hosts/1/containers" },
+          { name: "network" },
+        ]}
+      />,
+    );
+    const list = screen.getByTestId("missing");
+    expect(within(list).getByText("this host has no Docker socket")).toBeInTheDocument();
+    expect(within(list).getByRole("link", { name: "docker" })).toHaveAttribute("href", "/hosts/1/containers");
+    // A thing that said nothing says so for itself rather than borrowing
+    // the sentence of the one above it.
+    expect(within(list).getByText("it gave no reason")).toBeInTheDocument();
+  });
 });
 
 describe("a card holding a list", () => {
@@ -240,6 +313,23 @@ describe("a card holding a list", () => {
     expect(card.querySelector(".fl-card-bar .fl-toolbar")).not.toBeNull();
     expect(card.querySelector(".fl-card-body .fl-toolbar")).toBeNull();
     expect(card.querySelector(".fl-card-body")).toHaveTextContent("rows");
+  });
+
+  it("takes the card's own actions down to its foot", () => {
+    draw(
+      <Card title="System" foot="Source: agent">
+        <p>facts</p>
+        <Actions><Button onClick={() => {}}>Rename host</Button></Actions>
+      </Card>,
+    );
+    const card = document.querySelector(".fl-card") as HTMLElement;
+    // Left among the facts, the button floated two lines under the last
+    // of them with the rest of the card empty beneath it. It belongs at
+    // the foot, outside the part that scrolls, like the toolbar above.
+    expect(card.querySelector(".fl-card-acts .fl-actions")).not.toBeNull();
+    expect(card.querySelector(".fl-card-body .fl-actions")).toBeNull();
+    expect(card.querySelector(".fl-card-body")).toHaveTextContent("facts");
+    expect(card.querySelector(".fl-card-foot")).toHaveTextContent("Source: agent");
   });
 
   it("draws a note even where there is no title above it", () => {
@@ -429,5 +519,46 @@ describe("the way back above a screen's name", () => {
     cleanup();
     draw(<Head title="agent-arch" />);
     expect(document.querySelector(".fl-head-crumb")).toBeNull();
+  });
+});
+
+/**
+ * A card is for what is read, a form for what is done. The panel drew
+ * forms as cards on a board until 17.10, and the owner's words for the
+ * result were that pressing a button opened a form inside a container
+ * carrying somebody else's title, so nobody knew what was going on.
+ */
+describe("a form is not a card", () => {
+  it("carries its own name, its fields and its buttons apart", () => {
+    draw(
+      <Form
+        testId="join"
+        title="Join the domain"
+        note="The host joins with a one-time password."
+        actions={<button type="submit">Join</button>}
+      >
+        <label className="fl-field"><span className="fl-field-label">Domain</span><input /></label>
+      </Form>,
+    );
+    const form = screen.getByTestId("join");
+    expect(form.tagName).toBe("FORM");
+    // Not a card: a card would put this title in .fl-card-title.
+    expect(form.querySelector(".fl-card")).toBeNull();
+    expect(form.querySelector(".fl-form-title")).toHaveTextContent("Join the domain");
+    // The button that commits sits in the foot, divided from the fields.
+    expect(form.querySelector(".fl-form-foot")).toHaveTextContent("Join");
+  });
+
+  it("submits without reloading the page", () => {
+    let sent = 0;
+    draw(<Form testId="f" title="One" onSubmit={() => { sent += 1; }} actions={<button type="submit">Go</button>}>x</Form>);
+    fireEvent.submit(screen.getByTestId("f"));
+    expect(sent).toBe(1);
+  });
+
+  it("names a block that is neither a card nor a form", () => {
+    draw(<Section testId="s" title="Mounts" note="As the host reports them.">rows</Section>);
+    expect(screen.getByTestId("s").tagName).toBe("SECTION");
+    expect(screen.getByTestId("s").querySelector(".fl-card")).toBeNull();
   });
 });

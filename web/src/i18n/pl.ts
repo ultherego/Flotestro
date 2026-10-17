@@ -6897,6 +6897,7 @@ export const pl: Record<string, string> = {
   "what it said": "co powiedział",
   "has reported no adapter at all": "nie zgłosił żadnego adaptera",
   "gave no reason": "nie podał powodu",
+  "it gave no reason": "nie podał powodu",
   "which operations": "które operacje",
   "No gap was found, and some hosts have reported no adapter at all - so this is not the same as a fleet with nothing missing.": "Nie znaleziono żadnej luki, a część hostów nie zgłosiła ani jednego adaptera - to nie to samo, co flota, której nic nie brakuje.",
   "what is missing": "czego brakuje",

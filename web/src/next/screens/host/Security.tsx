@@ -830,13 +830,13 @@ export function Security({ host }: { host: Host }) {
 
 /** The containers this module can draw, and the shape each ships with. */
 export const HOST_SECURITY: BoardEntry[] = [
-  { key: "checks", title: "Checks", width: 12, height: 2 },
-  { key: "need", title: "Need action", width: 4, height: 2 },
-  { key: "reach", title: "Where the host listens", width: 4, height: 2 },
-  { key: "state", title: "Protective state", width: 4, height: 2 },
-  { key: "sockets", title: "Listening sockets", width: 12, height: 3 },
-  { key: "findings", title: "Findings", width: 12, height: 5 },
-  { key: "plans", title: "Remediation plans", width: 12, height: 4 },
+  { key: "checks", title: "Checks", width: 12, height: 4 },
+  { key: "need", title: "Need action", width: 4, height: 4 },
+  { key: "reach", title: "Where the host listens", width: 4, height: 4 },
+  { key: "state", title: "Protective state", width: 4, height: 4 },
+  { key: "sockets", title: "Listening sockets", width: 12, height: 5 },
+  { key: "findings", title: "Findings", width: 12, height: 9 },
+  { key: "plans", title: "Remediation plans", width: 12, height: 7 },
 ];
 
 /** The name this module's arrangement is stored under. */

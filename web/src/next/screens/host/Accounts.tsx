@@ -1196,10 +1196,10 @@ function sourceName(t: (text: string) => string, source: LocalAccount["source"])
 
 /** The containers this module can draw, and the shape each ships with. */
 export const HOST_ACCOUNTS: BoardEntry[] = [
-  { key: "access", title: "Access", width: 8, height: 2 },
-  { key: "sources", title: "By source", width: 4, height: 2 },
-  { key: "create", title: "New local account", width: 12, height: 3 },
-  { key: "accounts", title: "Accounts", width: 12, height: 4 },
+  { key: "access", title: "Access", width: 8, height: 4 },
+  { key: "sources", title: "By source", width: 4, height: 4 },
+  { key: "create", title: "New local account", width: 12, height: 5 },
+  { key: "accounts", title: "Accounts", width: 12, height: 7 },
 ];
 
 /** The name this module's arrangement is stored under. */

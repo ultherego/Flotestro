@@ -410,13 +410,13 @@ export const KERNEL_SCREEN = "next_host_kernel";
 
 /** The containers this module can draw, and the shape each ships with. */
 export const HOST_KERNEL: BoardEntry[] = [
-  { key: "applied", title: "Settings as desired", width: 4, height: 1 },
-  { key: "waiting", title: "Not applied yet", width: 4, height: 1 },
-  { key: "loaded", title: "Modules loaded", width: 4, height: 1 },
-  { key: "profile", title: "Settings", width: 7, height: 2 },
-  { key: "kernel", title: "Kernel", width: 5, height: 2 },
-  { key: "settings", title: "Settings", width: 7, height: 3 },
-  { key: "set", title: "Set kernel settings", width: 5, height: 3 },
-  { key: "modules", title: "Modules", width: 7, height: 4 },
-  { key: "load", title: "Load a module", width: 5, height: 2 },
+  { key: "applied", title: "Settings as desired", width: 4, height: 2 },
+  { key: "waiting", title: "Not applied yet", width: 4, height: 2 },
+  { key: "loaded", title: "Modules loaded", width: 4, height: 2 },
+  { key: "profile", title: "Settings", width: 7, height: 4 },
+  { key: "kernel", title: "Kernel", width: 5, height: 4 },
+  { key: "settings", title: "Settings", width: 7, height: 5 },
+  { key: "set", title: "Set kernel settings", width: 5, height: 5 },
+  { key: "modules", title: "Modules", width: 7, height: 7 },
+  { key: "load", title: "Load a module", width: 5, height: 4 },
 ];

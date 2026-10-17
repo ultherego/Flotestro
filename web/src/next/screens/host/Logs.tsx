@@ -826,8 +826,8 @@ export const HOST_LOGS_SCREEN = "next_host_logs";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const HOST_LOGS: BoardEntry[] = [
-  { key: "counts", title: "Lines on screen", width: 8, height: 2 },
-  { key: "reading", title: "Reading", width: 4, height: 2 },
-  { key: "read", title: "Read", width: 5, height: 5 },
-  { key: "output", title: "Output", width: 7, height: 5 },
+  { key: "counts", title: "Lines on screen", width: 8, height: 4 },
+  { key: "reading", title: "Reading", width: 4, height: 4 },
+  { key: "read", title: "Read", width: 5, height: 9 },
+  { key: "output", title: "Output", width: 7, height: 9 },
 ];

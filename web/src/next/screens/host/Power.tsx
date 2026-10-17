@@ -868,13 +868,13 @@ export const POWER_SCREEN = "next_host_power";
 
 /** The containers this module can draw, and the shape each ships with. */
 export const HOST_POWER: BoardEntry[] = [
-  { key: "uptime", title: "Uptime", width: 4, height: 1 },
-  { key: "reboot", title: "Reboot required", width: 4, height: 1 },
-  { key: "holds", title: "Inhibitors", width: 4, height: 1 },
-  { key: "bands", title: "Holds and reasons", width: 7, height: 2 },
-  { key: "boot", title: "This boot", width: 5, height: 3 },
-  { key: "maintenance", title: "Maintenance window", width: 7, height: 3 },
-  { key: "act", title: "Power", width: 5, height: 3 },
-  { key: "inhibitors", title: "Inhibitors", width: 7, height: 3 },
-  { key: "boots", title: "Last boots", width: 12, height: 3 },
+  { key: "uptime", title: "Uptime", width: 4, height: 2 },
+  { key: "reboot", title: "Reboot required", width: 4, height: 2 },
+  { key: "holds", title: "Inhibitors", width: 4, height: 2 },
+  { key: "bands", title: "Holds and reasons", width: 7, height: 4 },
+  { key: "boot", title: "This boot", width: 5, height: 5 },
+  { key: "maintenance", title: "Maintenance window", width: 7, height: 5 },
+  { key: "act", title: "Power", width: 5, height: 5 },
+  { key: "inhibitors", title: "Inhibitors", width: 7, height: 5 },
+  { key: "boots", title: "Last boots", width: 12, height: 5 },
 ];

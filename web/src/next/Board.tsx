@@ -28,13 +28,17 @@ import { HeadActions, Problem } from "./kit";
  */
 
 /**
- * Nothing stands on anything else.
+ * Nothing stands on anything else, and nothing floats.
  *
  * What the hand is holding keeps the cell it was put on; everything it
  * landed on moves down until the grid is clear again, in the order it was
  * already in. Without this a container made wider simply covers its
  * neighbour, which reads as a panel that has broken rather than as a
  * grid that has been rearranged.
+ *
+ * Then everything rises as far as it can. A row holds containers of
+ * different heights, so the short one would otherwise leave a hole
+ * beneath it that the next container begins below rather than inside.
  */
 export function settle(widgets: BoardWidget[], held: string): BoardWidget[] {
   const over = (a: BoardWidget, b: BoardWidget) => {
@@ -54,6 +58,16 @@ export function settle(widgets: BoardWidget[], held: string): BoardWidget[] {
     while (settled.some((other) => over(placed, other))) {
       placed.y = (placed.y ?? 0) + 1;
     }
+    // Then back up as far as it will go. Containers in one row are rarely
+    // the same height, and without this the short one leaves a hole under
+    // itself that the next container cannot enter - it starts where its
+    // tall neighbour ends. Half a row of empty floor, over and over, is
+    // what made a board read as a heap of cards rather than one board.
+    while ((placed.y ?? 0) > 0) {
+      const lifted = { ...placed, y: (placed.y ?? 0) - 1 };
+      if (settled.some((other) => over(lifted, other))) break;
+      placed.y = lifted.y;
+    }
     settled.push(placed);
   }
   // The record keeps the order it had; only the places changed.
@@ -65,11 +79,18 @@ export function settle(widgets: BoardWidget[], held: string): BoardWidget[] {
  *
  * It is here and in `--row` of the stylesheet, and the two must
  * agree: the grid draws by the first and the corner measures by the
- * second, so a difference makes a container jump as it is sized. It is
- * the height of a headline tile, because that is the smallest thing
- * anybody puts on a board.
+ * second, so a difference makes a container jump as it is sized.
+ *
+ * It was 152px until 17.10 - the height of a headline tile, on the
+ * reasoning that a tile is the smallest thing anybody puts on a board.
+ * The reasoning was wrong, and the measurement said so: a cell could
+ * only be 152, 324 or 496 tall, so a container whose words ended at
+ * 180px had to take 324 and carry a hand's width of empty floor under
+ * them. Half of every board was built that way. The row is half that
+ * now and a tile is two of them, so a container can be the size of what
+ * it holds to within a line of text.
  */
-export const ROW = 152;
+export const ROW = 76;
 
 export function Board({ screen, catalogue, drawn, notices }: {
   /**

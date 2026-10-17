@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../lib/api";
 import { absoluteTime, goDuration, relativeTime } from "../../lib/format";
@@ -13,7 +12,7 @@ import { Board } from "../Board";
 import { CertificateAuthority, CertificateAuthorityWarning } from "./CertificateAuthority";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Bones, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Grid, Note, Pill, Problem, Screen, stacked, Tabs,
+  Actions, Banner, Bones, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Note, Pill, Problem, Screen, stacked,
 } from "../kit";
 
 /**
@@ -58,9 +57,6 @@ export function hubState(data: unknown, error: unknown, loading: boolean): HubSt
 /**
  * One section of the settings area.
  *
- * `to` is the place in the new panel that holds the section's own screen;
- * `href` is the panel as it is, for a section the rewrite has not reached.
- * A section with neither is drawn here, in full.
  */
 type Section = {
   key: string;
@@ -72,101 +68,38 @@ type Section = {
   note: string;
   /** What the section decides, in the words of what it changes. */
   body: string;
-  to?: string;
-  href?: string;
 };
 
+/**
+ * The tabs of this screen.
+ *
+ * There were nine until 17.10 and eight of them held nothing: a title, the
+ * same sentence under it, the same thing again as a paragraph, and a button
+ * leading somewhere else. The owner's word for it was that they were junk,
+ * and he was right - the rail on the left is what leads to a screen; a tab
+ * that only points at one is a signpost pretending to be a place. Two of
+ * them also lied: the fleet authority pointed at /certificates although the
+ * section lives here, and the access review pointed at itself.
+ */
 export const TABS: Section[] = [
   {
     key: "general",
     label: "General",
-    permission: "",
+    permission: "settings.read",
     icon: "settings",
     note: "What the panel stores, and what it was started with.",
     body: "",
-  },
-  {
-    key: "users",
-    label: "Users",
-    permission: "principal.manage",
-    icon: "access",
-    note: "Who may sign in to this installation, and what each of them holds.",
-    body: "Who may sign in, the identities the panel keeps records of, the roles each of them holds and the scope every role is held over. A role granted by a group of the identity provider cannot be taken away one person at a time: the mapping is where it is edited.",
-    to: "/access",
-  },
-  {
-    key: "roles",
-    label: "Roles",
-    permission: "host.read",
-    icon: "access",
-    note: "The roles of this installation and the permissions each one carries.",
-    body: "A role is a set of permissions; a scope says where it applies - the whole fleet, a site, an environment or a team. The catalogue is read beside the people holding the roles, because a permission is only readable against who has it.",
-    to: "/access",
-  },
-  {
-    key: "mappings",
-    label: "Group mappings",
-    permission: "principal.manage",
-    icon: "directory",
-    note: "Which group of the identity provider grants which role.",
-    body: "A mapping turns a group of the identity provider into a role at the next sign-in. It is the only place such a grant can be withdrawn: taken away from one person it would come back the next time they signed in.",
-    to: "/access",
-  },
-  {
-    key: "review",
-    label: "Access review",
-    permission: "principal.manage",
-    icon: "audit",
-    note: "Who holds what, read once rather than one record at a time.",
-    body: "The whole of the access rules on one page, so that a grant nobody remembers making is visible without opening every identity in turn.",
-    href: "/settings?tab=review",
-  },
-  {
-    key: "ca",
-    label: "Fleet CA",
-    permission: "principal.manage",
-    icon: "certificates",
-    note: "The authority the fleet's own certificates are signed by.",
-    body: "Rotation is four deliberate stages, each an ordinary campaign: distribute the new authority, verify it reached every host, rotate the leaves, withdraw the old one. A withdrawal is refused while any host is unverified or still holds a certificate issued by it.",
-    to: "/certificates",
-  },
-  {
-    key: "channels",
-    label: "Notification channels",
-    permission: "notification.read",
-    icon: "notifications",
-    note: "Where the panel sends what it has to say.",
-    body: "A channel is an address the panel delivers to and the events it delivers there. A delivery that failed is kept and retried rather than dropped, so a channel that is quiet is a channel nobody subscribed, not a fleet with nothing to report.",
-    href: "/notifications",
-  },
-  {
-    key: "budgets",
-    label: "Budgets",
-    permission: "budget.read",
-    icon: "campaigns",
-    note: "How much of the fleet may be changed at once.",
-    body: "A budget is the reason a job or a campaign stands in the queue instead of running. It is the fleet's own brake: the number of hosts that may be touched in a window, read against what the operations are asking for.",
-    href: "/budgets",
-  },
-  {
-    key: "policies",
-    label: "Policies",
-    permission: "policy.read",
-    icon: "campaigns",
-    note: "What is declared to be true, and what is ordered for the rest.",
-    body: "A policy is the third model of change, next to the job and the campaign: it states what is to hold across a set of hosts and orders campaigns for the hosts where it does not.",
-    href: "/policies",
   },
 ];
 
 export type TabKey = string;
 
 /**
- * The tab the address names, or the first one for a name that is not a tab.
+ * Where an address naming a tab lands.
  *
- * A tab the sign-in may not open is not one either: an address kept in a
- * bookmark from a wider role must land somewhere that exists rather than on
- * an empty screen.
+ * This screen had nine tabs until 17.10 and now has none - eight were
+ * signposts and the ninth was the screen itself. A bookmark kept from then
+ * still names one, so it is answered rather than left to draw nothing.
  */
 export function settingsTab(value: string | null, permissions: Set<string>): TabKey {
   const open = TABS.filter((tab) => tab.permission === "" || permissions.has(tab.permission));
@@ -176,17 +109,12 @@ export function settingsTab(value: string | null, permissions: Set<string>): Tab
 
 export function Settings() {
   const t = useT();
-  const [searchParams, setSearchParams] = useSearchParams();
   const whoami = useQuery({
     queryKey: ["whoami"],
     queryFn: () => api.get<Whoami>("/api/v1/whoami"),
     staleTime: 5 * 60 * 1000,
   });
   const permissions = new Set(whoami.data?.permissions ?? []);
-  const tab = settingsTab(searchParams.get("tab"), permissions);
-  const open = TABS.filter((one) => one.permission === "" || permissions.has(one.permission));
-  const here = open.find((one) => one.key === tab) ?? TABS[0];
-  const setTab = (next: TabKey) => setSearchParams(next === "general" ? {} : { tab: next });
 
   return (
     <Screen
@@ -202,14 +130,7 @@ export function Settings() {
         </>
       }
     >
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        tabs={open.map((one) => ({ value: one.key, label: t(one.label) }))}
-      />
-      {tab === "general"
-        ? <General permissions={permissions} />
-        : <Elsewhere section={here} />}
+      <General permissions={permissions} />
     </Screen>
   );
 }
@@ -221,26 +142,6 @@ export function Settings() {
  * and in whose words, which is the part worth having on a settings screen,
  * and then leads to where it is done.
  */
-function Elsewhere({ section }: { section: Section }) {
-  const t = useT();
-  return (
-    <Grid>
-      <Card span={12} title={t(section.label)} note={t(section.note)}>
-        <Note>{t(section.body)}</Note>
-        <Empty
-          icon={section.icon}
-          action={section.to
-            ? <Link className="fl-btn" to={section.to} data-testid="settings-open-section">{t("Open {name}", { name: t(section.label) })}</Link>
-            : <a className="fl-btn fl-quiet" href={section.href} data-testid="settings-open-section">{t("Open it in the panel as it is")}</a>}
-        >
-          {section.to
-            ? t("This section has a screen of its own in the new panel.")
-            : t("This section has not been rewritten yet; it is unchanged in the panel as it is.")}
-        </Empty>
-      </Card>
-    </Grid>
-  );
-}
 
 /* --------------------------------------------------------------- general */
 
@@ -1065,16 +966,16 @@ export const SETTINGS_SCREEN = "next_settings";
 export const SETTINGS: BoardEntry[] = [
   // Six fields, each with the sentence that says what it costs, and the
   // count of what a change would remove under them.
-  { key: "retention", title: "Monitoring retention", width: 12, height: 4 },
+  { key: "retention", title: "Monitoring retention", width: 12, height: 7 },
   // What is in force, and the interfaces this panel read off itself with
   // a choice between them.
-  { key: "address", title: "Advertised address", width: 12, height: 4 },
+  { key: "address", title: "Advertised address", width: 12, height: 7 },
   // The trust set, what still hangs on each authority, and the two phases
   // of a rotation. It is the one section on this tab that changes what a
   // thousand machines will accept, so it is given the room to be read.
-  { key: "fleet_ca", title: "Fleet CA", width: 12, height: 4 },
+  { key: "fleet_ca", title: "Fleet CA", width: 12, height: 7 },
   // A heading and the search under it: the areas themselves are below.
-  { key: "started_with", title: "What the process was started with", width: 12, height: 1 },
+  { key: "started_with", title: "What the process was started with", width: 12, height: 2 },
 ];
 
 /**

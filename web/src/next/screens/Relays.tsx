@@ -586,14 +586,14 @@ export function bufferSummary(points: RelayBufferPoint[], stepSeconds: number) {
 export const RELAYS_SCREEN = "next_relays";
 
 export const RELAYS: BoardEntry[] = [
-  { key: "count", title: "How many relays", width: 3, height: 1 },
-  { key: "attested", title: "Hosts attested", width: 3, height: 1 },
-  { key: "waiting", title: "Items waiting", width: 3, height: 1 },
-  { key: "dropped", title: "Results dropped", width: 3, height: 1 },
-  { key: "state", title: "State", width: 8, height: 2 },
-  { key: "sites", title: "By site", width: 4, height: 2 },
-  { key: "list", title: "Relays", width: 12, height: 4 },
-  { key: "relay", title: "The relay", width: 6, height: 3 },
-  { key: "hosts", title: "Hosts behind the relay", width: 6, height: 3 },
-  { key: "buffer", title: "The spool over time", width: 12, height: 4 },
+  { key: "count", title: "How many relays", width: 3, height: 2 },
+  { key: "attested", title: "Hosts attested", width: 3, height: 2 },
+  { key: "waiting", title: "Items waiting", width: 3, height: 2 },
+  { key: "dropped", title: "Results dropped", width: 3, height: 2 },
+  { key: "state", title: "State", width: 8, height: 4 },
+  { key: "sites", title: "By site", width: 4, height: 4 },
+  { key: "list", title: "Relays", width: 12, height: 7 },
+  { key: "relay", title: "The relay", width: 6, height: 5 },
+  { key: "hosts", title: "Hosts behind the relay", width: 6, height: 5 },
+  { key: "buffer", title: "The spool over time", width: 12, height: 7 },
 ];

@@ -1238,14 +1238,14 @@ function OneAdvisory({ cve }: { cve: string }) {
 export const VULNERABILITIES_SCREEN = "next_vulnerabilities";
 
 export const VULNERABILITIES: BoardEntry[] = [
-  { key: "findings", title: "Open findings", width: 3, height: 1 },
-  { key: "fixable", title: "Vendor fix released", width: 3, height: 1 },
-  { key: "nofix", title: "No fix yet", width: 3, height: 1 },
-  { key: "unassessed", title: "Hosts never judged", width: 3, height: 1 },
-  { key: "split", title: "What the vendor offers", width: 5, height: 2 },
-  { key: "assessed", title: "Judged", width: 3, height: 2 },
-  { key: "worst", title: "Where to start", width: 4, height: 2 },
-  { key: "held", title: "Feed fetches held back", width: 12, height: 1 },
-  { key: "sources", title: "Security data", width: 12, height: 3 },
-  { key: "list", title: "The list", width: 12, height: 6 },
+  { key: "findings", title: "Open findings", width: 3, height: 2 },
+  { key: "fixable", title: "Vendor fix released", width: 3, height: 2 },
+  { key: "nofix", title: "No fix yet", width: 3, height: 2 },
+  { key: "unassessed", title: "Hosts never judged", width: 3, height: 2 },
+  { key: "split", title: "What the vendor offers", width: 5, height: 4 },
+  { key: "assessed", title: "Judged", width: 3, height: 4 },
+  { key: "worst", title: "Where to start", width: 4, height: 4 },
+  { key: "held", title: "Feed fetches held back", width: 12, height: 2 },
+  { key: "sources", title: "Security data", width: 12, height: 5 },
+  { key: "list", title: "The list", width: 12, height: 11 },
 ];

@@ -879,15 +879,15 @@ export const FIREWALL_SCREEN = "next_host_firewall";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const FIREWALL_BOARD: BoardEntry[] = [
-  { key: "ours", title: "Rules owned by Flotestro", width: 3, height: 1 },
-  { key: "total", title: "Rules in force", width: 3, height: 1 },
-  { key: "drift", title: "Differences from the boot source", width: 3, height: 1 },
-  { key: "adapter", title: "Adapter", width: 3, height: 1 },
-  { key: "owners", title: "Effective rules by owner", width: 8, height: 2 },
-  { key: "firewall", title: "Firewall", width: 4, height: 3 },
-  { key: "wizard", title: "New rule", width: 12, height: 4 },
-  { key: "differences", title: "Differences from the boot source", width: 12, height: 3 },
-  { key: "zones", title: "Zones", width: 12, height: 3 },
-  { key: "rules", title: "Effective rules", width: 12, height: 5 },
-  { key: "source", title: "Where this came from", width: 12, height: 1 },
+  { key: "ours", title: "Rules owned by Flotestro", width: 3, height: 2 },
+  { key: "total", title: "Rules in force", width: 3, height: 2 },
+  { key: "drift", title: "Differences from the boot source", width: 3, height: 2 },
+  { key: "adapter", title: "Adapter", width: 3, height: 2 },
+  { key: "owners", title: "Effective rules by owner", width: 8, height: 4 },
+  { key: "firewall", title: "Firewall", width: 4, height: 5 },
+  { key: "wizard", title: "New rule", width: 12, height: 7 },
+  { key: "differences", title: "Differences from the boot source", width: 12, height: 5 },
+  { key: "zones", title: "Zones", width: 12, height: 5 },
+  { key: "rules", title: "Effective rules", width: 12, height: 9 },
+  { key: "source", title: "Where this came from", width: 12, height: 2 },
 ];

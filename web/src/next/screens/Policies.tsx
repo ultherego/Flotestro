@@ -1323,16 +1323,16 @@ function PolicyCampaigns({ policyID }: { policyID: string }) {
 export const POLICIES_SCREEN = "next_policies";
 
 export const POLICIES: BoardEntry[] = [
-  { key: "count", title: "How many policies", width: 3, height: 1 },
-  { key: "published", title: "Published", width: 3, height: 1 },
-  { key: "drifting", title: "With drift", width: 3, height: 1 },
-  { key: "erring", title: "With errors", width: 3, height: 1 },
-  { key: "standing", title: "Standing", width: 12, height: 1 },
-  { key: "list", title: "Policies", width: 12, height: 5 },
-  { key: "policy", title: "The policy", width: 6, height: 3 },
-  { key: "compliance", title: "Compliance", width: 6, height: 2 },
-  { key: "document", title: "Document", width: 12, height: 6 },
-  { key: "results", title: "Results", width: 12, height: 5 },
-  { key: "versions", title: "Versions", width: 6, height: 4 },
-  { key: "campaigns", title: "Remediation campaigns", width: 6, height: 4 },
+  { key: "count", title: "How many policies", width: 3, height: 2 },
+  { key: "published", title: "Published", width: 3, height: 2 },
+  { key: "drifting", title: "With drift", width: 3, height: 2 },
+  { key: "erring", title: "With errors", width: 3, height: 2 },
+  { key: "standing", title: "Standing", width: 12, height: 2 },
+  { key: "list", title: "Policies", width: 12, height: 9 },
+  { key: "policy", title: "The policy", width: 6, height: 5 },
+  { key: "compliance", title: "Compliance", width: 6, height: 4 },
+  { key: "document", title: "Document", width: 12, height: 11 },
+  { key: "results", title: "Results", width: 12, height: 9 },
+  { key: "versions", title: "Versions", width: 6, height: 7 },
+  { key: "campaigns", title: "Remediation campaigns", width: 6, height: 7 },
 ];

@@ -1032,11 +1032,11 @@ function ChannelFields({ form, subjects, severities, onChange }: {
 export const NOTIFICATIONS_SCREEN = "next_notifications";
 
 export const NOTIFICATIONS: BoardEntry[] = [
-  { key: "channels_count", title: "Channels", width: 3, height: 1 },
-  { key: "carrying", title: "Carrying events", width: 3, height: 1 },
-  { key: "dead", title: "Dead letters", width: 3, height: 1 },
-  { key: "shape", title: "What the queue is made of", width: 3, height: 1 },
-  { key: "form", title: "The channel being written", width: 12, height: 5 },
-  { key: "channels", title: "Channels", width: 12, height: 4 },
-  { key: "queue", title: "Delivery queue", width: 12, height: 6 },
+  { key: "channels_count", title: "Channels", width: 3, height: 2 },
+  { key: "carrying", title: "Carrying events", width: 3, height: 2 },
+  { key: "dead", title: "Dead letters", width: 3, height: 2 },
+  { key: "shape", title: "What the queue is made of", width: 3, height: 2 },
+  { key: "form", title: "The channel being written", width: 12, height: 9 },
+  { key: "channels", title: "Channels", width: 12, height: 7 },
+  { key: "queue", title: "Delivery queue", width: 12, height: 11 },
 ];

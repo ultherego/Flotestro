@@ -740,12 +740,12 @@ function CheckHosts({ check }: { check: FleetCheck }) {
 export const SECURITY_SCREEN = "next_security";
 
 export const SECURITY: BoardEntry[] = [
-  { key: "findings", title: "Findings", width: 4, height: 1 },
-  { key: "fixable", title: "Fixable from here", width: 4, height: 1 },
-  { key: "unjudged", title: "Not judged", width: 4, height: 1 },
-  { key: "outcome", title: "How the checks came out", width: 5, height: 1 },
-  { key: "severity", title: "By severity", width: 3, height: 2 },
-  { key: "worst", title: "Where to start", width: 4, height: 2 },
-  { key: "checks", title: "Checks", width: 12, height: 4 },
-  { key: "remediate", title: "Remediate on the fleet", width: 12, height: 5 },
+  { key: "findings", title: "Findings", width: 4, height: 2 },
+  { key: "fixable", title: "Fixable from here", width: 4, height: 2 },
+  { key: "unjudged", title: "Not judged", width: 4, height: 2 },
+  { key: "outcome", title: "How the checks came out", width: 5, height: 2 },
+  { key: "severity", title: "By severity", width: 3, height: 4 },
+  { key: "worst", title: "Where to start", width: 4, height: 4 },
+  { key: "checks", title: "Checks", width: 12, height: 7 },
+  { key: "remediate", title: "Remediate on the fleet", width: 12, height: 9 },
 ];

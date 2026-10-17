@@ -43,7 +43,7 @@
   --fl-bar: 60px;
   --fl-gutter: var(--s5);
   --fl-pad: var(--s7);
-  --row: 152px;
+  --row: 76px;
 
   --fl-card: color-mix(in srgb, var(--bg-panel) 94%, var(--text) 6%);
   /* The light falls from the top left, as it does on the headline tile
@@ -842,8 +842,23 @@
 .fl-app .fl-card-body > .fl-ring,
 .fl-app .fl-card-body > .fl-arcs { flex: 1 1 auto; min-height: 0; }
 
+/* The same for an action a card draws from inside one of its own parts,
+   where the kit cannot lift it out: it settles at the foot of the body
+   instead of floating two lines under the last fact with the rest of
+   the card empty beneath it. */
+.fl-app .fl-card-body > .fl-actions:last-child { margin-top: auto; padding-top: var(--s3); }
+
 .fl-app .fl-flush .fl-card-body { padding: var(--s3) 0 0; }
 .fl-app .fl-flush .fl-card-head { padding-bottom: var(--s1); }
+
+/* What the card lets you do stands at its foot, outside the part that
+   scrolls: a button left among the facts floated two lines under the
+   last of them with the rest of the card empty beneath it. */
+.fl-app .fl-card-acts {
+  flex: 0 0 auto;
+  padding: var(--s3) var(--s5);
+  border-top: 1px solid var(--border);
+}
 
 .fl-app .fl-card-foot {
   flex: 0 0 auto;
@@ -852,6 +867,10 @@
   font-size: var(--t-small);
   color: var(--text-faint);
 }
+
+/* Two strips at the foot of one card are one strip with a line through
+   the middle of it, not two boxes. */
+.fl-app .fl-card-acts + .fl-card-foot { border-top: 0; padding-top: 0; }
 
 /* ---------------------------------------------------------------------
    8. One number as a widget
@@ -1278,6 +1297,80 @@
 .fl-app .fl-chart-hit { fill: transparent; cursor: crosshair; }
 
 /* ---------------------------------------------------------------------
+   9b. The form and the section - what a sub-tab is made of
+
+   A card is for what is read. A form is for what is done. They must not
+   look the same, or a reader cannot tell a reading from a decision - the
+   fault the owner named on 17.10, when a button opened a form inside a
+   container that carried somebody else's title.
+   ------------------------------------------------------------------ */
+
+.fl-app .fl-form,
+.fl-app .fl-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  min-width: 0;
+}
+
+.fl-app .fl-form {
+  max-width: 1120px;
+  padding: var(--s5) var(--s5) var(--s4);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border);
+  background: linear-gradient(152deg,
+    color-mix(in srgb, var(--accent) 5%, var(--fl-card)),
+    var(--fl-card) 62%);
+  box-shadow: var(--fl-lift);
+}
+
+/* One line of light along the top edge, as a card has: it says the thing
+   is raised off the page without drawing a second border. */
+.fl-app .fl-form { position: relative; overflow: hidden; }
+.fl-app .fl-form::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--fl-edge) 20%, var(--fl-edge) 80%, transparent);
+  pointer-events: none;
+}
+
+.fl-app .fl-form-head { display: flex; flex-direction: column; gap: var(--s1); }
+
+.fl-app .fl-form-title {
+  margin: 0;
+  font-size: var(--fl-card-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.fl-app .fl-form-note { margin: 0; font-size: var(--t-small); color: var(--text-faint); }
+
+.fl-app .fl-form-body { display: flex; flex-direction: column; gap: var(--s4); }
+
+/* The buttons of a form sit at its foot, divided from the fields, so the
+   one that commits is never mistaken for one more field. */
+.fl-app .fl-form-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3);
+  padding-top: var(--s4);
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+/* A form inside a form's body needs no second face. */
+.fl-app .fl-form .fl-fields,
+.fl-app .fl-form-body > .fl-fields {
+  max-width: none;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+/* ---------------------------------------------------------------------
    10. The table
    ------------------------------------------------------------------ */
 
@@ -1477,13 +1570,49 @@
 .fl-app .fl-feed-who { display: block; margin-top: 1px; font-size: var(--t-small); color: var(--text-faint); }
 .fl-app .fl-feed-when { flex: 0 0 auto; font-size: var(--t-small); color: var(--text-faint); white-space: nowrap; }
 
+/* What is not here, and the words of whatever said so: the name on one
+   line and the sentence under it, in a block of columns as wide as what
+   stands in them. */
+.fl-app .fl-reasons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, max-content));
+  justify-content: start;
+  gap: var(--s3) var(--s5);
+}
+
+.fl-app .fl-reason { min-width: 0; max-width: 46ch; }
+
+.fl-app .fl-reason-name {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--t-small);
+  color: var(--text);
+}
+
+.fl-app .fl-reason-why {
+  display: block;
+  margin-top: 1px;
+  font-size: var(--t-small);
+  color: var(--text-muted);
+}
+
 /* A list of things that need somebody, inside a card. */
-.fl-app .fl-needs { display: flex; flex-direction: column; }
+/* The label, its count and the word for an uncounted one are three
+   tracks of one grid, so the counts line up in a column beside the
+   labels they answer. A row that was a flex line with a growing label
+   put the two at opposite edges of the card, four hundred pixels apart,
+   and the pair stopped reading as a pair. */
+.fl-app .fl-needs {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) max-content 1fr;
+}
 
 .fl-app .fl-needs-row {
-  display: flex;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: var(--s3);
+  gap: var(--s4);
   padding: var(--s3) var(--s5);
   color: inherit;
   text-decoration: none;
@@ -1493,17 +1622,18 @@
 
 .fl-app .fl-needs-row:last-child { border-bottom: 0; }
 .fl-app .fl-needs-row:hover { background: var(--bg-hover); text-decoration: none; }
-.fl-app .fl-needs-label { flex: 1 1 auto; min-width: 0; font-size: var(--t-body); }
+.fl-app .fl-needs-label { min-width: 0; font-size: var(--t-body); }
 
 .fl-app .fl-needs-count {
-  flex: 0 0 auto;
-  min-width: 32px;
+  min-width: 2ch;
   text-align: right;
   font-size: var(--t-lead);
   font-weight: 650;
   font-variant-numeric: tabular-nums;
   color: var(--tone-text, var(--text));
 }
+
+.fl-app .fl-needs-why { font-size: var(--t-small); color: var(--text-faint); }
 
 /* ---------------------------------------------------------------------
    13. Small things that say a state
@@ -1691,12 +1821,18 @@
   padding: 0 var(--s4);
   border-radius: var(--radius);
   border: 1px solid transparent;
-  background: var(--accent);
+  /* The one button that commits something wears a gradient, so the eye
+     finds it without reading: flat accent made every button on a form
+     look the same weight as the one that acts. */
+  background: linear-gradient(160deg,
+    color-mix(in srgb, var(--text) 10%, var(--accent)),
+    var(--accent) 72%);
   color: var(--accent-contrast);
   font-size: var(--t-small);
   font-weight: 650;
   text-decoration: none;
-  transition: filter var(--fl-quick);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: filter var(--fl-quick), box-shadow var(--fl-quick);
 }
 
 .fl-app .fl-screen button:not(.fl-quiet):not(.fl-plain):not(.fl-word):not(.fl-iconbtn):not(.fl-helpmark):not(.fl-tab):not(.fl-corner):not(.fl-seg button):hover,
@@ -1888,7 +2024,29 @@
   font-variant-numeric: tabular-nums;
 }
 
-.fl-app .fl-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--s4); }
+/* A form is a thing somebody acts on, so it sits on a face of its own
+   rather than running on as more of the card's prose: a hairline, a
+   gradient a shade off the card under it, and room of its own. The
+   owner's words were that the forms should look modern; this is that,
+   said once here so no screen says it differently. */
+.fl-app .fl-fields {
+  display: grid;
+  /* The same measure as a block of facts: a form whose fields run the
+     width of a 4K screen is a form nobody can follow down. */
+  max-width: 1120px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--s4);
+}
+
+.fl-app .fl-card-body > .fl-fields,
+.fl-app .fl-form > .fl-fields {
+  padding: var(--s5);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: linear-gradient(152deg,
+    color-mix(in srgb, var(--text) 4%, var(--bg-panel)),
+    var(--bg-panel) 68%);
+}
 .fl-app .fl-field { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
 .fl-app .fl-field.fl-wide { grid-column: 1 / -1; }
 
@@ -1926,8 +2084,45 @@
 .fl-app .fl-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
 .fl-app .fl-actions.fl-right { justify-content: flex-end; }
 
-.fl-app .fl-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--s4) var(--s5); margin: 0; }
-.fl-app .fl-fact { min-width: 0; }
+/* Facts form a block, they do not spread. The track used to be `1fr`, so
+   four facts in a wide card were pulled to four columns of three hundred
+   pixels and the card read as four lonely things rather than as one
+   paragraph of detail. A track is now as wide as what stands in it, no
+   wider than a readable measure, and the block is left-aligned with the
+   leftover space left over. */
+.fl-app .fl-facts {
+  display: grid;
+  /* A measure, not a screen. `auto-fit` across a 4K card made nine
+     columns of it, so a label and its value stood a metre apart and the
+     eye had to travel to put them back together - the owner's words were
+     that he did not want to read it. Four columns is as wide as a block
+     of detail stays readable; the rest of the card is left over, which
+     is what leftover space is for. */
+  max-width: 1120px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, max-content));
+  /* A fact that takes two tracks and does not fit in what is left of a
+     row would otherwise leave the rest of that row blank, which is the
+     scatter again by another route. The short facts behind it fill the
+     hole instead. */
+  grid-auto-flow: row dense;
+  justify-content: start;
+  gap: var(--s4) var(--s5);
+  margin: 0;
+}
+
+.fl-app .fl-fact { min-width: 0; max-width: 34ch; }
+
+/* A value read as one word - a machine id, a boot id, a path - takes two
+   tracks rather than being broken across two lines, where a reader has
+   no way to tell a wrap from a second value. Narrower than that it ends
+   in an ellipsis and carries the whole of itself as its own title. */
+.fl-app .fl-whole { grid-column: span 2; max-width: none; }
+
+.fl-app .fl-whole dd {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .fl-app .fl-fact dt {
   font-size: var(--t-label);
@@ -2014,6 +2209,25 @@
 .fl-app .fl-placed { grid-auto-rows: var(--row); align-items: stretch; }
 .fl-app .fl-held { position: relative; min-width: 0; min-height: 0; }
 .fl-app .fl-held > * { height: 100%; }
+
+/* Below the width where twelfths mean anything, the board stops being a
+   grid and becomes one card after another, each as tall as what is in
+   it - which is what the print rules have always done with it.
+   
+   The places come from Board.tsx as `grid-column` and `grid-row` written
+   on each container, so a media query cannot narrow them; but a block
+   container makes both inert, and the cards fall into one column without
+   a line of JavaScript. Until 17.10 there was no such rule and the board
+   kept seven-twelfths of a 1024px window for one card: the facts inside
+   it were cut off mid-word, which is what a reader saw first. */
+@media (max-width: 999px) {
+  .fl-app .fl-placed { display: block; }
+  .fl-app .fl-held,
+  .fl-app .fl-held > * { height: auto; }
+  .fl-app .fl-held + .fl-held { margin-top: var(--fl-gutter); }
+  /* Nothing scrolls inside a card that is no longer held to a height. */
+  .fl-app .fl-placed .fl-card-body { overflow: visible; }
+}
 
 /* A notice is a line, not a box the height of its cell. Stretched to
    fill one it read as a tall empty frame with a sentence floating in

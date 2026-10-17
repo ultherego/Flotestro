@@ -344,7 +344,7 @@ export const HOST_AUDIT_SCREEN = "next_host_audit";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const HOST_AUDIT: BoardEntry[] = [
-  { key: "outcomes", title: "Outcomes", width: 8, height: 2 },
-  { key: "actors", title: "By actor", width: 4, height: 3 },
-  { key: "events", title: "Audit", width: 12, height: 6 },
+  { key: "outcomes", title: "Outcomes", width: 8, height: 4 },
+  { key: "actors", title: "By actor", width: 4, height: 5 },
+  { key: "events", title: "Audit", width: 12, height: 11 },
 ];

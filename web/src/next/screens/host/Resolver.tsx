@@ -820,15 +820,15 @@ export const RESOLVER_SCREEN = "next_host_dns";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const RESOLVER_BOARD: BoardEntry[] = [
-  { key: "servers", title: "Name servers", width: 3, height: 1 },
-  { key: "domains", title: "Search domains", width: 3, height: 1 },
-  { key: "encrypted", title: "Links with DoT", width: 3, height: 1 },
-  { key: "owner", title: "Owner of resolv.conf", width: 3, height: 1 },
-  { key: "resolution", title: "Resolution", width: 8, height: 2 },
-  { key: "ownership", title: "Ownership", width: 4, height: 2 },
-  { key: "configuration", title: "Configuration", width: 6, height: 2 },
-  { key: "test", title: "Test resolution from the host", width: 6, height: 3 },
-  { key: "change", title: "Change resolver", width: 12, height: 5 },
-  { key: "links", title: "Per-link resolvers", width: 12, height: 3 },
-  { key: "source", title: "Where this came from", width: 12, height: 1 },
+  { key: "servers", title: "Name servers", width: 3, height: 2 },
+  { key: "domains", title: "Search domains", width: 3, height: 2 },
+  { key: "encrypted", title: "Links with DoT", width: 3, height: 2 },
+  { key: "owner", title: "Owner of resolv.conf", width: 3, height: 2 },
+  { key: "resolution", title: "Resolution", width: 8, height: 4 },
+  { key: "ownership", title: "Ownership", width: 4, height: 4 },
+  { key: "configuration", title: "Configuration", width: 6, height: 4 },
+  { key: "test", title: "Test resolution from the host", width: 6, height: 5 },
+  { key: "change", title: "Change resolver", width: 12, height: 9 },
+  { key: "links", title: "Per-link resolvers", width: 12, height: 5 },
+  { key: "source", title: "Where this came from", width: 12, height: 2 },
 ];

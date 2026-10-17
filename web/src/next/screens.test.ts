@@ -187,3 +187,68 @@ describe("what is never a container", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+/**
+ * A form is never a container of the board.
+ *
+ * This is the fault the owner named on 17.10, in his own words: pressing
+ * "Create identity" opened a form inside a container headed "Who may sign
+ * in", and from there nobody knows what is going on. It was on nineteen
+ * screens - a filter, a wizard step, a twenty-seven-field declaration -
+ * because the board treats a form and a reading as the same rectangle.
+ *
+ * A reading goes in a `Card` on the board. A decision goes in a `Form`,
+ * which is not a board container and never carries somebody else's title.
+ */
+describe("what may stand on a board", () => {
+  /**
+   * The twenty places where it is still true, on 17.10, and a ratchet.
+   *
+   * The list may only shrink. A screen converted to the pattern takes its
+   * line out; a screen that puts a new form on a board fails here the day
+   * it is written. Leaving the test simply red while the panel is
+   * converted would have meant a red suite for everybody for days, and a
+   * red suite nobody can fix is a suite people learn to ignore.
+   *
+   * What this cannot see: a container whose form is inside a component it
+   * calls - `set: <SetSettings host={host} />`. Those are on the list in
+   * DESIGN-UI.md, found by walking the running panel, and they are the
+   * reason this number is not the whole of the work.
+   */
+  const stillWrong = [
+    "Access.tsx: filter", "Audit.tsx: filter", "Profile.tsx: look",
+    "Profile.tsx: reading", "Schedules.tsx: form", "Security.tsx: remediate",
+    "Vulnerabilities.tsx: held", "host/Compose.tsx: project",
+    "host/Compose.tsx: deploy", "host/Identity.tsx: join",
+    "host/Identity.tsx: keytab", "host/Kernel.tsx: load", "host/Logs.tsx: read",
+    "host/Monitoring.tsx: silence", "host/Packages.tsx: change",
+    "host/Packages.tsx: agent", "host/Power.tsx: act", "host/Resolver.tsx: test",
+    "host/Time.tsx: probe", "host/Time.tsx: zone",
+  ];
+
+  it("puts no form in a container of it", () => {
+    const offenders: string[] = [];
+    for (const { name, text } of screens()) {
+      // The record the board draws from: `drawn={{ key: <…/> }}`.
+      const at = text.indexOf("drawn={{");
+      if (at < 0) continue;
+      const closes = text.indexOf("\n      }}", at);
+      const record = text.slice(at, closes > at ? closes : undefined);
+      // Cut the record at each key and read what belongs to it. An earlier
+      // version used one regular expression with a lookahead and a lazy
+      // quantifier, which stopped at the first end of line and so read
+      // nothing at all - it passed over every screen that was wrong.
+      const keys = [...record.matchAll(/^ {6,8}([a-z0-9_]+): /gm)];
+      for (const [index, key] of keys.entries()) {
+        const from = key.index ?? 0;
+        const to = index + 1 < keys.length ? keys[index + 1].index : record.length;
+        if (/<Fields>|<Field\b|<Form\b|<textarea/.test(record.slice(from, to))) {
+          offenders.push(`${name}: ${key[1]}`);
+        }
+      }
+    }
+    expect(offenders.filter((one) => !stillWrong.includes(one))).toEqual([]);
+    // And the ratchet: a line that is no longer true comes out of the list.
+    expect(stillWrong.filter((one) => !offenders.includes(one))).toEqual([]);
+  });
+});

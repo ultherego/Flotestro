@@ -939,17 +939,17 @@ function LocalSudoRules({ access }: { access: HostAccess }) {
 
 /** The containers this module can draw, and the shape each ships with. */
 export const HOST_IDENTITY: BoardEntry[] = [
-  { key: "domain", title: "Domain", width: 6, height: 2 },
-  { key: "client", title: "Directory client", width: 6, height: 2 },
-  { key: "offline", title: "Logins during a directory outage", width: 6, height: 2 },
-  { key: "access", title: "Effective access", width: 6, height: 2 },
-  { key: "hbac", title: "HBAC rules reaching this host", width: 12, height: 3 },
-  { key: "sudo", title: "sudo rules reaching this host", width: 12, height: 3 },
-  { key: "localsudo", title: "Local sudoers rules", width: 12, height: 3 },
-  { key: "join", title: "Join the domain", width: 12, height: 3 },
-  { key: "preflight", title: "Preflight", width: 12, height: 3 },
-  { key: "keytab", title: "Renew a keytab", width: 6, height: 2 },
-  { key: "leave", title: "Leave the domain", width: 6, height: 2 },
+  { key: "domain", title: "Domain", width: 6, height: 4 },
+  { key: "client", title: "Directory client", width: 6, height: 4 },
+  { key: "offline", title: "Logins during a directory outage", width: 6, height: 4 },
+  { key: "access", title: "Effective access", width: 6, height: 4 },
+  { key: "hbac", title: "HBAC rules reaching this host", width: 12, height: 5 },
+  { key: "sudo", title: "sudo rules reaching this host", width: 12, height: 5 },
+  { key: "localsudo", title: "Local sudoers rules", width: 12, height: 5 },
+  { key: "join", title: "Join the domain", width: 12, height: 5 },
+  { key: "preflight", title: "Preflight", width: 12, height: 5 },
+  { key: "keytab", title: "Renew a keytab", width: 6, height: 4 },
+  { key: "leave", title: "Leave the domain", width: 6, height: 4 },
 ];
 
 /** The name this module's arrangement is stored under. */

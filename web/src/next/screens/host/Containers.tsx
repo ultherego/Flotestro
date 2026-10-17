@@ -1717,16 +1717,16 @@ export const CONTAINERS_SCREEN = "next_host_containers";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const CONTAINERS_BOARD: BoardEntry[] = [
-  { key: "running", title: "Running", width: 3, height: 1 },
-  { key: "unhealthy", title: "Unhealthy", width: 3, height: 1 },
-  { key: "restarting", title: "Restarting", width: 3, height: 1 },
-  { key: "engineversion", title: "Engine", width: 3, height: 1 },
-  { key: "states", title: "Containers by state", width: 8, height: 2 },
-  { key: "engine", title: "Engine", width: 4, height: 2 },
-  { key: "projects", title: "Compose projects", width: 12, height: 2 },
-  { key: "objects", title: "Engine objects", width: 12, height: 5 },
-  { key: "logs", title: "Container log", width: 12, height: 5 },
-  { key: "pull", title: "Pull an image", width: 12, height: 2 },
-  { key: "declare", title: "Declare what this host is to carry", width: 12, height: 5 },
-  { key: "source", title: "Where this came from", width: 12, height: 1 },
+  { key: "running", title: "Running", width: 3, height: 2 },
+  { key: "unhealthy", title: "Unhealthy", width: 3, height: 2 },
+  { key: "restarting", title: "Restarting", width: 3, height: 2 },
+  { key: "engineversion", title: "Engine", width: 3, height: 2 },
+  { key: "states", title: "Containers by state", width: 8, height: 4 },
+  { key: "engine", title: "Engine", width: 4, height: 4 },
+  { key: "projects", title: "Compose projects", width: 12, height: 4 },
+  { key: "objects", title: "Engine objects", width: 12, height: 9 },
+  { key: "logs", title: "Container log", width: 12, height: 9 },
+  { key: "pull", title: "Pull an image", width: 12, height: 4 },
+  { key: "declare", title: "Declare what this host is to carry", width: 12, height: 9 },
+  { key: "source", title: "Where this came from", width: 12, height: 2 },
 ];

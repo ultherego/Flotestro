@@ -720,17 +720,17 @@ export const SSH_SCREEN = "next_host_ssh";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const SSH_BOARD: BoardEntry[] = [
-  { key: "ports", title: "Ports", width: 3, height: 1 },
-  { key: "open", title: "Methods enabled", width: 3, height: 1 },
-  { key: "rootlogin", title: "Root login", width: 3, height: 1 },
-  { key: "keys", title: "Host keys", width: 3, height: 1 },
-  { key: "ways", title: "Ways in", width: 8, height: 2 },
-  { key: "posture", title: "Posture", width: 4, height: 2 },
-  { key: "editor", title: "Change configuration", width: 12, height: 5 },
-  { key: "effective", title: "Effective configuration", width: 7, height: 2 },
+  { key: "ports", title: "Ports", width: 3, height: 2 },
+  { key: "open", title: "Methods enabled", width: 3, height: 2 },
+  { key: "rootlogin", title: "Root login", width: 3, height: 2 },
+  { key: "keys", title: "Host keys", width: 3, height: 2 },
+  { key: "ways", title: "Ways in", width: 8, height: 4 },
+  { key: "posture", title: "Posture", width: 4, height: 4 },
+  { key: "editor", title: "Change configuration", width: 12, height: 9 },
+  { key: "effective", title: "Effective configuration", width: 7, height: 4 },
   // The four methods sshd has; the table is never longer.
-  { key: "methods", title: "Authentication methods", width: 5, height: 2 },
-  { key: "hostkeys", title: "Host keys", width: 7, height: 3 },
-  { key: "dropin", title: "Managed drop-in", width: 5, height: 3 },
-  { key: "source", title: "Where this came from", width: 12, height: 1 },
+  { key: "methods", title: "Authentication methods", width: 5, height: 4 },
+  { key: "hostkeys", title: "Host keys", width: 7, height: 5 },
+  { key: "dropin", title: "Managed drop-in", width: 5, height: 5 },
+  { key: "source", title: "Where this came from", width: 12, height: 2 },
 ];

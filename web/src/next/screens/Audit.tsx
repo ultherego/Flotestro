@@ -727,9 +727,9 @@ export function digest(detail: Record<string, unknown>, t: (key: string) => stri
 export const AUDIT_SCREEN = "next_audit";
 
 export const AUDIT: BoardEntry[] = [
-  { key: "filter", title: "What to read", width: 12, height: 3 },
-  { key: "per_hour", title: "Events per hour", width: 8, height: 3 },
-  { key: "outcome", title: "Outcome", width: 4, height: 2 },
-  { key: "events", title: "Events", width: 12, height: 6 },
-  { key: "actors", title: "By actor", width: 4, height: 3 },
+  { key: "filter", title: "What to read", width: 12, height: 5 },
+  { key: "per_hour", title: "Events per hour", width: 8, height: 5 },
+  { key: "outcome", title: "Outcome", width: 4, height: 4 },
+  { key: "events", title: "Events", width: 12, height: 11 },
+  { key: "actors", title: "By actor", width: 4, height: 5 },
 ];

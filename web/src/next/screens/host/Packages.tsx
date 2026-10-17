@@ -1552,14 +1552,14 @@ export const HOST_PACKAGES_SCREEN = "next_host_packages";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const HOST_PACKAGES: BoardEntry[] = [
-  { key: "updates", title: "Updates", width: 8, height: 2 },
-  { key: "sources", title: "Sources", width: 4, height: 2 },
-  { key: "plan", title: "Plan updates", width: 4, height: 3 },
-  { key: "change", title: "Install, remove or hold", width: 4, height: 3 },
-  { key: "agent", title: "Agent", width: 4, height: 3 },
-  { key: "removal", title: "Removal plan", width: 12, height: 3 },
-  { key: "installed", title: "Installed packages", width: 12, height: 6 },
-  { key: "repositories", title: "Repositories", width: 12, height: 4 },
-  { key: "sourceform", title: "Package source", width: 12, height: 5 },
-  { key: "history", title: "Transaction history", width: 12, height: 4 },
+  { key: "updates", title: "Updates", width: 8, height: 4 },
+  { key: "sources", title: "Sources", width: 4, height: 4 },
+  { key: "plan", title: "Plan updates", width: 4, height: 5 },
+  { key: "change", title: "Install, remove or hold", width: 4, height: 5 },
+  { key: "agent", title: "Agent", width: 4, height: 5 },
+  { key: "removal", title: "Removal plan", width: 12, height: 5 },
+  { key: "installed", title: "Installed packages", width: 12, height: 11 },
+  { key: "repositories", title: "Repositories", width: 12, height: 7 },
+  { key: "sourceform", title: "Package source", width: 12, height: 9 },
+  { key: "history", title: "Transaction history", width: 12, height: 7 },
 ];

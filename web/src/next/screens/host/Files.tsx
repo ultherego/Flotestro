@@ -594,14 +594,14 @@ export const FILES_SCREEN = "next_host_files";
 
 /** The containers this module can draw, and the shape each ships with. */
 export const HOST_FILES: BoardEntry[] = [
-  { key: "managed", title: "Managed files", width: 4, height: 1 },
-  { key: "drifted", title: "Changed outside the panel", width: 4, height: 1 },
-  { key: "missing", title: "Missing on host", width: 4, height: 1 },
-  { key: "states", title: "What the host has", width: 7, height: 2 },
-  { key: "content", title: "Content", width: 5, height: 2 },
-  { key: "add", title: "Manage a file", width: 12, height: 4 },
-  { key: "list", title: "Files", width: 12, height: 4 },
-  { key: "history", title: "Versions the panel wrote", width: 7, height: 3 },
-  { key: "kept", title: "Versions kept on the host", width: 5, height: 3 },
-  { key: "difference", title: "Difference", width: 12, height: 3 },
+  { key: "managed", title: "Managed files", width: 4, height: 2 },
+  { key: "drifted", title: "Changed outside the panel", width: 4, height: 2 },
+  { key: "missing", title: "Missing on host", width: 4, height: 2 },
+  { key: "states", title: "What the host has", width: 7, height: 4 },
+  { key: "content", title: "Content", width: 5, height: 4 },
+  { key: "add", title: "Manage a file", width: 12, height: 7 },
+  { key: "list", title: "Files", width: 12, height: 7 },
+  { key: "history", title: "Versions the panel wrote", width: 7, height: 5 },
+  { key: "kept", title: "Versions kept on the host", width: 5, height: 5 },
+  { key: "difference", title: "Difference", width: 12, height: 5 },
 ];

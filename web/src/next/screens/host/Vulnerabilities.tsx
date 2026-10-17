@@ -691,11 +691,11 @@ export function Vulnerabilities({ host }: { host: Host }) {
 
 /** The containers this module can draw, and the shape each ships with. */
 export const HOST_VULNERABILITIES: BoardEntry[] = [
-  { key: "severity", title: "Affected packages by severity", width: 8, height: 2 },
-  { key: "coverage", title: "Coverage", width: 4, height: 2 },
-  { key: "findings", title: "Findings", width: 12, height: 5 },
-  { key: "packages", title: "Most affected packages", width: 4, height: 2 },
-  { key: "decided", title: "What decided this", width: 8, height: 2 },
+  { key: "severity", title: "Affected packages by severity", width: 8, height: 4 },
+  { key: "coverage", title: "Coverage", width: 4, height: 4 },
+  { key: "findings", title: "Findings", width: 12, height: 9 },
+  { key: "packages", title: "Most affected packages", width: 4, height: 4 },
+  { key: "decided", title: "What decided this", width: 8, height: 4 },
 ];
 
 /** The name this module's arrangement is stored under. */

@@ -1019,13 +1019,13 @@ export function Backups({ host }: { host: Host }) {
 
 /** The containers this module can draw, and the shape each ships with. */
 export const HOST_BACKUPS: BoardEntry[] = [
-  { key: "state", title: "Backups", width: 5, height: 2 },
-  { key: "verification", title: "Verification and tools", width: 4, height: 2 },
-  { key: "tools", title: "Tools on this host", width: 3, height: 2 },
-  { key: "form", title: "Backup definition", width: 12, height: 5 },
-  { key: "list", title: "Backups", width: 12, height: 4 },
-  { key: "copies", title: "Copies in the repository", width: 6, height: 3 },
-  { key: "history", title: "History", width: 6, height: 3 },
+  { key: "state", title: "Backups", width: 5, height: 4 },
+  { key: "verification", title: "Verification and tools", width: 4, height: 4 },
+  { key: "tools", title: "Tools on this host", width: 3, height: 4 },
+  { key: "form", title: "Backup definition", width: 12, height: 9 },
+  { key: "list", title: "Backups", width: 12, height: 7 },
+  { key: "copies", title: "Copies in the repository", width: 6, height: 5 },
+  { key: "history", title: "History", width: 6, height: 5 },
 ];
 
 /** The name this module's arrangement is stored under. */

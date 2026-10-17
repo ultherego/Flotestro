@@ -531,15 +531,15 @@ export const TIME_SCREEN = "next_host_time";
 
 /** The containers this module can draw, and the shape each ships with. */
 export const HOST_TIME: BoardEntry[] = [
-  { key: "synchronized", title: "Synchronized", width: 4, height: 1 },
-  { key: "offset", title: "Offset", width: 4, height: 1 },
-  { key: "stratum", title: "Stratum", width: 4, height: 1 },
-  { key: "states", title: "Sources", width: 7, height: 2 },
-  { key: "clock", title: "Clock", width: 5, height: 2 },
-  { key: "details", title: "Clock details", width: 7, height: 3 },
-  { key: "zone", title: "Timezone", width: 5, height: 2 },
-  { key: "sources", title: "Sources", width: 7, height: 3 },
-  { key: "configured", title: "Configured servers", width: 5, height: 3 },
-  { key: "probe", title: "Test time sources", width: 7, height: 4 },
-  { key: "managed", title: "What the panel wrote", width: 5, height: 3 },
+  { key: "synchronized", title: "Synchronized", width: 4, height: 2 },
+  { key: "offset", title: "Offset", width: 4, height: 2 },
+  { key: "stratum", title: "Stratum", width: 4, height: 2 },
+  { key: "states", title: "Sources", width: 7, height: 4 },
+  { key: "clock", title: "Clock", width: 5, height: 4 },
+  { key: "details", title: "Clock details", width: 7, height: 5 },
+  { key: "zone", title: "Timezone", width: 5, height: 4 },
+  { key: "sources", title: "Sources", width: 7, height: 5 },
+  { key: "configured", title: "Configured servers", width: 5, height: 5 },
+  { key: "probe", title: "Test time sources", width: 7, height: 7 },
+  { key: "managed", title: "What the panel wrote", width: 5, height: 5 },
 ];

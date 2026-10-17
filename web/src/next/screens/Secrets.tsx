@@ -954,13 +954,13 @@ export const SECRETS_SCREEN = "next_secrets";
 export const SECRETS: BoardEntry[] = [
   // A band over three counts of a store that is already counted: one row
   // holds the title, the sentence under it and the band itself.
-  { key: "store", title: "Store", width: 8, height: 1 },
+  { key: "store", title: "Store", width: 8, height: 2 },
   // At most eight creators, one bar each.
-  { key: "by_creator", title: "By creator", width: 4, height: 2 },
+  { key: "by_creator", title: "By creator", width: 4, height: 4 },
   // A form of four fields, one of which grows into a textarea when the
   // value is shown: it is filled in, so it is not asked to scroll.
-  { key: "new_secret", title: "New secret", width: 12, height: 3 },
+  { key: "new_secret", title: "New secret", width: 12, height: 5 },
   // The store itself grows with the installation, and a rotation opens
   // inside the row it belongs to.
-  { key: "list", title: "Secrets", width: 12, height: 6 },
+  { key: "list", title: "Secrets", width: 12, height: 11 },
 ];

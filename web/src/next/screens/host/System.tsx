@@ -249,10 +249,10 @@ export function System({ host }: { host: Host }) {
                 {fact("dmi", [snapshot.dmi?.board_vendor, snapshot.dmi?.board_name].filter(Boolean).join(" "))}
               </Fact>
               <Fact label={t("Chassis")}>{fact("dmi", snapshot.dmi?.chassis_type)}</Fact>
-              <Fact label={t("Serial number")}>{fact("dmi.serial", snapshot.dmi?.serial)}</Fact>
-              <Fact label={t("UUID")}>{fact("dmi.uuid", snapshot.dmi?.uuid)}</Fact>
-              <Fact label={t("Board serial")}>{fact("dmi.serial", snapshot.dmi?.board_serial)}</Fact>
-              <Fact label={t("Chassis serial")}>{fact("dmi.serial", snapshot.dmi?.chassis_serial)}</Fact>
+              <Fact label={t("Serial number")} mono>{fact("dmi.serial", snapshot.dmi?.serial)}</Fact>
+              <Fact label={t("UUID")} mono>{fact("dmi.uuid", snapshot.dmi?.uuid)}</Fact>
+              <Fact label={t("Board serial")} mono>{fact("dmi.serial", snapshot.dmi?.board_serial)}</Fact>
+              <Fact label={t("Chassis serial")} mono>{fact("dmi.serial", snapshot.dmi?.chassis_serial)}</Fact>
             </Facts>
           </Card>
         ),
@@ -282,7 +282,7 @@ export function System({ host }: { host: Host }) {
                   ? fact("boot", undefined)
                   : <span title={t("as of the last read")}>{uptimeText(uptime)}</span>}
               </Fact>
-              <Fact label={t("Boot id")}>{snapshot.boot_id || "—"}</Fact>
+              <Fact label={t("Boot id")} mono>{snapshot.boot_id || "—"}</Fact>
               <Fact label={t("Virtualization")}>
                 {fact("virtualization", virtualization === "none" ? t("bare metal") : virtualization)}
               </Fact>
@@ -384,17 +384,17 @@ export const HOST_SYSTEM_SCREEN = "next_host_system";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const HOST_SYSTEM: BoardEntry[] = [
-  { key: "uptime", title: "Uptime", width: 3, height: 1 },
-  { key: "kernel", title: "Kernel", width: 3, height: 1 },
-  { key: "release", title: "Release", width: 3, height: 1 },
-  { key: "runson", title: "Runs on", width: 3, height: 1 },
-  { key: "os", title: "Operating system", width: 6, height: 3 },
-  { key: "kernelcard", title: "Kernel", width: 6, height: 3 },
-  { key: "cpu", title: "Processor", width: 6, height: 3 },
-  { key: "memory", title: "Memory and root filesystem", width: 6, height: 3 },
-  { key: "machine", title: "Machine", width: 6, height: 3 },
-  { key: "firmware", title: "Firmware and boot", width: 6, height: 3 },
-  { key: "adapters", title: "Detected capabilities", width: 6, height: 3 },
-  { key: "history", title: "Kernel and release history", width: 6, height: 3 },
-  { key: "notread", title: "Not read", width: 12, height: 2 },
+  { key: "uptime", title: "Uptime", width: 3, height: 2 },
+  { key: "kernel", title: "Kernel", width: 3, height: 2 },
+  { key: "release", title: "Release", width: 3, height: 2 },
+  { key: "runson", title: "Runs on", width: 3, height: 2 },
+  { key: "os", title: "Operating system", width: 6, height: 5 },
+  { key: "kernelcard", title: "Kernel", width: 6, height: 5 },
+  { key: "cpu", title: "Processor", width: 6, height: 5 },
+  { key: "memory", title: "Memory and root filesystem", width: 6, height: 5 },
+  { key: "machine", title: "Machine", width: 6, height: 5 },
+  { key: "firmware", title: "Firmware and boot", width: 6, height: 5 },
+  { key: "adapters", title: "Detected capabilities", width: 6, height: 5 },
+  { key: "history", title: "Kernel and release history", width: 6, height: 5 },
+  { key: "notread", title: "Not read", width: 12, height: 4 },
 ];

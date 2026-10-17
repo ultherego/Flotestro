@@ -299,10 +299,10 @@ function RenameTag({ tags, onClose }: { tags: TagCount[]; onClose: () => void })
 export const TAGS_SCREEN = "next_tags";
 
 export const TAGS: BoardEntry[] = [
-  { key: "count", title: "Tags", width: 4, height: 1 },
-  { key: "assignments", title: "Assignments", width: 4, height: 1 },
-  { key: "keyed", title: "Keys in use", width: 4, height: 1 },
-  { key: "shape", title: "How the tags are written", width: 6, height: 1 },
-  { key: "keys", title: "By key", width: 6, height: 2 },
-  { key: "list", title: "Tags", width: 12, height: 5 },
+  { key: "count", title: "Tags", width: 4, height: 2 },
+  { key: "assignments", title: "Assignments", width: 4, height: 2 },
+  { key: "keyed", title: "Keys in use", width: 4, height: 2 },
+  { key: "shape", title: "How the tags are written", width: 6, height: 2 },
+  { key: "keys", title: "By key", width: 6, height: 4 },
+  { key: "list", title: "Tags", width: 12, height: 9 },
 ];

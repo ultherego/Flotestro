@@ -1305,16 +1305,16 @@ export const NETWORK_SCREEN = "next_host_network";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const NETWORK_BOARD: BoardEntry[] = [
-  { key: "up", title: "Interfaces up", width: 3, height: 1 },
-  { key: "addressed", title: "Interfaces with an address", width: 3, height: 1 },
-  { key: "routecount", title: "Routes", width: 3, height: 1 },
-  { key: "adapter", title: "Write adapter", width: 3, height: 1 },
-  { key: "states", title: "Interfaces by state", width: 8, height: 2 },
-  { key: "channel", title: "Management channel", width: 4, height: 2 },
-  { key: "interfaces", title: "Interfaces", width: 12, height: 4 },
-  { key: "change", title: "Change an interface", width: 12, height: 5 },
-  { key: "layers", title: "Layering", width: 12, height: 3 },
-  { key: "build", title: "Build a layer", width: 12, height: 4 },
-  { key: "routes", title: "Routes", width: 12, height: 3 },
-  { key: "source", title: "Where this came from", width: 12, height: 1 },
+  { key: "up", title: "Interfaces up", width: 3, height: 2 },
+  { key: "addressed", title: "Interfaces with an address", width: 3, height: 2 },
+  { key: "routecount", title: "Routes", width: 3, height: 2 },
+  { key: "adapter", title: "Write adapter", width: 3, height: 2 },
+  { key: "states", title: "Interfaces by state", width: 8, height: 4 },
+  { key: "channel", title: "Management channel", width: 4, height: 4 },
+  { key: "interfaces", title: "Interfaces", width: 12, height: 7 },
+  { key: "change", title: "Change an interface", width: 12, height: 9 },
+  { key: "layers", title: "Layering", width: 12, height: 5 },
+  { key: "build", title: "Build a layer", width: 12, height: 7 },
+  { key: "routes", title: "Routes", width: 12, height: 5 },
+  { key: "source", title: "Where this came from", width: 12, height: 2 },
 ];

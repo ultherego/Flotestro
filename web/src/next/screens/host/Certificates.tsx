@@ -1181,14 +1181,14 @@ export function Certificates({ host }: { host: Host }) {
 
 /** The containers this module can draw, and the shape each ships with. */
 export const HOST_CERTIFICATES: BoardEntry[] = [
-  { key: "deadline", title: "By deadline", width: 8, height: 2 },
-  { key: "renewal", title: "Renewal", width: 4, height: 2 },
-  { key: "watch", title: "Watch a path", width: 12, height: 3 },
-  { key: "deploy", title: "Deploy a certificate", width: 12, height: 4 },
-  { key: "list", title: "Certificates", width: 12, height: 4 },
-  { key: "certificate", title: "The chosen certificate", width: 6, height: 3 },
-  { key: "deployments", title: "Deployments from the panel", width: 6, height: 3 },
-  { key: "missing", title: "Not established", width: 12, height: 2 },
+  { key: "deadline", title: "By deadline", width: 8, height: 4 },
+  { key: "renewal", title: "Renewal", width: 4, height: 4 },
+  { key: "watch", title: "Watch a path", width: 12, height: 5 },
+  { key: "deploy", title: "Deploy a certificate", width: 12, height: 7 },
+  { key: "list", title: "Certificates", width: 12, height: 7 },
+  { key: "certificate", title: "The chosen certificate", width: 6, height: 5 },
+  { key: "deployments", title: "Deployments from the panel", width: 6, height: 5 },
+  { key: "missing", title: "Not established", width: 12, height: 4 },
 ];
 
 /** The name this module's arrangement is stored under. */

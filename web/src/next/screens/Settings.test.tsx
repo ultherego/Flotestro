@@ -161,13 +161,14 @@ afterEach(() => {
 });
 
 describe("what the screen decides before it draws", () => {
-  it("lands on the named tab, and on one that exists when the name does not", () => {
-    const all = new Set(["principal.manage", "host.read", "notification.read", "budget.read", "policy.read"]);
-    expect(settingsTab("users", all)).toBe("users");
+  it("lands on a tab that exists, whatever the address says", () => {
+    const all = new Set(["settings.read", "principal.manage", "host.read"]);
+    expect(settingsTab("general", all)).toBe("general");
     expect(settingsTab(null, all)).toBe("general");
+    // A bookmark kept from the eight signpost tabs that were removed on
+    // 17.10 lands somewhere that exists rather than on an empty screen.
+    expect(settingsTab("users", all)).toBe("general");
     expect(settingsTab("nonsense", all)).toBe("general");
-    // A bookmark kept from a wider role lands somewhere that exists.
-    expect(settingsTab("users", new Set<string>())).toBe("general");
   });
 
   it("counts a hub honestly: a refusal is not a count of none", () => {
@@ -195,30 +196,28 @@ describe("what the screen decides before it draws", () => {
 });
 
 describe("the tabs", () => {
-  it("offers only the sections this sign-in may read", async () => {
-    Object.assign(answers, base(), { "/api/v1/whoami": reader });
-    draw();
-    // host.read opens the role catalogue and nothing else.
-    await waitFor(() => expect(screen.getByRole("tab", { name: "Roles" })).toBeInTheDocument());
-    expect(screen.getByRole("tab", { name: "General" })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Users" })).toBeNull();
-    expect(screen.queryByRole("tab", { name: "Budgets" })).toBeNull();
-  });
-
-  it("leads to the section's own screen inside the new panel", async () => {
-    Object.assign(answers, base(), { "/api/v1/whoami": admin });
-    draw("/settings?tab=users");
-    await waitFor(() => expect(screen.getByTestId("settings-open-section")).toBeInTheDocument());
-    expect(screen.getByTestId("settings-open-section")).toHaveAttribute("href", "/access");
-  });
-
-  it("switches on a click and says what the section decides", async () => {
+  /**
+   * Eight of the nine tabs were signposts: a title, the same sentence as a
+   * note, the same thing again as a paragraph, and a button leading to the
+   * screen that actually holds the section. They are gone, and this is what
+   * keeps them gone - the rail on the left is what leads to a screen.
+   */
+  it("carries no tab that only points somewhere else", async () => {
     Object.assign(answers, base(), { "/api/v1/whoami": admin });
     draw();
-    await waitFor(() => expect(screen.getByRole("tab", { name: "Fleet CA" })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("tab", { name: "Fleet CA" }));
-    await waitFor(() => expect(screen.getByTestId("settings-open-section")).toHaveAttribute("href", "/certificates"));
-    expect(screen.getByText(/Rotation is four deliberate stages/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Monitoring retention")).toBeInTheDocument());
+    for (const gone of ["Users", "Roles", "Group mappings", "Access review", "Notification channels", "Budgets", "Policies"]) {
+      expect(screen.queryByRole("tab", { name: gone })).toBeNull();
+    }
+    expect(screen.queryByTestId("settings-open-section")).toBeNull();
+  });
+
+  it("draws the settings themselves rather than a way to them", async () => {
+    Object.assign(answers, base(), { "/api/v1/whoami": admin });
+    draw();
+    // The fleet authority is a section of this screen, not a link to
+    // /certificates - which is where the signpost used to send the reader.
+    await waitFor(() => expect(screen.getByText("Monitoring retention")).toBeInTheDocument());
   });
 });
 
@@ -516,7 +515,7 @@ describe("the fleet CA on the general tab", () => {
   it("is not drawn for a sign-in that may not read it, and asks nothing of the server", async () => {
     Object.assign(answers, base(), { "/api/v1/whoami": reader });
     draw();
-    await waitFor(() => expect(screen.getByRole("tab", { name: "General" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Monitoring retention")).toBeInTheDocument());
     expect(screen.queryByTestId("ca-authorities")).toBeNull();
     expect(asked).not.toContain("/api/v1/pki");
   });

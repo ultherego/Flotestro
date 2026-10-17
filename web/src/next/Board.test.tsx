@@ -198,3 +198,26 @@ describe("what has to be read first", () => {
     expect(screen.queryByText("the host returned no configuration")).toBeNull();
   });
 });
+
+describe("a board with no holes in it", () => {
+  it("lifts a container into the gap its short neighbour left", () => {
+    // Two in a row, one tall and one short, and a third below the short
+    // one. Settling alone leaves the third starting where the TALL one
+    // ends, so half a row is empty floor - which is what made a board
+    // read as a heap of cards rather than one board.
+    const placed = settle([
+      { key: "tall", x: 0, y: 0, width: 6, height: 6 },
+      { key: "short", x: 6, y: 0, width: 6, height: 2 },
+      { key: "under", x: 6, y: 6, width: 6, height: 2 },
+    ], "");
+    expect(placed.find((one) => one.key === "under")?.y).toBe(2);
+  });
+
+  it("leaves a container where it cannot rise", () => {
+    const placed = settle([
+      { key: "top", x: 0, y: 0, width: 12, height: 2 },
+      { key: "below", x: 0, y: 2, width: 12, height: 2 },
+    ], "");
+    expect(placed.find((one) => one.key === "below")?.y).toBe(2);
+  });
+});

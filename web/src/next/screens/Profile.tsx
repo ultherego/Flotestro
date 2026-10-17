@@ -755,12 +755,12 @@ function AskAboutToken({ ask, busy, blocked, onConfirm, onClose, children }: {
 export const PROFILE_SCREEN = "next_profile";
 
 export const PROFILE: BoardEntry[] = [
-  { key: "who", title: "Who you are signed in as", width: 5, height: 2 },
-  { key: "look", title: "How the panel looks", width: 7, height: 2 },
-  { key: "reading", title: "How the panel reads to you", width: 7, height: 2 },
-  { key: "password", title: "Your password", width: 5, height: 2 },
-  { key: "bindings", title: "Your roles and where they reach", width: 12, height: 2 },
-  { key: "permissions", title: "What you may do", width: 12, height: 3 },
-  { key: "sessions", title: "Your sessions", width: 12, height: 2 },
-  { key: "tokens", title: "Your API tokens", width: 12, height: 2 },
+  { key: "who", title: "Who you are signed in as", width: 5, height: 4 },
+  { key: "look", title: "How the panel looks", width: 7, height: 4 },
+  { key: "reading", title: "How the panel reads to you", width: 7, height: 4 },
+  { key: "password", title: "Your password", width: 5, height: 4 },
+  { key: "bindings", title: "Your roles and where they reach", width: 12, height: 4 },
+  { key: "permissions", title: "What you may do", width: 12, height: 5 },
+  { key: "sessions", title: "Your sessions", width: 12, height: 4 },
+  { key: "tokens", title: "Your API tokens", width: 12, height: 4 },
 ];

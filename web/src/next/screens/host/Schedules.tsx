@@ -632,8 +632,8 @@ export const HOST_SCHEDULES_SCREEN = "next_host_schedules";
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const HOST_SCHEDULES: BoardEntry[] = [
-  { key: "shape", title: "Schedules", width: 8, height: 2 },
-  { key: "kinds", title: "By kind", width: 4, height: 2 },
-  { key: "form", title: "New schedule", width: 12, height: 5 },
-  { key: "list", title: "Schedules", width: 12, height: 5 },
+  { key: "shape", title: "Schedules", width: 8, height: 4 },
+  { key: "kinds", title: "By kind", width: 4, height: 4 },
+  { key: "form", title: "New schedule", width: 12, height: 9 },
+  { key: "list", title: "Schedules", width: 12, height: 9 },
 ];

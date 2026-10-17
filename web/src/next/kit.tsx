@@ -4,7 +4,7 @@ import {
   type PointerEvent as ReactPointerEvent, type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Icon, type IconName } from "../components/icons";
 import { exportAddress, exportFileName } from "../components/ExportButton";
 import { fetchWithCredentials } from "../lib/api";
@@ -278,7 +278,26 @@ export function Card({ title, note, tools, bar, children, foot, flush = false, s
      and the first rows showed through the gap. */
   const kids = Children.toArray(children);
   const steering = kids.filter((one) => isValidElement(one) && one.type === Toolbar);
-  const rest = kids.filter((one) => !(isValidElement(one) && one.type === Toolbar));
+  /* And the card's last word, where that is an action, is lifted the
+     other way - to its foot. Left in the body, a button under a list of
+     facts floats two lines below the last of them with the rest of the
+     card empty under it, which is how the owner found "Rename host" on
+     the host overview. The foot is where the kit already keeps what a
+     card says last, and a button there stays put while the facts above
+     it scroll.
+
+     Only the trailing run is taken. An action in the middle of a card
+     belongs to what it stands under - the save of a form, the cancel of
+     an editor - and moving that to the foot would part it from the
+     field it answers for. */
+  let end = kids.length;
+  while (end > 0) {
+    const last = kids[end - 1];
+    if (!isValidElement(last) || last.type !== Actions) break;
+    end -= 1;
+  }
+  const acting = kids.slice(end);
+  const rest = kids.slice(0, end).filter((one) => !(isValidElement(one) && one.type === Toolbar));
   const steer = bar ?? (steering.length > 0 ? steering : undefined);
   const body = bar ? children : rest;
 
@@ -295,6 +314,7 @@ export function Card({ title, note, tools, bar, children, foot, flush = false, s
       {body !== undefined && body !== null && body !== false && (
         <div className="fl-card-body">{body}</div>
       )}
+      {!bar && acting.length > 0 && <div className="fl-card-acts">{acting}</div>}
       {foot && <div className="fl-card-foot">{foot}</div>}
     </section>
   );
@@ -456,6 +476,90 @@ export function Empty({ children, action, icon = "check", testId }: {
 /** What went wrong, in the reader's words rather than the server's. */
 export function Problem({ children }: { children: ReactNode }) {
   return <div className="fl-problem" role="alert">{children}</div>;
+}
+
+/* ------------------------------------------------- the sub-tabs of a screen */
+
+/**
+ * Which sub-tab is open, kept in the address.
+ *
+ * A screen with sub-tabs has to be linkable into one of them: a colleague
+ * is sent to the firewall rules, not to the firewall. The first name is
+ * the one a bare address lands on, and a name nobody serves lands there
+ * too rather than drawing nothing.
+ */
+export function useTab<T extends string>(names: readonly T[]): [T, (next: T) => void] {
+  const [address, setAddress] = useSearchParams();
+  const asked = address.get("tab") ?? "";
+  const open = (names as readonly string[]).includes(asked) ? asked as T : names[0];
+  const go = (next: T) => {
+    const after = new URLSearchParams(address);
+    if (next === names[0]) after.delete("tab"); else after.set("tab", next);
+    setAddress(after, { replace: true });
+  };
+  return [open, go];
+}
+
+/* ------------------------------------------------------------ the form */
+
+/**
+ * A thing somebody fills in and submits.
+ *
+ * It is **not** a card, and that is the whole point. A card is for what is
+ * read; a form is for what is done, and the panel spent a month drawing
+ * forms as cards on a board - the owner's words were that pressing a button
+ * opened a form inside a container with somebody else's title on it, and
+ * that the reader then has no idea what is going on.
+ *
+ * So a form carries its own name, stands on a face of its own, and is as
+ * tall as what it holds. It never goes into a `BoardEntry`; there is a test
+ * that fails the build if one does.
+ */
+export function Form({ title, note, children, actions, onSubmit, testId }: {
+  title: ReactNode;
+  /** One line on what this decides. Not a second copy of the title. */
+  note?: ReactNode;
+  children: ReactNode;
+  /** The buttons that commit it, at the foot where a form's buttons live. */
+  actions?: ReactNode;
+  onSubmit?: () => void;
+  testId?: string;
+}) {
+  return (
+    <form
+      className="fl-form"
+      data-testid={testId}
+      onSubmit={(event) => { event.preventDefault(); onSubmit?.(); }}
+    >
+      <div className="fl-form-head">
+        <h3 className="fl-form-title">{title}</h3>
+        {note && <p className="fl-form-note">{note}</p>}
+      </div>
+      <div className="fl-form-body">{children}</div>
+      {actions && <div className="fl-form-foot">{actions}</div>}
+    </form>
+  );
+}
+
+/**
+ * A named block inside a sub-tab that is neither a card nor a form - a
+ * table with a heading over it, a group of readings that needs a name.
+ */
+export function Section({ title, note, children, testId }: {
+  title: ReactNode;
+  note?: ReactNode;
+  children: ReactNode;
+  testId?: string;
+}) {
+  return (
+    <section className="fl-section" data-testid={testId}>
+      <div className="fl-form-head">
+        <h3 className="fl-form-title">{title}</h3>
+        {note && <p className="fl-form-note">{note}</p>}
+      </div>
+      {children}
+    </section>
+  );
 }
 
 /* --------------------------------------------------------------- table */
@@ -823,11 +927,24 @@ export function Fact({ label, children, mono = false }: {
   /** A serial, a uuid, a boot id, a path: read as one word, not as prose. */
   mono?: boolean;
 }) {
-  const unknown = children === null || children === undefined || children === "";
+  /* The kit's own dash counts as unknown however it arrived: a screen
+     that wrote the dash by hand still meant "nobody reported this", and
+     a dash set in the face of a serial number reads as a value. */
+  const unknown = children === null || children === undefined || children === "" || children === "—";
+  /* A value read as one word is never cut in half. Broken across two
+     lines a machine id reads as two things - the owner saw
+     "1c0cc8cf0b1a4171a51dbc7acba" over "3c6ef" and asked which of them
+     it was - so such a fact takes two columns of the block and, where
+     even that is too narrow, ends in an ellipsis with the whole of it
+     on the value itself. */
+  const whole = Boolean(mono) && !unknown;
   return (
-    <div className="fl-fact">
+    <div className={join("fl-fact", whole && "fl-whole")}>
       <dt>{label}</dt>
-      <dd className={join(mono && !unknown && "fl-mono", unknown && "fl-faint")}>
+      <dd
+        className={join(whole && "fl-mono", unknown && "fl-faint")}
+        title={whole && typeof children === "string" ? children : undefined}
+      >
         {unknown ? "—" : children}
       </dd>
     </div>
@@ -1637,6 +1754,38 @@ export function FeedRow({ icon, tone, what, who, when, to }: {
   return to ? <Link to={to} className="fl-feed-row">{body}</Link> : <div className="fl-feed-row">{body}</div>;
 }
 
+/* --------------------------------------------------------- the reasons */
+
+/**
+ * What is not here, each with the words of whatever said so.
+ *
+ * A count of what is missing tells a reader there is something to do and
+ * nothing about what: "six unavailable" is a number, "this host has no
+ * Docker socket" is an instruction. The sentence is the host's own, never
+ * composed in the browser, and a thing that gave no reason says that
+ * rather than borrowing its neighbour's.
+ */
+export function Reasons({ items, testId }: {
+  items: { name: ReactNode; reason?: string; to?: string }[];
+  testId?: string;
+}) {
+  const t = useT();
+  return (
+    <div className="fl-reasons" data-testid={testId}>
+      {items.map((one, index) => (
+        <div className="fl-reason" key={index}>
+          <span className="fl-reason-name">
+            {one.to ? <Link to={one.to}>{one.name}</Link> : one.name}
+          </span>
+          <span className={join("fl-reason-why", !one.reason && "fl-faint")}>
+            {one.reason || t("it gave no reason")}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ----------------------------------------------------------- the needs */
 
 /**
@@ -1663,11 +1812,18 @@ export function Needs({ items }: {
       {items.map((one, index) => {
         const unknown = one.value === undefined || one.value === null;
         const shown = typeof one.value === "boolean" ? (one.value ? t("yes") : t("no")) : one.value;
+        /* The count stands next to the label it answers, and the counts
+           line up in a column of their own. Spread to the two edges of a
+           wide row - which is what a flex row with a growing label did -
+           the pair reads as two lists: four hundred pixels of nothing
+           between "Updates waiting" and the 18 that is its answer. The
+           word for a count nobody could take comes after the dash, so
+           the dash keeps the column. */
         const body = (
           <>
             <span className="fl-needs-label">{one.label}</span>
-            {unknown && <span className="fl-faint fl-small">{t("not counted")}</span>}
             <span className="fl-needs-count">{unknown ? "—" : shown}</span>
+            {unknown && <span className="fl-needs-why">{t("not counted")}</span>}
           </>
         );
         const className = join(
