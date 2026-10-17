@@ -143,10 +143,22 @@ describe("arranging a screen", () => {
     point(screen.getByTestId("board"), "pointermove", 600, 300 + 6 * 76);
     point(screen.getByTestId("board"), "pointerup", 600, 300 + 6 * 76);
     // Dragged from the height drawn (the box is stubbed), by six rows.
-    const tall = parseInt(screen.getByTestId("held-first").style.minHeight, 10);
+    const tall = parseInt((screen.getByTestId("held-first").querySelector(".fl-fit") as HTMLElement).style.minHeight, 10);
     expect(tall).toBeGreaterThanOrEqual(456);
     expect(tall % 76).toBe(0);
     expect(screen.getByTestId("width-first").textContent).toBe(width);
+  });
+
+  it("puts a container in the column under the hand, so one can stand under another", async () => {
+    draw();
+    await waitFor(() => expect(screen.getByTestId("arrange")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("arrange"));
+    expect(screen.getByTestId("held-first").style.gridColumn).toBe("1 / span 6");
+    point(screen.getByTestId("grip-first"), "pointerdown", 100, 100);
+    point(screen.getByTestId("board"), "pointermove", 1000, 100);
+    point(screen.getByTestId("board"), "pointerup", 1000, 100);
+    // Nine columns along would run past the twelfth, so it stops flush right.
+    expect(screen.getByTestId("held-first").style.gridColumn).toBe("7 / span 6");
   });
 
   it("widens and narrows a container by its arrows, to the column", async () => {

@@ -1,4 +1,4 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import {
@@ -93,9 +93,9 @@ export function sequenced(widgets: BoardWidget[]): BoardWidget[] {
   return [...widgets].sort((a, b) => (a.y ?? 0) - (b.y ?? 0) || (a.x ?? 0) - (b.x ?? 0));
 }
 
-/** Positions that say nothing but the order: row i, column 0. */
+/** The order as row numbers; the columns are kept, because they say what stands beside what. */
 export function renumbered(widgets: BoardWidget[]): BoardWidget[] {
-  return sequenced(widgets).map((one, index) => ({ ...one, x: 0, y: index }));
+  return sequenced(widgets).map((one, index) => ({ ...one, y: index }));
 }
 
 /**
@@ -115,6 +115,54 @@ export function renumbered(widgets: BoardWidget[]): BoardWidget[] {
  * it holds to within a line of text.
  */
 export const ROW = 76;
+
+/**
+ * An arrangement stored while every container was pinned to column zero.
+ *
+ * For a few hours on 17.10 the editor wrote x = 0 for everything, which
+ * reads as one tall column of narrow cards. Nobody arranges a screen to
+ * be a single column of containers narrower than the screen, so such a
+ * record is read as having no places at all, and the widths pack the row.
+ */
+function unpinned(widgets: BoardWidget[]): BoardWidget[] {
+  const shown = widgets.filter((one) => !one.hidden);
+  const pinned = shown.length > 1 && shown.every((one) => (one.x ?? 0) === 0) && shown.some((one) => one.width < BOARD_COLUMNS);
+  return pinned ? widgets.map(({ x: _x, y: _y, ...rest }) => rest) : widgets;
+}
+
+/** A container stays inside the twelve columns: made wider, it moves left to fit. */
+function fitted(one: BoardWidget): BoardWidget {
+  const width = Math.min(Math.max(one.width, 1), BOARD_COLUMNS);
+  return { ...one, width, x: Math.min(one.x ?? 0, BOARD_COLUMNS - width) };
+}
+
+/**
+ * The box of one container, as tall as what is in it.
+ *
+ * The board is a grid of one-pixel rows and each container says how many it
+ * takes - the height it measures to - so containers of different heights
+ * stack in their columns without leaving a hole under the short one. It is
+ * the one way to let one container stand under another beside a tall third
+ * without a library, and it is why a height is a minimum rather than a cell.
+ */
+function Fit({ minHeight, children }: { minHeight?: number; children: ReactNode }) {
+  const box = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const element = box.current;
+    const host = element?.parentElement;
+    if (!element || !host) return;
+    const apply = () => {
+      const gap = parseFloat(getComputedStyle(host.parentElement ?? host).columnGap || "20") || 20;
+      host.style.gridRow = `span ${Math.max(1, Math.ceil(element.offsetHeight + gap))}`;
+    };
+    apply();
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(apply);
+    watch.observe(element);
+    return () => watch.disconnect();
+  }, []);
+  return <div ref={box} className="fl-fit" style={minHeight !== undefined ? { minHeight } : undefined}>{children}</div>;
+}
 
 export function Board({ screen, catalogue, drawn, notices }: {
   /**
@@ -149,7 +197,7 @@ export function Board({ screen, catalogue, drawn, notices }: {
   const [editing, setEditing] = useState<BoardWidget[] | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [hold, setHold] = useState<
-    { key: string; mode: "move" | "size" | "width" | "height"; fromX: number; fromY: number; start: BoardWidget; startPx: number } | null
+    { key: string; mode: "move" | "size" | "width" | "height"; fromX: number; fromY: number; start: BoardWidget; startPx: number; grabCol: number; grabY: number } | null
   >(null);
 
   const layout = useQuery({
@@ -187,7 +235,7 @@ export function Board({ screen, catalogue, drawn, notices }: {
     onError: (error) => toast.error(error instanceof Error ? error.message : String(error)),
   });
 
-  const current = editing ?? boardToDraw(layout.data, catalogue, known);
+  const current = editing ?? unpinned(boardToDraw(layout.data, catalogue, known));
   const shown = current.filter((one) => !one.hidden);
   /* Every screen stands on the grid from the first time it is opened,
      with the shape each container ships with. Left to flow, the row of
@@ -216,6 +264,11 @@ export function Board({ screen, catalogue, drawn, notices }: {
     return (box.width - gap * (BOARD_COLUMNS - 1)) / BOARD_COLUMNS;
   };
 
+  const columnGap = () => {
+    if (!gridRef.current) return 20;
+    return parseFloat(getComputedStyle(gridRef.current).columnGap || "20") || 20;
+  };
+
   const take = (event: ReactPointerEvent, key: string, mode: "move" | "size" | "width" | "height") => {
     if (editing === null) return;
     const start = placed.find((one) => one.key === key);
@@ -223,17 +276,29 @@ export function Board({ screen, catalogue, drawn, notices }: {
     (event.target as Element).setPointerCapture?.(event.pointerId);
     // Where the container is NOW, in pixels: a height is dragged from what
     // is drawn, not from a number the catalogue guessed.
-    const box = (event.currentTarget as HTMLElement).closest("[data-held-key]")?.getBoundingClientRect();
-    setHold({ key, mode, fromX: event.clientX, fromY: event.clientY, start, startPx: box?.height ?? 0 });
+    const box = (event.currentTarget as HTMLElement).closest("[data-held-key]")?.querySelector(".fl-fit")?.getBoundingClientRect();
+    const grid = gridRef.current?.getBoundingClientRect();
+    const column = columnWidth();
+    const gap = columnGap();
+    // Which column of the container the hand took, so it is carried by that
+    // part of it and not by its left edge.
+    const grabCol = grid && column > 0 ? Math.floor((event.clientX - grid.left) / (column + gap)) - (start.x ?? 0) : 0;
+    setHold({
+      key, mode, fromX: event.clientX, fromY: event.clientY, start,
+      startPx: box?.height ?? 0, grabCol, grabY: box ? event.clientY - box.top : 0,
+    });
     event.preventDefault();
   };
 
   const lastSwap = useRef(0);
+  // The containers somebody has sized in this session: a height equal to the
+  // one the catalogue ships with is still a height they chose.
+  const touched = useRef(new Set<string>());
 
   const widen = (key: string, by: number) => {
     if (editing === null) return;
     setEditing(current.map((one) => (
-      one.key === key ? { ...one, width: Math.min(Math.max(one.width + by, 1), BOARD_COLUMNS) } : one
+      one.key === key ? fitted({ ...one, width: Math.min(Math.max(one.width + by, 1), BOARD_COLUMNS) }) : one
     )));
   };
 
@@ -250,29 +315,45 @@ export function Board({ screen, catalogue, drawn, notices }: {
       const width = widthWanted && column > 0
         ? Math.min(Math.max(hold.start.width + Math.round((event.clientX - hold.fromX) / column), 1), BOARD_COLUMNS)
         : hold.start.width;
-      const rows = Math.max(Math.round((hold.startPx + event.clientY - hold.fromY) / ROW), 1);
+      // A click is not a drag: until the pointer has travelled, nothing
+      // changes, so pressing the edge never moves it by the rounding.
+      const dy = event.clientY - hold.fromY;
+      const moved = heightWanted && Math.abs(dy) >= 8;
+      const rows = Math.max(Math.round((hold.startPx + dy) / ROW), 1);
+      if (moved) touched.current.add(hold.key);
       setEditing(current.map((one) => (
-        one.key === hold.key ? { ...one, width, ...(heightWanted ? { height: rows } : {}) } : one
+        one.key === hold.key ? fitted({ ...one, width, ...(moved ? { height: rows } : {}) }) : one
       )));
       return;
     }
 
-    // Moving: the container takes the place of the one under the pointer,
-    // and the rest close up around it. Not faster than a person can see -
-    // a tall container dragged over a short one reflows what is under the
-    // pointer, and without this it swapped back and forth every frame.
-    if (event.timeStamp - lastSwap.current < 140) return;
-    const under = document.elementFromPoint?.(event.clientX, event.clientY)?.closest("[data-held-key]");
-    const target = under?.getAttribute("data-held-key");
-    if (!target || target === hold.key) return;
-    const visible = sequenced(current.filter((one) => !one.hidden));
-    const from = visible.findIndex((one) => one.key === hold.key);
-    const to = visible.findIndex((one) => one.key === target);
-    if (from < 0 || to < 0) return;
-    const [moving] = visible.splice(from, 1);
-    visible.splice(to, 0, moving);
+    // Moving: the container goes to the column under the hand, and takes
+    // its turn among the others by how high it is carried. The rest close
+    // up around it, so one container can be put under another and beside a
+    // third. Not faster than a person can see: every move of the hand
+    // reflows what the others are measured against.
+    if (lastSwap.current !== 0 && event.timeStamp - lastSwap.current < 90) return;
+    const grid = gridRef.current?.getBoundingClientRect();
+    const column = columnWidth();
+    if (!grid || column <= 0) return;
+    const col = Math.floor((event.clientX - grid.left) / (column + columnGap())) - hold.grabCol;
+    const x = Math.min(Math.max(col, 0), BOARD_COLUMNS - hold.start.width);
+    const tops = new Map<string, number>();
+    gridRef.current?.querySelectorAll("[data-held-key]").forEach((one) => {
+      tops.set(one.getAttribute("data-held-key") ?? "", one.getBoundingClientRect().top);
+    });
+    tops.set(hold.key, event.clientY - hold.grabY);
+    const visible = current.filter((one) => !one.hidden)
+      .map((one) => (one.key === hold.key ? { ...one, x } : one));
+    visible.sort((a, b) => (tops.get(a.key) ?? 0) - (tops.get(b.key) ?? 0) || (a.x ?? 0) - (b.x ?? 0));
+    const next = visible.map((one, index) => ({ ...one, y: index }));
+    const same = next.every((one) => {
+      const before = current.find((on) => on.key === one.key);
+      return before?.x === one.x && before?.y === one.y;
+    });
+    if (same) return;
     lastSwap.current = event.timeStamp;
-    setEditing([...renumbered(visible), ...current.filter((one) => one.hidden)]);
+    setEditing([...next, ...current.filter((one) => one.hidden)]);
   };
 
   const letGo = () => setHold(null);
@@ -287,7 +368,7 @@ export function Board({ screen, catalogue, drawn, notices }: {
 
       {layout.data !== undefined && editing === null && (
         <HeadActions>
-          <button type="button" className="fl-quiet" onClick={() => setEditing([...renumbered(settle(placeAll(shown), "")), ...current.filter((one) => one.hidden)])} data-testid="arrange">
+          <button type="button" className="fl-quiet" onClick={() => { touched.current = new Set(); setEditing([...renumbered(settle(placeAll(shown), "")), ...current.filter((one) => one.hidden)]); }} data-testid="arrange">
             <Icon name="dashboard" />
             {t("Arrange this screen")}
           </button>
@@ -368,12 +449,10 @@ export function Board({ screen, catalogue, drawn, notices }: {
           // more than a line, one of them from 171px to 843px.
           // The same layout whether the board is read or arranged: a width
           // in columns, and the height the content makes.
-          const wanted = one.height !== undefined && one.height !== catalogue.find((on) => on.key === one.key)?.height
+          const wanted = one.height !== undefined
+            && (touched.current.has(one.key) || one.height !== catalogue.find((on) => on.key === one.key)?.height)
             ? one.height : undefined;
-          const style = {
-            gridColumn: `span ${one.width}`,
-            ...(wanted !== undefined ? { minHeight: wanted * ROW } : {}),
-          };
+          const style = { gridColumn: `${(one.x ?? 0) + 1} / span ${one.width}` };
           return (
             <div
               key={one.key}
@@ -382,6 +461,7 @@ export function Board({ screen, catalogue, drawn, notices }: {
               data-held-key={one.key}
               data-testid={editing !== null ? `held-${one.key}` : undefined}
             >
+              <Fit minHeight={wanted !== undefined ? wanted * ROW : undefined}>
               {editing !== null && (
                 <div className="fl-grip">
                   <span
@@ -452,6 +532,7 @@ export function Board({ screen, catalogue, drawn, notices }: {
                   />
                 </>
               )}
+              </Fit>
             </div>
           );
         })}
