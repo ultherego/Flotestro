@@ -81,7 +81,7 @@ test("the panel signs in, shows the host and follows one operation to its answer
 
   // The same answer on the screen: the host's job list names the operation,
   // its state and the code the host answered with.
-  await page.goto(`/hosts/${hostID}/jobs`);
+  await page.goto(`/hosts/${hostID}/jobs?tab=jobs`);
   const row = page.locator("tbody tr").filter({ hasText: "unit.status" }).first();
   await expect(row).toBeVisible();
   // The state, and beside it the typed code the host answered with.
