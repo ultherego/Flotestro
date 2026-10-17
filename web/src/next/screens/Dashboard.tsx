@@ -162,7 +162,7 @@ export function Dashboard() {
             </button>
           </></HeadActions>
 
-      <Board screen={DASHBOARD_SCREEN} catalogue={DASHBOARD} drawn={{
+      <Board fixed screen={DASHBOARD_SCREEN} catalogue={DASHBOARD} drawn={{
         hosts: (
           <Kpi
             icon="hosts"
@@ -402,19 +402,19 @@ export const DASHBOARD_SCREEN = "next_dashboard";
  * says otherwise.
  */
 export const DASHBOARD: BoardEntry[] = [
-  { key: "hosts", title: "Hosts", width: 3, height: 2 },
-  { key: "online", title: "Online", width: 3, height: 2 },
-  { key: "waiting", title: "Waiting on a person", width: 3, height: 2 },
-  { key: "found", title: "Found on the hosts", width: 3, height: 2 },
-  { key: "needs", title: "What needs you", width: 8, height: 7 },
-  { key: "answering", title: "Fleet condition", width: 4, height: 4 },
-  { key: "fleet", title: "The fleet", width: 12, height: 4 },
-  { key: "availability", title: "Host availability", width: 4, height: 2 },
-  { key: "operations", title: "Operations, last 24 h", width: 8, height: 5 },
-  { key: "composition", title: "Fleet composition", width: 4, height: 9 },
-  { key: "campaigns", title: "Campaigns in progress", width: 4, height: 5 },
-  { key: "failures", title: "Recent failures", width: 4, height: 5 },
-  { key: "denials", title: "Recent access denials", width: 12, height: 5 },
+  { key: "hosts", title: "Hosts", width: 3, height: 2, x: 0, y: 0 },
+  { key: "online", title: "Online", width: 3, height: 2, x: 3, y: 0 },
+  { key: "waiting", title: "Waiting on a person", width: 3, height: 2, x: 6, y: 0 },
+  { key: "found", title: "Found on the hosts", width: 3, height: 2, x: 9, y: 0 },
+  { key: "needs", title: "What needs you", width: 4, height: 5, x: 0, y: 2 },
+  { key: "answering", title: "Fleet condition", width: 4, height: 5, x: 4, y: 2 },
+  { key: "fleet", title: "The fleet", width: 12, height: 4, x: 0, y: 7 },
+  { key: "availability", title: "Host availability", width: 4, height: 3, x: 8, y: 2 },
+  { key: "operations", title: "Operations, last 24 h", width: 6, height: 5, x: 6, y: 11 },
+  { key: "composition", title: "Fleet composition", width: 3, height: 5, x: 0, y: 11 },
+  { key: "campaigns", title: "Campaigns in progress", width: 4, height: 2, x: 8, y: 5 },
+  { key: "failures", title: "Recent failures", width: 3, height: 5, x: 3, y: 11 },
+  { key: "denials", title: "Recent access denials", width: 12, height: 5, x: 0, y: 16 },
 ];
 
 type Need = { label: string; value?: number; tone: Tone; to?: string };

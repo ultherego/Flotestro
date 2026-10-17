@@ -6986,7 +6986,7 @@ export const pl: Record<string, string> = {
   "+{n} at zero": "+{n} na zerze",
   "Drag to resize": "Przeciągnij, by zmienić rozmiar",
   "Drag to change the height": "Przeciągnij, by zmienić wysokość",
-  "Hold a name to move a container; size it by its right edge, its bottom edge or the corner.": "Przytrzymaj nazwę, żeby przesunąć kontener; rozmiar zmieniasz prawą krawędzią, dolną krawędzią albo rogiem.",
+  "Hold a name to move a container; pull its right edge, its bottom edge or the corner to size it.": "Przytrzymaj nazwę, żeby przesunąć kontener; rozmiar zmieniasz prawą krawędzią, dolną krawędzią albo rogiem.",
   // Panel pisany od nowa (16.10): powłoka, pulpit i lista hostów.
   "Show or hide the navigation": "Pokaż lub ukryj nawigację",
   "Search the fleet…": "Szukaj we flocie…",

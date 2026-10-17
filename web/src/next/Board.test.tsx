@@ -44,13 +44,14 @@ const CATALOGUE = [
   { key: "second", title: "Second", width: 6, height: 2 },
 ];
 
-function draw(notices?: ReactNode) {
+function draw(notices?: ReactNode, fixed = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
   );
   return render(
     <Board
+      fixed={fixed}
       screen="test"
       catalogue={CATALOGUE}
       notices={notices}
@@ -134,31 +135,43 @@ describe("arranging a screen", () => {
     expect(screen.getByTestId("held-first")).toHaveTextContent("8");
   });
 
-  it("makes a container taller by its bottom edge, without touching its width", async () => {
-    draw();
+  it("on a fixed board, a container is exactly the rows its bottom edge was pulled to", async () => {
+    draw(undefined, true);
     await waitFor(() => expect(screen.getByTestId("arrange")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("arrange"));
-    const width = screen.getByTestId("width-first").textContent;
+    expect(screen.getByTestId("held-first").style.gridRow).toBe("1 / span 2");
+    // A row is 76 and the gap 20: three rows down is 288 pixels.
     point(screen.getByTestId("low-first"), "pointerdown", 600, 300);
-    point(screen.getByTestId("board"), "pointermove", 600, 300 + 6 * 76);
-    point(screen.getByTestId("board"), "pointerup", 600, 300 + 6 * 76);
-    // Dragged from the height drawn (the box is stubbed), by six rows.
-    const tall = parseInt((screen.getByTestId("held-first").querySelector(".fl-held-body") as HTMLElement).style.minHeight, 10);
-    expect(tall).toBeGreaterThanOrEqual(456);
-    expect(tall % 76).toBe(0);
-    expect(screen.getByTestId("width-first").textContent).toBe(width);
+    point(screen.getByTestId("board"), "pointermove", 600, 300 + 3 * 96);
+    point(screen.getByTestId("board"), "pointerup", 600, 300 + 3 * 96);
+    expect(screen.getByTestId("held-first").style.gridRow).toBe("1 / span 5");
+    expect(screen.getByTestId("held-first").style.gridColumn).toBe("1 / span 6");
   });
 
-  it("puts a container in the column under the hand, so one can stand under another", async () => {
+  it("on a fixed board, a container can be put in any column and under any other", async () => {
+    draw(undefined, true);
+    await waitFor(() => expect(screen.getByTestId("arrange")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("arrange"));
+    const first = screen.getByTestId("held-first");
+    point(screen.getByTestId("grip-first"), "pointerdown", 100, 100);
+    // Two columns right and three rows down.
+    point(screen.getByTestId("board"), "pointermove", 100 + 2 * 101.7, 100 + 3 * 96);
+    point(screen.getByTestId("board"), "pointerup", 100 + 2 * 101.7, 100 + 3 * 96);
+    expect(first.style.gridColumn).toBe("3 / span 6");
+    expect(first.style.gridRow).toBe("4 / span 2");
+  });
+
+  it("on a page, a container is moved into the place of the one it is dragged over", async () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("arrange")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("arrange"));
-    expect(screen.getByTestId("held-first").style.gridColumn).toBe("1 / span 6");
+    const order = () => [...document.querySelectorAll("[data-held-key]")].map((one) => one.getAttribute("data-held-key"));
+    expect(order().slice(0, 2)).toEqual(["first", "second"]);
+    document.elementFromPoint = () => screen.getByTestId("held-second");
     point(screen.getByTestId("grip-first"), "pointerdown", 100, 100);
-    point(screen.getByTestId("board"), "pointermove", 1000, 100);
-    point(screen.getByTestId("board"), "pointerup", 1000, 100);
-    // Nine columns along would run past the twelfth, so it stops flush right.
-    expect(screen.getByTestId("held-first").style.gridColumn).toBe("7 / span 6");
+    point(screen.getByTestId("board"), "pointermove", 900, 100);
+    point(screen.getByTestId("board"), "pointerup", 900, 100);
+    expect(order().slice(0, 2)).toEqual(["second", "first"]);
   });
 
   it("widens and narrows a container by its arrows, to the column", async () => {

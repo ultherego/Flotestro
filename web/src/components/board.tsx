@@ -91,7 +91,8 @@ export type StoredBoard = {
  * by ordering alone never had one; a screen laid out on the grid says
  * what each container is worth in rows.
  */
-export type BoardEntry = { key: string; title: string; width: number; height?: number };
+/** `x` and `y` give a container its place on a fixed board; without them the shapes are packed into rows. */
+export type BoardEntry = { key: string; title: string; width: number; height?: number; x?: number; y?: number };
 
 /**
  * The widths the twelve-column grid has a class for: every one of them.
@@ -126,7 +127,7 @@ export function boardToDraw(
   stored: StoredBoard | undefined, catalogue: BoardEntry[], known: Set<string>,
 ): BoardWidget[] {
   if (!stored || !stored.present || stored.widgets.length === 0) {
-    return catalogue.filter((one) => known.has(one.key)).map((one) => ({ key: one.key, width: one.width, height: one.height }));
+    return catalogue.filter((one) => known.has(one.key)).map((one) => ({ key: one.key, width: one.width, height: one.height, x: one.x, y: one.y }));
   }
   const placed = stored.widgets.filter((one) => known.has(one.key) && !one.hidden);
   const decided = new Set(stored.widgets.map((one) => one.key));

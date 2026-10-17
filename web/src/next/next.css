@@ -2238,75 +2238,66 @@
 
 .fl-app .fl-arrange-what { flex: 1 1 auto; min-width: 0; font-size: var(--t-small); color: var(--text-faint); }
 .fl-app .fl-arrange select { width: auto; }
-.fl-app .fl-placed { grid-auto-rows: var(--row); align-items: stretch; }
+/* ------------------------------------------------------------------
+   The two boards.
 
-/* The board is a grid of one-pixel rows. Each container says how many it
-   takes (Board.tsx measures it), so containers of different heights stack
-   in their columns and the short one leaves no hole under it. `dense`
-   lets each take the first place it fits. */
-.fl-app .fl-placed.fl-flowing {
-  grid-auto-rows: 1px;
-  row-gap: 0;
-  align-items: start;
-  grid-auto-flow: row dense;
-}
+   A fixed board (.fl-pin) is a wall of tiles: twelve columns of fixed
+   rows, each container exactly the cells it was given. Reading it and
+   arranging it are one grid, so there is nothing to differ.
+
+   A page board (.fl-flowing) lets a container be as tall as what is in it,
+   and a row is as tall as its tallest. `dense` lets a narrow one take
+   the hole a wide one left.
+   ------------------------------------------------------------------ */
+.fl-app .fl-placed { align-items: stretch; }
+.fl-app .fl-pin { grid-auto-rows: var(--row); }
+.fl-app .fl-placed.fl-flowing { grid-auto-rows: auto; grid-auto-flow: row dense; }
 .fl-app .fl-placed.fl-flowing .fl-card-body { overflow: visible; }
-.fl-app .fl-held { position: relative; min-width: 0; min-height: 0; }
-.fl-app .fl-fit { position: relative; display: flex; flex-direction: column; min-height: var(--fl-fill, 0); }
-.fl-app .fl-fit > .fl-held-body { flex: 1 1 auto; }
-.fl-app .fl-held-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+
+.fl-app .fl-held { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.fl-app .fl-held-body { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .fl-app .fl-held-body > * { flex: 1 1 auto; min-height: 0; }
-
-/* Below the width where twelfths mean anything, the board stops being a
-   grid and becomes one card after another, each as tall as what is in
-   it - which is what the print rules have always done with it.
-   
-   The places come from Board.tsx as `grid-column` and `grid-row` written
-   on each container, so a media query cannot narrow them; but a block
-   container makes both inert, and the cards fall into one column without
-   a line of JavaScript. Until 17.10 there was no such rule and the board
-   kept seven-twelfths of a 1024px window for one card: the facts inside
-   it were cut off mid-word, which is what a reader saw first. */
-@media (max-width: 999px) {
-  .fl-app .fl-placed { display: block; }
-  .fl-app .fl-held-body > * { height: auto; }
-  .fl-app .fl-held + .fl-held { margin-top: var(--fl-gutter); }
-  /* Nothing scrolls inside a card that is no longer held to a height. */
-  .fl-app .fl-placed .fl-card-body { overflow: visible; }
-}
-
-/* A notice is a line, not a box the height of its cell. Stretched to
-   fill one it read as a tall empty frame with a sentence floating in
-   the middle of it. */
+/* A notice is a line, not a box the height of its cell. */
 .fl-app .fl-held-body > .fl-banner,
 .fl-app .fl-held-body > .fl-problem { flex: 0 0 auto; }
 
-/* Arranging: the container as it will be read, under a bar of its own. */
-.fl-app .fl-editing .fl-fit {
-  padding: 0;
-  gap: var(--s2);
+/* Below the width where twelfths mean anything the board is one card after
+   another, each as tall as what is in it; a block container makes the
+   places written on the containers inert. */
+@media (max-width: 999px) {
+  .fl-app .fl-placed { display: block; }
+  .fl-app .fl-held { display: block; }
+  .fl-app .fl-held-body > * { height: auto; }
+  .fl-app .fl-held + .fl-held { margin-top: var(--fl-gutter); }
+  .fl-app .fl-placed .fl-card-body { overflow: visible; }
+}
+
+/* Arranging. The content is left alone and only looked at. */
+.fl-app .fl-editing .fl-held-body { pointer-events: none; user-select: none; }
+.fl-app .fl-editing .fl-held {
   outline: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
-  outline-offset: 5px;
+  outline-offset: 4px;
   border-radius: var(--radius-card);
 }
-.fl-app .fl-editing .fl-held-body { pointer-events: none; user-select: none; }
-
-.fl-app .fl-dragging { z-index: 5; opacity: 0.85; }
-.fl-app .fl-dragging .fl-fit { box-shadow: var(--fl-lift-high); }
+.fl-app .fl-dragging { z-index: 5; }
+.fl-app .fl-dragging .fl-held-body { box-shadow: var(--fl-lift-high); opacity: 0.9; }
 .fl-app .fl-holding { user-select: none; cursor: grabbing; }
 
+/* The bar of a container being arranged. On a fixed board it lies over the
+   top of the container, so nothing moves; on a page board it stands above. */
 .fl-app .fl-grip {
-  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--s3);
   padding: var(--s1) var(--s2);
   border-radius: var(--radius-sm);
-  background: var(--bg-raised);
+  background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
   border: 1px solid var(--border-strong);
   font-size: var(--t-small);
   color: var(--text-muted);
 }
+.fl-app .fl-pin .fl-grip { position: absolute; inset: var(--s2) var(--s2) auto var(--s2); z-index: 6; backdrop-filter: blur(4px); }
+.fl-app .fl-flowing .fl-grip { flex: 0 0 auto; margin-bottom: var(--s2); }
 .fl-app .fl-grip-handle {
   flex: 1 1 auto;
   min-width: 0;
@@ -2322,68 +2313,19 @@
 .fl-app .fl-grip-width button { min-width: 28px; height: 28px; padding: 0; }
 .fl-app .fl-grip-size { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; color: var(--text-faint); }
 
-/* The right edge: a strip to pull, not a button the height of the cell. */
-.fl-app .fl-edge {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: -6px;
-  width: 12px;
-  cursor: ew-resize;
-  touch-action: none;
-  z-index: 6;
-}
-.fl-app .fl-edge::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 4px;
-  width: 4px;
-  height: 40px;
-  margin-top: -20px;
-  border-radius: 2px;
-  background: var(--accent);
-  opacity: 0.6;
-}
-.fl-app .fl-edge:hover::after { opacity: 1; }
-
-/* The bottom edge pulls the height; the corner pulls both. */
-.fl-app .fl-edge-low {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -6px;
-  height: 12px;
-  cursor: ns-resize;
-  touch-action: none;
-  z-index: 6;
-}
-.fl-app .fl-edge-low::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 4px;
-  width: 40px;
-  height: 4px;
-  margin-left: -20px;
-  border-radius: 2px;
-  background: var(--accent);
-  opacity: 0.6;
-}
+/* The edges: strips to pull, never a button the height of the cell. */
+.fl-app .fl-edge,
+.fl-app .fl-edge-low,
+.fl-app .fl-edge-corner { position: absolute; touch-action: none; z-index: 7; }
+.fl-app .fl-edge { top: 0; bottom: 0; right: -7px; width: 14px; cursor: ew-resize; }
+.fl-app .fl-edge-low { left: 0; right: 0; bottom: -7px; height: 14px; cursor: ns-resize; }
+.fl-app .fl-edge::after,
+.fl-app .fl-edge-low::after { content: ""; position: absolute; border-radius: 2px; background: var(--accent); opacity: 0.6; }
+.fl-app .fl-edge::after { top: 50%; left: 5px; width: 4px; height: 40px; margin-top: -20px; }
+.fl-app .fl-edge-low::after { left: 50%; top: 5px; height: 4px; width: 40px; margin-left: -20px; }
+.fl-app .fl-edge:hover::after,
 .fl-app .fl-edge-low:hover::after { opacity: 1; }
-.fl-app .fl-edge-corner {
-  position: absolute;
-  right: -6px;
-  bottom: -6px;
-  width: 16px;
-  height: 16px;
-  cursor: nwse-resize;
-  touch-action: none;
-  border-radius: 50%;
-  background: var(--accent);
-  opacity: 0.7;
-  z-index: 7;
-}
+.fl-app .fl-edge-corner { right: -7px; bottom: -7px; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); opacity: 0.7; cursor: nwse-resize; }
 .fl-app .fl-edge-corner:hover { opacity: 1; }
 
 /* What a screen may group inside a card without inventing a layout. */
