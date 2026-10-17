@@ -438,6 +438,34 @@ export function Tag({ children, to, title }: { children: ReactNode; to?: string;
     : <span className="fl-tag" title={title}>{children}</span>;
 }
 
+/**
+ * A strip of facts under a heading: each a small label over its value,
+ * side by side and wrapping, instead of a row of boxed words.
+ */
+export function Strip({ children }: { children: ReactNode }) {
+  return <div className="fl-strip">{children}</div>;
+}
+
+export function StripItem({ label, children, copy, copyTitle, copyTestId, title }: {
+  label: ReactNode;
+  children: ReactNode;
+  /** What the little copy button beside the value takes. */
+  copy?: string;
+  copyTitle?: string;
+  copyTestId?: string;
+  title?: string;
+}) {
+  return (
+    <div className="fl-stripitem" title={title}>
+      <span className="fl-stripitem-label">{label}</span>
+      <span className="fl-stripitem-value">
+        {children}
+        {copy !== undefined && <Copy compact value={copy} title={copyTitle} testId={copyTestId} />}
+      </span>
+    </div>
+  );
+}
+
 export function Tags({ children }: { children: ReactNode }) {
   return <div className="fl-tags">{children}</div>;
 }
@@ -2143,8 +2171,10 @@ export function MenuItem({ to, onClick, disabled, title, icon, children, testId 
  * reader a value is somewhere it is not - so a refusal says so and
  * leaves the whole value selectable under the pointer instead.
  */
-export function Copy({ value, title, testId }: {
+export function Copy({ value, title, testId, compact = false }: {
   value: string;
+  /** An icon only, for beside a value it copies. */
+  compact?: boolean;
   /** What the button offers to take, for the pointer. */
   title?: string;
   testId?: string;
@@ -2158,13 +2188,14 @@ export function Copy({ value, title, testId }: {
   return (
     <button
       type="button"
-      className="fl-plain fl-copy"
+      className={compact ? "fl-plain fl-copy fl-copy-icon" : "fl-plain fl-copy"}
       onClick={() => { void take(); }}
-      title={title ?? value}
+      title={state === "copied" ? t("Copied") : state === "failed" ? t("Copy by hand") : (title ?? value)}
+      aria-label={title ?? t("Copy")}
       data-testid={testId}
     >
-      <Icon name="copy" />
-      {state === "copied" ? t("Copied") : state === "failed" ? t("Copy by hand") : t("Copy")}
+      <Icon name={state === "copied" ? "check" : "copy"} />
+      {compact ? null : state === "copied" ? t("Copied") : state === "failed" ? t("Copy by hand") : t("Copy")}
     </button>
   );
 }

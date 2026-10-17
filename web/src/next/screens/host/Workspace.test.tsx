@@ -304,7 +304,7 @@ describe("the head above every module of a host", () => {
     draw("/hosts/h1");
     expect(await screen.findByTestId("host-id")).toHaveTextContent("01234567");
     fireEvent.click(screen.getByTestId("copy-host-id"));
-    await waitFor(() => expect(screen.getByTestId("copy-host-id")).toHaveTextContent("Copy by hand"));
+    await waitFor(() => expect(screen.getByTestId("copy-host-id")).toHaveAttribute("title", "Copy by hand"));
     expect(refusing).toHaveBeenCalledWith("0123456789abcdef");
     cleanup();
 
@@ -312,7 +312,7 @@ describe("the head above every module of a host", () => {
     Object.defineProperty(navigator, "clipboard", { value: { writeText: taking }, configurable: true });
     draw("/hosts/h1");
     fireEvent.click(await screen.findByTestId("copy-host-id"));
-    await waitFor(() => expect(screen.getByTestId("copy-host-id")).toHaveTextContent("Copied"));
+    await waitFor(() => expect(screen.getByTestId("copy-host-id")).toHaveAttribute("title", "Copied"));
     // The whole of it goes, not the eight characters that are read.
     expect(taking).toHaveBeenCalledWith("0123456789abcdef");
   });
@@ -372,7 +372,7 @@ describe("the head above every module of a host", () => {
     // The address the control plane saw at its own end and one the host
     // reported about itself are two different facts.
     expect(await screen.findByTestId("address-source")).toHaveTextContent("session");
-    expect(screen.getByTestId("address-source").closest(".fl-tag"))
+    expect(screen.getByTestId("address-source").closest(".fl-stripitem"))
       .toHaveAttribute("title", "address seen by the control plane on its end of the connection");
     cleanup();
 

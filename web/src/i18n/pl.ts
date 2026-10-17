@@ -1875,6 +1875,8 @@ export const pl: Record<string, string> = {
   "Go to the dashboard": "Przejdź do pulpitu",
   "No screen of this panel answers to that address.": "Żaden ekran tego panelu nie odpowiada pod tym adresem.",
   "Calendar": "Kalendarz",
+  "Seen": "Widziany",
+  "copy the address": "skopiuj adres",
   "Components": "Komponenty",
   "The values the process was started with are read-only and live under Status, because nothing here can change them: they come from the deployment and need a restart.": "Wartości, z którymi proces wystartował, są tylko do odczytu i leżą w Statusie, bo nic tu ich nie zmieni: pochodzą z wdrożenia i wymagają restartu.",
   "There is nothing here this sign-in may change.": "Nie ma tu nic, co to konto może zmienić.",

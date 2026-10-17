@@ -1705,6 +1705,37 @@
 .fl-app .fl-copy svg { width: 12px; height: 12px; }
 .fl-app .fl-copy:hover { color: var(--text); background: var(--bg-hover); }
 
+/* The facts under a heading: a label over its value, side by side. */
+.fl-app .fl-strip { display: flex; flex-wrap: wrap; gap: var(--s3) var(--s6); align-items: flex-start; max-width: none; }
+.fl-app .fl-head-lead:has(.fl-strip) { max-width: none; display: flex; flex-direction: column; gap: var(--s3); }
+.fl-app .fl-stripitem { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fl-app .fl-stripitem-label {
+  font-size: var(--t-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.fl-app .fl-stripitem-value {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+  font-size: var(--t-body);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.fl-app .fl-copy-icon {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.fl-app .fl-copy-icon svg { flex: none; width: 14px; height: 14px; min-width: 14px; }
+
 /* The words a screen may use, and the only ones. */
 .fl-app .fl-note { font-size: var(--t-small); color: var(--text-faint); }
 .fl-app .fl-faint { color: var(--text-faint); }
