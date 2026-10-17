@@ -4435,12 +4435,12 @@
    round each - twenty boxes were twenty things to look at - only a thin
    rule between rows. The label is the reader's accent, bold. */
 .fl-app .fl-facts {
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 0 var(--s7);
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
 }
 .fl-app .fl-fact {
   display: grid;
-  grid-template-columns: minmax(120px, 40%) minmax(0, 1fr);
+  grid-template-columns: minmax(150px, 220px) minmax(0, 1fr);
   align-items: center;
   gap: var(--s3);
   padding: var(--s2) 0;
@@ -4488,3 +4488,14 @@
 .fl-app .fl-ring-legend-row { transition: background var(--fl-quick); border-radius: var(--radius-sm); }
 .fl-app .fl-ring-legend-row:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .fl-app .fl-pie-face, .fl-app .fl-ring-face { pointer-events: none; }
+
+/* A tag inside a fact is a light chip of the same family as the row, not a
+   black well. */
+.fl-app .fl-fact .fl-tag {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  border: 0;
+  font-family: inherit;
+  font-size: var(--t-small);
+  color: var(--text-muted);
+  padding: 1px var(--s2);
+}
