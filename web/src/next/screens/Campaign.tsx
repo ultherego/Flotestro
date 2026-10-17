@@ -17,8 +17,8 @@ import { stateName } from "../../lib/states";
 import {
   bulkPrefill, contractWords, MIN_REASON, reasonValid, REVERSE_OPERATION, reversePayload,
   useOperation, type Operation, type PlanGroups,
-} from "../../pages/Bulk";
-import { describeExpression } from "../../pages/Groups";
+} from "../../lib/orders";
+import { describeExpression } from "../../lib/selectors";
 import type {
   Campaign as CampaignType, CampaignApproval, CampaignReport, CampaignTarget,
   SelectorExpression, TimelineEntry,

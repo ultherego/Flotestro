@@ -6,7 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import { ApiError } from "../../lib/api";
 import { Reads, jobTone, readsPrefill, refusalMessage } from "./Reads";
-import { parsePayload, payloadHint } from "../../pages/Reads";
+import { parsePayload, payloadHint } from "../../lib/payload";
 import { ToastProvider } from "../../components/Toast";
 
 /**

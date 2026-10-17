@@ -7,7 +7,7 @@ import { REFRESH_INTERVAL } from "../../lib/stream";
 import { relativeTime, absoluteTime } from "../../lib/format";
 import { RELEASE_CHANNELS, refusalName, type FleetActivity, type Host, type Relay, type Whoami } from "../../lib/types";
 import { formatSort, parseSort, usePageSize } from "../../components/SortableTable";
-import { useTeams } from "../../pages/Teams";
+import { useTeams } from "../../lib/teams";
 import { useT } from "../../i18n";
 import {
   Actions, Bars, Bones, Button, Card, Check, Dot, Download, Empty, Field, Fields, Find, Grid, HeadActions,

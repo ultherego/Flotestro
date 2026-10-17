@@ -20,15 +20,16 @@ import {
   changeAction, isPackageChange, planStatus, planWords, ACTION_WORDS,
   type HostPlan, type PackagePlanFacts, type PlanGroup,
 } from "../../components/plan";
-import { buildExpression, describeExpression, RULE_FIELDS, type Rule, type RuleField } from "../../pages/Groups";
-import { WEEKDAYS, type RecurrenceForm } from "../../pages/Schedules";
+import { buildExpression, describeExpression, RULE_FIELDS, type Rule, type RuleField } from "../../lib/selectors";
+import { WEEKDAYS, type RecurrenceForm } from "../../lib/recurrence";
 import {
-  campaignBody, clearDraft, contractWords, emptyOrder, FacetList, JOB_TIMEOUT, jobTimeoutValid,
+  campaignBody, clearDraft, contractWords, emptyOrder, JOB_TIMEOUT, jobTimeoutValid,
   loadDraft, matchedState, MIN_REASON, orderForm, orderTargets, parseUnits, prefilledOrder,
   previewTokenOf, reasonValid, saveDraft, scheduleBody, scheduleProblem, selectorNames,
   startingPayloadText, useFleetFacets, useOperations, windowProblem, wizardOperations,
   type Operation, type PreviewToken, type ScheduleChoice, type TargetMode, type WindowProblem,
-} from "../../pages/Bulk";
+} from "../../lib/orders";
+import { FacetList } from "../../components/FacetList";
 import { useT, type Translate } from "../../i18n";
 import {
   Actions, Banner, Bones, Card, Check, Dot, Empty, Fact, Facts, Field, Fields, Find, Grid,

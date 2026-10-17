@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection, type Page } from "../../lib/api";
 import { useDebounced } from "../../lib/debounce";
 import type { Host, Whoami } from "../../lib/types";
+import type { Team } from "../../lib/teams";
 import { absoluteTime, relativeTime } from "../../lib/format";
 import { t, useT } from "../../i18n";
 import { Board } from "../Board";
@@ -22,17 +23,10 @@ import {
  * it is recorded with the reason it was made.
  */
 
-/** One team as the register lists it, with the hosts placed in it counted. */
-export type Team = {
-  id: string;
-  name: string;
-  description?: string;
-  created_by?: string;
-  /** The hosts placed in the team; a deletion says how many it releases. */
-  hosts: number;
-  created_at: string;
-  updated_at: string;
-};
+/* The team record is shared with every screen that reads the register -
+   the host list's filter, the placement on a host page, the binding form -
+   so it lives in lib/teams beside the read they all make. */
+export type { Team };
 
 /**
  * The team a host carries. The host listing does not declare it, because

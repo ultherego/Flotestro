@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { FleetReadiness, ReadinessGap } from "../../lib/types";
-import { readinessVerdict, type ReadinessVerdict } from "../../pages/Readiness";
+import { readinessVerdict, type ReadinessVerdict } from "../../lib/readiness";
 import { useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";

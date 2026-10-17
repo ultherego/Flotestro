@@ -8,11 +8,12 @@ import {
   coverageSentence, unknownBreakdown, PARTIAL_REASONS, type Coverage,
 } from "../../components/FleetCoverage";
 import type { BoardEntry } from "../../components/board";
-import { FacetList, useFleetFacets } from "../../pages/Bulk";
+import { useFleetFacets } from "../../lib/orders";
+import { FacetList } from "../../components/FacetList";
 import {
   campaignStateLabel, campaignStateTone, duration, FOLDED_ROWS, percent,
   presetRange, PRESETS, reportParams, type Preset, type ReportFilters,
-} from "../../pages/Reports";
+} from "../../lib/reports";
 import { toLocalInput } from "./Audit";
 import { Board } from "../Board";
 import { useT } from "../../i18n";

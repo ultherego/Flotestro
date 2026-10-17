@@ -6,6 +6,9 @@ import { useDebounced } from "../../lib/debounce";
 import { absoluteTime, relativeTime } from "../../lib/format";
 import { REFRESH_INTERVAL } from "../../lib/stream";
 import type { Host, HostGroup, SelectorExpression, Whoami } from "../../lib/types";
+import {
+  buildExpression, describeExpression, RULE_FIELDS, type Rule, type RuleField,
+} from "../../lib/selectors";
 import { useT } from "../../i18n";
 import { useToast } from "../../components/Toast";
 import { Board } from "../Board";
@@ -73,54 +76,27 @@ export function orderGroups<T extends Pick<HostGroup, "name" | "member_count">>(
   });
 }
 
-/** The saved expression in one line, in the shape the server logs it. */
-export function describeSelector(expression?: SelectorExpression | null): string {
-  if (!expression) return "";
-  if (expression.all) return `(${expression.all.map(describeSelector).join(" and ")})`;
-  if (expression.any) return `(${expression.any.map(describeSelector).join(" or ")})`;
-  if (expression.not) return `not ${describeSelector(expression.not)}`;
-  const [field, value] = Object.entries(expression).find(([, one]) => typeof one === "string") ?? ["nothing", ""];
-  return value ? `${field}=${value}` : field;
-}
+/**
+ * The saved expression in one line, in the shape the server logs it. The
+ * name this screen knows it by; the one copy lives in lib/selectors, because
+ * the bulk wizard, the policy editor and the read form print the same line.
+ */
+export const describeSelector = describeExpression;
 
-/** One row of the builder: a fact about a host, its value, and whether it is denied. */
-export type Rule = { field: RuleField; value: string; negated: boolean };
-
-export type RuleField =
-  | "tag" | "group" | "site" | "environment" | "os_family" | "os_version" | "capability"
-  | "connection_state" | "lifecycle_state" | "owner" | "channel"
-  | "security_updates" | "reboot_required" | "failed_units" | "agent_version"
-  | "relay" | "failure_domain";
-
-/** The facts a rule may name, in the order the builder offers them. */
-export const RULE_FIELDS: RuleField[] = [
-  "tag", "group", "site", "environment", "os_family", "os_version", "capability",
-  "connection_state", "lifecycle_state", "owner", "channel",
-  "security_updates", "reboot_required", "failed_units", "agent_version",
-  "relay", "failure_domain",
-];
+/* One row of the builder, the facts it may name, and the two translations
+   between rows and expression are the selector language, shared with the
+   bulk wizard, the policy editor and the read form; they live in
+   lib/selectors and are re-exported under the names this screen uses. */
+export { RULE_FIELDS, type Rule, type RuleField };
 
 /** The facts a host reports as yes or no; a host that never reported is on neither side. */
 const YES_NO_FIELDS: RuleField[] = ["security_updates", "reboot_required", "failed_units"];
 
 /**
- * The rows as the expression the server reads: one leaf per row, a denied
- * row wrapped in `not`, and the rows joined by `all` or `any`. A row with
- * no value is not a rule yet and is left out.
+ * The rows as the expression the server reads. The name this screen knows
+ * `buildExpression` by; one copy, in lib/selectors.
  */
-export function selectorOf(rules: Rule[], combine: "all" | "any"): SelectorExpression | null {
-  const leaves = rules
-    .filter((rule) => rule.value.trim() !== "")
-    .map((rule): SelectorExpression => {
-      // Every leaf the builder offers is a string on the wire; the release
-      // channel is typed narrower in the view, which is what the cast is for.
-      const leaf = { [rule.field]: rule.value.trim() } as SelectorExpression;
-      return rule.negated ? { not: leaf } : leaf;
-    });
-  if (leaves.length === 0) return null;
-  if (leaves.length === 1) return leaves[0];
-  return combine === "all" ? { all: leaves } : { any: leaves };
-}
+export const selectorOf = buildExpression;
 
 /**
  * The saved expression read back as rows of the builder: one leaf per row,

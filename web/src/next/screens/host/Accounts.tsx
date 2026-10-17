@@ -3,9 +3,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../../lib/api";
 import { useAllowed, useModuleAccess } from "../../../lib/actions";
 import { absoluteTime, relativeTime } from "../../../lib/format";
-import {
-  emptyForm, operationForm, type FormProblem, type FormValue,
-} from "../../../lib/operations";
 import type { Host, Job, LocalAccount } from "../../../lib/types";
 import { useT } from "../../../i18n";
 import { Board } from "../../Board";
@@ -14,6 +11,9 @@ import {
   Actions, Band, Banner, Bars, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields,
   Modal, Note, Pill, Problem, Stack, Table, Tabs, Toolbar, TwoLine, type Segment, type Tone,
 } from "../../kit";
+import {
+  orderReady, refusalOf, registryOrder, type RegistryOrder,
+} from "../../../lib/host/module";
 
 /**
  * Who can get into this machine, and how.
@@ -73,21 +73,10 @@ function countWhere<T>(items: T[] | undefined, test: (item: T) => boolean): numb
 
 /* ------------------------------------------------------------- the order */
 
-/** One order as the registry composes it: what would be sent, and what is wrong with it. */
-export type RegistryOrder = { action: string; payload: Record<string, unknown>; problems: FormProblem[] };
-
-/**
- * Puts an order through the registry entry of its action, so this module and
- * the Bulk workspace send one payload and refuse one set of values.
- */
-export function registryOrder(action: string, seed: FormValue): RegistryOrder {
-  const entry = operationForm(action);
-  if (!entry) {
-    return { action, payload: {}, problems: [{ message: "The registry has no form for {action} yet.", params: { action } }] };
-  }
-  const form = { ...emptyForm(entry), ...seed };
-  return { action, payload: entry.toPayload(form), problems: entry.validate(form) };
-}
+/* The registry's order model is lib/host/module's: every module of a host
+   page composes its order the same way, through the registry entry, so
+   there is one copy of what "ready" and "refused" mean. */
+export { orderReady, refusalOf, registryOrder, type RegistryOrder };
 
 export type Order = {
   action: string;
@@ -143,20 +132,6 @@ export function accountOrder(order: Order): RegistryOrder {
   const section = { ...(composed.payload.local_user as Record<string, unknown>) };
   section.keys = keys.map((key) => (key.comment ? { ...key } : { public_key: key.public_key }));
   return { ...composed, payload: { local_user: section } };
-}
-
-/** Whether the registry would take this order as it stands. */
-export function orderReady(order: RegistryOrder): boolean {
-  return order.problems.length === 0;
-}
-
-/** The first refusal of an order as a sentence, or an empty string. */
-export function refusalOf(
-  t: (text: string, params?: Record<string, string | number>) => string,
-  order: RegistryOrder,
-): string {
-  const problem = order.problems[0];
-  return problem ? t(problem.message, problem.params) : "";
 }
 
 export type Request = { mutate: (order: Order) => void; message: string; error: boolean; busy: boolean };

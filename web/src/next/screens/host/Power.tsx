@@ -7,8 +7,8 @@ import { absoluteTime, relativeTime } from "../../../lib/format";
 import type { Host, InventoryFragment, Job } from "../../../lib/types";
 import { useT, type Translate } from "../../../i18n";
 import {
-  body, count, emptyForm, flag, operationForm, payloadTextOf, readPayloadText, text,
-  type FieldSuggestions, type FieldValue, type FormProblem, type FormValue,
+  body, count, flag, payloadTextOf, readPayloadText, text,
+  type FieldSuggestions, type FieldValue, type FormValue,
   type OperationEntry, type OperationField,
 } from "../../../lib/operations";
 import { Board } from "../../Board";
@@ -17,6 +17,9 @@ import {
   Band, Banner, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Kpi, Modal, Note, Pill,
   Table, Tag, Tags, type Segment,
 } from "../../kit";
+import {
+  orderReady, refusalOf, registryOrder, type RegistryOrder,
+} from "../../../lib/host/module";
 
 /**
  * Power, boot and the maintenance window.
@@ -408,48 +411,10 @@ function OneField({ field, value, problem, set, suggestions }: {
 
 /* ------------------------------------------------- the registry's orders */
 
-/** One order as the registry composes it: what would be sent, and what is wrong with it. */
-export type RegistryOrder = {
-  action: string;
-  payload: Record<string, unknown>;
-  problems: FormProblem[];
-};
-
-/**
- * Puts an order through the registry entry of its action. The seed carries
- * only the fields the module fills in; the rest come from the entry's own
- * empty form, so the payload is the one the Bulk workspace would send.
- */
-export function registryOrder(action: string, seed: FormValue): RegistryOrder {
-  const entry = operationForm(action);
-  // An action with no entry is a programming mistake, not an operator one:
-  // the order is refused rather than sent as a payload nobody composed.
-  if (!entry) {
-    return {
-      action,
-      payload: {},
-      problems: [{ message: "The registry has no form for {action} yet.", params: { action } }],
-    };
-  }
-  const form = { ...emptyForm(entry), ...seed };
-  return { action, payload: entry.toPayload(form), problems: entry.validate(form) };
-}
-
-/** Whether the registry would take this order as it stands. */
-export function orderReady(order: RegistryOrder): boolean {
-  return order.problems.length === 0;
-}
-
-/**
- * The first refusal of an order as a sentence, or an empty string when the
- * registry takes it. It is what a disabled button says in its hint, so it
- * takes the translator rather than calling the hook: a row in a list uses
- * it too.
- */
-export function refusalOf(t: Translate, order: RegistryOrder): string {
-  const problem = order.problems[0];
-  return problem ? t(problem.message, problem.params) : "";
-}
+/* The registry's order model is lib/host/module's: every module of a host
+   page composes its order the same way, through the registry entry, so
+   there is one copy of what "ready" and "refused" mean. */
+export { orderReady, refusalOf, registryOrder, type RegistryOrder };
 
 /**
  * The one line that says where a module's reading came from and how old

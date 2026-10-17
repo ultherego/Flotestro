@@ -7,7 +7,7 @@ import "@testing-library/jest-dom/vitest";
 import { Schedules, commandOf, hostClock } from "./Schedules";
 import { ToastProvider } from "../../../components/Toast";
 import type { Host } from "../../../lib/types";
-import type { Schedule } from "../../../pages/host/Schedules";
+import type { Schedule } from "../../../lib/host/schedules";
 
 /**
  * The recurring work of one host, and the line the screen will not cross:

@@ -8,7 +8,7 @@ import { needsReason } from "../../../lib/actions";
 import { OPERATIONS_INTERVAL, useProgress } from "../../../lib/stream";
 import { stateName } from "../../../lib/states";
 import type { Attempt, Host, Job, OperationContract } from "../../../lib/types";
-import { contractWords, useOperations } from "../../../pages/Bulk";
+import { contractWords, useOperations } from "../../../lib/orders";
 import { useT } from "../../../i18n";
 import { hoursAgo, jobTone, prettyJSON, reasonAccepted } from "../Jobs";
 import { Board } from "../../Board";

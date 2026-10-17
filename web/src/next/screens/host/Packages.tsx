@@ -13,8 +13,8 @@ import {
   planBinding, planExpired, planMode,
   type ApprovedPlan, type InstalledPackage, type PackageFilter, type PackageRow, type PackagesState,
   type PlanChange, type PlanHeader,
-} from "../../../pages/host/Packages";
-import { orderReady, refusalOf } from "../../../pages/host/shared";
+} from "../../../lib/host/packages";
+import { orderReady, refusalOf } from "../../../lib/host/module";
 import { useT } from "../../../i18n";
 import { Board } from "../../Board";
 import type { BoardEntry } from "../../../components/board";

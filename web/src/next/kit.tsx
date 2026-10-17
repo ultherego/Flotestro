@@ -11,6 +11,7 @@ import { fetchWithCredentials } from "../lib/api";
 import { isStringList, useStoredState } from "../lib/storage";
 import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
+import type { Tone } from "../lib/tone";
 
 /**
  * The pieces the new panel is drawn from, and the only ones it may use.
@@ -27,7 +28,9 @@ import { useT } from "../i18n";
  * last screen is written.
  */
 
-export type Tone = "ok" | "warn" | "error" | "info" | "unknown" | "neutral" | "accent";
+/* The tone vocabulary is shared with the helpers that work a state out,
+   so it is declared once, in lib/tone, and re-exported here. */
+export type { Tone };
 export type Span = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
 
 const join = (...parts: (string | false | undefined | null)[]) => parts.filter(Boolean).join(" ");

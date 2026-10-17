@@ -2,16 +2,18 @@ import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../../lib/api";
 import { useAllowed, useModuleAccess } from "../../../lib/actions";
-import { emptyForm, operationForm, type FormProblem, type FormValue } from "../../../lib/operations";
 import { bytes, relativeTime, absoluteTime } from "../../../lib/format";
 import type { Host, InventoryFragment, Job } from "../../../lib/types";
-import { useT, type Translate } from "../../../i18n";
+import { useT } from "../../../i18n";
 import { Board } from "../../Board";
 import type { BoardEntry } from "../../../components/board";
 import {
   Banner, Bars, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Kpi, Meter,
   Modal, Note, Pill, Row, Stack, Table, Toolbar,
 } from "../../kit";
+import {
+  orderReady, refusalOf, registryOrder, type RegistryOrder,
+} from "../../../lib/host/module";
 
 /**
  * The host's firewall, read from the kernel with nft.
@@ -111,37 +113,10 @@ type Intent = { action: string; label: string; description: string; payload: Rec
 
 /* ------------------------------------------------------- the registry */
 
-/** One order as the registry composes it: what would be sent, and what is wrong with it. */
-export type RegistryOrder = {
-  action: string;
-  payload: Record<string, unknown>;
-  problems: FormProblem[];
-};
-
-/** Puts an order through the registry entry of its action. */
-export function registryOrder(action: string, seed: FormValue): RegistryOrder {
-  const entry = operationForm(action);
-  if (!entry) {
-    return {
-      action,
-      payload: {},
-      problems: [{ message: "The registry has no form for {action} yet.", params: { action } }],
-    };
-  }
-  const form = { ...emptyForm(entry), ...seed };
-  return { action, payload: entry.toPayload(form), problems: entry.validate(form) };
-}
-
-/** Whether the registry would take this order as it stands. */
-export function orderReady(order: RegistryOrder): boolean {
-  return order.problems.length === 0;
-}
-
-/** The first refusal of an order as a sentence, or an empty string. */
-export function refusalOf(t: Translate, order: RegistryOrder): string {
-  const problem = order.problems[0];
-  return problem ? t(problem.message, problem.params) : "";
-}
+/* The registry's order model is lib/host/module's: every module of a host
+   page composes its order the same way, through the registry entry, so
+   there is one copy of what "ready" and "refused" mean. */
+export { orderReady, refusalOf, registryOrder, type RegistryOrder };
 
 /** The shortest reason the API takes for a change of this weight. */
 export const MIN_REASON_LENGTH = 8;

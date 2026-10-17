@@ -5,7 +5,7 @@ import { api } from "../../../lib/api";
 import { useAllowed, useModuleAccess } from "../../../lib/actions";
 import { absoluteTime, relativeTime } from "../../../lib/format";
 import type { Host, Job } from "../../../lib/types";
-import { bulkPrefill } from "../../../pages/Bulk";
+import { bulkPrefill } from "../../../lib/orders";
 import { useT } from "../../../i18n";
 import { Board } from "../../Board";
 import type { BoardEntry } from "../../../components/board";

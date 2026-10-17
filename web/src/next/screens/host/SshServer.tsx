@@ -16,6 +16,9 @@ import {
   Banner, Bars, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Kpi, Modal, Note,
   Pill, Readout, Stack, Table,
 } from "../../kit";
+import {
+  orderReady, refusalOf, registryOrder, type RegistryOrder,
+} from "../../../lib/host/module";
 
 /**
  * The sshd server as sshd itself reports it.
@@ -54,37 +57,10 @@ type Intent = { action: string; label: string; description: string; payload: Rec
 
 /* ------------------------------------------------------- the registry */
 
-/** One order as the registry composes it: what would be sent, and what is wrong with it. */
-export type RegistryOrder = {
-  action: string;
-  payload: Record<string, unknown>;
-  problems: FormProblem[];
-};
-
-/** Puts an order through the registry entry of its action. */
-export function registryOrder(action: string, seed: FormValue): RegistryOrder {
-  const entry = operationForm(action);
-  if (!entry) {
-    return {
-      action,
-      payload: {},
-      problems: [{ message: "The registry has no form for {action} yet.", params: { action } }],
-    };
-  }
-  const form = { ...emptyForm(entry), ...seed };
-  return { action, payload: entry.toPayload(form), problems: entry.validate(form) };
-}
-
-/** Whether the registry would take this order as it stands. */
-export function orderReady(order: RegistryOrder): boolean {
-  return order.problems.length === 0;
-}
-
-/** The first refusal of an order as a sentence, or an empty string. */
-export function refusalOf(t: Translate, order: RegistryOrder): string {
-  const problem = order.problems[0];
-  return problem ? t(problem.message, problem.params) : "";
-}
+/* The registry's order model is lib/host/module's: every module of a host
+   page composes its order the same way, through the registry entry, so
+   there is one copy of what "ready" and "refused" mean. */
+export { orderReady, refusalOf, registryOrder, type RegistryOrder };
 
 /**
  * A change to the server's settings as an order, composed by the operation

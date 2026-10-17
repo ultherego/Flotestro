@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type Collection } from "../../../lib/api";
 import { absoluteTime, relativeTime } from "../../../lib/format";
 import { POLICY_VERDICTS, type Host, type PolicyResult, type PolicyVerdict } from "../../../lib/types";
-import { ruleSummary, verdictLabel, verdictTone } from "../../../pages/Policies";
+import { ruleSummary, verdictLabel, verdictTone } from "../../../lib/policies";
 import { useT } from "../../../i18n";
 import { Board } from "../../Board";
 import type { BoardEntry } from "../../../components/board";

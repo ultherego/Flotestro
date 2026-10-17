@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import { Readiness, verdictTone } from "./Readiness";
-import { readinessVerdict } from "../../pages/Readiness";
+import { readinessVerdict } from "../../lib/readiness";
 import { ToastProvider } from "../../components/Toast";
 
 /**

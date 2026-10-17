@@ -7,8 +7,8 @@ import type { Host, InventoryFragment, Job } from "../../../lib/types";
 import {
   enableOrder, ensureOrder, entryOrder, foundUnderName, kindLabel, previewOf, scheduleKinds,
   type Attempt, type Schedule,
-} from "../../../pages/host/Schedules";
-import { orderReady, refusalOf } from "../../../pages/host/shared";
+} from "../../../lib/host/schedules";
+import { orderReady, refusalOf } from "../../../lib/host/module";
 import { useT } from "../../../i18n";
 import { Board } from "../../Board";
 import type { BoardEntry } from "../../../components/board";
