@@ -32,8 +32,7 @@ import {
 import { FacetList } from "../../components/FacetList";
 import { useT, type Translate } from "../../i18n";
 import {
-  Actions, Banner, Bones, Card, Check, Dot, Empty, Fact, Facts, Field, Fields, Find, Grid,
-  Note, Pill, Problem, Screen, Seg, Stack, Table, Tabs, Tag, Tags, type Tone, Toolbar, TwoLine,
+  Actions, Banner, Bones, Card, Check, Dot, Empty, Fact, Facts, Field, Fields, Find, Form, Grid, Note, Pill, Problem, Screen, Seg, Stack, Table, Tabs, Tag, Tags, Toolbar, TwoLine, type Tone,
 } from "../kit";
 
 /**
@@ -585,11 +584,10 @@ function ScopeStep({ order, change, bulk, refusals, preview, refusal, nav }: {
   const formed = wizardOperations(bulk);
   const payloadValid = orderPayload(order) !== null;
   return (
-    <Card
-      span={12}
+    <Form
       title={`1. ${t("Scope")}`}
       note={t("Name the campaign and pick what it does on every host; the next step chooses the hosts. Only operations the registry opens to the fleet are listed - an operation missing here is a deliberate refusal, not a missing screen.")}
-      foot={nav}
+      actions={nav}
     >
       <Stack>
         {refusal && (
@@ -725,7 +723,7 @@ function ScopeStep({ order, change, bulk, refusals, preview, refusal, nav }: {
           </Stack>
         )}
       </Stack>
-    </Card>
+    </Form>
   );
 }
 
@@ -1114,8 +1112,7 @@ function TargetsStep({ order, change, preview, checking, refusal, nav }: {
   const matched = matchedState(Boolean(names), count, checking);
   const way = TARGET_WAYS.find(([mode]) => mode === order.targetMode);
   return (
-    <Card
-      span={12}
+    <Form
       title={`2. ${t("Targets")}`}
       note={t("Choose the hosts one of three ways: by site, environment and OS; by groups and tags; or by picking them from a list. The count below is the server's answer; the next step says which of those hosts can run the operation.")}
       tools={
@@ -1126,7 +1123,7 @@ function TargetsStep({ order, change, preview, checking, refusal, nav }: {
           options={TARGET_WAYS.map(([mode, label]) => ({ value: mode, label: t(label) }))}
         />
       }
-      foot={nav}
+      actions={nav}
     >
       <Stack>
         {way && <Note>{t(way[2])}</Note>}
@@ -1281,7 +1278,7 @@ function TargetsStep({ order, change, preview, checking, refusal, nav }: {
         )}
         <Distribution preview={preview} />
       </Stack>
-    </Card>
+    </Form>
   );
 }
 
@@ -1702,11 +1699,10 @@ function WindowStep({ order, change, operation, nav }: {
   const scheduleFault = scheduleWords(t, scheduleProblem(schedule, new Date()));
   const changeSchedule = (delta: Partial<ScheduleChoice>) => change({ schedule: { ...schedule, ...delta } });
   return (
-    <Card
-      span={12}
+    <Form
       title={`5. ${t("Window and verification")}`}
       note={t("Say when the change may run and what is checked afterwards; everything here is optional, and left empty the campaign runs as soon as it is approved and verifies nothing. Both go into the fingerprint the approver signs; the next step creates the campaign.")}
-      foot={nav}
+      actions={nav}
     >
       <Stack>
         <Fields>
@@ -1787,7 +1783,7 @@ function WindowStep({ order, change, operation, nav }: {
           </Stack>
         )}
       </Stack>
-    </Card>
+    </Form>
   );
 }
 
@@ -1893,13 +1889,12 @@ function CreateStep({ order, change, targets, compensates, token, campaignID, on
   const scheduling = order.schedule.enabled;
 
   return (
-    <Card
-      span={12}
+    <Form
       title={`6. ${t("Create")}`}
       note={scheduling
         ? t("Give the reason and record the schedule: the order is placed at its moments, and each campaign it places waits for its approval. Nothing changes on any host now.")
         : t("Give the reason and create the campaign: this freezes the host list and every host starts computing its plan. Nothing changes on any host yet; that takes the approval two steps on.")}
-      foot={nav}
+      actions={nav}
     >
       <Stack>
         {/* The link is part of what is created: the operator is to read which
@@ -1963,7 +1958,7 @@ function CreateStep({ order, change, targets, compensates, token, campaignID, on
         )}
         {errorMessage && <Problem>{errorMessage}</Problem>}
       </Stack>
-    </Card>
+    </Form>
   );
 }
 
@@ -1984,13 +1979,12 @@ function PlansStep({ campaignID, campaign, nav }: { campaignID: string; campaign
   const planning = campaign?.state === "planning";
   const groups = plans.data?.items ?? [];
   return (
-    <Card
-      span={12}
+    <Form
       title={`7. ${t("Plans")}`}
       note={planning
         ? t("Wait: each host is computing what it would change, and the page refreshes by itself. Nothing is applied while this runs; the approval opens once every plan is in.")
         : t("Read what every host would change - hosts with the same change are shown as one group - then go on to approve. The fingerprint covers the whole set: a host whose plan changed refuses the change.")}
-      foot={nav}
+      actions={nav}
     >
       {targets.error ? <Problem>{String(targets.error)}</Problem> : (
         <Stack>
@@ -2006,7 +2000,7 @@ function PlansStep({ campaignID, campaign, nav }: { campaignID: string; campaign
           <TargetTable targets={targets} action={campaign?.action_type ?? ""} />
         </Stack>
       )}
-    </Card>
+    </Form>
   );
 }
 
@@ -2328,17 +2322,16 @@ function ApprovalStep({ campaignID, campaign, nav }: { campaignID: string; campa
 
   if (!campaign) {
     return (
-      <Card span={12} title={`8. ${t("Approval and run")}`} foot={nav}>
+      <Form title={`8. ${t("Approval and run")}`} actions={nav}>
         <Empty icon="help">{t("No campaign yet.")}</Empty>
-      </Card>
+      </Form>
     );
   }
   return (
-    <Card
-      span={12}
+    <Form
       title={`8. ${t("Approval and run")}`}
       note={t("Give the reason and approve: the campaign starts at once, canary first, and its progress is followed on the campaign page. You are approving this operation, this payload, this list of hosts, this rollout policy and this set of plans - together, as one fingerprint.")}
-      foot={nav}
+      actions={nav}
     >
       <Stack>
         <Facts>
@@ -2388,7 +2381,7 @@ function ApprovalStep({ campaignID, campaign, nav }: { campaignID: string; campa
         )}
         <TargetTable targets={targets} action={campaign.action_type} />
       </Stack>
-    </Card>
+    </Form>
   );
 }
 

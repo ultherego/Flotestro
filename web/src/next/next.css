@@ -1336,7 +1336,10 @@
   pointer-events: none;
 }
 
-.fl-app .fl-form-head { display: flex; flex-direction: column; gap: var(--s1); }
+/* The name of the form, and what belongs to the whole of it beside. */
+.fl-app .fl-form-head { display: flex; align-items: flex-start; gap: var(--s4); }
+.fl-app .fl-form-naming { display: flex; flex-direction: column; gap: var(--s1); min-width: 0; flex: 1 1 auto; }
+.fl-app .fl-form-tools { flex: 0 0 auto; }
 
 .fl-app .fl-form-title {
   margin: 0;

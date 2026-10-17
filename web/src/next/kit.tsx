@@ -515,13 +515,15 @@ export function useTab<T extends string>(names: readonly T[]): [T, (next: T) => 
  * tall as what it holds. It never goes into a `BoardEntry`; there is a test
  * that fails the build if one does.
  */
-export function Form({ title, note, children, actions, onSubmit, testId }: {
+export function Form({ title, note, children, actions, tools, onSubmit, testId }: {
   title: ReactNode;
   /** One line on what this decides. Not a second copy of the title. */
   note?: ReactNode;
   children: ReactNode;
   /** The buttons that commit it, at the foot where a form's buttons live. */
   actions?: ReactNode;
+  /** A control that belongs to the whole form - a search over its choices. */
+  tools?: ReactNode;
   onSubmit?: () => void;
   testId?: string;
 }) {
@@ -532,8 +534,11 @@ export function Form({ title, note, children, actions, onSubmit, testId }: {
       onSubmit={(event) => { event.preventDefault(); onSubmit?.(); }}
     >
       <div className="fl-form-head">
-        <h3 className="fl-form-title">{title}</h3>
-        {note && <p className="fl-form-note">{note}</p>}
+        <div className="fl-form-naming">
+          <h3 className="fl-form-title">{title}</h3>
+          {note && <p className="fl-form-note">{note}</p>}
+        </div>
+        {tools && <div className="fl-form-tools">{tools}</div>}
       </div>
       <div className="fl-form-body">{children}</div>
       {actions && <div className="fl-form-foot">{actions}</div>}

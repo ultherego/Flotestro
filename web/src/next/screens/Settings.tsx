@@ -12,7 +12,7 @@ import { Board } from "../Board";
 import { CertificateAuthority, CertificateAuthorityWarning } from "./CertificateAuthority";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Bones, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Note, Pill, Problem, Screen, stacked,
+  Actions, Banner, Bones, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Form, Note, Pill, Problem, Screen, stacked,
 } from "../kit";
 
 /**
@@ -537,9 +537,9 @@ function MonitoringRetention() {
   if (settings.error) return null;
   if (!settings.data) {
     return (
-      <Card title={t("Monitoring retention")} note={t("How long the panel keeps what the hosts send.")}>
+      <Form title={t("Monitoring retention")} note={t("How long the panel keeps what the hosts send.")}>
         <Bones rows={4} />
-      </Card>
+      </Form>
     );
   }
 
@@ -550,11 +550,11 @@ function MonitoringRetention() {
   const ready = preview !== null && !invalid && (!destructive || acknowledged);
 
   return (
-    <Card
+    <Form
       title={t("Monitoring retention")}
       note={t("How long the panel keeps what the hosts send.")}
-      foot={
-        <Actions>
+      actions={
+        <>
           <button
             type="button"
             className="fl-quiet"
@@ -580,7 +580,7 @@ function MonitoringRetention() {
               })}
             </Note>
           )}
-        </Actions>
+        </>
       }
     >
       <Fields>
@@ -630,7 +630,7 @@ function MonitoringRetention() {
       {preview && !invalid && (
         <Impact impact={preview.impact} acknowledged={acknowledged} onAcknowledge={setAcknowledged} />
       )}
-    </Card>
+    </Form>
   );
 }
 

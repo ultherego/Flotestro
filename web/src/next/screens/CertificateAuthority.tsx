@@ -6,8 +6,7 @@ import type { Authority } from "../../lib/types";
 import { useToast } from "../../components/Toast";
 import { useT, type Translate } from "../../i18n";
 import {
-  Actions, Band, Banner, Bars, Bones, Button, Card, Empty, Field, Fields, Modal, Note, Pill,
-  Problem, Table, type Tone,
+  Actions, Band, Banner, Bars, Bones, Button, Card, Empty, Field, Fields, Form, Modal, Note, Pill, Problem, Table, type Tone,
 } from "../kit";
 
 /**
@@ -279,17 +278,6 @@ export function CertificateAuthority({ mayRotate, reportError }: {
       <Card
         title={t("Fleet CA")}
         note={t("Agent certificates are issued by the fleet CA. Rotation happens in two phases: the new CA first reaches agents as their certificates are renewed, and only then takes over signing.")}
-        foot={
-          <Rotation
-            pending={pending}
-            mayRotate={mayRotate}
-            reason={reason}
-            setReason={setReason}
-            working={prepare.isPending || activate.isPending}
-            onPrepare={() => prepare.mutate()}
-            onActivate={() => activate.mutate()}
-          />
-        }
       >
         <Band
           testId="ca-trust-set"
@@ -381,6 +369,15 @@ export function CertificateAuthority({ mayRotate, reportError }: {
           ]}
         />
       </Card>
+      <Rotation
+        pending={pending}
+        mayRotate={mayRotate}
+        reason={reason}
+        setReason={setReason}
+        working={prepare.isPending || activate.isPending}
+        onPrepare={() => prepare.mutate()}
+        onActivate={() => activate.mutate()}
+      />
 
       {retiring && (
         <Modal
@@ -459,8 +456,7 @@ function Rotation({ pending, mayRotate, reason, setReason, working, onPrepare, o
     : t("The new CA will join the trust set and reach agents as their certificates are renewed. Signing stays with the current CA.");
 
   return (
-    <>
-      <Note testId="ca-phase"><b>{title}</b> {body}</Note>
+    <Form title={title} note={body} testId="ca-rotation">
       {pending && (pending.relays_missing ?? 0) > 0 && (
         <Note testId="ca-relays-missing">
           {t("{n} relays do not have the new CA yet either. A relay without it stops recognising the agents of its site the moment signing moves.", {
@@ -505,6 +501,6 @@ function Rotation({ pending, mayRotate, reason, setReason, working, onPrepare, o
           </Actions>
         </>
       )}
-    </>
+    </Form>
   );
 }
