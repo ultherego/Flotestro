@@ -215,33 +215,56 @@ describe("what may stand on a board", () => {
    * DESIGN-UI.md, found by walking the running panel, and they are the
    * reason this number is not the whole of the work.
    */
-  const stillWrong = [
-    "Schedules.tsx: form",
-  ];
+  /**
+   * How many such cards each screen still has. The number may only fall:
+   * a screen that gains one fails here, and a screen that loses its last
+   * comes off the list. Counted rather than named, because several of
+   * these titles are expressions and a name would be the fragile part.
+   */
+  const stillWrong: Record<string, number> = {
+    "Bulk.tsx": 1,
+    "Directory.tsx": 7,
+    "Groups.tsx": 1,
+    "Hosts.tsx": 2,
+    "Reads.tsx": 1,
+    "Schedules.tsx": 1,
+  };
 
-  it("puts no form in a container of it", () => {
-    const offenders: string[] = [];
-    for (const { name, text } of screens()) {
-      // The record the board draws from: `drawn={{ key: <…/> }}`.
-      const at = text.indexOf("drawn={{");
-      if (at < 0) continue;
-      const closes = text.indexOf("\n      }}", at);
-      const record = text.slice(at, closes > at ? closes : undefined);
-      // Cut the record at each key and read what belongs to it. An earlier
-      // version used one regular expression with a lookahead and a lazy
-      // quantifier, which stopped at the first end of line and so read
-      // nothing at all - it passed over every screen that was wrong.
-      const keys = [...record.matchAll(/^ {6,8}([a-z0-9_]+): /gm)];
-      for (const [index, key] of keys.entries()) {
-        const from = key.index ?? 0;
-        const to = index + 1 < keys.length ? keys[index + 1].index : record.length;
-        if (/<Fields>|<Field\b|<Form\b|<textarea/.test(record.slice(from, to))) {
-          offenders.push(`${name}: ${key[1]}`);
+  /** Each `<Card …>` of a file, from its opening tag to its own close. */
+  function cards(text: string): string[] {
+    const out: string[] = [];
+    for (const open of text.matchAll(/<Card\b/g)) {
+      let depth = 0;
+      let i = open.index ?? 0;
+      const from = i;
+      while (i < text.length) {
+        if (text.startsWith("<Card", i)) { depth += 1; i += 5; continue; }
+        if (text.startsWith("</Card>", i)) {
+          depth -= 1; i += 7;
+          if (depth === 0) { out.push(text.slice(from, i)); break; }
+          continue;
         }
+        if (text.startsWith("/>", i) && depth === 1) { out.push(text.slice(from, i + 2)); break; }
+        i += 1;
       }
     }
-    expect(offenders.filter((one) => !stillWrong.includes(one))).toEqual([]);
-    // And the ratchet: a line that is no longer true comes out of the list.
-    expect(stillWrong.filter((one) => !offenders.includes(one))).toEqual([]);
+    return out;
+  }
+
+  it("holds nothing somebody has to fill in", () => {
+    const tally: Record<string, number> = {};
+    for (const { name, text } of screens()) {
+      const n = cards(text).filter((card) => /<(input|textarea|Field\b|Fields\b)/.test(card)).length;
+      if (n > 0) tally[name] = n;
+    }
+    const worse = Object.entries(tally)
+      .filter(([name, n]) => n > (stillWrong[name] ?? 0))
+      .map(([name, n]) => `${name}: ${n} (was ${stillWrong[name] ?? 0})`);
+    expect(worse).toEqual([]);
+    // And the ratchet: a screen that no longer has any comes off the list.
+    const stale = Object.entries(stillWrong)
+      .filter(([name, n]) => (tally[name] ?? 0) < n)
+      .map(([name, n]) => `${name}: now ${tally[name] ?? 0}, listed as ${n}`);
+    expect(stale).toEqual([]);
   });
 });
