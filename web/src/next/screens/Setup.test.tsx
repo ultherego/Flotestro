@@ -140,11 +140,12 @@ describe("the first run", () => {
     expect(screen.getByTestId("found-identity_provider"))
       .toHaveTextContent("Issuer https://id.example.org.");
     expect(screen.getByText("1 of 4 required steps done")).toBeInTheDocument();
-    // The first undone step is the one to do now, said in a word.
-    const mapping = screen.getByText("2. First group mapping").closest(".fl-card");
-    expect(within(mapping as HTMLElement).getByText("do this next")).toBeInTheDocument();
-    const provider = screen.getByText("1. Identity provider").closest(".fl-card");
-    expect(within(provider as HTMLElement).queryByText("do this next")).toBeNull();
+    // The first undone step is the one to do now, said in a word. A step
+    // is a row of the list since 17.10, not a card of its own.
+    const mapping = screen.getByTestId("step-group_mapping");
+    expect(within(mapping).getByText("do this next")).toBeInTheDocument();
+    const provider = screen.getByTestId("step-identity_provider");
+    expect(within(provider).queryByText("do this next")).toBeNull();
   });
 
   it("names the bootstrap token as live and never shows anything that signs anybody in", async () => {
@@ -295,8 +296,8 @@ describe("the first run", () => {
     await waitFor(() => expect(screen.getByText("Every required step is done")).toBeInTheDocument());
     expect(screen.getByText("The warnings and the optional steps below are advice, not blockers."))
       .toBeInTheDocument();
-    const directory = screen.getByText("5. Directory connector").closest(".fl-card");
-    expect(within(directory as HTMLElement).getByText("Optional")).toBeInTheDocument();
+    const directory = screen.getByTestId("step-directory");
+    expect(within(directory).getByText("Optional")).toBeInTheDocument();
     // With no bootstrap token live there is nothing to take account of first.
     expect(screen.queryByText(/bootstrap token/)).toBeNull();
   });

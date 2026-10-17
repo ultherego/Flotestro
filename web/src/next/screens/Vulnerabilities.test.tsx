@@ -275,7 +275,9 @@ describe("the feed fetches the gate held back", () => {
         }],
       }),
     });
-    draw();
+    // Where the verdicts came from is a sub-tab of its own since 17.10,
+    // and the fetches the gate held back stand at the top of it.
+    draw("/vulnerabilities?tab=sources");
     await waitFor(() => expect(screen.getByTestId("held-fetch-debian")).toBeInTheDocument());
     const row = screen.getByTestId("held-fetch-debian");
     expect(row).toHaveTextContent("the fetch stopped covering a release that is in force");
@@ -293,7 +295,7 @@ describe("the feed fetches the gate held back", () => {
         }],
       }),
     });
-    draw();
+    draw("/vulnerabilities?tab=sources");
     await waitFor(() => expect(screen.getByTestId("accept-debian")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("accept-debian"));
     expect(screen.getByTestId("accept-confirm")).toBeDisabled();

@@ -6,11 +6,9 @@ import { emptyForm, operationForm, type FormProblem, type FormValue } from "../.
 import { relativeTime, absoluteTime } from "../../../lib/format";
 import type { Host, InventoryFragment, Job } from "../../../lib/types";
 import { useT, type Translate } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Banner, Bars, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Kpi, Modal, Note,
-  Pill, Problem, Stack, Table, Toolbar, type Segment,
+  Banner, Bars, Bones, Button, C, Card, Check, Empty, Fact, Facts, Field, Fields, Form, Grid, Kpi,
+  Modal, Note, Pill, Problem, Stack, Table, Tabs, Toolbar, useTab, type Segment,
 } from "../../kit";
 
 /**
@@ -321,8 +319,15 @@ function Allowed({ host, action, children }: { host: string; action: string; chi
 
 /* -------------------------------------------------------- the screen */
 
+/**
+ * The sub-tabs of this module: what the kernel has up, and what the
+ * panel may change about it. The address carries the open one.
+ */
+const NETWORK_TABS = ["state", "change"] as const;
+
 export function Network({ host }: { host: Host }) {
   const t = useT();
+  const [tab, go] = useTab(NETWORK_TABS);
   const queryClient = useQueryClient();
   const access = useModuleAccess(host.id, NETWORK_CHANGES);
 
@@ -454,8 +459,10 @@ export function Network({ host }: { host: Host }) {
           onCancel={() => setIntent(null)}
         />
       )}
-      <Board screen={NETWORK_SCREEN} catalogue={NETWORK_BOARD} notices={notices.length > 0 ? <Stack>{notices}</Stack> : undefined} drawn={{
-        up: (
+      {notices.length > 0 && <Stack>{notices}</Stack>}
+
+      <Grid>
+        <C span={3}>
           <Kpi
             hero
             icon="network"
@@ -463,22 +470,22 @@ export function Network({ host }: { host: Host }) {
             value={countWhere(known, (iface) => iface.oper_state === "up") ?? null}
             note={known === undefined ? undefined : t("of {n} the kernel lists", { n: interfaces.length })}
           />
-        ),
-        addressed: (
+        </C>
+        <C span={3}>
           <Kpi
             icon="network"
             label={t("Interfaces with an address")}
             value={countWhere(known, (iface) => (iface.addresses ?? []).length > 0) ?? null}
           />
-        ),
-        routecount: (
+        </C>
+        <C span={3}>
           <Kpi
             icon="dashboard"
             label={t("Routes")}
             value={snapshot?.unavailable_reason ? null : routes.length}
           />
-        ),
-        adapter: (
+        </C>
+        <C span={3}>
           <Kpi
             icon="settings"
             label={t("Write adapter")}
@@ -486,278 +493,318 @@ export function Network({ host }: { host: Host }) {
             tone={snapshot?.write_adapter ? "ok" : undefined}
             note={snapshot?.write_adapter ? undefined : t("the panel will not change this host's network")}
           />
-        ),
-        states: (
-          <Card
-            title={t("Interfaces by state")}
-            note={t("Every interface the kernel lists, by its operational state.")}
-          >
-            <Bars items={states.map((one) => ({
-              label: one.label,
-              value: one.value ?? 0,
-              tone: one.value === undefined ? "unknown" : one.tone,
-            }))} />
-            {known === undefined && <Note>{t("Nothing was counted: the snapshot could not be read.")}</Note>}
-          </Card>
-        ),
-        channel: (
-          <Card title={t("Management channel")}>
-            <Facts>
-              <Fact label={t("Interface")}>
-                {snapshot?.management_interface
-                  ? <span className="fl-mono">{snapshot.management_interface}</span>
-                  : <Pill tone="unknown">{t("unknown")}</Pill>}
-              </Fact>
-              <Fact label={t("Address")}>
-                {snapshot?.management_address
-                  ? <span className="fl-mono">{snapshot.management_address}</span>
-                  : <span className="fl-faint">—</span>}
-              </Fact>
-              <Fact label={t("Write adapter")}>
-                {snapshot?.write_adapter
-                  ? <Pill tone="ok">{adapterLabel(snapshot.write_adapter)}</Pill>
-                  : <Pill tone="unknown">{t("none")}</Pill>}
-              </Fact>
-              <Fact label={t("Routes")}>
-                {snapshot?.unavailable_reason ? <Pill tone="unknown">{t("unknown")}</Pill> : routes.length}
-              </Fact>
-              <Fact label={t("By kind")}>
-                {kinds.length
-                  ? <Bars items={kinds.map(([kind, count]) => ({ label: kind, value: count }))} />
-                  : <span className="fl-faint">—</span>}
-              </Fact>
-            </Facts>
-          </Card>
-        ),
-        interfaces: (
-          <Card title={t("Interfaces")} flush>
-            <Toolbar end={<span className="fl-note">{t("{n} shown", { n: visible.length })}</span>}>
-              <Check checked={all} onChange={setAll}>
-                {t("Show virtual interfaces ({n} hidden)", { n: interfaces.length - visible.length })}
-              </Check>
-            </Toolbar>
-            <Table
-              testId="interfaces"
-              rows={visible}
-              keyOf={(one) => one.name}
-              rowTestId={(one) => `interface-${one.name}`}
-              empty={t("The kernel lists no interface here.")}
-              columns={[
-                { key: "name", head: t("Interface"), cell: (one) => (
-                  <Stack>
-                    <span className="fl-mono">{one.name}</span>
-                    {/* The management interface is the one the command came
-                        through: changing it is changing the branch we sit on. */}
-                    {one.management && <Pill tone="info">{t("management")}</Pill>}
-                  </Stack>
-                ) },
-                { key: "kind", head: t("Kind"), cell: (one) => one.kind || <span className="fl-faint">—</span> },
-                // What the interface is made of, or what owns it. An
-                // interface a layer owns has no addressing of its own worth
-                // speaking of, and changing it as if it had is how a bond
-                // comes apart by accident.
-                { key: "layering", head: t("Layering"), tight: true, cell: (one) => (
-                  <Stack>
-                    <span className="fl-mono">{layerSummary(one) || "—"}</span>
-                    {one.master && layerKind(one) === "" && (
-                      <span className="fl-faint">{t("its address lives on {owner}", { owner: one.master })}</span>
-                    )}
-                  </Stack>
-                ) },
-                // The state is the kernel's word. A loopback has no carrier
-                // to report, so "unknown" is its normal state, not a fault.
-                { key: "state", head: t("State"), cell: (one) => (
-                  <Pill
-                    tone={one.oper_state === "up" ? "ok" : one.oper_state === "down" ? "neutral" : "unknown"}
-                    title={one.oper_state === "unknown" && one.kind === "loopback"
-                      ? t("The kernel reports no operational state for a loopback; this is its normal state.")
-                      : t("The operational state as the kernel reports it.")}
-                  >
-                    {one.oper_state}
-                  </Pill>
-                ) },
-                { key: "addresses", head: t("Addresses"), cell: (one) => (
-                  (one.addresses ?? []).length === 0
-                    ? <span className="fl-faint">—</span>
-                    : (
-                      <Stack>
-                        {(one.addresses ?? []).map((address) => (
-                          <span key={address.address} className="fl-mono">
-                            {address.address}
-                            {!address.permanent && <span className="fl-faint"> · {t("temporary")}</span>}
-                            {address.source && <span className="fl-faint"> · {address.source}</span>}
-                          </span>
-                        ))}
-                      </Stack>
-                    )
-                ) },
-                { key: "mtu", head: "MTU", num: true, cell: (one) => one.mtu },
-                // An unknown carrier and an unknown speed stay unknown: a
-                // missing value is not the same as a missing cable.
-                { key: "link", head: t("Link"), cell: (one) => (
-                  one.carrier === undefined
-                    ? <Pill tone="unknown">{t("unknown")}</Pill>
-                    : one.carrier
-                      ? (one.speed_mbps ? `${t("up")}, ${one.speed_mbps} Mbps` : t("up"))
-                      : t("no carrier")
-                ) },
-                { key: "mac", head: "MAC", minor: true, tight: true, cell: (one) => (
-                  one.mac ? <span className="fl-mono">{one.mac}</span> : <span className="fl-faint">—</span>
-                ) },
-                { key: "driver", head: t("Driver"), minor: true, cell: (one) => one.driver || <span className="fl-faint">—</span> },
-                // Without a write mechanism there is nothing to edit: the
-                // panel does not change a configuration the host will not
-                // keep after a reboot.
-                ...(writable ? [{
-                  key: "act", head: t("Actions"), actions: true, cell: (one: Interface) => (
-                    access.anyAllowed
-                      ? (
-                        <Button kind="quiet" testId={`change-${one.name}`} onClick={() => setEdited(one)}>
-                          {t("Change")}
-                        </Button>
-                      )
-                      : null
-                  ),
-                }] : []),
-              ]}
-            />
-          </Card>
-        ),
-        change: edited ? (
-          <InterfaceChange
-            key={edited.name}
-            hostID={host.id}
-            iface={edited}
-            management={edited.management}
-            onIntent={setIntent}
-            onCancel={() => setEdited(null)}
-          />
-        ) : undefined,
-        layers: (
-          <Card
-            title={t("Layering")}
-            note={t("What sits on what: a bond joins links into one, a bridge puts them on one segment, a VLAN rides tagged on one of them. A layer takes the addressing of its members, so building one is a change of the same weight as rewriting an address.")}
-            tools={writable ? (
-              <Allowed host={host.id} action="network.link.apply">
-                <Button kind="quiet" testId="build-layer" onClick={() => setBuilding((open) => !open)}>
-                  {building ? t("Cancel") : t("Build a layer")}
-                </Button>
-              </Allowed>
-            ) : undefined}
-            flush
-          >
-            <Table
-              testId="layers"
-              rows={layers}
-              keyOf={(one) => one.name}
-              rowTestId={(one) => `layer-${one.name}`}
-              empty={t("This host reports no bond, bridge or VLAN.")}
-              columns={[
-                { key: "name", head: t("Interface"), cell: (one) => (
-                  <Stack>
-                    <span className="fl-mono">{one.name}</span>
-                    {one.management && <Pill tone="info">{t("management")}</Pill>}
-                  </Stack>
-                ) },
-                { key: "kind", head: t("Kind"), cell: (one) => layerKind(one) },
-                { key: "members", head: t("Members"), cell: (one) => (
-                  one.vlan
-                    ? <span className="fl-mono">{t("on {parent}", { parent: one.vlan.parent || "—" })}</span>
-                    : layerMembers(one).length === 0
+        </C>
+      </Grid>
+
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "state", label: t("State") },
+          { value: "change", label: t("Change") },
+        ]}
+      />
+
+      {tab === "state" && (
+        <Grid>
+          <C span={8}>
+            <Card
+              title={t("Interfaces by state")}
+              note={t("Every interface the kernel lists, by its operational state.")}
+            >
+              <Bars items={states.map((one) => ({
+                label: one.label,
+                value: one.value ?? 0,
+                tone: one.value === undefined ? "unknown" : one.tone,
+              }))} />
+              {known === undefined && <Note>{t("Nothing was counted: the snapshot could not be read.")}</Note>}
+            </Card>
+          </C>
+          <C span={4}>
+            <Card title={t("Management channel")}>
+              <Facts>
+                <Fact label={t("Interface")}>
+                  {snapshot?.management_interface
+                    ? <span className="fl-mono">{snapshot.management_interface}</span>
+                    : <Pill tone="unknown">{t("unknown")}</Pill>}
+                </Fact>
+                <Fact label={t("Address")}>
+                  {snapshot?.management_address
+                    ? <span className="fl-mono">{snapshot.management_address}</span>
+                    : <span className="fl-faint">—</span>}
+                </Fact>
+                <Fact label={t("Write adapter")}>
+                  {snapshot?.write_adapter
+                    ? <Pill tone="ok">{adapterLabel(snapshot.write_adapter)}</Pill>
+                    : <Pill tone="unknown">{t("none")}</Pill>}
+                </Fact>
+                <Fact label={t("Routes")}>
+                  {snapshot?.unavailable_reason ? <Pill tone="unknown">{t("unknown")}</Pill> : routes.length}
+                </Fact>
+                <Fact label={t("By kind")}>
+                  {kinds.length
+                    ? <Bars items={kinds.map(([kind, count]) => ({ label: kind, value: count }))} />
+                    : <span className="fl-faint">—</span>}
+                </Fact>
+              </Facts>
+            </Card>
+          </C>
+          <C span={12}>
+            <Card title={t("Interfaces")} flush>
+              <Toolbar end={<span className="fl-note">{t("{n} shown", { n: visible.length })}</span>}>
+                <Check checked={all} onChange={setAll}>
+                  {t("Show virtual interfaces ({n} hidden)", { n: interfaces.length - visible.length })}
+                </Check>
+              </Toolbar>
+              <Table
+                testId="interfaces"
+                rows={visible}
+                keyOf={(one) => one.name}
+                rowTestId={(one) => `interface-${one.name}`}
+                empty={t("The kernel lists no interface here.")}
+                columns={[
+                  { key: "name", head: t("Interface"), cell: (one) => (
+                    <Stack>
+                      <span className="fl-mono">{one.name}</span>
+                      {/* The management interface is the one the command came
+                          through: changing it is changing the branch we sit on. */}
+                      {one.management && <Pill tone="info">{t("management")}</Pill>}
+                    </Stack>
+                  ) },
+                  { key: "kind", head: t("Kind"), cell: (one) => one.kind || <span className="fl-faint">—</span> },
+                  // What the interface is made of, or what owns it. An
+                  // interface a layer owns has no addressing of its own worth
+                  // speaking of, and changing it as if it had is how a bond
+                  // comes apart by accident.
+                  { key: "layering", head: t("Layering"), tight: true, cell: (one) => (
+                    <Stack>
+                      <span className="fl-mono">{layerSummary(one) || "—"}</span>
+                      {one.master && layerKind(one) === "" && (
+                        <span className="fl-faint">{t("its address lives on {owner}", { owner: one.master })}</span>
+                      )}
+                    </Stack>
+                  ) },
+                  // The state is the kernel's word. A loopback has no carrier
+                  // to report, so "unknown" is its normal state, not a fault.
+                  { key: "state", head: t("State"), cell: (one) => (
+                    <Pill
+                      tone={one.oper_state === "up" ? "ok" : one.oper_state === "down" ? "neutral" : "unknown"}
+                      title={one.oper_state === "unknown" && one.kind === "loopback"
+                        ? t("The kernel reports no operational state for a loopback; this is its normal state.")
+                        : t("The operational state as the kernel reports it.")}
+                    >
+                      {one.oper_state}
+                    </Pill>
+                  ) },
+                  { key: "addresses", head: t("Addresses"), cell: (one) => (
+                    (one.addresses ?? []).length === 0
                       ? <span className="fl-faint">—</span>
                       : (
                         <Stack>
-                          {layerMembers(one).map((member) => {
-                            // The driver's own word about the member.
-                            const state = one.bond?.member_states?.[member] ?? "";
-                            const carrying = one.bond?.active_member === member;
-                            return (
-                              <span key={member} className="fl-mono">
-                                {member}
-                                {state !== "" && <span className="fl-faint"> · {state}</span>}
-                                {carrying && <Pill tone="ok">{t("carrying")}</Pill>}
-                              </span>
-                            );
-                          })}
+                          {(one.addresses ?? []).map((address) => (
+                            <span key={address.address} className="fl-mono">
+                              {address.address}
+                              {!address.permanent && <span className="fl-faint"> · {t("temporary")}</span>}
+                              {address.source && <span className="fl-faint"> · {address.source}</span>}
+                            </span>
+                          ))}
                         </Stack>
                       )
-                ) },
-                { key: "settings", head: t("Settings"), minor: true, cell: (one) => layerSettings(one, t) },
-                { key: "state", head: t("State"), cell: (one) => (
-                  <Stack>
-                    <Pill tone={one.oper_state === "up" ? "ok" : "neutral"}>{one.oper_state}</Pill>
-                    {/* A bond that failed over is a bond running on its
-                        spare: the operator asks this screen exactly that. */}
-                    {one.bond?.primary && one.bond.active_member
-                      && one.bond.active_member !== one.bond.primary && (
-                        <Pill tone="warn">{t("failed over")}</Pill>
-                      )}
-                  </Stack>
-                ) },
-                ...(writable ? [{
-                  key: "act", head: t("Actions"), actions: true, cell: (one: Interface) => (
-                    <Allowed host={host.id} action="network.link.remove">
-                      <LayerRemove iface={one} onIntent={setIntent} />
-                    </Allowed>
-                  ),
-                }] : []),
-              ]}
-            />
-          </Card>
-        ),
-        build: building && writable ? (
-          <LayerBuild
-            hostID={host.id}
-            interfaces={interfaces}
-            onIntent={setIntent}
-            onCancel={() => setBuilding(false)}
-          />
-        ) : undefined,
-        routes: (
-          <Card
-            title={t("Routes")}
-            foot={
-              <>
-                {t("Management channel")}: {snapshot?.management_interface || t("unknown")}
-                {snapshot?.management_address ? ` · ${snapshot.management_address}` : ""}
-                {snapshot?.write_adapter ? ` · ${t("write adapter {name}", { name: adapterLabel(snapshot.write_adapter) })}` : ""}
-                {snapshot?.observed_at ? ` · ${t("read")} ${relativeTime(snapshot.observed_at)}` : ""}
-              </>
-            }
-            flush
-          >
-            <Table
-              testId="routes"
-              rows={routes}
-              keyOf={(one, index) => `${one.family}-${one.destination}-${one.interface}-${index}`}
-              empty={t("No routes reported.")}
-              columns={[
-                { key: "destination", head: t("Destination"), tight: true, cell: (one) => <span className="fl-mono">{one.destination}</span> },
-                { key: "gateway", head: t("Gateway"), tight: true, cell: (one) => one.gateway ? <span className="fl-mono">{one.gateway}</span> : <span className="fl-faint">—</span> },
-                { key: "interface", head: t("Interface"), cell: (one) => one.interface ? <span className="fl-mono">{one.interface}</span> : <span className="fl-faint">—</span> },
-                { key: "source", head: t("Source"), minor: true, tight: true, cell: (one) => one.source ? <span className="fl-mono">{one.source}</span> : <span className="fl-faint">—</span> },
-                { key: "protocol", head: t("Protocol"), cell: (one) => <span title={one.protocol || undefined}>{t(routeProtocolWords(one.protocol))}</span> },
-                { key: "metric", head: t("Metric"), num: true, cell: (one) => one.metric },
-                { key: "family", head: t("Family"), cell: (one) => one.family === "inet6" ? "IPv6" : "IPv4" },
-              ]}
-            />
-          </Card>
-        ),
-        source: (
-          <Card title={t("Where this came from")}>
-            <Facts>
-              <Fact label={t("Source")}>{module.data.source}</Fact>
-              <Fact label={t("Revision")}><span className="fl-mono">{module.data.revision.slice(0, 12)}</span></Fact>
-              <Fact label={t("Observed")}>
-                <span title={absoluteTime(module.data.observed_at)}>{relativeTime(module.data.observed_at)}</span>
-              </Fact>
-              {module.data.unavailable_reason && (
-                <Fact label={t("Could not be read")}>{module.data.unavailable_reason}</Fact>
-              )}
-            </Facts>
-          </Card>
-        ),
-      }} />
+                  ) },
+                  { key: "mtu", head: "MTU", num: true, cell: (one) => one.mtu },
+                  // An unknown carrier and an unknown speed stay unknown: a
+                  // missing value is not the same as a missing cable.
+                  { key: "link", head: t("Link"), cell: (one) => (
+                    one.carrier === undefined
+                      ? <Pill tone="unknown">{t("unknown")}</Pill>
+                      : one.carrier
+                        ? (one.speed_mbps ? `${t("up")}, ${one.speed_mbps} Mbps` : t("up"))
+                        : t("no carrier")
+                  ) },
+                  { key: "mac", head: "MAC", minor: true, tight: true, cell: (one) => (
+                    one.mac ? <span className="fl-mono">{one.mac}</span> : <span className="fl-faint">—</span>
+                  ) },
+                  { key: "driver", head: t("Driver"), minor: true, cell: (one) => one.driver || <span className="fl-faint">—</span> },
+                  // Without a write mechanism there is nothing to edit: the
+                  // panel does not change a configuration the host will not
+                  // keep after a reboot.
+                  ...(writable ? [{
+                    key: "act", head: t("Actions"), actions: true, cell: (one: Interface) => (
+                      access.anyAllowed
+                        ? (
+                          <Button
+                          kind="quiet"
+                          testId={`change-${one.name}`}
+                          onClick={() => { setEdited(one); go("change"); }}
+                        >
+                          {t("Change")}
+                        </Button>
+                        )
+                        : null
+                    ),
+                  }] : []),
+                ]}
+              />
+            </Card>
+          </C>
+          <C span={12}>
+            <Card
+              title={t("Layering")}
+              note={t("What sits on what: a bond joins links into one, a bridge puts them on one segment, a VLAN rides tagged on one of them. A layer takes the addressing of its members, so building one is a change of the same weight as rewriting an address.")}
+              tools={writable ? (
+                <Allowed host={host.id} action="network.link.apply">
+                  <Button
+                    kind="quiet"
+                    testId="build-layer"
+                    onClick={() => { setBuilding(true); go("change"); }}
+                  >
+                    {t("Build a layer")}
+                  </Button>
+                </Allowed>
+              ) : undefined}
+              flush
+            >
+              <Table
+                testId="layers"
+                rows={layers}
+                keyOf={(one) => one.name}
+                rowTestId={(one) => `layer-${one.name}`}
+                empty={t("This host reports no bond, bridge or VLAN.")}
+                columns={[
+                  { key: "name", head: t("Interface"), cell: (one) => (
+                    <Stack>
+                      <span className="fl-mono">{one.name}</span>
+                      {one.management && <Pill tone="info">{t("management")}</Pill>}
+                    </Stack>
+                  ) },
+                  { key: "kind", head: t("Kind"), cell: (one) => layerKind(one) },
+                  { key: "members", head: t("Members"), cell: (one) => (
+                    one.vlan
+                      ? <span className="fl-mono">{t("on {parent}", { parent: one.vlan.parent || "—" })}</span>
+                      : layerMembers(one).length === 0
+                        ? <span className="fl-faint">—</span>
+                        : (
+                          <Stack>
+                            {layerMembers(one).map((member) => {
+                              // The driver's own word about the member.
+                              const state = one.bond?.member_states?.[member] ?? "";
+                              const carrying = one.bond?.active_member === member;
+                              return (
+                                <span key={member} className="fl-mono">
+                                  {member}
+                                  {state !== "" && <span className="fl-faint"> · {state}</span>}
+                                  {carrying && <Pill tone="ok">{t("carrying")}</Pill>}
+                                </span>
+                              );
+                            })}
+                          </Stack>
+                        )
+                  ) },
+                  { key: "settings", head: t("Settings"), minor: true, cell: (one) => layerSettings(one, t) },
+                  { key: "state", head: t("State"), cell: (one) => (
+                    <Stack>
+                      <Pill tone={one.oper_state === "up" ? "ok" : "neutral"}>{one.oper_state}</Pill>
+                      {/* A bond that failed over is a bond running on its
+                          spare: the operator asks this screen exactly that. */}
+                      {one.bond?.primary && one.bond.active_member
+                        && one.bond.active_member !== one.bond.primary && (
+                          <Pill tone="warn">{t("failed over")}</Pill>
+                        )}
+                    </Stack>
+                  ) },
+                  ...(writable ? [{
+                    key: "act", head: t("Actions"), actions: true, cell: (one: Interface) => (
+                      <Allowed host={host.id} action="network.link.remove">
+                        <LayerRemove iface={one} onIntent={setIntent} />
+                      </Allowed>
+                    ),
+                  }] : []),
+                ]}
+              />
+            </Card>
+          </C>
+          <C span={12}>
+            <Card
+              title={t("Routes")}
+              foot={
+                <>
+                  {t("Management channel")}: {snapshot?.management_interface || t("unknown")}
+                  {snapshot?.management_address ? ` · ${snapshot.management_address}` : ""}
+                  {snapshot?.write_adapter ? ` · ${t("write adapter {name}", { name: adapterLabel(snapshot.write_adapter) })}` : ""}
+                  {snapshot?.observed_at ? ` · ${t("read")} ${relativeTime(snapshot.observed_at)}` : ""}
+                </>
+              }
+              flush
+            >
+              <Table
+                testId="routes"
+                rows={routes}
+                keyOf={(one, index) => `${one.family}-${one.destination}-${one.interface}-${index}`}
+                empty={t("No routes reported.")}
+                columns={[
+                  { key: "destination", head: t("Destination"), tight: true, cell: (one) => <span className="fl-mono">{one.destination}</span> },
+                  { key: "gateway", head: t("Gateway"), tight: true, cell: (one) => one.gateway ? <span className="fl-mono">{one.gateway}</span> : <span className="fl-faint">—</span> },
+                  { key: "interface", head: t("Interface"), cell: (one) => one.interface ? <span className="fl-mono">{one.interface}</span> : <span className="fl-faint">—</span> },
+                  { key: "source", head: t("Source"), minor: true, tight: true, cell: (one) => one.source ? <span className="fl-mono">{one.source}</span> : <span className="fl-faint">—</span> },
+                  { key: "protocol", head: t("Protocol"), cell: (one) => <span title={one.protocol || undefined}>{t(routeProtocolWords(one.protocol))}</span> },
+                  { key: "metric", head: t("Metric"), num: true, cell: (one) => one.metric },
+                  { key: "family", head: t("Family"), cell: (one) => one.family === "inet6" ? "IPv6" : "IPv4" },
+                ]}
+              />
+            </Card>
+          </C>
+          <C span={12}>
+            <Card title={t("Where this came from")}>
+              <Facts>
+                <Fact label={t("Source")}>{module.data.source}</Fact>
+                <Fact label={t("Revision")}><span className="fl-mono">{module.data.revision.slice(0, 12)}</span></Fact>
+                <Fact label={t("Observed")}>
+                  <span title={absoluteTime(module.data.observed_at)}>{relativeTime(module.data.observed_at)}</span>
+                </Fact>
+                {module.data.unavailable_reason && (
+                  <Fact label={t("Could not be read")}>{module.data.unavailable_reason}</Fact>
+                )}
+              </Facts>
+            </Card>
+          </C>
+        </Grid>
+      )}
+
+      {tab === "change" && (
+        <Grid>
+          {edited && (
+            <C span={12}>
+              <InterfaceChange
+                key={edited.name}
+                hostID={host.id}
+                iface={edited}
+                management={edited.management}
+                onIntent={setIntent}
+                onCancel={() => setEdited(null)}
+              />
+            </C>
+          )}
+          {building && writable && (
+            <C span={12}>
+              <LayerBuild
+                hostID={host.id}
+                interfaces={interfaces}
+                onIntent={setIntent}
+                onCancel={() => setBuilding(false)}
+              />
+            </C>
+          )}
+          {/* The tab is reachable by its own address, so it says what it
+              would hold rather than standing empty. */}
+          {!edited && !(building && writable) && (
+            <C span={12}>
+              <Empty icon="network">
+                {t("Nothing is being changed. Under State, press Change on an interface, or Build a layer.")}
+              </Empty>
+            </C>
+          )}
+        </Grid>
+      )}
     </>
   );
 }
@@ -874,10 +921,10 @@ function InterfaceChange({ hostID, iface, management, onIntent, onCancel }: {
   const routesRequest = routesOrder(iface.name, list(routes), seconds);
 
   return (
-    <Card
+    <Form
       title={t("Change {iface}", { iface: iface.name })}
       note={t("The host arms a rollback before it applies anything and cancels it only after the agent proves it can still reach the panel.")}
-      tools={<Button kind="quiet" onClick={onCancel}>{t("Cancel")}</Button>}
+      actions={<Button kind="quiet" onClick={onCancel}>{t("Cancel")}</Button>}
     >
       <Stack>
         {/* Changing the management interface is changing the branch we sit
@@ -1056,7 +1103,7 @@ function InterfaceChange({ hostID, iface, management, onIntent, onCancel }: {
           </Button>
         </Allowed>
       </Stack>
-    </Card>
+    </Form>
   );
 }
 
@@ -1164,10 +1211,10 @@ function LayerBuild({ hostID, interfaces, onIntent, onCancel }: {
   }
 
   return (
-    <Card
+    <Form
       title={t("Build a layer")}
       note={t("The host computes its own plan first and refuses what would not hold: a member another layer owns, a bond of one member, a VLAN on a parent it does not have, or a layer that would swallow the interface the panel talks over.")}
-      tools={<Button kind="quiet" onClick={onCancel}>{t("Cancel")}</Button>}
+      actions={<Button kind="quiet" onClick={onCancel}>{t("Cancel")}</Button>}
     >
       <Stack>
         <Fields>
@@ -1267,7 +1314,7 @@ function LayerBuild({ hostID, interfaces, onIntent, onCancel }: {
           </Button>
         </Allowed>
       </Stack>
-    </Card>
+    </Form>
   );
 }
 
@@ -1299,22 +1346,3 @@ function LayerRemove({ iface, onIntent }: { iface: Interface; onIntent: (intent:
     </Button>
   );
 }
-
-/** The name this screen's arrangement is stored under. */
-export const NETWORK_SCREEN = "next_host_network";
-
-/** The containers this screen can draw, and the shape each ships with. */
-export const NETWORK_BOARD: BoardEntry[] = [
-  { key: "up", title: "Interfaces up", width: 3, height: 2 },
-  { key: "addressed", title: "Interfaces with an address", width: 3, height: 2 },
-  { key: "routecount", title: "Routes", width: 3, height: 2 },
-  { key: "adapter", title: "Write adapter", width: 3, height: 2 },
-  { key: "states", title: "Interfaces by state", width: 8, height: 4 },
-  { key: "channel", title: "Management channel", width: 4, height: 4 },
-  { key: "interfaces", title: "Interfaces", width: 12, height: 7 },
-  { key: "change", title: "Change an interface", width: 12, height: 9 },
-  { key: "layers", title: "Layering", width: 12, height: 5 },
-  { key: "build", title: "Build a layer", width: 12, height: 7 },
-  { key: "routes", title: "Routes", width: 12, height: 5 },
-  { key: "source", title: "Where this came from", width: 12, height: 2 },
-];

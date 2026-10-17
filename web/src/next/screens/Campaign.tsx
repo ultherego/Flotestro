@@ -28,7 +28,7 @@ import { useT } from "../../i18n";
 import {
   Band, Banner, Bones, Card, Chart, Check, Empty, Fact, Facts, Feed, FeedRow, Field, Fields, Find,
   Grid, Kpi, Kpis, Meter, Modal, Needs, Note, Pill, Problem, Ring, Screen, Squares, Stack, Table,
-  Tag, Tags, Toolbar, type Segment, type Series, type Tone,
+  Tabs, Tag, Tags, Toolbar, useTab, type Segment, type Series, type Tone,
 } from "../kit";
 import { campaignTone } from "./Campaigns";
 import { ErrorCode, PlanBody, Save } from "./Job";
@@ -256,8 +256,12 @@ export function approvalReasonRequired(risk: string | undefined): boolean {
   return risk === "critical" || risk === "destructive";
 }
 
+/** The sub-tabs of one campaign, in the order a reader wants them. */
+const CAMPAIGN_TABS = ["progress", "hosts", "order", "approval", "timeline"] as const;
+
 export function Campaign() {
   const t = useT();
+  const [tab, go] = useTab(CAMPAIGN_TABS);
   const { id = "" } = useParams();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -635,6 +639,23 @@ export function Campaign() {
         <Kpi label={t("Unknown")} value={counted ? unknown : null} tone="warn" testId="kpi-unknown" />
       </Kpis>
 
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "progress", label: t("Progress") },
+          { value: "hosts", label: t("Hosts"), count: total || undefined },
+          { value: "order", label: t("Order") },
+          { value: "approval", label: t("Approval") },
+          { value: "timeline", label: t("Timeline") },
+        ]}
+      />
+
+      {/* One campaign was thirteen containers on one board until 17.10.
+          How far it got, which hosts, what was ordered, who consented and
+          what happened are five readings, and the reader wants one. */}
+      {tab === "progress" && (
+      <>
       <Grid>
         <Card span={4} title={t("How far it has got")}>
           {/* A share nobody could take draws no arc at all: a campaign with
@@ -806,12 +827,17 @@ export function Campaign() {
         </Card>
       )}
 
+      </>
+      )}
+
       {/* The order itself, before any decision about it: what runs, with
           what payload, on which hosts as they were named, under which
           rollout. The approver reads this; the fingerprint binds the
           consent to exactly it. */}
-      <Order campaign={data} operation={operation} />
+      {tab === "order" && <Order campaign={data} operation={operation} />}
 
+      {tab === "approval" && (
+      <>
       <Grid>
         <Card span={6} title={t("The record")}>
           <Facts>
@@ -948,6 +974,10 @@ export function Campaign() {
         </Card>
       )}
 
+      </>
+      )}
+
+      {tab === "order" && (
       <Card
         title={t("Plans")}
         note={t("One group is one shape of the change and the hosts that get it.")}
@@ -978,10 +1008,12 @@ export function Campaign() {
           </Stack>
         )}
       </Card>
+      )}
 
       {/* The trail is filtered in the browser: it is already loaded whole,
           and one kind of event or one host is what a diagnosis looks for.
           The export is the filtered rows, built here from the same list. */}
+      {tab === "timeline" && (
       <Card
         title={t("Timeline")}
         flush
@@ -1031,7 +1063,10 @@ export function Campaign() {
           </Feed>
         )}
       </Card>
+      )}
 
+      {tab === "hosts" && (
+      <>
       {/* The export is a file, not a screen: a report of ten thousand hosts
           goes to a spreadsheet, streamed from the server page by page. */}
       <Card
@@ -1239,6 +1274,8 @@ export function Campaign() {
             compensation={rowCompensation ? compensationOf([openSteps.hostId]) : undefined}
           />
         </Card>
+      )}
+      </>
       )}
 
       {asking?.kind === "retry" && canRetry && (

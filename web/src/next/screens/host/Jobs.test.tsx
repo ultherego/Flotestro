@@ -77,12 +77,19 @@ const job = (over: Record<string, unknown> = {}) => ({
 const layout = { widgets: [], present: false, revision: 0 };
 const contracts = { count: 1, items: [{ action: "unit.restart", cancel_mode: "safe" }] };
 
-function draw(permissions = ["job.cancel", "job.approve"]) {
+/**
+ * The module is two sub-tabs since 17.10 and the address says which one
+ * is open. Most of what is held here is about the list, so that is the
+ * tab these open on; the band of outcomes is read on the first.
+ */
+function draw(permissions = ["job.cancel", "job.approve"], tab = "jobs") {
   Object.assign(answers, { "/api/v1/whoami": { permissions } });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter>
+      <MemoryRouter initialEntries={[`/hosts/h1/jobs?tab=${tab}`]}>
+        <ToastProvider>{children}</ToastProvider>
+      </MemoryRouter>
     </QueryClientProvider>
   );
   return render(<Jobs host={host} />, { wrapper });
@@ -147,7 +154,7 @@ describe("the jobs module of a host", () => {
 
   it("counts nothing before the list is read", async () => {
     Object.assign(answers, { "/api/v1/settings/layout": layout, "/api/v1/actions": contracts });
-    draw();
+    draw(undefined, "state");
     const band = await screen.findByTestId("job-states");
     expect(band).toHaveTextContent("—");
     expect(band.querySelector(".fl-band")).toBeNull();

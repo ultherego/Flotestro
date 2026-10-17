@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, fetchWithCredentials } from "../../lib/api";
@@ -7,12 +7,10 @@ import { useToast } from "../../components/Toast";
 import { useDebounced } from "../../lib/debounce";
 import { relativeTime, absoluteTime } from "../../lib/format";
 import { useT } from "../../i18n";
-import { Board } from "../Board";
-import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Band, Bars, Banner, Bones, Button, Card, Check, Fact, Facts, Field, Fields, Find, Empty,
-  Grid, Kpi, Kpis, Meter, Modal, Note, Pager, Pill, Problem, Ring, Screen, Seg, Stack, Table, Tag,
-  Tags, Toolbar, TwoLine, type Segment, type Tone,
+  Actions, Band, Bars, Banner, Bones, Button, C, Card, Check, Fact, Facts, Field, Fields, Find,
+  Empty, Grid, Kpi, Kpis, Meter, Modal, Note, Pager, Pill, Problem, Ring, Screen, Seg, Stack, Table,
+  Tabs, Tag, Tags, Toolbar, TwoLine, useTab, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -213,6 +211,17 @@ export function packagesPreview(packages: string[], shown = 4): { shown: string[
 const PAGE = 50;
 
 /**
+ * The sub-tabs of this screen.
+ *
+ * What the fleet is carrying is one reading and where the verdicts came
+ * from is another; the second was three containers down the same board,
+ * under the first, and nobody scrolled that far to find out that a feed
+ * had been held back for a week.
+ */
+const VULNERABILITY_TABS = ["findings", "sources"] as const;
+type VulnerabilityTab = typeof VULNERABILITY_TABS[number];
+
+/**
  * The fleet's CVE picture, or one advisory in it.
  *
  * `/vulnerabilities` is the fleet and
@@ -236,6 +245,9 @@ function VulnerabilityList() {
   const fixable = params.get("fixable") === "true";
   const sort = params.get("sort") ?? "";
   const [search, setSearch] = useState(params.get("q") ?? "");
+  // The sub-tab is in the address beside the filters, so the whole of
+  // what is on screen is a link somebody can send.
+  const [tab, goTab] = useTab<VulnerabilityTab>(VULNERABILITY_TABS);
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(PAGE);
   // A list that asked the server on every keystroke asked it five times for
@@ -376,17 +388,16 @@ function VulnerabilityList() {
   };
 
   return (
-    <Board
-      screen={VULNERABILITIES_SCREEN}
-      catalogue={VULNERABILITIES}
-      notices={coverageReasons.length > 0 ? (
+    <>
+      {coverageReasons.length > 0 && (
         <Banner tone="warn">
           {t("Those hosts show no findings because nothing could be decided for them, not because they are clean: {reasons}.", {
             reasons: coverageReasons.map(([code, count]) => `${count} × ${reasonOf(code)}`).join(", "),
           })}
         </Banner>
-      ) : undefined}
-      drawn={{
+      )}
+
+      <Readings tab={tab} onTab={goTab} held={candidates.length} panels={{
       findings: (
         <Kpi
           hero
@@ -757,6 +768,64 @@ function VulnerabilityList() {
         </Card>
       ),
     }} />
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+/**
+ * The screen in two readings rather than ten containers.
+ *
+ * What the fleet carries is on one tab - the split, how much of the
+ * fleet could be judged at all, where to start, and the list itself,
+ * grouped by host or by CVE as the reader asks. Where those verdicts
+ * came from is on the other, the fetches the sanity gate held back
+ * first: a feed nobody put in force is the reason a verdict is old.
+ */
+function Readings({ tab, onTab, held, panels }: {
+  tab: VulnerabilityTab;
+  onTab: (next: VulnerabilityTab) => void;
+  /** How many fetches are waiting on a decision, which the tab carries. */
+  held: number;
+  panels: Record<string, ReactNode>;
+}) {
+  const t = useT();
+  return (
+    <>
+      <Grid>
+        <C span={3}>{panels.findings}</C>
+        <C span={3}>{panels.fixable}</C>
+        <C span={3}>{panels.nofix}</C>
+        <C span={3}>{panels.unassessed}</C>
+      </Grid>
+
+      <Tabs
+        value={tab}
+        onChange={onTab}
+        tabs={[
+          { value: "findings", label: t("Findings") },
+          { value: "sources", label: t("Sources"), count: held || undefined },
+        ]}
+      />
+
+      {tab === "findings" && (
+        <Grid>
+          <C span={5}>{panels.split}</C>
+          <C span={3}>{panels.assessed}</C>
+          <C span={4}>{panels.worst}</C>
+          <C span={12}>{panels.list}</C>
+        </Grid>
+      )}
+      {tab === "sources" && (
+        <Grid>
+          {/* A fetch waiting on a decision stands over the feeds in
+              force: it is the reason one of them is standing still. */}
+          {panels.held ? <C span={12}>{panels.held}</C> : null}
+          <C span={12}>{panels.sources}</C>
+        </Grid>
+      )}
+    </>
   );
 }
 
@@ -1234,18 +1303,3 @@ function OneAdvisory({ cve }: { cve: string }) {
     </Screen>
   );
 }
-
-export const VULNERABILITIES_SCREEN = "next_vulnerabilities";
-
-export const VULNERABILITIES: BoardEntry[] = [
-  { key: "findings", title: "Open findings", width: 3, height: 2 },
-  { key: "fixable", title: "Vendor fix released", width: 3, height: 2 },
-  { key: "nofix", title: "No fix yet", width: 3, height: 2 },
-  { key: "unassessed", title: "Hosts never judged", width: 3, height: 2 },
-  { key: "split", title: "What the vendor offers", width: 5, height: 4 },
-  { key: "assessed", title: "Judged", width: 3, height: 4 },
-  { key: "worst", title: "Where to start", width: 4, height: 4 },
-  { key: "held", title: "Feed fetches held back", width: 12, height: 2 },
-  { key: "sources", title: "Security data", width: 12, height: 5 },
-  { key: "list", title: "The list", width: 12, height: 11 },
-];

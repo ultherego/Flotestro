@@ -10,12 +10,13 @@ import {
 } from "../../../lib/host/schedules";
 import { orderReady, refusalOf } from "../../../lib/host/module";
 import { useT } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Actions, Band, Banner, Bars, Button, Card, Check, Empty, Fact, Facts, Field, Fields, HeadActions,
-  Modal, Note, Pill, Problem, Readout, Table, type Segment,
+  Band, Banner, Bars, Button, C, Card, Check, Empty, Fact, Facts, Field, Fields, Form, Grid, HeadActions,
+  Modal, Note, Pill, Problem, Readout, Table, Tabs, useTab, type Segment,
 } from "../../kit";
+
+/** The sub-tabs of this screen, in the order a reader wants them. */
+const SCHEDULE_TABS = ["state", "schedules", "new"] as const;
 
 /**
  * The recurring work of one host: cron entries and systemd timers in one
@@ -101,6 +102,7 @@ function ReadOnlyNotice({ host, actions }: { host: string; actions: string[] }) 
 
 export function Schedules({ host }: { host: Host }) {
   const t = useT();
+  const [tab, go] = useTab(SCHEDULE_TABS);
   const queryClient = useQueryClient();
 
   const module = useQuery({
@@ -112,7 +114,6 @@ export function Schedules({ host }: { host: Host }) {
   const [intent, setIntent] = useState<Intent | null>(null);
   const [notice, setNotice] = useState("");
   const [problem, setProblem] = useState("");
-  const [form, setForm] = useState(false);
 
   const request = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
@@ -123,7 +124,9 @@ export function Schedules({ host }: { host: Host }) {
         ? t("Job {id} is waiting for approval.", { id: job.id.slice(0, 8) })
         : t("Job {id} has been queued.", { id: job.id.slice(0, 8) }));
       setIntent(null);
-      setForm(false);
+      // An entry that has been ordered is read on the list, not on the
+      // form it was typed into.
+      go("schedules");
       void queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
     },
     onError: (error) => setProblem(error instanceof Error ? error.message : String(error)),
@@ -158,8 +161,8 @@ export function Schedules({ host }: { host: Host }) {
     <>
       <HeadActions>
         <Guard action="schedule.ensure" host={host.id}>
-          <Button onClick={() => setForm((open) => !open)} testId="new-schedule">
-            {form ? t("Cancel") : t("New schedule")}
+          <Button onClick={() => go("new")} testId="new-schedule">
+            {t("New schedule")}
           </Button>
         </Guard>
       </HeadActions>
@@ -186,180 +189,204 @@ export function Schedules({ host }: { host: Host }) {
         />
       )}
 
-      <Board screen={HOST_SCHEDULES_SCREEN} catalogue={HOST_SCHEDULES} drawn={{
-        shape: (
-          <Card
-            title={t("Schedules")}
-            note={t("Cron entries and timers, by whether they run and who owns them.")}
-            foot={freshness}
-          >
-            <Band segments={shape} testId="schedule-shape" />
-          </Card>
-        ),
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "state", label: t("State") },
+          { value: "schedules", label: t("Schedules") },
+          { value: "new", label: t("New") },
+        ]}
+      />
 
-        kinds: (
-          <Card title={t("By kind")} note={t("Which mechanism carries the recurring work here.")}>
-            <Facts>
-              <Fact label={t("Timezone")}>{snapshot?.timezone || "—"}</Fact>
-            </Facts>
-            {kinds.length > 0
-              ? <Bars items={kinds.map(([kind, count]) => ({ label: kind, value: count }))} />
-              : <Empty icon="schedules">{t("Nothing recurring has been reported.")}</Empty>}
-          </Card>
-        ),
+      {tab === "state" && (
+        <Grid>
+          <C span={12}>
+            {/* Not "Schedules" a second time: the list on the next tab
+                carries that name, and two containers of one name on one
+                screen is what sent the reader hunting. */}
+            <Card
+              title={t("By state and owner")}
+              note={t("Cron entries and timers, by whether they run and who owns them.")}
+              foot={freshness}
+            >
+              <Band segments={shape} testId="schedule-shape" />
+            </Card>
+          </C>
+          <C span={12}>
+            <Card title={t("By kind")} note={t("Which mechanism carries the recurring work here.")}>
+              <Facts>
+                <Fact label={t("Timezone")}>{snapshot?.timezone || "—"}</Fact>
+              </Facts>
+              {kinds.length > 0
+                ? <Bars items={kinds.map(([kind, count]) => ({ label: kind, value: count }))} />
+                : <Empty icon="schedules">{t("Nothing recurring has been reported.")}</Empty>}
+            </Card>
+          </C>
+        </Grid>
+      )}
 
-        form: form && (
-          <Guard action="schedule.ensure" host={host.id}>
-            <NewEntry
-              hostId={host.id}
-              online={host.connection_state === "online"}
-              kinds={scheduleKinds(host.capabilities)}
-              entries={entries}
-              busy={request.isPending}
-              onRequest={(payload) => request.mutate({ action: "schedule.ensure", payload })}
-            />
-          </Guard>
-        ),
+      {tab === "schedules" && (
+        <Grid>
+          <C span={12}>
+            <Card
+              title={t("Schedules")}
+              note={t("Cron entries and systemd timers under one list. Entries created here belong to Flotestro and live in their own files; entries found on the host stay untouched until you adopt them.")}
+              foot={snapshot
+                ? `${t("{managed} managed · {found} found on the host", {
+                    managed, found: entries.length - managed,
+                  })}${snapshot.timezone ? ` · ${t("host timezone {zone}", { zone: snapshot.timezone })}` : ""}`
+                : undefined}
+              flush
+            >
+              {!module.data
+                ? <Empty icon="schedules">{t("This host has not reported its schedules yet.")}</Empty>
+                : (
+                  <Table
+                    rows={entries}
+                    keyOf={(entry) => `${entry.path ?? ""}:${entry.line ?? 0}:${entry.id}`}
+                    rowTestId={(entry) => `schedule-${entry.id}`}
+                    testId="schedules"
+                    loading={module.isLoading}
+                    empty={t("No cron entries and no timers on this host.")}
+                    columns={[
+                      { key: "name", head: t("Name"), tight: true, cell: (entry) => entry.id },
+                      { key: "kind", head: t("Kind"), cell: (entry) => entry.kind },
+                      /* The entry's ownership decides what the panel may do with it. */
+                      {
+                        key: "owner", head: t("Owner"), cell: (entry) => (
+                          entry.source === "managed"
+                            ? "Flotestro"
+                            : <Pill tone="unknown" title={entry.path}>{t("host admin")}</Pill>
+                        ),
+                      },
+                      /* A timer the panel wrote shows both: the expression
+                         the operator typed and what systemd was told, which
+                         are the same schedule in two languages. */
+                      {
+                        key: "schedule", head: t("Schedule"), tight: true, cell: (entry) => (
+                          <>
+                            {entry.expression || <Pill tone="unknown">{t("event-based")}</Pill>}
+                            {entry.calendar && entry.calendar !== entry.expression && (
+                              <span title={t("The calendar expression systemd runs it by")}> · {entry.calendar}</span>
+                            )}
+                            {entry.timezone ? ` · ${entry.timezone}` : ""}
+                          </>
+                        ),
+                      },
+                      /* The next run, and the two after it: the rhythm of an
+                         entry is read from three dates, not from one. */
+                      {
+                        key: "next", head: t("Next run"), cell: (entry) => (
+                          <>
+                            {entry.next_run
+                              ? <span title={absoluteTime(entry.next_run)}>{relativeTime(entry.next_run)}</span>
+                              : "—"}
+                            {(entry.next_runs ?? []).length > 1 && (
+                              <span title={t("The following runs, in the host zone")}>
+                                {` · ${t("then")} ${(entry.next_runs ?? []).slice(1).map(hostClock).join(", ")}`}
+                              </span>
+                            )}
+                          </>
+                        ),
+                      },
+                      /* A found entry is a shell line, an owned one an
+                         argument list; both show what the host will run. */
+                      {
+                        key: "command", head: t("Command"), tight: true, minor: true,
+                        cell: (entry) => <span title={commandOf(entry)}>{commandOf(entry).slice(0, 50) || "—"}</span>,
+                      },
+                      {
+                        key: "state", head: t("State"), cell: (entry) => (
+                          entry.enabled
+                            ? <Pill tone="ok">{t("enabled")}</Pill>
+                            : <Pill tone="neutral">{t("disabled")}</Pill>
+                        ),
+                      },
+                      {
+                        key: "actions", head: t("Actions"), actions: true, cell: (entry) => (
+                          <>
+                            <Guard action="schedule.run_now" host={host.id}>
+                              <Button
+                                kind="quiet"
+                                disabled={entry.source !== "managed"}
+                                title={entry.source === "managed"
+                                  ? undefined
+                                  : t("Only entries owned by Flotestro can be run from the panel.")}
+                                onClick={() => setIntent({
+                                  action: "schedule.run_now",
+                                  label: t("Run now"),
+                                  description: t("{command} will run immediately on {host}, outside its schedule.", {
+                                    command: commandOf(entry), host: host.hostname,
+                                  }),
+                                  payload: entryOrder("schedule.run_now", entry.id).payload,
+                                })}
+                                testId={`run-${entry.id}`}
+                              >
+                                {t("Run now")}
+                              </Button>
+                            </Guard>
+                            {/* Switching an entry off is reversible with one
+                                click and erases nothing, so it is not stopped
+                                by a confirmation of its own. */}
+                            <Guard action="schedule.disable" host={host.id}>
+                              <Button
+                                kind="quiet"
+                                disabled={entry.source !== "managed"}
+                                onClick={() => request.mutate({
+                                  action: "schedule.disable",
+                                  payload: enableOrder(entry.id, !entry.enabled).payload,
+                                })}
+                              >
+                                {entry.enabled ? t("Disable") : t("Enable")}
+                              </Button>
+                            </Guard>
+                            <Guard action="schedule.remove" host={host.id}>
+                              <Button
+                                kind="danger"
+                                disabled={entry.source !== "managed"}
+                                onClick={() => setIntent({
+                                  action: "schedule.remove",
+                                  label: t("Remove"),
+                                  description: t("{id} will be removed from {path}.", {
+                                    id: entry.id, path: entry.path || t("the host"),
+                                  }),
+                                  payload: entryOrder("schedule.remove", entry.id).payload,
+                                })}
+                                testId={`remove-${entry.id}`}
+                              >
+                                {t("Remove")}
+                              </Button>
+                            </Guard>
+                          </>
+                        ),
+                      },
+                    ]}
+                  />
+                )}
+            </Card>
+          </C>
+        </Grid>
+      )}
 
-        list: (
-          <Card
-            title={t("Schedules")}
-            note={t("Cron entries and systemd timers under one list. Entries created here belong to Flotestro and live in their own files; entries found on the host stay untouched until you adopt them.")}
-            foot={snapshot
-              ? `${t("{managed} managed · {found} found on the host", {
-                  managed, found: entries.length - managed,
-                })}${snapshot.timezone ? ` · ${t("host timezone {zone}", { zone: snapshot.timezone })}` : ""}`
-              : undefined}
-            flush
-          >
-            {!module.data
-              ? <Empty icon="schedules">{t("This host has not reported its schedules yet.")}</Empty>
-              : (
-                <Table
-                  rows={entries}
-                  keyOf={(entry) => `${entry.path ?? ""}:${entry.line ?? 0}:${entry.id}`}
-                  rowTestId={(entry) => `schedule-${entry.id}`}
-                  testId="schedules"
-                  loading={module.isLoading}
-                  empty={t("No cron entries and no timers on this host.")}
-                  columns={[
-                    { key: "name", head: t("Name"), tight: true, cell: (entry) => entry.id },
-                    { key: "kind", head: t("Kind"), cell: (entry) => entry.kind },
-                    /* The entry's ownership decides what the panel may do with it. */
-                    {
-                      key: "owner", head: t("Owner"), cell: (entry) => (
-                        entry.source === "managed"
-                          ? "Flotestro"
-                          : <Pill tone="unknown" title={entry.path}>{t("host admin")}</Pill>
-                      ),
-                    },
-                    /* A timer the panel wrote shows both: the expression
-                       the operator typed and what systemd was told, which
-                       are the same schedule in two languages. */
-                    {
-                      key: "schedule", head: t("Schedule"), tight: true, cell: (entry) => (
-                        <>
-                          {entry.expression || <Pill tone="unknown">{t("event-based")}</Pill>}
-                          {entry.calendar && entry.calendar !== entry.expression && (
-                            <span title={t("The calendar expression systemd runs it by")}> · {entry.calendar}</span>
-                          )}
-                          {entry.timezone ? ` · ${entry.timezone}` : ""}
-                        </>
-                      ),
-                    },
-                    /* The next run, and the two after it: the rhythm of an
-                       entry is read from three dates, not from one. */
-                    {
-                      key: "next", head: t("Next run"), cell: (entry) => (
-                        <>
-                          {entry.next_run
-                            ? <span title={absoluteTime(entry.next_run)}>{relativeTime(entry.next_run)}</span>
-                            : "—"}
-                          {(entry.next_runs ?? []).length > 1 && (
-                            <span title={t("The following runs, in the host zone")}>
-                              {` · ${t("then")} ${(entry.next_runs ?? []).slice(1).map(hostClock).join(", ")}`}
-                            </span>
-                          )}
-                        </>
-                      ),
-                    },
-                    /* A found entry is a shell line, an owned one an
-                       argument list; both show what the host will run. */
-                    {
-                      key: "command", head: t("Command"), tight: true, minor: true,
-                      cell: (entry) => <span title={commandOf(entry)}>{commandOf(entry).slice(0, 50) || "—"}</span>,
-                    },
-                    {
-                      key: "state", head: t("State"), cell: (entry) => (
-                        entry.enabled
-                          ? <Pill tone="ok">{t("enabled")}</Pill>
-                          : <Pill tone="neutral">{t("disabled")}</Pill>
-                      ),
-                    },
-                    {
-                      key: "actions", head: t("Actions"), actions: true, cell: (entry) => (
-                        <>
-                          <Guard action="schedule.run_now" host={host.id}>
-                            <Button
-                              kind="quiet"
-                              disabled={entry.source !== "managed"}
-                              title={entry.source === "managed"
-                                ? undefined
-                                : t("Only entries owned by Flotestro can be run from the panel.")}
-                              onClick={() => setIntent({
-                                action: "schedule.run_now",
-                                label: t("Run now"),
-                                description: t("{command} will run immediately on {host}, outside its schedule.", {
-                                  command: commandOf(entry), host: host.hostname,
-                                }),
-                                payload: entryOrder("schedule.run_now", entry.id).payload,
-                              })}
-                              testId={`run-${entry.id}`}
-                            >
-                              {t("Run now")}
-                            </Button>
-                          </Guard>
-                          {/* Switching an entry off is reversible with one
-                              click and erases nothing, so it is not stopped
-                              by a confirmation of its own. */}
-                          <Guard action="schedule.disable" host={host.id}>
-                            <Button
-                              kind="quiet"
-                              disabled={entry.source !== "managed"}
-                              onClick={() => request.mutate({
-                                action: "schedule.disable",
-                                payload: enableOrder(entry.id, !entry.enabled).payload,
-                              })}
-                            >
-                              {entry.enabled ? t("Disable") : t("Enable")}
-                            </Button>
-                          </Guard>
-                          <Guard action="schedule.remove" host={host.id}>
-                            <Button
-                              kind="danger"
-                              disabled={entry.source !== "managed"}
-                              onClick={() => setIntent({
-                                action: "schedule.remove",
-                                label: t("Remove"),
-                                description: t("{id} will be removed from {path}.", {
-                                  id: entry.id, path: entry.path || t("the host"),
-                                }),
-                                payload: entryOrder("schedule.remove", entry.id).payload,
-                              })}
-                              testId={`remove-${entry.id}`}
-                            >
-                              {t("Remove")}
-                            </Button>
-                          </Guard>
-                        </>
-                      ),
-                    },
-                  ]}
-                />
-              )}
-          </Card>
-        ),
-      }} />
+      {tab === "new" && (
+        <Grid>
+          <C span={12}>
+            {/* The tab is there for everybody, so a reader who may not write
+                one is told why rather than being shown an empty page. */}
+            <Guard action="schedule.ensure" host={host.id} explain>
+              <NewEntry
+                hostId={host.id}
+                online={host.connection_state === "online"}
+                kinds={scheduleKinds(host.capabilities)}
+                entries={entries}
+                busy={request.isPending}
+                onRequest={(payload) => request.mutate({ action: "schedule.ensure", payload })}
+              />
+            </Guard>
+          </C>
+        </Grid>
+      )}
     </>
   );
 }
@@ -439,7 +466,35 @@ function NewEntry({ hostId, online, kinds, entries, busy, onRequest }: {
   const shown = preview.data && preview.data.expression === expression.trim() ? preview.data : undefined;
 
   return (
-    <Card title={t("New schedule")} note={t("What runs, when, and under which account.")}>
+    <Form
+      title={t("New schedule")}
+      note={t("What runs, when, and under which account.")}
+      actions={(
+        <>
+          <Guard action="schedule.preview" host={hostId} explain>
+            <Button
+              kind="quiet"
+              onClick={() => preview.mutate(expression.trim())}
+              disabled={!expression.trim() || preview.isPending || !online}
+              testId="schedule-preview-ask"
+            >
+              {preview.isPending ? t("Asking the host…") : t("Preview next runs")}
+            </Button>
+          </Guard>
+          <Button
+            onClick={() => onRequest(entryRequest.payload)}
+            // What the host already runs under this name is this screen's
+            // own refusal: the registry sees the form, not the host.
+            disabled={busy || !orderReady(entryRequest) || shared || (found.length > 0 && !adopt)}
+            title={refusalOf(t, entryRequest)}
+            testId="schedule-create"
+          >
+            {t("Create")}
+          </Button>
+          {!orderReady(entryRequest) && <Note>{refusalOf(t, entryRequest)}</Note>}
+        </>
+      )}
+    >
       <Fields>
         <Field
           label={t("Name")}
@@ -548,30 +603,7 @@ function NewEntry({ hostId, online, kinds, entries, busy, onRequest }: {
         <Readout key={unit.path} label={unit.path} value={unit.content} lines={10} />
       ))}
 
-      <Actions>
-        <Guard action="schedule.preview" host={hostId} explain>
-          <Button
-            kind="quiet"
-            onClick={() => preview.mutate(expression.trim())}
-            disabled={!expression.trim() || preview.isPending || !online}
-            testId="schedule-preview-ask"
-          >
-            {preview.isPending ? t("Asking the host…") : t("Preview next runs")}
-          </Button>
-        </Guard>
-        <Button
-          onClick={() => onRequest(entryRequest.payload)}
-          // What the host already runs under this name is this screen's own
-          // refusal: the registry sees the form, not the host.
-          disabled={busy || !orderReady(entryRequest) || shared || (found.length > 0 && !adopt)}
-          title={refusalOf(t, entryRequest)}
-          testId="schedule-create"
-        >
-          {t("Create")}
-        </Button>
-      </Actions>
-      {!orderReady(entryRequest) && <Note>{refusalOf(t, entryRequest)}</Note>}
-    </Card>
+    </Form>
   );
 }
 
@@ -626,14 +658,3 @@ function ConfirmEntry({ host, label, description, busy, onConfirm, onCancel }: {
     </Modal>
   );
 }
-
-/** The name this screen's arrangement is stored under. */
-export const HOST_SCHEDULES_SCREEN = "next_host_schedules";
-
-/** The containers this screen can draw, and the shape each ships with. */
-export const HOST_SCHEDULES: BoardEntry[] = [
-  { key: "shape", title: "Schedules", width: 8, height: 4 },
-  { key: "kinds", title: "By kind", width: 4, height: 4 },
-  { key: "form", title: "New schedule", width: 12, height: 9 },
-  { key: "list", title: "Schedules", width: 12, height: 9 },
-];

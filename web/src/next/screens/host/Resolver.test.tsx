@@ -86,11 +86,17 @@ const resolved = {
   observed_at: "2026-10-16T09:00:00Z",
 };
 
-function draw() {
+/**
+ * The module is two sub-tabs since 17.10 and the address names the open
+ * one, so a test of a decision asks for the tab a reader would follow a
+ * link to.
+ */
+function draw(tab?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const where = tab ? `/hosts/h1/dns?tab=${tab}` : "/hosts/h1/dns";
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter>
+      <MemoryRouter initialEntries={[where]}><ToastProvider>{children}</ToastProvider></MemoryRouter>
     </QueryClientProvider>
   );
   return render(<Resolver host={host} />, { wrapper });
@@ -152,7 +158,7 @@ describe("what the resolver module says", () => {
       "/api/v1/hosts/h1/actions": may(EVERY),
       "/api/v1/jobs/job-1234abcd/attempts": { items: [] },
     });
-    draw();
+    draw("change");
     await waitFor(() => expect(screen.getByTestId("resolve")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("resolve-names"), { target: { value: "ipa.flotestro.test, db.flotestro.test" } });
     fireEvent.click(screen.getByTestId("resolve"));
@@ -177,7 +183,7 @@ describe("what the resolver module says", () => {
         }],
       },
     });
-    draw();
+    draw("change");
     await waitFor(() => expect(screen.getByTestId("resolve")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("resolve"));
     await waitFor(() => expect(screen.getByTestId("answer-ipa.flotestro.test")).toBeInTheDocument());

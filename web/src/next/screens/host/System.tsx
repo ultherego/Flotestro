@@ -4,10 +4,9 @@ import { absoluteTime, bytes, relativeTime } from "../../../lib/format";
 import type { Capability, Host, InventoryFragment, SystemHistoryEntry, SystemSnapshot } from "../../../lib/types";
 import { adapterSegment, factReason, layoutText, uptimeText } from "../../../lib/host/system";
 import { useT } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Banner, Bones, Card, Empty, Fact, Facts, Kpi, Meter, Pill, Readout, Table, Tag, Tags, type Tone,
+  Banner, Bones, C, Card, Empty, Fact, Facts, Grid, Kpi, Kpis, Meter, Pill, Readout, Table, Tabs, Tag,
+  Tags, useTab, type Tone,
 } from "../../kit";
 
 /**
@@ -20,6 +19,9 @@ import {
  * reason the host gave travels with the word "unknown" rather than being
  * swallowed by an em dash.
  */
+
+/** The sub-tabs of this screen, in the order a reader wants them. */
+const SYSTEM_TABS = ["state", "history"] as const;
 
 /** How full the root filesystem is, and whether that is a condition. */
 export function rootPressure(total?: number, free?: number): { share?: number; tone?: Tone } {
@@ -37,6 +39,7 @@ export function adapterTone(capability: Capability): { tone: Tone; label: string
 
 export function System({ host }: { host: Host }) {
   const t = useT();
+  const [tab, go] = useTab(SYSTEM_TABS);
 
   const module = useQuery({
     queryKey: ["inventory", host.id, "system"],
@@ -103,298 +106,282 @@ export function System({ host }: { host: Host }) {
         </Banner>
       )}
 
-      <Board screen={HOST_SYSTEM_SCREEN} catalogue={HOST_SYSTEM} drawn={{
-        uptime: (
-          <Kpi
-            icon="time"
-            label={t("Uptime")}
-            value={uptime === undefined ? null : uptimeText(uptime)}
-            note={snapshot.boot?.booted_at
-              ? t("booted {when}", { when: absoluteTime(snapshot.boot.booted_at) })
-              : undefined}
-            testId="kpi-uptime"
-          />
-        ),
-        kernel: (
-          <Kpi
-            icon="kernel"
-            label={t("Kernel")}
-            value={snapshot.kernel?.release || snapshot.os?.kernel || null}
-            note={snapshot.kernel?.architecture || snapshot.os?.architecture || undefined}
-            testId="kpi-kernel"
-          />
-        ),
-        release: (
-          <Kpi
-            icon="server"
-            label={t("Release")}
-            value={snapshot.distribution?.pretty_name || snapshot.os?.pretty_name || null}
-            note={snapshot.timezone || undefined}
-            testId="kpi-release"
-          />
-        ),
-        runson: (
-          <Kpi
-            icon="containers"
-            label={t("Runs on")}
-            value={virtualization ? (virtualization === "none" ? t("bare metal") : virtualization) : null}
-            note={snapshot.virtualization?.source || undefined}
-            testId="kpi-runs-on"
-          />
-        ),
+      <Kpis>
+        <Kpi
+          icon="time"
+          label={t("Uptime")}
+          value={uptime === undefined ? null : uptimeText(uptime)}
+          note={snapshot.boot?.booted_at
+            ? t("booted {when}", { when: absoluteTime(snapshot.boot.booted_at) })
+            : undefined}
+          testId="kpi-uptime"
+        />
+        <Kpi
+          icon="kernel"
+          label={t("Kernel")}
+          value={snapshot.kernel?.release || snapshot.os?.kernel || null}
+          note={snapshot.kernel?.architecture || snapshot.os?.architecture || undefined}
+          testId="kpi-kernel"
+        />
+        <Kpi
+          icon="server"
+          label={t("Release")}
+          value={snapshot.distribution?.pretty_name || snapshot.os?.pretty_name || null}
+          note={snapshot.timezone || undefined}
+          testId="kpi-release"
+        />
+        <Kpi
+          icon="containers"
+          label={t("Runs on")}
+          value={virtualization ? (virtualization === "none" ? t("bare metal") : virtualization) : null}
+          note={snapshot.virtualization?.source || undefined}
+          testId="kpi-runs-on"
+        />
+      </Kpis>
 
-        os: (
-          <Card title={t("Operating system")} foot={freshness}>
-            <Facts>
-              <Fact label={t("Distribution")}>{fact("distribution", snapshot.distribution?.pretty_name || snapshot.os?.pretty_name)}</Fact>
-              <Fact label={t("Identifier")}>{fact("distribution", snapshot.distribution?.id || snapshot.os?.distribution)}</Fact>
-              <Fact label={t("Version")}>{fact("distribution", snapshot.distribution?.version || snapshot.os?.version)}</Fact>
-              <Fact label={t("Codename")}>{fact("distribution", snapshot.distribution?.codename || snapshot.os?.codename)}</Fact>
-              <Fact label={t("Family")}>{snapshot.os?.family || "—"}</Fact>
-              <Fact label={t("Like")}>{(snapshot.distribution?.like ?? []).join(", ") || "—"}</Fact>
-              <Fact label={t("Timezone")}>{fact("timezone", snapshot.timezone)}</Fact>
-              <Fact label={t("Hostname")}>{snapshot.hostname || "—"}</Fact>
-            </Facts>
-          </Card>
-        ),
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "state", label: t("State") },
+          { value: "history", label: t("History") },
+        ]}
+      />
 
-        kernelcard: (
-          <Card title={t("Kernel")}>
-            <Facts>
-              <Fact label={t("Release")}>{fact("kernel", snapshot.kernel?.release || snapshot.os?.kernel)}</Fact>
-              <Fact label={t("Architecture")}>{fact("kernel", snapshot.kernel?.architecture || snapshot.os?.architecture)}</Fact>
-              <Fact label={t("Build")}>{fact("kernel", snapshot.kernel?.version)}</Fact>
-            </Facts>
-            {/* The command line is read as one line and copied as one line:
-                broken across two it stops being the thing a reader pastes
-                into a bug report. */}
-            {factReason(missing, "kernel.cmdline")
-              ? <Facts><Fact label={t("Command line")}>{fact("kernel.cmdline", undefined)}</Fact></Facts>
-              : snapshot.kernel?.cmdline
-                ? <Readout label={t("Command line")} value={snapshot.kernel.cmdline} lines={3} testId="kernel-cmdline" />
-                : <Facts><Fact label={t("Command line")}>—</Fact></Facts>}
-          </Card>
-        ),
-
-        cpu: (
-          <Card
-            title={t("Processor")}
-            foot={snapshot.cpu?.flag_count !== undefined
-              ? t("{count} flags in total", { count: snapshot.cpu.flag_count })
-              : undefined}
-          >
-            <Facts>
-              <Fact label={t("Model")}>{fact("cpu", snapshot.cpu?.model)}</Fact>
-              <Fact label={t("Vendor")}>{fact("cpu", snapshot.cpu?.vendor)}</Fact>
-              <Fact label={t("Layout")}>{fact("cpu", layoutText(snapshot.cpu))}</Fact>
-              <Fact label={t("Frequency")}>
-                {snapshot.cpu?.mhz !== undefined ? t("{n} MHz", { n: Math.round(snapshot.cpu.mhz) }) : "—"}
-              </Fact>
-              <Fact label={t("Logical processors")}>{snapshot.hardware?.cpu_cores ?? "—"}</Fact>
-              <Fact label={t("Flags")}>
-                {factReason(missing, "cpu")
-                  ? fact("cpu", undefined)
-                  : flags.length === 0
-                    ? "—"
-                    : <Tags>{flags.map((flag) => <Tag key={flag}>{flag}</Tag>)}</Tags>}
-              </Fact>
-            </Facts>
-          </Card>
-        ),
-
-        memory: (
-          <Card title={t("Memory and root filesystem")}>
-            <Facts>
-              <Fact label={t("Memory")}>
-                {fact("memory", snapshot.memory?.total_bytes !== undefined ? bytes(snapshot.memory.total_bytes) : undefined)}
-              </Fact>
-              <Fact label={t("Swap")}>
-                {factReason(missing, "memory")
-                  ? fact("memory", undefined)
-                  : snapshot.memory?.swap_total_bytes === undefined
-                    ? "—"
-                    : snapshot.memory.swap_total_bytes === 0
-                      ? t("none")
-                      : bytes(snapshot.memory.swap_total_bytes)}
-              </Fact>
-              <Fact label={t("Root filesystem")}>
-                {root.share === undefined
-                  ? (snapshot.hardware?.root_fs_bytes ? bytes(snapshot.hardware.root_fs_bytes) : "—")
-                  : (
-                    <Meter
-                      share={root.share}
-                      tone={root.tone}
-                      text={t("{free} free of {total}", {
-                        free: bytes(snapshot.hardware?.root_fs_free_bytes ?? 0),
-                        total: bytes(snapshot.hardware?.root_fs_bytes ?? 0),
-                      })}
-                    />
-                  )}
-              </Fact>
-            </Facts>
-          </Card>
-        ),
-
-        machine: (
-          <Card
-            title={t("Machine")}
-            note={t("The identity from the DMI tables. The serial numbers and the UUID are readable by root alone, so they come through the helper.")}
-          >
-            <Facts>
-              <Fact label={t("Vendor")}>{fact("dmi", snapshot.dmi?.vendor)}</Fact>
-              <Fact label={t("Product")}>{fact("dmi", snapshot.dmi?.product)}</Fact>
-              <Fact label={t("Version")}>{fact("dmi", snapshot.dmi?.version)}</Fact>
-              <Fact label={t("Family")}>{fact("dmi", snapshot.dmi?.family)}</Fact>
-              <Fact label={t("Board")}>
-                {fact("dmi", [snapshot.dmi?.board_vendor, snapshot.dmi?.board_name].filter(Boolean).join(" "))}
-              </Fact>
-              <Fact label={t("Chassis")}>{fact("dmi", snapshot.dmi?.chassis_type)}</Fact>
-              <Fact label={t("Serial number")} mono>{fact("dmi.serial", snapshot.dmi?.serial)}</Fact>
-              <Fact label={t("UUID")} mono>{fact("dmi.uuid", snapshot.dmi?.uuid)}</Fact>
-              <Fact label={t("Board serial")} mono>{fact("dmi.serial", snapshot.dmi?.board_serial)}</Fact>
-              <Fact label={t("Chassis serial")} mono>{fact("dmi.serial", snapshot.dmi?.chassis_serial)}</Fact>
-            </Facts>
-          </Card>
-        ),
-
-        firmware: (
-          <Card title={t("Firmware and boot")}>
-            <Facts>
-              <Fact label={t("Boot mode")}>
-                {factReason(missing, "firmware")
-                  ? fact("firmware", undefined)
-                  : snapshot.firmware?.mode === "uefi" ? "UEFI"
-                    : snapshot.firmware?.mode === "bios" ? "BIOS" : "—"}
-              </Fact>
-              <Fact label={t("Firmware vendor")}>{fact("firmware", snapshot.firmware?.vendor)}</Fact>
-              <Fact label={t("Firmware version")}>{fact("firmware", snapshot.firmware?.version)}</Fact>
-              <Fact label={t("Firmware date")}>{fact("firmware", snapshot.firmware?.date)}</Fact>
-              <Fact label={t("Booted")}>
-                {snapshot.boot?.booted_at
-                  ? <span title={absoluteTime(snapshot.boot.booted_at)}>{relativeTime(snapshot.boot.booted_at)}</span>
-                  : fact("boot", undefined)}
-              </Fact>
-              {/* The uptime is as old as the read, so the read's own instant
-                  stands beside it: the two can then never disagree by the
-                  age of the snapshot. */}
-              <Fact label={t("Uptime")}>
-                {uptime === undefined
-                  ? fact("boot", undefined)
-                  : <span title={t("as of the last read")}>{uptimeText(uptime)}</span>}
-              </Fact>
-              <Fact label={t("Boot id")} mono>{snapshot.boot_id || "—"}</Fact>
-              <Fact label={t("Virtualization")}>
-                {fact("virtualization", virtualization === "none" ? t("bare metal") : virtualization)}
-              </Fact>
-            </Facts>
-          </Card>
-        ),
-
-        adapters: (
-          <Card
-            title={t("Detected capabilities")}
-            note={t("The adapters the other modules stand on, and the reason where one is missing.")}
-            flush
-          >
-            <Table
-              rows={adapters}
-              keyOf={(one) => one.name}
-              testId="adapters"
-              empty={t("The host has not reported its adapters.")}
-              columns={[
-                {
-                  key: "adapter", head: t("Adapter"), tight: true, cell: (one) => {
-                    const segment = adapterSegment(one.name);
-                    return segment
-                      ? <Tag to={`/hosts/${host.id}/${segment}`}>{one.name}</Tag>
-                      : one.name;
+      {tab === "state" && (
+        <Grid>
+          <C span={12}>
+            <Card title={t("Operating system")} foot={freshness}>
+              <Facts>
+                <Fact label={t("Distribution")}>{fact("distribution", snapshot.distribution?.pretty_name || snapshot.os?.pretty_name)}</Fact>
+                <Fact label={t("Identifier")}>{fact("distribution", snapshot.distribution?.id || snapshot.os?.distribution)}</Fact>
+                <Fact label={t("Version")}>{fact("distribution", snapshot.distribution?.version || snapshot.os?.version)}</Fact>
+                <Fact label={t("Codename")}>{fact("distribution", snapshot.distribution?.codename || snapshot.os?.codename)}</Fact>
+                <Fact label={t("Family")}>{snapshot.os?.family || "—"}</Fact>
+                <Fact label={t("Like")}>{(snapshot.distribution?.like ?? []).join(", ") || "—"}</Fact>
+                <Fact label={t("Timezone")}>{fact("timezone", snapshot.timezone)}</Fact>
+                <Fact label={t("Hostname")}>{snapshot.hostname || "—"}</Fact>
+              </Facts>
+            </Card>
+          </C>
+          <C span={12}>
+            <Card title={t("Kernel")}>
+              <Facts>
+                <Fact label={t("Release")}>{fact("kernel", snapshot.kernel?.release || snapshot.os?.kernel)}</Fact>
+                <Fact label={t("Architecture")}>{fact("kernel", snapshot.kernel?.architecture || snapshot.os?.architecture)}</Fact>
+                <Fact label={t("Build")}>{fact("kernel", snapshot.kernel?.version)}</Fact>
+              </Facts>
+              {/* The command line is read as one line and copied as one line:
+                  broken across two it stops being the thing a reader pastes
+                  into a bug report. */}
+              {factReason(missing, "kernel.cmdline")
+                ? <Facts><Fact label={t("Command line")}>{fact("kernel.cmdline", undefined)}</Fact></Facts>
+                : snapshot.kernel?.cmdline
+                  ? <Readout label={t("Command line")} value={snapshot.kernel.cmdline} lines={3} testId="kernel-cmdline" />
+                  : <Facts><Fact label={t("Command line")}>—</Fact></Facts>}
+            </Card>
+          </C>
+          <C span={12}>
+            <Card
+              title={t("Processor")}
+              foot={snapshot.cpu?.flag_count !== undefined
+                ? t("{count} flags in total", { count: snapshot.cpu.flag_count })
+                : undefined}
+            >
+              <Facts>
+                <Fact label={t("Model")}>{fact("cpu", snapshot.cpu?.model)}</Fact>
+                <Fact label={t("Vendor")}>{fact("cpu", snapshot.cpu?.vendor)}</Fact>
+                <Fact label={t("Layout")}>{fact("cpu", layoutText(snapshot.cpu))}</Fact>
+                <Fact label={t("Frequency")}>
+                  {snapshot.cpu?.mhz !== undefined ? t("{n} MHz", { n: Math.round(snapshot.cpu.mhz) }) : "—"}
+                </Fact>
+                <Fact label={t("Logical processors")}>{snapshot.hardware?.cpu_cores ?? "—"}</Fact>
+                <Fact label={t("Flags")}>
+                  {factReason(missing, "cpu")
+                    ? fact("cpu", undefined)
+                    : flags.length === 0
+                      ? "—"
+                      : <Tags>{flags.map((flag) => <Tag key={flag}>{flag}</Tag>)}</Tags>}
+                </Fact>
+              </Facts>
+            </Card>
+          </C>
+          <C span={12}>
+            <Card title={t("Memory and root filesystem")}>
+              <Facts>
+                <Fact label={t("Memory")}>
+                  {fact("memory", snapshot.memory?.total_bytes !== undefined ? bytes(snapshot.memory.total_bytes) : undefined)}
+                </Fact>
+                <Fact label={t("Swap")}>
+                  {factReason(missing, "memory")
+                    ? fact("memory", undefined)
+                    : snapshot.memory?.swap_total_bytes === undefined
+                      ? "—"
+                      : snapshot.memory.swap_total_bytes === 0
+                        ? t("none")
+                        : bytes(snapshot.memory.swap_total_bytes)}
+                </Fact>
+                <Fact label={t("Root filesystem")}>
+                  {root.share === undefined
+                    ? (snapshot.hardware?.root_fs_bytes ? bytes(snapshot.hardware.root_fs_bytes) : "—")
+                    : (
+                      <Meter
+                        share={root.share}
+                        tone={root.tone}
+                        text={t("{free} free of {total}", {
+                          free: bytes(snapshot.hardware?.root_fs_free_bytes ?? 0),
+                          total: bytes(snapshot.hardware?.root_fs_bytes ?? 0),
+                        })}
+                      />
+                    )}
+                </Fact>
+              </Facts>
+            </Card>
+          </C>
+          <C span={12}>
+            <Card
+              title={t("Machine")}
+              note={t("The identity from the DMI tables. The serial numbers and the UUID are readable by root alone, so they come through the helper.")}
+            >
+              <Facts>
+                <Fact label={t("Vendor")}>{fact("dmi", snapshot.dmi?.vendor)}</Fact>
+                <Fact label={t("Product")}>{fact("dmi", snapshot.dmi?.product)}</Fact>
+                <Fact label={t("Version")}>{fact("dmi", snapshot.dmi?.version)}</Fact>
+                <Fact label={t("Family")}>{fact("dmi", snapshot.dmi?.family)}</Fact>
+                <Fact label={t("Board")}>
+                  {fact("dmi", [snapshot.dmi?.board_vendor, snapshot.dmi?.board_name].filter(Boolean).join(" "))}
+                </Fact>
+                <Fact label={t("Chassis")}>{fact("dmi", snapshot.dmi?.chassis_type)}</Fact>
+                <Fact label={t("Serial number")} mono>{fact("dmi.serial", snapshot.dmi?.serial)}</Fact>
+                <Fact label={t("UUID")} mono>{fact("dmi.uuid", snapshot.dmi?.uuid)}</Fact>
+                <Fact label={t("Board serial")} mono>{fact("dmi.serial", snapshot.dmi?.board_serial)}</Fact>
+                <Fact label={t("Chassis serial")} mono>{fact("dmi.serial", snapshot.dmi?.chassis_serial)}</Fact>
+              </Facts>
+            </Card>
+          </C>
+          <C span={12}>
+            <Card title={t("Firmware and boot")}>
+              <Facts>
+                <Fact label={t("Boot mode")}>
+                  {factReason(missing, "firmware")
+                    ? fact("firmware", undefined)
+                    : snapshot.firmware?.mode === "uefi" ? "UEFI"
+                      : snapshot.firmware?.mode === "bios" ? "BIOS" : "—"}
+                </Fact>
+                <Fact label={t("Firmware vendor")}>{fact("firmware", snapshot.firmware?.vendor)}</Fact>
+                <Fact label={t("Firmware version")}>{fact("firmware", snapshot.firmware?.version)}</Fact>
+                <Fact label={t("Firmware date")}>{fact("firmware", snapshot.firmware?.date)}</Fact>
+                <Fact label={t("Booted")}>
+                  {snapshot.boot?.booted_at
+                    ? <span title={absoluteTime(snapshot.boot.booted_at)}>{relativeTime(snapshot.boot.booted_at)}</span>
+                    : fact("boot", undefined)}
+                </Fact>
+                {/* The uptime is as old as the read, so the read's own instant
+                    stands beside it: the two can then never disagree by the
+                    age of the snapshot. */}
+                <Fact label={t("Uptime")}>
+                  {uptime === undefined
+                    ? fact("boot", undefined)
+                    : <span title={t("as of the last read")}>{uptimeText(uptime)}</span>}
+                </Fact>
+                <Fact label={t("Boot id")} mono>{snapshot.boot_id || "—"}</Fact>
+                <Fact label={t("Virtualization")}>
+                  {fact("virtualization", virtualization === "none" ? t("bare metal") : virtualization)}
+                </Fact>
+              </Facts>
+            </Card>
+          </C>
+          <C span={12}>
+            <Card
+              title={t("Detected capabilities")}
+              note={t("The adapters the other modules stand on, and the reason where one is missing.")}
+              flush
+            >
+              <Table
+                rows={adapters}
+                keyOf={(one) => one.name}
+                testId="adapters"
+                empty={t("The host has not reported its adapters.")}
+                columns={[
+                  {
+                    key: "adapter", head: t("Adapter"), tight: true, cell: (one) => {
+                      const segment = adapterSegment(one.name);
+                      return segment
+                        ? <Tag to={`/hosts/${host.id}/${segment}`}>{one.name}</Tag>
+                        : one.name;
+                    },
                   },
-                },
-                {
-                  key: "state", head: t("State"), cell: (one) => {
-                    const state = adapterTone(one);
-                    return <Pill tone={state.tone}>{t(state.label)}</Pill>;
+                  {
+                    key: "state", head: t("State"), cell: (one) => {
+                      const state = adapterTone(one);
+                      return <Pill tone={state.tone}>{t(state.label)}</Pill>;
+                    },
                   },
-                },
-                { key: "reason", head: t("Reason"), minor: true, cell: (one) => one.reason || "—" },
-              ]}
-            />
-          </Card>
-        ),
-
-        history: (
-          <Card
-            title={t("Kernel and release history")}
-            note={t("Every kernel and release the panel has seen this host report, newest first; the panel keeps the last twenty.")}
-            foot={t("The current kernel and release are the top row; a row below it is what the host ran before.")}
-            flush
-          >
-            {history.error
-              ? <Empty icon="help">{t("The history could not be read.")}</Empty>
-              : (
+                  { key: "reason", head: t("Reason"), minor: true, cell: (one) => one.reason || "—" },
+                ]}
+              />
+            </Card>
+          </C>
+          {/* The facts that could not be read, each with its reason. A
+              container without DMI is not a machine with an empty serial,
+              and this is the card that says which of the two this host is. */}
+          {notRead.length > 0 && (
+            <C span={12}>
+              <Card title={t("Not read")} note={t("What the host could not read, and why.")} flush>
                 <Table
-                  rows={historyItems}
-                  keyOf={(one) => `${one.kernel}/${one.distribution}/${one.distribution_version}`}
-                  loading={history.isLoading}
-                  empty={t("No platform has been recorded for this host yet.")}
-                  testId="system-history"
+                  rows={notRead}
+                  keyOf={([key]) => key}
+                  testId="not-read"
                   columns={[
-                    { key: "kernel", head: t("Kernel"), tight: true, cell: (one) => one.kernel || "—" },
-                    {
-                      key: "release", head: t("Release"),
-                      cell: (one) => [one.distribution, one.distribution_version].filter(Boolean).join(" ") || "—",
-                    },
-                    {
-                      key: "first", head: t("First seen"), minor: true,
-                      cell: (one) => <span title={absoluteTime(one.first_seen_at)}>{relativeTime(one.first_seen_at)}</span>,
-                    },
-                    {
-                      key: "last", head: t("Last seen"),
-                      cell: (one) => <span title={absoluteTime(one.last_seen_at)}>{relativeTime(one.last_seen_at)}</span>,
-                    },
+                    { key: "fact", head: t("Fact"), tight: true, cell: ([key]) => key },
+                    { key: "reason", head: t("Reason"), cell: ([, reason]) => reason },
                   ]}
                 />
-              )}
-          </Card>
-        ),
+              </Card>
+            </C>
+          )}
+        </Grid>
+      )}
 
-        /* The facts that could not be read, each with its reason. A
-           container without DMI is not a machine with an empty serial, and
-           this is the card that says which of the two this host is. */
-        notread: notRead.length > 0 && (
-          <Card title={t("Not read")} note={t("What the host could not read, and why.")} flush>
-            <Table
-              rows={notRead}
-              keyOf={([key]) => key}
-              testId="not-read"
-              columns={[
-                { key: "fact", head: t("Fact"), tight: true, cell: ([key]) => key },
-                { key: "reason", head: t("Reason"), cell: ([, reason]) => reason },
-              ]}
-            />
-          </Card>
-        ),
-      }} />
+      {tab === "history" && (
+        <Grid>
+          <C span={12}>
+            <Card
+              title={t("Kernel and release history")}
+              note={t("Every kernel and release the panel has seen this host report, newest first; the panel keeps the last twenty.")}
+              foot={t("The current kernel and release are the top row; a row below it is what the host ran before.")}
+              flush
+            >
+              {history.error
+                ? <Empty icon="help">{t("The history could not be read.")}</Empty>
+                : (
+                  <Table
+                    rows={historyItems}
+                    keyOf={(one) => `${one.kernel}/${one.distribution}/${one.distribution_version}`}
+                    loading={history.isLoading}
+                    empty={t("No platform has been recorded for this host yet.")}
+                    testId="system-history"
+                    columns={[
+                      { key: "kernel", head: t("Kernel"), tight: true, cell: (one) => one.kernel || "—" },
+                      {
+                        key: "release", head: t("Release"),
+                        cell: (one) => [one.distribution, one.distribution_version].filter(Boolean).join(" ") || "—",
+                      },
+                      {
+                        key: "first", head: t("First seen"), minor: true,
+                        cell: (one) => <span title={absoluteTime(one.first_seen_at)}>{relativeTime(one.first_seen_at)}</span>,
+                      },
+                      {
+                        key: "last", head: t("Last seen"),
+                        cell: (one) => <span title={absoluteTime(one.last_seen_at)}>{relativeTime(one.last_seen_at)}</span>,
+                      },
+                    ]}
+                  />
+                )}
+            </Card>
+          </C>
+        </Grid>
+      )}
     </>
   );
 }
-
-/** The name this screen's arrangement is stored under. */
-export const HOST_SYSTEM_SCREEN = "next_host_system";
-
-/** The containers this screen can draw, and the shape each ships with. */
-export const HOST_SYSTEM: BoardEntry[] = [
-  { key: "uptime", title: "Uptime", width: 3, height: 2 },
-  { key: "kernel", title: "Kernel", width: 3, height: 2 },
-  { key: "release", title: "Release", width: 3, height: 2 },
-  { key: "runson", title: "Runs on", width: 3, height: 2 },
-  { key: "os", title: "Operating system", width: 6, height: 5 },
-  { key: "kernelcard", title: "Kernel", width: 6, height: 5 },
-  { key: "cpu", title: "Processor", width: 6, height: 5 },
-  { key: "memory", title: "Memory and root filesystem", width: 6, height: 5 },
-  { key: "machine", title: "Machine", width: 6, height: 5 },
-  { key: "firmware", title: "Firmware and boot", width: 6, height: 5 },
-  { key: "adapters", title: "Detected capabilities", width: 6, height: 5 },
-  { key: "history", title: "Kernel and release history", width: 6, height: 5 },
-  { key: "notread", title: "Not read", width: 12, height: 4 },
-];

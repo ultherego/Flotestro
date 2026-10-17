@@ -11,12 +11,10 @@ import {
 } from "../../lib/selectors";
 import { useT } from "../../i18n";
 import { useToast } from "../../components/Toast";
-import { Board } from "../Board";
-import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Band, Banner, Bars, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Find,
-  Grid, Kpi, Kpis, Modal, Note, Pill, Problem, Readout, Screen, Seg, Stack, Table, Tag, Toolbar,
-  TwoLine, type Segment, type Tone,
+  Actions, Band, Banner, Bars, Bones, Button, C, Card, Check, Empty, Fact, Facts, Field, Fields,
+  Find, Form, Grid, Kpi, Kpis, Modal, Note, Pill, Problem, Readout, Screen, Seg, Stack, Table, Tabs,
+  Tag, Toolbar, TwoLine, useTab, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -199,12 +197,15 @@ export function connectionTone(state?: string): Tone {
   return "unknown";
 }
 
+/** The sub-tabs: the groups, and the form that draws a new one. */
+const GROUP_TABS = ["groups", "new"] as const;
+
 function GroupList() {
   const t = useT();
   const [search, setSearch] = useState("");
   const [order, setOrder] = useState<GroupOrder>("name");
-  const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [tab, go] = useTab(GROUP_TABS);
 
   const groups = useQuery({
     queryKey: ["host-groups"],
@@ -235,16 +236,36 @@ function GroupList() {
   return (
     <>
       {deleting && <DeleteGroup groups={items} onClose={() => setDeleting(false)} />}
-      <Board screen={GROUPS_SCREEN} catalogue={GROUPS} drawn={{
-        kinds: (
+
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "groups", label: t("Groups") },
+          { value: "new", label: t("New group") },
+        ]}
+      />
+
+      {/* The form has a face of its own and its own heading. It was a
+          container of the board until 17.10, which is the fault the owner
+          named: a form opening under somebody else's title. */}
+      {tab === "new" && (
+        canWrite
+          ? <CreateGroup onDone={() => go("groups")} />
+          : <Card title={t("New group")}><Empty icon="hosts">{t("Only whoever may write the groups can draw one; ask an administrator.")}</Empty></Card>
+      )}
+
+      {tab === "groups" && (
+      <Grid>
+        <C span={5}>
           <Card
             title={t("How the groups answer")}
             note={t("A member list is what somebody wrote down; a selector is asked again every time it is read.")}
           >
             <Band segments={kinds} testId="group-kinds" />
           </Card>
-        ),
-        biggest: (
+        </C>
+        <C span={4}>
           <Card title={t("The biggest groups")} note={uncounted > 0 ? t("{n} groups have no size to show.", { n: uncounted }) : undefined}>
             {biggest.length === 0
               ? <Empty>{loaded ? t("No group has a size to show.") : t("Reading the groups…")}</Empty>
@@ -255,8 +276,8 @@ function GroupList() {
                 }))} />
               )}
           </Card>
-        ),
-        broken: (
+        </C>
+        <C span={3}>
           <Card title={t("Selectors that do not resolve")} note={t("A group that names something gone resolves to nobody until it is changed.")}>
             {broken.length === 0
               ? <Empty>{loaded ? t("Every selector resolves.") : t("Reading the groups…")}</Empty>
@@ -270,15 +291,14 @@ function GroupList() {
                 </Facts>
               )}
           </Card>
-        ),
-        form: creating && <CreateGroup onDone={() => setCreating(false)} />,
-        list: (
+        </C>
+        <C span={12}>
           <Card
             title={t("Groups")}
             note={loaded ? t("{shown} of {total} groups", { shown: shown.length, total: items.length }) : undefined}
             tools={canWrite && (
               <>
-                <button type="button" onClick={() => setCreating(true)} disabled={creating} data-testid="new-group">
+                <button type="button" onClick={() => go("new")} data-testid="new-group">
                   {t("New group")}
                 </button>
                 <button type="button" className="fl-danger" onClick={() => setDeleting(true)} disabled={items.length === 0} data-testid="delete-a-group">
@@ -343,8 +363,9 @@ function GroupList() {
               ]}
             />
           </Card>
-        ),
-      }} />
+        </C>
+      </Grid>
+      )}
     </>
   );
 }
@@ -471,10 +492,11 @@ function CreateGroup({ onDone }: { onDone: () => void }) {
   const ready = name.trim() !== "" && (kind === "static" ? members.size > 0 : selector !== null);
 
   return (
-    <Card
+    <Form
       title={t("New group")}
       note={t("The name is what a campaign selector will use; keep it short and without spaces.")}
-      foot={
+      onSubmit={() => { if (ready && !create.isPending) { setMessage(""); create.mutate(); } }}
+      actions={
         <Actions>
           <button type="button" onClick={() => { setMessage(""); create.mutate(); }} disabled={!ready || create.isPending} data-testid="create-group">
             {create.isPending ? t("Creating…") : t("Create group")}
@@ -511,7 +533,7 @@ function CreateGroup({ onDone }: { onDone: () => void }) {
             <SelectorPreview selector={selector} />
           </>
         )}
-    </Card>
+    </Form>
   );
 }
 
@@ -1379,13 +1401,3 @@ function OneGroup({ id }: { id: string }) {
     </Screen>
   );
 }
-
-export const GROUPS_SCREEN = "next_groups";
-
-export const GROUPS: BoardEntry[] = [
-  { key: "kinds", title: "How the groups answer", width: 5, height: 2 },
-  { key: "biggest", title: "The biggest groups", width: 4, height: 4 },
-  { key: "broken", title: "Selectors that do not resolve", width: 3, height: 4 },
-  { key: "form", title: "New group", width: 12, height: 7 },
-  { key: "list", title: "Groups", width: 12, height: 9 },
-];

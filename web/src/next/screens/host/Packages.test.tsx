@@ -83,11 +83,18 @@ const quiet = {
   "/api/v1/hosts/h1/packages": { items: [], count: 0, state: { package_count: 0 } },
 };
 
-function draw(one: Host = host()) {
+/**
+ * The screen is three sub-tabs since 17.10 - what is installed, what is
+ * being changed and what was done - and the address names which one is
+ * open, so a test that works a form asks for `?tab=change` the way a
+ * reader following a link would.
+ */
+function draw(one: Host = host(), tab?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const where = tab ? `/hosts/${one.id}/packages?tab=${tab}` : `/hosts/${one.id}/packages`;
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter>
+      <MemoryRouter initialEntries={[where]}><ToastProvider>{children}</ToastProvider></MemoryRouter>
     </QueryClientProvider>
   );
   return render(<Packages host={one} />, { wrapper });
@@ -109,7 +116,7 @@ describe("the software of one host", () => {
       "/api/v1/hosts/h1/actions": allow(...EVERY),
       "/api/v1/hosts/h1/inventory/packages": fragment({ manager: "apt", installed: 1200 }),
     });
-    draw();
+    draw(host(), "change");
     await waitFor(() => expect(screen.getByTestId("hold")).toBeInTheDocument());
     expect(screen.getByTestId("hold")).toBeDisabled();
     fireEvent.change(screen.getByTestId("package-names"), { target: { value: "nginx, htop" } });
@@ -146,7 +153,7 @@ describe("the software of one host", () => {
       "/api/v1/hosts/h1/actions": allow(...EVERY),
       "/api/v1/hosts/h1/inventory/packages": fragment({ manager: "apt" }),
     });
-    draw();
+    draw(host(), "change");
     await waitFor(() => expect(screen.getByTestId("release-channel")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("release-channel"), { target: { value: "beta" } });
     await waitFor(() => expect(sent).toHaveLength(1));
@@ -160,7 +167,7 @@ describe("the software of one host", () => {
       "/api/v1/hosts/h1/actions": allow(...EVERY),
       "/api/v1/hosts/h1/inventory/packages": fragment({ manager: "apt" }),
     });
-    draw();
+    draw(host(), "change");
     await waitFor(() => expect(screen.getByTestId("agent-version")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("agent-version"), { target: { value: "0.63.2" } });
     expect(screen.getByTestId("replace-agent")).toBeDisabled();
@@ -209,7 +216,7 @@ describe("the software of one host", () => {
         },
       }),
     });
-    draw();
+    draw(host(), "change");
     await waitFor(() => expect(screen.getByTestId("source-debian")).toBeInTheDocument());
     // The distribution's own source is read here and changed on the host.
     expect(within(screen.getByTestId("source-debian")).getByRole("button", { name: "Remove" })).toBeDisabled();
@@ -283,10 +290,20 @@ describe("the software of one host", () => {
       "/api/v1/hosts/h1/actions": allow("packages.list"),
       "/api/v1/hosts/h1/inventory/packages": fragment({ manager: "apt" }),
     });
-    draw();
+    const reading = draw();
     // Reading the list is still offered: it changes nothing on the host,
     // and its arrival is how we know the verdicts have been read.
     await waitFor(() => expect(screen.getByTestId("read-package-list")).toBeInTheDocument());
+    reading.unmount();
+
+    // And on the tab the changes live on, not one of them is drawn - the
+    // tab has to be the one asked for, or this would pass on an empty page.
+    draw(host(), "change");
+    // The form itself is drawn whatever the verdicts say - only the
+    // buttons that place an order are gated - so the field is the proof
+    // that the tab came up and the absences below mean something.
+    await waitFor(() => expect(screen.getByTestId("package-names")).toBeInTheDocument());
+    expect(screen.queryByTestId("plan-updates")).toBeNull();
     expect(screen.queryByTestId("hold")).toBeNull();
     expect(screen.queryByTestId("plan-removal")).toBeNull();
     expect(screen.queryByTestId("replace-agent")).toBeNull();

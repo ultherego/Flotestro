@@ -217,11 +217,19 @@ export function Policies({ host }: { host: Host }) {
   );
 }
 
-/** The containers this module can draw, and the shape each ships with. */
+/**
+ * The containers this module can draw, and the shape each ships with.
+ *
+ * Three readings and no decision, so this screen keeps its board - but
+ * the shapes are the ones the content needs rather than the ones the
+ * grid liked: a band of four verdicts is two lines tall whatever width
+ * it is given, and the table of every rule of every policy is the thing
+ * people come here to read.
+ */
 export const HOST_POLICIES: BoardEntry[] = [
-  { key: "verdicts", title: "Verdicts", width: 7, height: 4 },
-  { key: "policies", title: "Policies that select this host", width: 5, height: 4 },
-  { key: "rules", title: "Rules", width: 12, height: 7 },
+  { key: "verdicts", title: "Verdicts", width: 6, height: 3 },
+  { key: "policies", title: "Policies that select this host", width: 6, height: 4 },
+  { key: "rules", title: "Rules", width: 12, height: 8 },
 ];
 
 /** The name this module's arrangement is stored under. */

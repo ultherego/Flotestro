@@ -6,10 +6,9 @@ import { useDebounced } from "../../lib/debounce";
 import { absoluteTime, relativeTime, toInstant } from "../../lib/format";
 import type { AuditEvent } from "../../lib/types";
 import { useT } from "../../i18n";
-import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Band, Banner, Bars, Card, Chart, Empty, Fact, Facts, Field, Fields, HeadActions, Note, Pill, Problem, Readout, Row, Seg, type Segment, type Series, Stack, Table, type Tone, TwoLine,
+  Band, Banner, Bars, C, Card, Chart, Empty, Fact, Facts, Field, Fields, Form, Grid, HeadActions, Note, Pill, Problem, Readout, Row, Seg, type Segment, type Series, Stack, Table, type Tone, TwoLine,
 } from "../kit";
 
 /**
@@ -213,72 +212,78 @@ export function Audit() {
             {exporting ? t("Exporting…") : t("Export the trail")}
           </button></HeadActions>
 
-      <Board screen={AUDIT_SCREEN} catalogue={AUDIT} drawn={{
-        filter: (
-          <Card
-            title={t("What to read")}
-            note={t("The trail narrows on the server: what is asked for is what is read.")}
-          >
-            <Stack>
-              {exportError && (
-                <Banner
-                  tone="error"
-                  actions={<button type="button" className="fl-quiet" onClick={() => setExportError(null)}>{t("Close")}</button>}
-                >
-                  {t("The export failed: {message}", { message: exportError })}
-                </Banner>
-              )}
-              <Fields>
-                <Field label={t("Outcome")}>
-                  <select value={outcome} onChange={(event) => setOutcome(event.target.value)} data-testid="outcome">
-                    <option value="">{t("outcome: any")}</option>
-                    <option value="denied">{t("denials only")}</option>
-                    <option value="failure">{t("failures only")}</option>
-                    <option value="success">{t("successes only")}</option>
-                  </select>
-                </Field>
-                <Field label={t("Actor")} hint={t("The name or the identifier as the event was written.")}>
-                  <input value={actor} onChange={(event) => setActor(event.target.value)} data-testid="actor" />
-                </Field>
-                <Field label={t("Operation")} hint={t("For example job.create")}>
-                  <input value={action} onChange={(event) => setAction(event.target.value)} data-testid="action" />
-                </Field>
-                <Field label={t("Target type")} hint={t("For example host")}>
-                  <input value={targetType} onChange={(event) => setTargetType(event.target.value)} data-testid="target-type" />
-                </Field>
-                <Field label={t("Target identifier")}>
-                  <input value={targetID} onChange={(event) => setTargetID(event.target.value)} data-testid="target-id" />
-                </Field>
-                <Field label={t("Since")}>
-                  <input type="datetime-local" value={since} onChange={(event) => editSince(event.target.value)} data-testid="since" />
-                </Field>
-                <Field label={t("Until")}>
-                  <input type="datetime-local" value={until} onChange={(event) => editUntil(event.target.value)} data-testid="until" />
-                </Field>
-              </Fields>
-              <Row>
-                <Seg
-                  value={window_}
-                  onChange={applyWindow}
-                  options={[
-                    { value: "", label: t("Any time") },
-                    { value: "1h", label: t("Last hour") },
-                    { value: "24h", label: t("Last 24 h") },
-                    { value: "7d", label: t("Last 7 days") },
-                  ]}
-                />
-                {pinned && (
-                  <Pill tone="info" title={pinned}>
-                    {`${actorKind || t("actor")} ${pinned.slice(0, 8)}`}
-                    <button type="button" className="fl-word" onClick={clearActor} data-testid="clear-actor"
-                            aria-label={t("Read every actor again")}>×</button>
-                  </Pill>
-                )}
-              </Row>
-            </Stack>
-          </Card>
-        ),
-        per_hour: (
+      {/* What to read is a decision, so it stands on a form of its own
+          above the table it narrows. It was a container of the board
+          until 17.10, which put a block of fields among the readings and
+          left the reader to work out which rectangle did what. */}
+      <Form
+        title={t("What to read")}
+        note={t("The trail narrows on the server: what is asked for is what is read.")}
+        testId="what-to-read"
+      >
+        <Stack>
+          {exportError && (
+            <Banner
+              tone="error"
+              actions={<button type="button" className="fl-quiet" onClick={() => setExportError(null)}>{t("Close")}</button>}
+            >
+              {t("The export failed: {message}", { message: exportError })}
+            </Banner>
+          )}
+          <Fields>
+            <Field label={t("Outcome")}>
+              <select value={outcome} onChange={(event) => setOutcome(event.target.value)} data-testid="outcome">
+                <option value="">{t("outcome: any")}</option>
+                <option value="denied">{t("denials only")}</option>
+                <option value="failure">{t("failures only")}</option>
+                <option value="success">{t("successes only")}</option>
+              </select>
+            </Field>
+            <Field label={t("Actor")} hint={t("The name or the identifier as the event was written.")}>
+              <input value={actor} onChange={(event) => setActor(event.target.value)} data-testid="actor" />
+            </Field>
+            <Field label={t("Operation")} hint={t("For example job.create")}>
+              <input value={action} onChange={(event) => setAction(event.target.value)} data-testid="action" />
+            </Field>
+            <Field label={t("Target type")} hint={t("For example host")}>
+              <input value={targetType} onChange={(event) => setTargetType(event.target.value)} data-testid="target-type" />
+            </Field>
+            <Field label={t("Target identifier")}>
+              <input value={targetID} onChange={(event) => setTargetID(event.target.value)} data-testid="target-id" />
+            </Field>
+            <Field label={t("Since")}>
+              <input type="datetime-local" value={since} onChange={(event) => editSince(event.target.value)} data-testid="since" />
+            </Field>
+            <Field label={t("Until")}>
+              <input type="datetime-local" value={until} onChange={(event) => editUntil(event.target.value)} data-testid="until" />
+            </Field>
+          </Fields>
+          <Row>
+            <Seg
+              value={window_}
+              onChange={applyWindow}
+              options={[
+                { value: "", label: t("Any time") },
+                { value: "1h", label: t("Last hour") },
+                { value: "24h", label: t("Last 24 h") },
+                { value: "7d", label: t("Last 7 days") },
+              ]}
+            />
+            {pinned && (
+              <Pill tone="info" title={pinned}>
+                {`${actorKind || t("actor")} ${pinned.slice(0, 8)}`}
+                <button type="button" className="fl-word" onClick={clearActor} data-testid="clear-actor"
+                        aria-label={t("Read every actor again")}>×</button>
+              </Pill>
+            )}
+          </Row>
+        </Stack>
+      </Form>
+
+      {/* What was read, read: the shape of it over time, how it came out,
+          who it was made of - and then the trail itself. */}
+      <Grid>
+        <C span={8}>
           <Card title={t("Events per hour")} note={`${t("By outcome")} · ${listed}`}>
             {!loaded
               ? <Empty>{t("Reading the trail…")}</Empty>
@@ -292,13 +297,13 @@ export function Audit() {
                   />
                 )}
           </Card>
-        ),
-        outcome: (
+        </C>
+        <C span={4}>
           <Card title={t("Outcome")} note={listed}>
             <Band segments={outcomes} testId="outcomes" />
           </Card>
-        ),
-        actors: (
+        </C>
+        <C span={4}>
           <Card title={t("By actor")} note={t("Who the read trail is made of. One of them narrows it to that actor.")}>
             {!loaded
               ? <Empty>{t("Reading the trail…")}</Empty>
@@ -316,8 +321,8 @@ export function Audit() {
                   }))} />
                 )}
           </Card>
-        ),
-        events: (
+        </C>
+        <C span={12}>
           <Card
             title={t("Events")}
             flush
@@ -381,8 +386,8 @@ export function Audit() {
               ]}
             />
           </Card>
-        ),
-      }} />
+        </C>
+      </Grid>
     </>
   );
 }
@@ -724,6 +729,9 @@ export function digest(detail: Record<string, unknown>, t: (key: string) => stri
     .slice(0, 120);
 }
 
+/* The containers this screen used to stand on a board with, kept as the
+   record of what an installation may have arranged, as the host overview
+   kept its own. The screen itself is sub-tabs since 17.10. */
 export const AUDIT_SCREEN = "next_audit";
 
 export const AUDIT: BoardEntry[] = [

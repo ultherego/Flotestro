@@ -78,11 +78,16 @@ const attempt = (over: Record<string, unknown>) => ({
   ...over,
 });
 
-function draw() {
+/**
+ * One job is read in four sub-tabs since 17.10 - the order, the result,
+ * the attempts and the approvals - so a test reads the one it is about,
+ * by the address a link to it would carry.
+ */
+function draw(tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/jobs/j1"]}>
+      <MemoryRouter initialEntries={[tab ? `/jobs/j1?tab=${tab}` : "/jobs/j1"]}>
         <ToastProvider>
           <Routes><Route path="/jobs/:id" element={children} /></Routes>
         </ToastProvider>
@@ -203,7 +208,7 @@ describe("one job", () => {
       "/api/v1/jobs/j1/attempts": { items: [attempt({ stdout: long })], count: 1 },
       "/api/v1/errors": { items: [] },
     });
-    draw();
+    draw("attempts");
     await waitFor(() => expect(screen.getByTestId("output-stdout")).toBeInTheDocument());
     expect(screen.getByTestId("output-stdout").textContent?.length).toBeLessThan(long.length);
     fireEvent.click(screen.getByTestId("more-stdout"));
@@ -221,7 +226,7 @@ describe("one job", () => {
       },
       "/api/v1/errors": { items: [] },
     });
-    draw();
+    draw("result");
     await waitFor(() => expect(screen.getAllByText("not observed").length).toBeGreaterThan(0));
     expect(screen.getAllByText(/expected active, observed failed/)[0]).toBeInTheDocument();
     // A change made and not observed is said before anything else.

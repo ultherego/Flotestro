@@ -1,15 +1,14 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../../lib/api";
 import { absoluteTime, relativeTime } from "../../lib/format";
 import type { Whoami } from "../../lib/types";
 import { useToast } from "../../components/Toast";
 import { useT, type Translate } from "../../i18n";
-import { Board } from "../Board";
-import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Band, Banner, Bones, Button, Card, Check, type Column, Download, Empty, Field, Fields,
-  Kpi, Modal, Note, Pill, Problem, Row, Stack, Table, Toolbar, TwoLine, type Segment, type Tone,
+  Actions, Band, Banner, Bones, Button, C, Card, Check, type Column, Download, Empty, Field, Fields,
+  Form, Grid, Kpi, Modal, Note, Pill, Problem, Row, Stack, Table, Tabs, Toolbar, TwoLine, useTab,
+  type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -382,6 +381,20 @@ const QUEUE_PAGE = 100;
 /** What a decision waiting on a sentence is about. */
 type Asking = { what: "enable" | "disable" | "delete"; channel: Channel };
 
+/**
+ * The sub-tabs of this screen.
+ *
+ * The channel being written was a container of the board, nine rows tall,
+ * which opened between the readings and pushed them down the screen. It
+ * is a decision, so it has a tab of its own; the channels and the queue
+ * are readings and keep theirs.
+ */
+const NOTIFICATION_TABS = ["channels", "new", "queue"] as const;
+type NotificationTab = typeof NOTIFICATION_TABS[number];
+
+/** For a reader who may not write a channel there is no form and no tab. */
+const NOTIFICATION_READING_TABS = ["channels", "queue"] as const;
+
 export function Notifications() {
   const t = useT();
   const queryClient = useQueryClient();
@@ -401,6 +414,10 @@ export function Notifications() {
     staleTime: 5 * 60 * 1000,
   });
   const canManage = (me.data?.permissions ?? []).includes("notification.manage");
+  // The sub-tab is in the address, so a colleague is sent to the queue
+  // rather than to the screen; whoever may not write a channel is not
+  // offered the form, and an address asking for it lands on the channels.
+  const [tab, goTab] = useTab<NotificationTab>(canManage ? NOTIFICATION_TABS : NOTIFICATION_READING_TABS);
 
   const channels = useQuery({
     queryKey: ["notifications", "channels"],
@@ -432,6 +449,8 @@ export function Notifications() {
       : api.post<Channel>("/api/v1/notifications/channels", body),
     onSuccess: (channel) => {
       setEditing(null); setEditingID(""); setErrorMessage("");
+      // The decision is taken, so the screen goes back to what it reads.
+      goTab("channels");
       toast.success(editingID
         ? t("Channel {name} is saved.", { name: channel.name })
         : t("Channel {name} is created.", { name: channel.name }));
@@ -506,7 +525,10 @@ export function Notifications() {
   // is never a list written twice.
   const states = channels.data?.states ?? [];
   const loaded = channels.data !== undefined;
-  const check = editing ? channelBody(editing) : undefined;
+  /* A reader who opened the form from the address has written nothing
+     yet, so the blank form is what they see until they type. */
+  const draft = editing ?? emptyForm();
+  const check = channelBody(draft);
 
   const rows = deliveries.data?.items ?? [];
   const queueRead = deliveries.data !== undefined;
@@ -526,7 +548,13 @@ export function Notifications() {
     { label: t("kept back"), value: count("suppressed"), tone: "neutral" },
   ];
 
-  const newChannel = () => { setEditing(emptyForm()); setEditingID(""); setErrorMessage(""); };
+  // The form lives on its own tab: a channel is written where it was
+  // asked for, never inside the container that lists the channels.
+  const newChannel = () => { setEditing(emptyForm()); setEditingID(""); setErrorMessage(""); goTab("new"); };
+  const editChannel = (one: Channel) => {
+    setEditing(formOf(one)); setEditingID(one.id); setErrorMessage(""); goTab("new");
+  };
+  const closeForm = () => { setEditing(null); setEditingID(""); goTab("channels"); };
   const tested = testOutcome ? items.find((one) => one.id === testOutcome.id) : undefined;
 
   const channelColumns: Column<Channel>[] = [
@@ -556,8 +584,7 @@ export function Notifications() {
         <Actions>
           <Button kind="quiet" onClick={() => test.mutate(one.id)} disabled={test.isPending}
                   testId={`test-${one.id}`}>{t("Send a test")}</Button>
-          <Button kind="quiet" testId={`edit-${one.id}`}
-                  onClick={() => { setEditing(formOf(one)); setEditingID(one.id); setErrorMessage(""); }}>
+          <Button kind="quiet" testId={`edit-${one.id}`} onClick={() => editChannel(one)}>
             {t("Edit")}
           </Button>
           <Button kind="quiet" disabled={toggle.isPending} testId={`toggle-${one.id}`}
@@ -646,21 +673,19 @@ export function Notifications() {
         />
       )}
 
-      <Board
-        screen={NOTIFICATIONS_SCREEN}
-        catalogue={NOTIFICATIONS}
-        /* What the server refused stays on the screen until it is read.
-           A toast says it once and goes; a write that failed is a fact
-           about the installation until somebody has dealt with it. */
-        notices={errorMessage ? (
-          <Banner
-            tone="error"
-            actions={<Button kind="quiet" onClick={() => setErrorMessage("")}>{t("Close")}</Button>}
-          >
-            {errorMessage}
-          </Banner>
-        ) : null}
-        drawn={{
+      {/* What the server refused stays on the screen until it is read.
+          A toast says it once and goes; a write that failed is a fact
+          about the installation until somebody has dealt with it. */}
+      {errorMessage !== "" && (
+        <Banner
+          tone="error"
+          actions={<Button kind="quiet" onClick={() => setErrorMessage("")}>{t("Close")}</Button>}
+        >
+          {errorMessage}
+        </Banner>
+      )}
+
+      <Readings tab={tab} onTab={goTab} canManage={canManage} panels={{
         channels_count: (
           <Kpi
             hero
@@ -688,28 +713,29 @@ export function Notifications() {
             note={t("Messages nobody received: the attempts ran out or the receiver refused the credentials. They wait here until an operator sends them again.")}
           />
         ),
-        form: editing && (
-          <Card
+        form: canManage && (
+          <Form
             title={editingID ? t("Edit the channel") : t("New channel")}
             note={t("No credential lies in the channel: the address of an incoming webhook, the key a webhook is signed with and a mail password go to the secret store the moment they are typed and are never shown back. The form says only whether one is configured and when it was last rotated; an empty field keeps the stored one.")}
-          >
-            <Stack>
-              <ChannelFields form={editing} subjects={subjects} severities={severities} onChange={setEditing} />
-              <Actions>
+            testId="channel-form"
+            actions={
+              <>
                 <Button
-                  onClick={() => check?.body && save.mutate(check.body)}
-                  disabled={save.isPending || !check?.body}
+                  onClick={() => check.body && save.mutate(check.body)}
+                  disabled={save.isPending || !check.body}
                   testId="save-channel"
                 >
                   {save.isPending ? t("Saving…") : editingID ? t("Save the channel") : t("Create the channel")}
                 </Button>
-                <Button kind="quiet" onClick={() => { setEditing(null); setEditingID(""); }}>{t("Cancel")}</Button>
+                <Button kind="quiet" onClick={closeForm}>{t("Cancel")}</Button>
                 {/* Why the form will not go yet, in the reader's words
                     rather than as a button that simply does nothing. */}
-                {check?.problem && <Note>{problemWords(t, check.problem)}</Note>}
-              </Actions>
-            </Stack>
-          </Card>
+                {check.problem && <Note>{problemWords(t, check.problem)}</Note>}
+              </>
+            }
+          >
+            <ChannelFields form={draft} subjects={subjects} severities={severities} onChange={setEditing} />
+          </Form>
         ),
         channels: (
           <Card
@@ -717,7 +743,7 @@ export function Notifications() {
             flush
             note={t("Each channel carries the events it names for the part of the fleet its filter keeps; a disabled one is listed because it would carry again the moment somebody enables it.")}
             tools={canManage && (
-              <Button onClick={newChannel} disabled={Boolean(editing)} testId="new-channel">
+              <Button onClick={newChannel} testId="new-channel">
                 {t("New channel")}
               </Button>
             )}
@@ -745,7 +771,7 @@ export function Notifications() {
             {loaded && items.length === 0 && (
               <Empty
                 icon="notifications"
-                action={canManage && !editing && (
+                action={canManage && (
                   <Button kind="quiet" onClick={newChannel} testId="new-channel-empty">{t("New channel")}</Button>
                 )}
               >
@@ -835,6 +861,53 @@ export function Notifications() {
           </Card>
         ),
       }} />
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+/**
+ * The screen in three readings rather than seven containers.
+ *
+ * The channels and the queue answer two questions, and the form of a
+ * channel answers neither: it was a container nine rows tall that opened
+ * in the middle of them, under a title of its own, which is the fault
+ * the owner named on 17.10. The headline tiles stay above the tabs.
+ */
+function Readings({ tab, onTab, canManage, panels }: {
+  tab: NotificationTab;
+  onTab: (next: NotificationTab) => void;
+  /** Whoever may not write a channel is offered neither form nor tab. */
+  canManage: boolean;
+  panels: Record<string, ReactNode>;
+}) {
+  const t = useT();
+  const tabs: { value: NotificationTab; label: ReactNode }[] = [
+    { value: "channels", label: t("Channels") },
+    ...(canManage ? [{ value: "new" as const, label: t("New channel") }] : []),
+    { value: "queue", label: t("Queue") },
+  ];
+  return (
+    <>
+      <Grid>
+        <C span={4}>{panels.channels_count}</C>
+        <C span={4}>{panels.carrying}</C>
+        <C span={4}>{panels.dead}</C>
+      </Grid>
+
+      <Tabs value={tab} onChange={onTab} tabs={tabs} />
+
+      {tab === "channels" && <Grid><C span={12}>{panels.channels}</C></Grid>}
+      {tab === "new" && <Grid><C span={12}>{panels.form}</C></Grid>}
+      {/* What the queue is made of is counted over the rows the filter
+          read, so it belongs over the rows it was counted from. */}
+      {tab === "queue" && (
+        <Grid>
+          <C span={12}>{panels.shape}</C>
+          <C span={12}>{panels.queue}</C>
+        </Grid>
+      )}
     </>
   );
 }
@@ -1028,15 +1101,3 @@ function ChannelFields({ form, subjects, severities, onChange }: {
     </Stack>
   );
 }
-
-export const NOTIFICATIONS_SCREEN = "next_notifications";
-
-export const NOTIFICATIONS: BoardEntry[] = [
-  { key: "channels_count", title: "Channels", width: 3, height: 2 },
-  { key: "carrying", title: "Carrying events", width: 3, height: 2 },
-  { key: "dead", title: "Dead letters", width: 3, height: 2 },
-  { key: "shape", title: "What the queue is made of", width: 3, height: 2 },
-  { key: "form", title: "The channel being written", width: 12, height: 9 },
-  { key: "channels", title: "Channels", width: 12, height: 7 },
-  { key: "queue", title: "Delivery queue", width: 12, height: 11 },
-];

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../../lib/api";
@@ -12,11 +12,9 @@ import {
 import { bytes, relativeTime, absoluteTime } from "../../../lib/format";
 import type { Host, InventoryFragment, Job } from "../../../lib/types";
 import { useT, type Translate } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Banner, Bars, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Kpi, Modal, Note,
-  Pill, Problem, Readout, Row, Stack, Table, Tabs,
+  Banner, Bars, Bones, Button, C, Card, Check, Empty, Fact, Facts, Field, Fields, Form, Grid, Kpi,
+  Kpis, Modal, Note, Pill, Problem, Readout, Row, Section, Stack, Table, Tabs, useTab,
 } from "../../kit";
 
 /**
@@ -160,6 +158,53 @@ export const DECLARATION_ACTIONS: Record<string, string[]> = {
   container: ["docker.container.ensure"],
   network: ["docker.network.ensure", "docker.network.remove"],
   volume: ["docker.volume.ensure", "docker.volume.remove"],
+};
+
+/**
+ * Every declaration this module offers, in one list.
+ *
+ * Until 17.10 the kind came from whichever table was open behind the
+ * form, so the same form meant a container on one tab and a volume on
+ * another and said so nowhere. The declaration is a decision of its own
+ * now, so it names what it is about itself.
+ */
+export const DECLARATION_CHOICES: string[] = [
+  ...DECLARATION_ACTIONS.container, ...DECLARATION_ACTIONS.network, ...DECLARATION_ACTIONS.volume,
+];
+
+/**
+ * The twenty-seven fields of a container declaration, in groups.
+ *
+ * One block of twenty-seven fields is a wall: the owner's words for it
+ * were that he could not be bothered to read it because he had to work
+ * out what it was trying to say. They are the same fields in the same
+ * order the registry gives them; the headings only say where one subject
+ * ends and the next begins. A field no group names keeps its place in
+ * the block above the first heading, so another operation's form - a
+ * network, a volume - is not cut up by headings written for a container.
+ */
+export const DECLARATION_GROUPS: Record<string, { title: string; names: string[] }[]> = {
+  "docker.container.ensure": [
+    {
+      title: "The container",
+      names: ["name", "hostname", "user", "working_dir", "stopped", "restart_policy",
+        "restart_max_retries", "stop_timeout_seconds", "read_only_root_filesystem"],
+    },
+    { title: "The image and what it runs", names: ["image", "command", "entrypoint"] },
+    { title: "What it is wired to", names: ["ports", "networks", "mounts"] },
+    { title: "Environment and labels", names: ["env", "labels"] },
+    {
+      title: "Runtime limits",
+      names: ["memory_bytes", "memory_reservation_bytes", "nano_cpus", "pids_limit"],
+    },
+    {
+      title: "The health check",
+      names: ["health_test", "health_disable", "health_interval_seconds", "health_timeout_seconds",
+        "health_retries", "health_start_period_seconds"],
+    },
+    { title: "Secrets", names: ["env_secrets"] },
+    { title: "Carrying it out", names: ["force"] },
+  ],
 };
 
 /** One difference the plan found between the host and the description. */
@@ -324,11 +369,24 @@ function JobNotice({ job, hostID }: { job: Job; hostID: string }) {
 
 /* -------------------------------------------------------- the screen */
 
+/**
+ * The three parts of this module: what the engine is doing, what it
+ * holds, and what this host is told to carry.
+ *
+ * It was one board of eleven containers, with a twenty-seven field
+ * declaration as one of them. The readings keep their containers; the
+ * declaration and the image pull stand on their own face in a sub-tab of
+ * their own, and the sub-tab is in the address so a colleague can be
+ * sent to it.
+ */
+const CONTAINER_TABS = ["state", "objects", "declaration"] as const;
+
 export function Containers({ host }: { host: Host }) {
   const t = useT();
   const queryClient = useQueryClient();
   const access = useModuleAccess(host.id, CONTAINER_CHANGES);
   const mayRead = useAllowed(host.id, "docker.read");
+  const [tab, goTab] = useTab(CONTAINER_TABS);
 
   const [view, setView] = useState<View>("containers");
   const [pending, setPending] = useState<Pending | null>(null);
@@ -456,35 +514,46 @@ export function Containers({ host }: { host: Host }) {
           onCancel={() => setPending(null)}
         />
       )}
-      <Board screen={CONTAINERS_SCREEN} catalogue={CONTAINERS_BOARD} notices={notices.length > 0 ? <Stack>{notices}</Stack> : undefined} drawn={{
-        running: (
-          <Kpi
-            hero
-            icon="containers"
-            label={t("Running")}
-            value={state?.running ?? null}
-            note={state?.containers === undefined ? undefined : t("of {n} on the engine", { n: state.containers })}
-          />
-        ),
-        unhealthy: (
-          <Kpi icon="containers" label={t("Unhealthy")} value={state?.unhealthy ?? null} tone="error" />
-        ),
-        restarting: (
-          // A container that keeps coming up is healthy at every single
-          // moment and broken nonetheless.
-          <Kpi icon="containers" label={t("Restarting")} value={state?.restart_looping ?? null} tone="warn" />
-        ),
-        engineversion: (
-          <Kpi
-            icon="settings"
-            label={t("Engine")}
-            value={state?.engine_version ?? null}
-            note={state?.api_version ? t("API {version}", { version: state.api_version }) : undefined}
-          />
-        ),
-        states: (
+      {notices.length > 0 && <Stack>{notices}</Stack>}
+
+      {/* The measurements stay above the tabs: they are one shape, they
+          are what a reader looks at first, and they are the same
+          whichever part of the module is open. */}
+      <Kpis>
+        <Kpi
+          hero
+          icon="containers"
+          label={t("Running")}
+          value={state?.running ?? null}
+          note={state?.containers === undefined ? undefined : t("of {n} on the engine", { n: state.containers })}
+        />
+        <Kpi icon="containers" label={t("Unhealthy")} value={state?.unhealthy ?? null} tone="error" />
+        {/* A container that keeps coming up is healthy at every single
+            moment and broken nonetheless. */}
+        <Kpi icon="containers" label={t("Restarting")} value={state?.restart_looping ?? null} tone="warn" />
+        <Kpi
+          icon="settings"
+          label={t("Engine")}
+          value={state?.engine_version ?? null}
+          note={state?.api_version ? t("API {version}", { version: state.api_version }) : undefined}
+        />
+      </Kpis>
+
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "state", label: t("State") },
+          { value: "objects", label: t("Objects") },
+          { value: "declaration", label: t("Declaration") },
+        ]}
+      />
+
+      {tab === "state" && (
+        <Grid>
+          <C span={8}>
           <Card
-            title={t("Containers")}
+            title={t("Containers by state")}
             note={t("Counted by the inventory cycle; the lists below come from a read.")}
             tools={
               mayRead.allowed ? (
@@ -510,9 +579,9 @@ export function Containers({ host }: { host: Host }) {
             ]} />
             {state === undefined && <Note>{t("This host has not reported its containers yet.")}</Note>}
           </Card>
-        ),
-        engine: (
-          <Card title={t("Engine")}>
+          </C>
+          <C span={4}>
+          <Card title={t("Engine and what it holds")}>
             <Facts>
               <Fact label={t("Engine")}>
                 {state?.engine_version || <Pill tone="unknown">{t("unknown")}</Pill>}
@@ -533,8 +602,9 @@ export function Containers({ host }: { host: Host }) {
               </Fact>
             </Facts>
           </Card>
-        ),
-        projects: state?.projects && state.projects.length > 0 ? (
+          </C>
+          {state?.projects && state.projects.length > 0 && (
+          <C span={12}>
           <Card title={t("Compose projects")} flush>
             <Table
               testId="projects"
@@ -548,20 +618,39 @@ export function Containers({ host }: { host: Host }) {
               ]}
             />
           </Card>
-        ) : undefined,
-        objects: (
-          <Card
+          </C>
+          )}
+          <C span={12}>
+          <Card title={t("Where this came from")}>
+            <Facts>
+              <Fact label={t("Source")}>{summary.data?.source ?? <span className="fl-faint">—</span>}</Fact>
+              <Fact label={t("Revision")}>
+                <span className="fl-mono">{summary.data?.revision.slice(0, 12) ?? "—"}</span>
+              </Fact>
+              <Fact label={t("Observed")}>
+                {summary.data
+                  ? <span title={absoluteTime(summary.data.observed_at)}>{relativeTime(summary.data.observed_at)}</span>
+                  : <span className="fl-faint">—</span>}
+              </Fact>
+              {summary.data?.unavailable_reason && (
+                <Fact label={t("Could not be read")}>{summary.data.unavailable_reason}</Fact>
+              )}
+            </Facts>
+          </Card>
+          </C>
+        </Grid>
+      )}
+
+      {tab === "objects" && (
+        <>
+          {/* The log opens above the tables rather than below fifty rows
+              of them: it is the answer to a click somebody just made. */}
+          {logsOf && (
+            <ContainerLogs key={logsOf.id} host={host} container={logsOf} onClose={() => setLogsOf(null)} />
+          )}
+          <Section
             title={t("Engine objects")}
-            foot={full.data
-              ? (
-                <>
-                  {t("Full state read from the host")}{" "}
-                  <span title={absoluteTime(full.data.observed_at)}>{relativeTime(full.data.observed_at)}</span>
-                  {lists?.summary?.unavailable_reason ? ` · ${lists.summary.unavailable_reason}` : ""}
-                </>
-              )
-              : undefined}
-            flush
+            note={t("What the engine holds right now, as the last read found it.")}
           >
             <Tabs
               value={view}
@@ -614,46 +703,29 @@ export function Containers({ host }: { host: Host }) {
               />
             )}
             {view === "events" && <Events host={host} />}
-          </Card>
-        ),
-        logs: logsOf ? (
-          <ContainerLogs key={logsOf.id} host={host} container={logsOf} onClose={() => setLogsOf(null)} />
-        ) : undefined,
-        pull: view === "images" ? (
+
+            {full.data && (
+              <Note>
+                {t("Full state read from the host")}{" "}
+                <span title={absoluteTime(full.data.observed_at)}>{relativeTime(full.data.observed_at)}</span>
+                {lists?.summary?.unavailable_reason ? ` · ${lists.summary.unavailable_reason}` : ""}
+              </Note>
+            )}
+          </Section>
+        </>
+      )}
+
+      {tab === "declaration" && (
+        <>
+          <Declaration host={host} choices={DECLARATION_CHOICES} lists={lists} />
           <PullImage
             hostID={host.id}
             images={lists?.images}
             busy={request.isPending}
             onPull={(reference) => request.mutate({ action: "docker.image.pull", payload: { docker_image: { reference } } })}
           />
-        ) : undefined,
-        declare: view === "containers" || view === "networks" || view === "volumes" ? (
-          <Declaration
-            key={view}
-            host={host}
-            kind={view === "containers" ? "container" : view === "networks" ? "network" : "volume"}
-            lists={lists}
-          />
-        ) : undefined,
-        source: (
-          <Card title={t("Where this came from")}>
-            <Facts>
-              <Fact label={t("Source")}>{summary.data?.source ?? <span className="fl-faint">—</span>}</Fact>
-              <Fact label={t("Revision")}>
-                <span className="fl-mono">{summary.data?.revision.slice(0, 12) ?? "—"}</span>
-              </Fact>
-              <Fact label={t("Observed")}>
-                {summary.data
-                  ? <span title={absoluteTime(summary.data.observed_at)}>{relativeTime(summary.data.observed_at)}</span>
-                  : <span className="fl-faint">—</span>}
-              </Fact>
-              {summary.data?.unavailable_reason && (
-                <Fact label={t("Could not be read")}>{summary.data.unavailable_reason}</Fact>
-              )}
-            </Facts>
-          </Card>
-        ),
-      }} />
+        </>
+      )}
     </>
   );
 }
@@ -929,11 +1001,18 @@ function PullImage({ hostID, images, busy, onPull }: {
   // form is not drawn at all.
   return (
     <Allowed host={hostID} action="docker.image.pull">
-      <Card title={t("Pull an image")}>
-        <Stack>
+      <Form
+        title={t("Pull an image")}
+        note={t("Only the image is fetched; nothing on this host starts using it until a container is declared from it.")}
+        actions={
+          <Button testId="pull-image" disabled={!valid || busy} onClick={() => onPull(value)}>
+            {t("Pull image")}
+          </Button>
+        }
+      >
           <Fields>
             <Field
-              label={t("Pull an image")}
+              label={t("Image")}
               hint={held.length
                 ? t("The full reference, with its registry where it is not the default one. The images this host already carries are on the list; the engine pulls with its own credentials.")
                 : t("The full reference, with its registry where it is not the default one, and a tag or a digest. The engine pulls it with its own credentials.")}
@@ -951,11 +1030,7 @@ function PullImage({ hostID, images, busy, onPull }: {
               </datalist>
             </Field>
           </Fields>
-          <Button kind="quiet" testId="pull-image" disabled={!valid || busy} onClick={() => onPull(value)}>
-            {t("Pull image")}
-          </Button>
-        </Stack>
-      </Card>
+      </Form>
     </Allowed>
   );
 }
@@ -981,15 +1056,37 @@ function ContainerLogs({ host, container, onClose }: {
   const bounded = Math.min(LOG_LINES_MAX, Math.max(LOG_LINES_MIN, Math.trunc(lines) || LOG_LINES_MIN));
 
   return (
-    <Card
-      title={t("Log of {name}", { name: container.name })}
-      tools={<Button kind="quiet" onClick={onClose}>{t("Close")}</Button>}
-      foot={result?.truncated
-        // A cut-off log without this sentence would look complete.
-        ? t("Truncated: {reason}. Narrow the window or the line count.", { reason: result.truncated_reason || "" })
-        : undefined}
-    >
-      <Stack>
+    <>
+      <Form
+        title={t("Log of {name}", { name: container.name })}
+        note={t("The tail of what this container wrote, read from the host when you ask for it.")}
+        actions={
+          <>
+            {mayRead.allowed ? (
+              <Button
+                testId="read-log"
+                disabled={read.busy || host.connection_state !== "online"}
+                onClick={() => read.order({
+                  action: "docker.container.logs",
+                  payload: {
+                    docker_logs: {
+                      container_id: container.id,
+                      lines: bounded,
+                      since: since.trim(),
+                      timestamps,
+                    },
+                  },
+                })}
+              >
+                {read.busy ? t("Reading…") : t("Read log")}
+              </Button>
+            ) : mayRead.known ? (
+              <Note>{mayRead.reason || t("This action is not available.")}</Note>
+            ) : null}
+            <Button kind="quiet" onClick={onClose}>{t("Close")}</Button>
+          </>
+        }
+      >
         <Fields>
           <Field
             label={t("Lines from the end")}
@@ -1016,28 +1113,11 @@ function ContainerLogs({ host, container, onClose }: {
             </Check>
           </Field>
         </Fields>
-        {mayRead.allowed ? (
-          <Button
-            testId="read-log"
-            disabled={read.busy || host.connection_state !== "online"}
-            onClick={() => read.order({
-              action: "docker.container.logs",
-              payload: {
-                docker_logs: {
-                  container_id: container.id,
-                  lines: bounded,
-                  since: since.trim(),
-                  timestamps,
-                },
-              },
-            })}
-          >
-            {read.busy ? t("Reading…") : t("Read log")}
-          </Button>
-        ) : mayRead.known ? (
-          <Note>{mayRead.reason || t("This action is not available.")}</Note>
-        ) : null}
+      </Form>
 
+      {/* What came back is a reading, so it stands under the form rather
+          than inside it. */}
+      <Stack>
         {read.message && <Problem>{read.message}</Problem>}
         {refused && (
           <Problem>{read.attempt?.message || read.attempt?.error_code || t("The host refused the read.")}</Problem>
@@ -1055,8 +1135,14 @@ function ContainerLogs({ host, container, onClose }: {
             ? <Empty>{t("The container wrote nothing in that range.")}</Empty>
             : <Readout value={output.join("\n")} lines={20} testId="log-output" />
         ) : null}
+        {/* A cut-off log without this sentence would look complete. */}
+        {result?.truncated && (
+          <Note>
+            {t("Truncated: {reason}. Narrow the window or the line count.", { reason: result.truncated_reason || "" })}
+          </Note>
+        )}
       </Stack>
-    </Card>
+    </>
   );
 }
 
@@ -1226,15 +1312,15 @@ function Events({ host }: { host: Host }) {
  * this panel without a plan: the host computes the difference, the change
  * carries that plan's digest, and the host refuses it when it has moved.
  */
-function Declaration({ host, kind, lists }: {
+function Declaration({ host, choices, lists }: {
   host: Host;
-  kind: "container" | "network" | "volume";
+  /** Every declaration offered, the first of them the one this opens on. */
+  choices: string[];
   /** What the engine on this host reports, so the fields can offer it. */
   lists?: FullState;
 }) {
   const t = useT();
   const queryClient = useQueryClient();
-  const choices = DECLARATION_ACTIONS[kind];
   const [action, setAction] = useState(choices[0]);
   const entry = operationForm(action);
   const [form, setForm] = useState<FormValue>(() => startingForm(choices[0]));
@@ -1295,31 +1381,12 @@ function Declaration({ host, kind, lists }: {
   const target = entry.summary(payload ?? {}) || t("this object");
 
   return (
-    <Card title={t("Declare what this host is to carry")}>
-      <Stack>
-        {choices.length > 1 && (
-          <Fields>
-            <Field label={t("What to declare")}>
-              <select value={action} onChange={(event) => choose(event.target.value)} data-testid="declare-action">
-                {choices.map((one) => (
-                  <option key={one} value={one}>{t(operationForm(one)?.title ?? one)}</option>
-                ))}
-              </select>
-            </Field>
-          </Fields>
-        )}
-        {/* The fields come from the operation registry, so this card and the
-            Bulk wizard ask for the same things in the same words. */}
-        <RegistryFields
-          key={action}
-          entry={entry}
-          value={form}
-          onChange={(next) => { setForm(next); setOrdered(null); }}
-          json={payloadText}
-          onJson={(next) => { setPayloadText(next); setOrdered(null); }}
-          suggestions={engineSuggestions(lists)}
-        />
-        <Row>
+    <>
+    <Form
+      title={t("Declare what this host is to carry")}
+      note={t("The host computes what would change before anything is ordered, and the order carries that plan with it.")}
+      actions={
+        <>
           {/* The plan is a read and stands behind the read permission; the
               change behind its own. An operator who may look but not change
               sees the plan and no button to carry it out. */}
@@ -1348,15 +1415,49 @@ function Declaration({ host, kind, lists }: {
               {t("Carry the plan out")}
             </Button>
           </Allowed>
-        </Row>
+        </>
+      }
+    >
+        {choices.length > 1 && (
+          <Fields>
+            <Field label={t("What to declare")}>
+              <select value={action} onChange={(event) => choose(event.target.value)} data-testid="declare-action">
+                {choices.map((one) => (
+                  <option key={one} value={one}>{t(operationForm(one)?.title ?? one)}</option>
+                ))}
+              </select>
+            </Field>
+          </Fields>
+        )}
+        {/* The fields come from the operation registry, so this form and the
+            Bulk wizard ask for the same things in the same words. */}
+        <RegistryFields
+          key={action}
+          entry={entry}
+          value={form}
+          onChange={(next) => { setForm(next); setOrdered(null); }}
+          json={payloadText}
+          onJson={(next) => { setPayloadText(next); setOrdered(null); }}
+          suggestions={engineSuggestions(lists)}
+          groups={DECLARATION_GROUPS[action]}
+        />
         <Note>
           {t("The change carries the digest of this plan. The host computes the plan once more right before it and refuses when the host moved in the meantime.")}
         </Note>
+    </Form>
+
+      {/* The plan the host sent back is a reading of this machine, so it
+          stands under the form rather than inside it. */}
+      <Stack>
         {(message || plan.message) && <Problem>{message || plan.message}</Problem>}
         {plan.attempt && !computed && (
           <Problem>{plan.attempt.message || plan.attempt.error_code || t("The host sent no plan back.")}</Problem>
         )}
-        {computed && <PlanView plan={computed} stale={stale} />}
+        {computed && (
+          <Section title={t("The plan")}>
+            <PlanView plan={computed} stale={stale} />
+          </Section>
+        )}
         {ordered && <JobNotice job={ordered} hostID={host.id} />}
       </Stack>
       {confirming && (
@@ -1377,7 +1478,7 @@ function Declaration({ host, kind, lists }: {
           onCancel={() => setConfirming(false)}
         />
       )}
-    </Card>
+    </>
   );
 }
 
@@ -1460,13 +1561,20 @@ function removalDescription(t: Translate, target: Pending): string {
  * The advanced view is the escape hatch for a payload the fields cannot
  * show; while it holds one, the payload travels exactly as typed.
  */
-function RegistryFields({ entry, value, onChange, json, onJson, suggestions }: {
+function RegistryFields({ entry, value, onChange, json, onJson, suggestions, groups }: {
   entry: OperationEntry;
   value: FormValue;
   onChange: (value: FormValue) => void;
   json: string;
   onJson: (json: string) => void;
   suggestions?: FieldSuggestions;
+  /**
+   * How the fields are divided into subjects, for a form long enough that
+   * a reader loses the thread - the container declaration has
+   * twenty-seven. Without one the fields stand in a single block, which
+   * is right for a form of four.
+   */
+  groups?: { title: string; names: string[] }[];
 }) {
   const t = useT();
   const [advanced, setAdvanced] = useState(json !== "");
@@ -1520,18 +1628,25 @@ function RegistryFields({ entry, value, onChange, json, onJson, suggestions }: {
         </Fields>
       ) : (
         <>
-          <Fields>
-            {entry.fields.map((field) => (
-              <OneField
-                key={field.name}
-                field={field}
-                value={value}
-                problem={problemOf(field.name)}
-                set={set}
-                suggestions={suggestions?.[field.name]}
-              />
-            ))}
-          </Fields>
+          {blocks(entry.fields, groups).map((block) => {
+            const fields = (
+              <Fields>
+                {block.fields.map((field) => (
+                  <OneField
+                    key={field.name}
+                    field={field}
+                    value={value}
+                    problem={problemOf(field.name)}
+                    set={set}
+                    suggestions={suggestions?.[field.name]}
+                  />
+                ))}
+              </Fields>
+            );
+            return block.title
+              ? <Section key={block.title} title={t(block.title)}>{fields}</Section>
+              : <Fragment key="rest">{fields}</Fragment>;
+          })}
           {entry.fields.length === 0 && <Note>{t("This operation takes no settings.")}</Note>}
           {problems.length > 0 && (
             <Note>{problems.map((one) => t(one.message, one.params)).join(" ")}</Note>
@@ -1540,6 +1655,30 @@ function RegistryFields({ entry, value, onChange, json, onJson, suggestions }: {
       )}
     </Stack>
   );
+}
+
+/**
+ * The fields of a form, in the order they are read, divided into the
+ * subjects a reader follows.
+ *
+ * A field no group names keeps its place in one block before the first
+ * heading, so a form the groups were not written for comes out as the
+ * single block it was, rather than as a heading with nothing under it.
+ */
+export function blocks(
+  fields: OperationField[],
+  groups?: { title: string; names: string[] }[],
+): { title?: string; fields: OperationField[] }[] {
+  if (!groups?.length) return fields.length > 0 ? [{ fields }] : [];
+  const named = new Set(groups.flatMap((group) => group.names));
+  const rest = fields.filter((field) => !named.has(field.name));
+  const out: { title?: string; fields: OperationField[] }[] = [];
+  if (rest.length > 0) out.push({ fields: rest });
+  for (const group of groups) {
+    const held = fields.filter((field) => group.names.includes(field.name));
+    if (held.length > 0) out.push({ title: group.title, fields: held });
+  }
+  return out;
 }
 
 /** What the advanced view is holding right now. */
@@ -1711,22 +1850,3 @@ function Confirm({ host, title, what, busy, danger, target, reasonOnly, onConfir
     </Modal>
   );
 }
-
-/** The name this screen's arrangement is stored under. */
-export const CONTAINERS_SCREEN = "next_host_containers";
-
-/** The containers this screen can draw, and the shape each ships with. */
-export const CONTAINERS_BOARD: BoardEntry[] = [
-  { key: "running", title: "Running", width: 3, height: 2 },
-  { key: "unhealthy", title: "Unhealthy", width: 3, height: 2 },
-  { key: "restarting", title: "Restarting", width: 3, height: 2 },
-  { key: "engineversion", title: "Engine", width: 3, height: 2 },
-  { key: "states", title: "Containers by state", width: 8, height: 4 },
-  { key: "engine", title: "Engine", width: 4, height: 4 },
-  { key: "projects", title: "Compose projects", width: 12, height: 4 },
-  { key: "objects", title: "Engine objects", width: 12, height: 9 },
-  { key: "logs", title: "Container log", width: 12, height: 9 },
-  { key: "pull", title: "Pull an image", width: 12, height: 4 },
-  { key: "declare", title: "Declare what this host is to carry", width: 12, height: 9 },
-  { key: "source", title: "Where this came from", width: 12, height: 2 },
-];

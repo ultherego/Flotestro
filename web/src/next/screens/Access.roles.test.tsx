@@ -84,10 +84,18 @@ function given(over: Record<string, unknown> = {}) {
   });
 }
 
-function draw() {
+/**
+ * The screen, opened at an address.
+ *
+ * It was thirteen containers on one board until 17.10 and is six
+ * sub-tabs now, with the open one in `?tab=`, so a test that reads the
+ * roles, the mappings, the review or the permissions says which one it
+ * is on. A bare address opens on the people.
+ */
+function draw(at = "/") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}><MemoryRouter initialEntries={[at]}><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
   );
   return render(<Access />, { wrapper });
 }
@@ -101,7 +109,7 @@ afterEach(() => {
 describe("what a role may be given", () => {
   it("lists the product's whole vocabulary, including a permission nobody holds", async () => {
     given();
-    draw();
+    draw("/access?tab=permissions");
     await waitFor(() => expect(screen.getByTestId("permission-row-secret.write")).toBeInTheDocument());
     // Read along the row: operator and shift_lead carry it, viewer does not.
     expect(within(screen.getByTestId("permission-row-unit.restart")).getAllByText("yes")).toHaveLength(2);
@@ -110,7 +118,7 @@ describe("what a role may be given", () => {
 
   it("names the installation's own roles among the product's, so the columns can be told apart", async () => {
     given();
-    draw();
+    draw("/access?tab=permissions");
     await waitFor(() => expect(screen.getByTestId("permission-catalogue")).toBeInTheDocument());
     const head = screen.getByTestId("permission-catalogue").querySelector("thead") as HTMLElement;
     expect(within(head).getByText("shift_lead").closest("th")).toHaveTextContent("own");
@@ -119,7 +127,7 @@ describe("what a role may be given", () => {
 
   it("narrows the catalogue on what is typed", async () => {
     given();
-    draw();
+    draw("/access?tab=permissions");
     await waitFor(() => expect(screen.getByTestId("permission-row-secret.write")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("permission-search"), { target: { value: "unit." } });
     await waitFor(() => expect(screen.queryByTestId("permission-row-secret.write")).not.toBeInTheDocument());
@@ -130,7 +138,7 @@ describe("what a role may be given", () => {
 describe("the roles of this installation", () => {
   it("lists only the roles somebody here wrote, with how much each is used", async () => {
     given();
-    draw();
+    draw("/access?tab=roles");
     await waitFor(() => expect(screen.getByTestId("role-shift_lead")).toBeInTheDocument());
     expect(screen.queryByTestId("role-viewer")).not.toBeInTheDocument();
     expect(screen.queryByTestId("role-operator")).not.toBeInTheDocument();
@@ -139,7 +147,7 @@ describe("the roles of this installation", () => {
 
   it("says a count the server never sent is not known, and never nobody", async () => {
     given({ "/api/v1/roles": { items: [{ role: "shift_lead", permissions: ["unit.restart"] }], count: 1 } });
-    draw();
+    draw("/access?tab=roles");
     await waitFor(() => expect(screen.getByTestId("role-shift_lead")).toBeInTheDocument());
     expect(screen.getByTestId("role-shift_lead")).toHaveTextContent("not known");
     expect(screen.getByTestId("role-shift_lead")).not.toHaveTextContent("nobody");
@@ -147,17 +155,18 @@ describe("the roles of this installation", () => {
 
   it("offers a reader who may not manage access nothing to press", async () => {
     given({ "/api/v1/whoami": { permissions: ["host.read"] } });
-    draw();
+    draw("/access?tab=roles");
     await waitFor(() => expect(screen.getByTestId("role-shift_lead")).toBeInTheDocument());
     expect(screen.queryByTestId("edit-role-shift_lead")).not.toBeInTheDocument();
     expect(within(screen.getByTestId("role-shift_lead")).getByText("read only")).toBeInTheDocument();
     // The catalogue is still readable; it is the writing that is withheld.
-    expect(screen.getByTestId("permission-catalogue")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Permissions" }));
+    expect(await screen.findByTestId("permission-catalogue")).toBeInTheDocument();
   });
 
   it("opens the editor on the role it was asked for, and on nothing else", async () => {
     given();
-    draw();
+    draw("/access?tab=roles");
     fireEvent.click(await screen.findByTestId("edit-role-shift_lead"));
     await waitFor(() => expect(screen.getByText("Edit the role shift_lead")).toBeInTheDocument());
     expect(screen.getByTestId("edit-role-shift_lead")).toBeDisabled();
@@ -176,7 +185,7 @@ describe("the roles of this installation", () => {
    */
   it("defines a role by name against the server's own vocabulary", async () => {
     given();
-    draw();
+    draw("/access?tab=roles");
     fireEvent.click(await screen.findByTestId("define-role"));
     await waitFor(() => expect(screen.getByTestId("role-name")).toBeInTheDocument());
     // Nothing is ticked on a role that does not exist yet.
@@ -210,7 +219,7 @@ describe("the roles of this installation", () => {
 
   it("refuses a name the server would refuse, and says what shape one takes", async () => {
     given();
-    draw();
+    draw("/access?tab=roles");
     fireEvent.click(await screen.findByTestId("define-role"));
     await waitFor(() => expect(screen.getByTestId("role-name")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("checkbox", { name: "unit.restart" }));
@@ -223,7 +232,7 @@ describe("the roles of this installation", () => {
 
   it("removes a role through the one dialog, with its reason in the address", async () => {
     given();
-    draw();
+    draw("/access?tab=roles");
     fireEvent.click(await screen.findByTestId("remove-role-shift_lead"));
     await waitFor(() => expect(screen.getByText("Remove the role shift_lead")).toBeInTheDocument());
     // A role that is still granted says the removal will be refused.
@@ -239,7 +248,7 @@ describe("the roles of this installation", () => {
 
   it("promises nothing about a role whose use the server never counted", async () => {
     given({ "/api/v1/roles": { items: [{ role: "shift_lead", permissions: ["unit.restart"] }], count: 1 } });
-    draw();
+    draw("/access?tab=roles");
     fireEvent.click(await screen.findByTestId("remove-role-shift_lead"));
     await waitFor(() => expect(screen.getByText(/not known here/)).toBeInTheDocument());
     expect(screen.queryByText(/nobody loses access by this/)).not.toBeInTheDocument();
@@ -247,7 +256,7 @@ describe("the roles of this installation", () => {
 
   it("offers a reader who may not manage access no way to define or remove one", async () => {
     given({ "/api/v1/whoami": { permissions: ["host.read"] } });
-    draw();
+    draw("/access?tab=roles");
     await waitFor(() => expect(screen.getByTestId("role-shift_lead")).toBeInTheDocument());
     expect(screen.queryByTestId("define-role")).not.toBeInTheDocument();
     expect(screen.queryByTestId("remove-role-shift_lead")).not.toBeInTheDocument();
@@ -255,7 +264,7 @@ describe("the roles of this installation", () => {
 
   it("will not write a role against a vocabulary that has not arrived", async () => {
     given({ "/api/v1/permissions": new Promise(() => { /* never */ }) });
-    draw();
+    draw("/access?tab=roles");
     fireEvent.click(await screen.findByTestId("edit-role-shift_lead"));
     await waitFor(() => expect(screen.getByTestId("role-save")).toBeInTheDocument());
     expect(screen.getByTestId("role-save")).toBeDisabled();

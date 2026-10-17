@@ -69,10 +69,15 @@ const trust = (over: Record<string, unknown> = {}) => ({
 /** The arrangement the board reads before it draws anything. */
 const layout = { widgets: [], present: false, revision: 0 };
 
-function draw() {
+/**
+ * The screen opens on the certificates; the authorities are the second
+ * sub-tab, asked for by address the way a link to them would arrive.
+ */
+function draw(tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const where = tab ? `/certificates?tab=${tab}` : "/certificates";
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}><MemoryRouter initialEntries={[where]}><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
   );
   return render(<Certificates />, { wrapper });
 }
@@ -232,7 +237,7 @@ describe("the fleet's certificates", () => {
         hosts_unknown: 0,
       }),
     });
-    draw();
+    draw("authorities");
     await waitFor(() => expect(screen.getByTestId("authority-fleet-ca-2026")).toBeInTheDocument());
     // The loaded certificate is signed by the 2026 authority, so nothing
     // may be withdrawn and the row says so rather than offering it.

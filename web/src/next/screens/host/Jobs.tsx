@@ -11,11 +11,9 @@ import type { Attempt, Host, Job, OperationContract } from "../../../lib/types";
 import { contractWords, useOperations } from "../../../lib/orders";
 import { useT } from "../../../i18n";
 import { hoursAgo, jobTone, prettyJSON, reasonAccepted } from "../Jobs";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Band, Bars, Bones, Button, Card, Empty, Field, Fields, Meter, Modal, Note, Pill, Presets, Problem,
-  Readout, Stack, Table, Tags, Toolbar, TwoLine, type Segment,
+  Band, Bars, Bones, Button, C, Card, Empty, Field, Fields, Grid, Meter, Modal, Note, Pill, Presets,
+  Problem, Readout, Stack, Table, Tabs, Tags, Toolbar, TwoLine, useTab, type Segment,
 } from "../../kit";
 
 /**
@@ -42,6 +40,18 @@ const JOB_STATES = [
 
 /** How many jobs one page of the list carries. */
 const JOBS_PAGE = 50;
+
+/**
+ * The two readings of this module, in the address so a link leads to the
+ * one that was meant.
+ *
+ * Nothing is composed here - an approval and a cancel are decisions taken
+ * on a job that already exists, in the dialog of its own row - so the
+ * module is given no "Change" tab to stand empty. Until 17.10 the three
+ * summaries and a fifty-row table shared one grid, and the table was the
+ * narrower for it.
+ */
+const JOBS_TABS = ["state", "jobs"] as const;
 
 /**
  * The campaign a job belongs to, as the chip names it: the campaign's name
@@ -72,6 +82,7 @@ export function Jobs({ host }: { host: Host }) {
   const t = useT();
   const queryClient = useQueryClient();
   const progress = useProgress("/api/v1/events");
+  const [tab, go] = useTab(JOBS_TABS);
   const [state, setState] = useState("");
   const [action, setAction] = useState("");
   const [since, setSince] = useState("");
@@ -183,224 +194,240 @@ export function Jobs({ host }: { host: Host }) {
 
   return (
     <>
-      <Board screen={HOST_JOBS_SCREEN} catalogue={HOST_JOBS} drawn={{
-        outcomes: (
-          <Card title={t("Outcomes")} note={listed}>
-            {/* A state nobody has counted yet is an em dash under the band,
-                never a nought: an unread list and a quiet host are not the
-                same answer. */}
-            <Band segments={band} testId="job-states" />
-          </Card>
-        ),
-        modules: (
-          <Card title={t("By module")} note={t("Which modules the operations belong to.")}>
-            {!loaded
-              ? <Bones rows={4} />
-              : operations.length === 0
-                ? <Empty icon="jobs">{t("No jobs for this host.")}</Empty>
-                : <Bars items={operations.map(([module, n]) => ({
-                    label: <code title={module}>{module}</code>, value: n,
-                  }))} />}
-          </Card>
-        ),
-        requesters: (
-          <Card title={t("Requested by")} note={t("Who asked for the listed operations.")}>
-            {!loaded
-              ? <Bones rows={3} />
-              : requesters.length === 0
-                ? <Empty icon="jobs">{t("No jobs for this host.")}</Empty>
-                : <Bars items={requesters.map(([who, n]) => ({ label: who, value: n }))} />}
-          </Card>
-        ),
-        jobs: (
-          <Card
-            title={t("Jobs")}
-            flush
-            note={t("Every operation requested on this host, newest first.")}
-            foot={
-              <>
-                <span className="fl-note">{t("{n} listed", { n: jobs.length })}</span>
-                {list.hasNextPage && (
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "state", label: t("State") },
+          { value: "jobs", label: t("List") },
+        ]}
+      />
+
+      {tab === "state" && (
+        <Grid>
+          <C span={5}>
+            <Card title={t("Outcomes")} note={listed}>
+              {/* A state nobody has counted yet is an em dash under the band,
+                  never a nought: an unread list and a quiet host are not the
+                  same answer. */}
+              <Band segments={band} testId="job-states" />
+            </Card>
+          </C>
+          <C span={4}>
+            <Card title={t("By module")} note={t("Which modules the operations belong to.")}>
+              {!loaded
+                ? <Bones rows={4} />
+                : operations.length === 0
+                  ? <Empty icon="jobs">{t("No jobs for this host.")}</Empty>
+                  : <Bars items={operations.map(([module, n]) => ({
+                      label: <code title={module}>{module}</code>, value: n,
+                    }))} />}
+            </Card>
+          </C>
+          <C span={3}>
+            <Card title={t("Requested by")} note={t("Who asked for the listed operations.")}>
+              {!loaded
+                ? <Bones rows={3} />
+                : requesters.length === 0
+                  ? <Empty icon="jobs">{t("No jobs for this host.")}</Empty>
+                  : <Bars items={requesters.map(([who, n]) => ({ label: who, value: n }))} />}
+            </Card>
+          </C>
+        </Grid>
+      )}
+
+      {tab === "jobs" && (
+        <Grid>
+          <C span={12}>
+            <Card
+              title={t("Jobs")}
+              flush
+              note={t("Every operation requested on this host, newest first.")}
+              foot={
+                <>
+                  <span className="fl-note">{t("{n} listed", { n: jobs.length })}</span>
+                  {list.hasNextPage && (
+                    <Button
+                      kind="quiet"
+                      onClick={() => void list.fetchNextPage()}
+                      disabled={list.isFetchingNextPage}
+                      testId="more"
+                    >
+                      {list.isFetchingNextPage ? t("loading…") : t("Load more")}
+                    </Button>
+                  )}
+                </>
+              }
+            >
+              <Toolbar>
+                <select
+                  value={state}
+                  onChange={(event) => setState(event.target.value)}
+                  aria-label={t("state: any")}
+                  data-testid="state"
+                >
+                  <option value="">{t("state: any")}</option>
+                  {JOB_STATES.map((one) => <option key={one} value={one}>{t(stateName(one))}</option>)}
+                </select>
+                <input
+                  placeholder={t("operation prefix, e.g. packages.")}
+                  aria-label={t("operation prefix, e.g. packages.")}
+                  value={action}
+                  onChange={(event) => setAction(event.target.value)}
+                  data-testid="action"
+                />
+                <input
+                  type="datetime-local"
+                  value={since}
+                  onChange={(event) => setSince(event.target.value)}
+                  aria-label={t("Since")}
+                  data-testid="since"
+                />
+                {/* A preset sets the lower bound to the moment of the click:
+                    "the last day" is what an operator asks after an incident. */}
+                <Presets
+                  label={t("Time range")}
+                  options={([[1, t("last hour")], [24, t("last 24 h")], [24 * 7, t("last 7 days")]] as const)
+                    .map(([hours, label]) => ({ label, onPick: () => setSince(hoursAgo(hours)) }))}
+                />
+                {filtered && (
                   <Button
-                    kind="quiet"
-                    onClick={() => void list.fetchNextPage()}
-                    disabled={list.isFetchingNextPage}
-                    testId="more"
+                    kind="plain"
+                    onClick={() => { setState(""); setAction(""); setSince(""); }}
+                    testId="clear"
                   >
-                    {list.isFetchingNextPage ? t("loading…") : t("Load more")}
+                    {t("Clear filters")}
                   </Button>
                 )}
-              </>
-            }
-          >
-            <Toolbar>
-              <select
-                value={state}
-                onChange={(event) => setState(event.target.value)}
-                aria-label={t("state: any")}
-                data-testid="state"
-              >
-                <option value="">{t("state: any")}</option>
-                {JOB_STATES.map((one) => <option key={one} value={one}>{t(stateName(one))}</option>)}
-              </select>
-              <input
-                placeholder={t("operation prefix, e.g. packages.")}
-                aria-label={t("operation prefix, e.g. packages.")}
-                value={action}
-                onChange={(event) => setAction(event.target.value)}
-                data-testid="action"
-              />
-              <input
-                type="datetime-local"
-                value={since}
-                onChange={(event) => setSince(event.target.value)}
-                aria-label={t("Since")}
-                data-testid="since"
-              />
-              {/* A preset sets the lower bound to the moment of the click:
-                  "the last day" is what an operator asks after an incident. */}
-              <Presets
-                label={t("Time range")}
-                options={([[1, t("last hour")], [24, t("last 24 h")], [24 * 7, t("last 7 days")]] as const)
-                  .map(([hours, label]) => ({ label, onPick: () => setSince(hoursAgo(hours)) }))}
-              />
-              {filtered && (
-                <Button
-                  kind="plain"
-                  onClick={() => { setState(""); setAction(""); setSince(""); }}
-                  testId="clear"
-                >
-                  {t("Clear filters")}
-                </Button>
-              )}
-            </Toolbar>
+              </Toolbar>
 
-            <Table
-              rows={jobs}
-              keyOf={(one) => one.id}
-              rowTestId={(one) => `job-${one.id}`}
-              /* The attempts open under the job they belong to, as the
-                 panel being replaced opened them, with the two ways on
-                 from there under them. */
-              opened={(one) => one.id === opened}
-              detail={(one) => (
-                <Stack>
-                  <Attempts jobId={one.id} />
-                  <Note>
-                    <Link to={`/jobs/${one.id}`}>{t("Open the job: full payload, plan and output")}</Link>
-                    {" · "}
-                    <Link to={`/hosts/${host.id}/logs?job=${one.id}`}>{t("Read the journal of this job")}</Link>
-                  </Note>
-                </Stack>
-              )}
-              testId="jobs"
-              loading={list.isLoading}
-              empty={filtered ? t("No job matches the filter.") : t("No jobs for this host.")}
-              columns={[
-                { key: "operation", head: t("Operation"), tight: true, cell: (one) => (
-                  <TwoLine sub={one.campaign_id
-                    ? (
-                      <Link to={`/campaigns/${one.campaign_id}`} title={`${t("Part of a campaign")} · ${one.campaign_id}`}>
-                        {t("campaign {id}", { id: campaignLabel(one) })}
+              <Table
+                rows={jobs}
+                keyOf={(one) => one.id}
+                rowTestId={(one) => `job-${one.id}`}
+                /* The attempts open under the job they belong to, as the
+                   panel being replaced opened them, with the two ways on
+                   from there under them. */
+                opened={(one) => one.id === opened}
+                detail={(one) => (
+                  <Stack>
+                    <Attempts jobId={one.id} />
+                    <Note>
+                      <Link to={`/jobs/${one.id}`}>{t("Open the job: full payload, plan and output")}</Link>
+                      {" · "}
+                      <Link to={`/hosts/${host.id}/logs?job=${one.id}`}>{t("Read the journal of this job")}</Link>
+                    </Note>
+                  </Stack>
+                )}
+                testId="jobs"
+                loading={list.isLoading}
+                empty={filtered ? t("No job matches the filter.") : t("No jobs for this host.")}
+                columns={[
+                  { key: "operation", head: t("Operation"), tight: true, cell: (one) => (
+                    <TwoLine sub={one.campaign_id
+                      ? (
+                        <Link to={`/campaigns/${one.campaign_id}`} title={`${t("Part of a campaign")} · ${one.campaign_id}`}>
+                          {t("campaign {id}", { id: campaignLabel(one) })}
+                        </Link>
+                      )
+                      : undefined}>
+                      <Link to={`/jobs/${one.id}`} title={one.id}>
+                        <code>{one.action_type}</code>
                       </Link>
-                    )
-                    : undefined}>
-                    <Link to={`/jobs/${one.id}`} title={one.id}>
-                      <code>{one.action_type}</code>
-                    </Link>
-                  </TwoLine>
-                ) },
-                { key: "state", head: t("State"), cell: (one) => {
-                  const moving = progress.get(one.id);
-                  return (
-                    <Tags>
-                      <Pill tone={jobTone(one.state)}>{t(stateName(one.state))}</Pill>
-                      {/* The reading accompanies the state and never
-                          replaces it: the reader is to see both that it
-                          runs and how far it has got. */}
-                      {moving && (
-                        <Meter
-                          share={(moving.percent ?? 0) / 100}
-                          tone="info"
-                          text={moving.percent !== undefined
-                            ? `${Math.round(moving.percent)}%`
-                            : t("{step} of {total}", { step: moving.step ?? 0, total: moving.total ?? 0 })}
-                        />
-                      )}
-                    </Tags>
-                  );
-                } },
-                { key: "by", head: t("Requested by"), minor: true, tight: true, cell: (one) => (
-                  // A campaign's job is requested by the campaign; the chip
-                  // beside the operation already names it.
-                  one.created_by.startsWith("campaign:")
-                    ? <span className="fl-faint">{t("the campaign")}</span>
-                    : <span title={one.created_by}>{one.created_by}</span>
-                ) },
-                { key: "approved", head: t("Approved by"), minor: true, tight: true, cell: (one) => (
-                  one.required_approvals > 1
-                    ? (
-                      <span title={one.approved_by}>
-                        {t("{collected} of {required} approvals", {
-                          collected: one.collected_approvals, required: one.required_approvals,
-                        })}
-                      </span>
-                    )
-                    : one.approved_by
-                      ? <span title={one.approved_by}>{one.approved_by}</span>
-                      : <span className="fl-faint">—</span>
-                ) },
-                // The result is the typed answer of the host: an error code,
-                // or a status other than the one the state pill already says.
-                { key: "result", head: t("Result"), tight: true, cell: (one) => (
-                  one.result_error_code
-                    ? <Pill tone="error" title={one.result_message}>{one.result_error_code}</Pill>
-                    : one.result_status && one.result_status !== one.state
-                      ? <span title={one.result_message}>{t(stateName(one.result_status))}</span>
-                      : <span className="fl-faint">—</span>
-                ) },
-                { key: "created", head: t("Created"), minor: true, cell: (one) => (
-                  <span title={absoluteTime(one.created_at)}>{relativeTime(one.created_at)}</span>
-                ) },
-                { key: "do", actions: true, cell: (one) => {
-                  const contract = contractOf(one.action_type);
-                  const [, cancelMeaning] = contractWords(t, "cancel", contract?.cancel_mode);
-                  return (
-                    <>
-                      <Button
-                        kind="quiet"
-                        onClick={() => setOpened(opened === one.id ? "" : one.id)}
-                        testId={`open-${one.id}`}
-                      >
-                        {opened === one.id ? t("Close") : t("Attempts")}
-                      </Button>
-                      {mayApprove && one.state === "awaiting_approval" && (
-                        <Button onClick={() => ask("approve", one)} testId={`approve-${one.id}`}>
-                          {t("Approve")}
-                        </Button>
-                      )}
-                      {mayCancel && cancellable(one, contract) ? (
+                    </TwoLine>
+                  ) },
+                  { key: "state", head: t("State"), cell: (one) => {
+                    const moving = progress.get(one.id);
+                    return (
+                      <Tags>
+                        <Pill tone={jobTone(one.state)}>{t(stateName(one.state))}</Pill>
+                        {/* The reading accompanies the state and never
+                            replaces it: the reader is to see both that it
+                            runs and how far it has got. */}
+                        {moving && (
+                          <Meter
+                            share={(moving.percent ?? 0) / 100}
+                            tone="info"
+                            text={moving.percent !== undefined
+                              ? `${Math.round(moving.percent)}%`
+                              : t("{step} of {total}", { step: moving.step ?? 0, total: moving.total ?? 0 })}
+                          />
+                        )}
+                      </Tags>
+                    );
+                  } },
+                  { key: "by", head: t("Requested by"), minor: true, tight: true, cell: (one) => (
+                    // A campaign's job is requested by the campaign; the chip
+                    // beside the operation already names it.
+                    one.created_by.startsWith("campaign:")
+                      ? <span className="fl-faint">{t("the campaign")}</span>
+                      : <span title={one.created_by}>{one.created_by}</span>
+                  ) },
+                  { key: "approved", head: t("Approved by"), minor: true, tight: true, cell: (one) => (
+                    one.required_approvals > 1
+                      ? (
+                        <span title={one.approved_by}>
+                          {t("{collected} of {required} approvals", {
+                            collected: one.collected_approvals, required: one.required_approvals,
+                          })}
+                        </span>
+                      )
+                      : one.approved_by
+                        ? <span title={one.approved_by}>{one.approved_by}</span>
+                        : <span className="fl-faint">—</span>
+                  ) },
+                  // The result is the typed answer of the host: an error code,
+                  // or a status other than the one the state pill already says.
+                  { key: "result", head: t("Result"), tight: true, cell: (one) => (
+                    one.result_error_code
+                      ? <Pill tone="error" title={one.result_message}>{one.result_error_code}</Pill>
+                      : one.result_status && one.result_status !== one.state
+                        ? <span title={one.result_message}>{t(stateName(one.result_status))}</span>
+                        : <span className="fl-faint">—</span>
+                  ) },
+                  { key: "created", head: t("Created"), minor: true, cell: (one) => (
+                    <span title={absoluteTime(one.created_at)}>{relativeTime(one.created_at)}</span>
+                  ) },
+                  { key: "do", actions: true, cell: (one) => {
+                    const contract = contractOf(one.action_type);
+                    const [, cancelMeaning] = contractWords(t, "cancel", contract?.cancel_mode);
+                    return (
+                      <>
                         <Button
-                          kind="danger"
-                          title={STARTED.includes(one.state)
-                            ? cancelMeaning
-                            : t("The host has not started this yet; a cancel stops it before it does.")}
-                          onClick={() => ask("cancel", one)}
-                          testId={`cancel-${one.id}`}
+                          kind="quiet"
+                          onClick={() => setOpened(opened === one.id ? "" : one.id)}
+                          testId={`open-${one.id}`}
                         >
-                          {t("Cancel")}
+                          {opened === one.id ? t("Close") : t("Attempts")}
                         </Button>
-                      ) : STARTED.includes(one.state) && contract?.cancel_mode ? (
-                        <span className="fl-faint" title={cancelMeaning}>{t("runs to its end")}</span>
-                      ) : null}
-                    </>
-                  );
-                } },
-              ]}
-            />
-          </Card>
-        ),
-      }} />
+                        {mayApprove && one.state === "awaiting_approval" && (
+                          <Button onClick={() => ask("approve", one)} testId={`approve-${one.id}`}>
+                            {t("Approve")}
+                          </Button>
+                        )}
+                        {mayCancel && cancellable(one, contract) ? (
+                          <Button
+                            kind="danger"
+                            title={STARTED.includes(one.state)
+                              ? cancelMeaning
+                              : t("The host has not started this yet; a cancel stops it before it does.")}
+                            onClick={() => ask("cancel", one)}
+                            testId={`cancel-${one.id}`}
+                          >
+                            {t("Cancel")}
+                          </Button>
+                        ) : STARTED.includes(one.state) && contract?.cancel_mode ? (
+                          <span className="fl-faint" title={cancelMeaning}>{t("runs to its end")}</span>
+                        ) : null}
+                      </>
+                    );
+                  } },
+                ]}
+              />
+            </Card>
+          </C>
+        </Grid>
+      )}
 
       {asking && (
         <Modal
@@ -515,13 +542,3 @@ function Attempts({ jobId }: { jobId: string }) {
   );
 }
 
-/** The name this screen's arrangement is stored under. */
-export const HOST_JOBS_SCREEN = "next_host_jobs";
-
-/** The containers this screen can draw, and the shape each ships with. */
-export const HOST_JOBS: BoardEntry[] = [
-  { key: "outcomes", title: "Outcomes", width: 5, height: 4 },
-  { key: "modules", title: "By module", width: 4, height: 4 },
-  { key: "requesters", title: "Requested by", width: 3, height: 4 },
-  { key: "jobs", title: "Jobs", width: 12, height: 11 },
-];

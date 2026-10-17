@@ -12,11 +12,10 @@ import { relativeTime, absoluteTime } from "../../lib/format";
 import type { ApiToken, Scope, Whoami } from "../../lib/types";
 import { useT } from "../../i18n";
 import { useToast } from "../../components/Toast";
-import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Bones, Card, Empty, Fact, Facts, Field, Fields, Modal, Note, Pill, Problem,
-  Seg, Table, Tag, Tags,
+  Actions, Banner, Bones, C, Card, Empty, Fact, Facts, Field, Fields, Form, Grid, Modal, Note, Pill,
+  Problem, Seg, Table, Tabs, Tag, Tags, useTab,
 } from "../kit";
 
 /**
@@ -136,6 +135,13 @@ const AREA_NAMES: Record<string, string> = {
   vulnerability: "Vulnerabilities",
 };
 
+/**
+ * The sub-tabs of this screen, in the order a reader wants them: who they
+ * are, what the panel looks like to them, the password, what they may do,
+ * and where they are signed in. The first is what a bare address opens on.
+ */
+const PROFILE_TABS = ["account", "appearance", "password", "permissions", "sessions"] as const;
+
 /** A scope part that names no site or environment: an asterisk, or nothing. */
 function anyScope(value: string | undefined): boolean {
   return !value || value === "*";
@@ -207,6 +213,16 @@ export function Profile() {
   const mustChange = search.get("change_password") === "1" && !changed;
   const writing = useOwnTokens(me.data?.id, managesAccess, tokens.data?.items ?? [], tokens.isLoading);
 
+  /* Five readings rather than eight containers, and the one a reader
+     asked for in the address. Three of the eight were forms drawn as
+     containers of the board - the theme, the preferences and the
+     password - which is the fault this screen was rewritten for. */
+  const [asked, go] = useTab(PROFILE_TABS);
+  /* A sign-in that found a password somebody else chose sends the person
+     here to replace it, so the screen opens where that is done - unless
+     they asked for another sub-tab themselves. */
+  const tab = mustChange && !search.get("tab") ? "password" : asked;
+
   return (
     <>
       {mustChange && (
@@ -220,222 +236,252 @@ export function Profile() {
           a container the reader has arranged away would take with it the
           one value the server will never show again. */}
       {writing.overlay}
-      <Board screen={PROFILE_SCREEN} catalogue={PROFILE} drawn={{
-        who: (
-          <Card title={t("Who you are signed in as")}>
-            <Facts>
-              <Fact label={t("Name")}>{me.data?.display_name || <span className="fl-faint">—</span>}</Fact>
-              <Fact label={t("Subject")}><span className="fl-mono">{me.data?.subject}</span></Fact>
-              <Fact label={t("Kind")}>
-                {me.data
-                  ? (me.data.kind === "service" ? t("service") : t("person"))
-                  : <span className="fl-faint">—</span>}
-              </Fact>
-              <Fact label={t("Identifier")} mono>
-                {me.data?.id || <span className="fl-faint">—</span>}
-              </Fact>
-              <Fact label={t("Roles")}>
-                <Tags>
-                  {(me.data?.roles ?? []).length > 0
-                    ? me.data?.roles.map((role) => <Tag key={role}>{role}</Tag>)
-                    : <Pill tone="unknown">{t("no roles")}</Pill>}
-                </Tags>
-              </Fact>
-            </Facts>
-            {managesAccess && (
-              <Note>
-                <Link to="/access">{t("Manage every identity on the access screen")}</Link>
-              </Note>
-            )}
-          </Card>
-        ),
-        look: (
-          <Card
-            title={t("How the panel looks")}
-            note={t("The theme and the language follow you to another browser; the size of the text belongs to this one.")}
-          >
-            <Fields>
-              <Field label={t("Theme")}>
-                <Seg
-                  label={t("Theme")}
-                  value={theme}
-                  onChange={(code) => { setTheme(code); void save({ theme: code }); }}
-                  options={THEMES.map((one) => ({ value: one.code, label: t(one.label) }))}
-                />
-              </Field>
-              <Field label={t("Text size")} hint={t("Kept in this browser.")}>
-                <Seg
-                  label={t("Text size")}
-                  value={scale}
-                  onChange={setScale}
-                  options={SCALES.map((one) => ({ value: one.code, label: one.label }))}
-                />
-              </Field>
-              <Field label={t("Language")}>
-                <Seg
-                  label={t("Language")}
-                  value={locale}
-                  onChange={(code) => { setLocale(code); void save({ language: code }); }}
-                  options={LOCALES.map((one) => ({ value: one.code, label: one.label }))}
-                />
-              </Field>
-            </Fields>
-          </Card>
-        ),
-        reading: (
-          <Card
-            title={t("How the panel reads to you")}
-            note={t("Kept on the server under your identity.")}
-            foot={saved ? t("Stored.") : undefined}
-          >
-            {problem && <Problem>{problem}</Problem>}
-            <Fields>
-              <Field label={t("Time zone")} hint={t("Empty reads every time in this browser's own zone.")}>
-                <input
-                  list="fl-zones"
-                  value={zone}
-                  onChange={(event) => setZone(event.target.value)}
-                  placeholder={t("this browser's zone")}
-                  data-testid="zone"
-                />
-                <datalist id="fl-zones">
-                  {COMMON_TIME_ZONES.map((one) => <option key={one} value={one} />)}
-                </datalist>
-              </Field>
-              <Field label={t("Rows per page")} hint={t("How many rows a list loads at once; empty for the panel's default, at most 500.")}>
-                <input
-                  type="number"
-                  min={0}
-                  max={500}
-                  value={pageSize}
-                  onChange={(event) => setPageSize(event.target.value)}
-                  data-testid="page-size-preference"
-                />
-              </Field>
-              <Field label={t("Landing page")} hint={t("The path the panel opens on after signing in, such as /hosts or /jobs; empty for the dashboard.")}>
-                <input value={landing} onChange={(event) => setLanding(event.target.value)} placeholder="/dashboard" data-testid="landing" />
-              </Field>
-            </Fields>
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "account", label: t("Account") },
+          { value: "appearance", label: t("Appearance") },
+          { value: "password", label: t("Password") },
+          { value: "permissions", label: t("Permissions") },
+          { value: "sessions", label: t("Sessions and tokens") },
+        ]}
+      />
+
+      {tab === "account" && (
+        <Grid>
+          <C span={12}>
+            <Card title={t("Who you are signed in as")}>
+              <Facts>
+                <Fact label={t("Name")}>{me.data?.display_name || <span className="fl-faint">—</span>}</Fact>
+                <Fact label={t("Subject")}><span className="fl-mono">{me.data?.subject}</span></Fact>
+                <Fact label={t("Kind")}>
+                  {me.data
+                    ? (me.data.kind === "service" ? t("service") : t("person"))
+                    : <span className="fl-faint">—</span>}
+                </Fact>
+                <Fact label={t("Identifier")} mono>
+                  {me.data?.id || <span className="fl-faint">—</span>}
+                </Fact>
+                <Fact label={t("Roles")}>
+                  <Tags>
+                    {(me.data?.roles ?? []).length > 0
+                      ? me.data?.roles.map((role) => <Tag key={role}>{role}</Tag>)
+                      : <Pill tone="unknown">{t("no roles")}</Pill>}
+                  </Tags>
+                </Fact>
+              </Facts>
+              {managesAccess && (
+                <Note>
+                  <Link to="/access">{t("Manage every identity on the access screen")}</Link>
+                </Note>
+              )}
+            </Card>
+          </C>
+          <C span={12}>
+            <Card
+              title={t("Your roles and where they reach")}
+              note={t("Each role with everything it is narrowed by. A category shown as any is one the binding does not narrow; a category naming values is one it does, and the role reaches nothing outside them.")}
+              flush
+            >
+              <Table
+                rows={bindings}
+                keyOf={(one, index) => `${one.role}-${one.scope.site}-${one.scope.environment}-${index}`}
+                loading={me.isLoading}
+                empty={t("No binding: you can read nothing and change nothing until somebody grants a role.")}
+                columns={[
+                  { key: "role", head: t("Role"), cell: (one) => one.role },
+                  { key: "site", head: t("Site"), cell: (one) => (
+                    anyScope(one.scope.site)
+                      ? <span className="fl-faint">{t("any site")}</span>
+                      : <span className="fl-mono">{one.scope.site}</span>
+                  ) },
+                  { key: "environment", head: t("Environment"), cell: (one) => (
+                    anyScope(one.scope.environment)
+                      ? <span className="fl-faint">{t("any environment")}</span>
+                      : <span className="fl-mono">{one.scope.environment}</span>
+                  ) },
+                  { key: "team", head: t("Team"), cell: (one) => (
+                    one.scope.team_scope?.mode === "exact"
+                      ? <span className="fl-mono">{one.scope.team_scope.team_id}</span>
+                      : <span className="fl-faint">{t("any team")}</span>
+                  ) },
+                  { key: "owners", head: t("Owners"), minor: true, cell: (one) => (
+                    <ScopeList values={one.scope.owners} every={t("any owner")} />
+                  ) },
+                  { key: "tags", head: t("Tags"), minor: true, cell: (one) => (
+                    <ScopeList values={one.scope.tags} every={t("any tag")} />
+                  ) },
+                  { key: "until", head: t("Valid until"), minor: true, cell: (one) => {
+                    const until = (one as { valid_until?: string }).valid_until;
+                    return until
+                      ? <span title={absoluteTime(until)}>{relativeTime(until)}</span>
+                      : <span className="fl-faint">{t("until revoked")}</span>;
+                  } },
+                ]}
+              />
+            </Card>
+          </C>
+        </Grid>
+      )}
+
+      {/* The two forms this screen offers a reader for themselves. They
+          were containers of the board until 17.10, which put a block of
+          fields among the readings and left nobody sure which rectangle
+          did what. */}
+      {tab === "appearance" && (
+        <Form
+          title={t("How the panel looks")}
+          note={t("The theme and the language follow you to another browser; the size of the text belongs to this one.")}
+          testId="how-the-panel-looks"
+        >
+          <Fields>
+            <Field label={t("Theme")}>
+              <Seg
+                label={t("Theme")}
+                value={theme}
+                onChange={(code) => { setTheme(code); void save({ theme: code }); }}
+                options={THEMES.map((one) => ({ value: one.code, label: t(one.label) }))}
+              />
+            </Field>
+            <Field label={t("Text size")} hint={t("Kept in this browser.")}>
+              <Seg
+                label={t("Text size")}
+                value={scale}
+                onChange={setScale}
+                options={SCALES.map((one) => ({ value: one.code, label: one.label }))}
+              />
+            </Field>
+            <Field label={t("Language")}>
+              <Seg
+                label={t("Language")}
+                value={locale}
+                onChange={(code) => { setLocale(code); void save({ language: code }); }}
+                options={LOCALES.map((one) => ({ value: one.code, label: one.label }))}
+              />
+            </Field>
+          </Fields>
+        </Form>
+      )}
+      {tab === "appearance" && (
+        <Form
+          title={t("How the panel reads to you")}
+          note={t("Kept on the server under your identity.")}
+          testId="how-the-panel-reads"
+          actions={
             <Actions>
               <button type="button" onClick={store} disabled={saving} data-testid="store-preferences">
                 {saving ? t("storing…") : t("Store")}
               </button>
+              {saved && <Note>{t("Stored.")}</Note>}
             </Actions>
-          </Card>
-        ),
-        password: <OwnPassword forced={mustChange} onChanged={() => setChanged(true)} />,
-        bindings: (
-          <Card
-            title={t("Your roles and where they reach")}
-            note={t("Each role with everything it is narrowed by. A category shown as any is one the binding does not narrow; a category naming values is one it does, and the role reaches nothing outside them.")}
-            flush
-          >
-            <Table
-              rows={bindings}
-              keyOf={(one, index) => `${one.role}-${one.scope.site}-${one.scope.environment}-${index}`}
-              loading={me.isLoading}
-              empty={t("No binding: you can read nothing and change nothing until somebody grants a role.")}
-              columns={[
-                { key: "role", head: t("Role"), cell: (one) => one.role },
-                { key: "site", head: t("Site"), cell: (one) => (
-                  anyScope(one.scope.site)
-                    ? <span className="fl-faint">{t("any site")}</span>
-                    : <span className="fl-mono">{one.scope.site}</span>
-                ) },
-                { key: "environment", head: t("Environment"), cell: (one) => (
-                  anyScope(one.scope.environment)
-                    ? <span className="fl-faint">{t("any environment")}</span>
-                    : <span className="fl-mono">{one.scope.environment}</span>
-                ) },
-                { key: "team", head: t("Team"), cell: (one) => (
-                  one.scope.team_scope?.mode === "exact"
-                    ? <span className="fl-mono">{one.scope.team_scope.team_id}</span>
-                    : <span className="fl-faint">{t("any team")}</span>
-                ) },
-                { key: "owners", head: t("Owners"), minor: true, cell: (one) => (
-                  <ScopeList values={one.scope.owners} every={t("any owner")} />
-                ) },
-                { key: "tags", head: t("Tags"), minor: true, cell: (one) => (
-                  <ScopeList values={one.scope.tags} every={t("any tag")} />
-                ) },
-                { key: "until", head: t("Valid until"), minor: true, cell: (one) => {
-                  const until = (one as { valid_until?: string }).valid_until;
-                  return until
-                    ? <span title={absoluteTime(until)}>{relativeTime(until)}</span>
-                    : <span className="fl-faint">{t("until revoked")}</span>;
-                } },
-              ]}
-            />
-          </Card>
-        ),
-        permissions: (
-          <Card
-            title={t("What you may do")}
-            note={t("Everything your roles allow, in any scope, by the part of the panel it concerns. The screens hide what is not here; the server refuses it either way.")}
-            flush
-          >
-            <Table
-              rows={groupPermissions(permissions)}
-              keyOf={(one) => one.area}
-              loading={me.isLoading}
-              empty={t("No permission.")}
-              columns={[
-                { key: "area", head: t("Area"), cell: (one) => (
-                  <span title={`${one.area}.*`}>{t(AREA_NAMES[one.area] ?? one.area)}</span>
-                ) },
-                { key: "allowed", head: t("Allowed"), cell: (one) => (
-                  <Tags>
-                    {one.actions.map((action) => (
-                      <Tag key={action} title={`${one.area}.${action}`}>{action}</Tag>
-                    ))}
-                  </Tags>
-                ) },
-              ]}
-            />
-          </Card>
-        ),
-        sessions: (
-          <Card title={t("Your sessions")} note={t("Where this identity is signed in.")} flush>
-            <Table
-              rows={sessions.data?.items ?? []}
-              keyOf={(one) => one.id}
-              loading={sessions.isLoading} empty={t("No session is recorded. Tokens are not sessions.")}
-              columns={[
-                { key: "where", head: t("From"), cell: (one) => (
-                  <span className="fl-mono">{one.address || one.remote_addr || <span className="fl-faint">—</span>}</span>
-                ) },
-                { key: "agent", head: t("Browser"), minor: true, tight: true, cell: (one) => (
-                  one.user_agent ? <span title={one.user_agent}>{one.user_agent}</span> : <span className="fl-faint">—</span>
-                ) },
-                { key: "since", head: t("Signed in"), cell: (one) => (
-                  <span title={absoluteTime(one.created_at)}>{relativeTime(one.created_at)}</span>
-                ) },
-                { key: "seen", head: t("Last seen"), cell: (one) => (
-                  one.last_seen_at
-                    ? <span title={absoluteTime(one.last_seen_at)}>{relativeTime(one.last_seen_at)}</span>
-                    : <span className="fl-faint">—</span>
-                ) },
-                { key: "ends", head: t("Ends"), minor: true, cell: (one) => (
-                  one.expires_at
-                    ? (
-                      <span title={one.idle_expires_at
-                        ? t("or idle {when}", { when: absoluteTime(one.idle_expires_at) })
-                        : absoluteTime(one.expires_at)}>
-                        {relativeTime(one.expires_at)}
-                      </span>
-                    )
-                    : <span className="fl-faint">—</span>
-                ) },
-                { key: "how", head: t("How"), minor: true, tight: true, cell: (one) => (
-                  one.acr ? <span className="fl-mono">{one.acr}</span> : <span className="fl-faint">—</span>
-                ) },
-                { key: "this", head: "", cell: (one) => (one.current ? <Pill tone="ok">{t("this one")}</Pill> : null) },
-              ]}
-            />
-          </Card>
-        ),
-        tokens: writing.card,
-      }} />
+          }
+        >
+          {problem && <Problem>{problem}</Problem>}
+          <Fields>
+            <Field label={t("Time zone")} hint={t("Empty reads every time in this browser's own zone.")}>
+              <input
+                list="fl-zones"
+                value={zone}
+                onChange={(event) => setZone(event.target.value)}
+                placeholder={t("this browser's zone")}
+                data-testid="zone"
+              />
+              <datalist id="fl-zones">
+                {COMMON_TIME_ZONES.map((one) => <option key={one} value={one} />)}
+              </datalist>
+            </Field>
+            <Field label={t("Rows per page")} hint={t("How many rows a list loads at once; empty for the panel's default, at most 500.")}>
+              <input
+                type="number"
+                min={0}
+                max={500}
+                value={pageSize}
+                onChange={(event) => setPageSize(event.target.value)}
+                data-testid="page-size-preference"
+              />
+            </Field>
+            <Field label={t("Landing page")} hint={t("The path the panel opens on after signing in, such as /hosts or /jobs; empty for the dashboard.")}>
+              <input value={landing} onChange={(event) => setLanding(event.target.value)} placeholder="/dashboard" data-testid="landing" />
+            </Field>
+          </Fields>
+        </Form>
+      )}
+
+      {tab === "password" && <OwnPassword forced={mustChange} onChanged={() => setChanged(true)} />}
+
+      {tab === "permissions" && (
+        <Card
+          title={t("What you may do")}
+          note={t("Everything your roles allow, in any scope, by the part of the panel it concerns. The screens hide what is not here; the server refuses it either way.")}
+          flush
+        >
+          <Table
+            rows={groupPermissions(permissions)}
+            keyOf={(one) => one.area}
+            loading={me.isLoading}
+            empty={t("No permission.")}
+            columns={[
+              { key: "area", head: t("Area"), cell: (one) => (
+                <span title={`${one.area}.*`}>{t(AREA_NAMES[one.area] ?? one.area)}</span>
+              ) },
+              { key: "allowed", head: t("Allowed"), cell: (one) => (
+                <Tags>
+                  {one.actions.map((action) => (
+                    <Tag key={action} title={`${one.area}.${action}`}>{action}</Tag>
+                  ))}
+                </Tags>
+              ) },
+            ]}
+          />
+        </Card>
+      )}
+
+      {tab === "sessions" && (
+        <Grid>
+          <C span={12}>
+            <Card title={t("Your sessions")} note={t("Where this identity is signed in.")} flush>
+              <Table
+                rows={sessions.data?.items ?? []}
+                keyOf={(one) => one.id}
+                loading={sessions.isLoading} empty={t("No session is recorded. Tokens are not sessions.")}
+                columns={[
+                  { key: "where", head: t("From"), cell: (one) => (
+                    <span className="fl-mono">{one.address || one.remote_addr || <span className="fl-faint">—</span>}</span>
+                  ) },
+                  { key: "agent", head: t("Browser"), minor: true, tight: true, cell: (one) => (
+                    one.user_agent ? <span title={one.user_agent}>{one.user_agent}</span> : <span className="fl-faint">—</span>
+                  ) },
+                  { key: "since", head: t("Signed in"), cell: (one) => (
+                    <span title={absoluteTime(one.created_at)}>{relativeTime(one.created_at)}</span>
+                  ) },
+                  { key: "seen", head: t("Last seen"), cell: (one) => (
+                    one.last_seen_at
+                      ? <span title={absoluteTime(one.last_seen_at)}>{relativeTime(one.last_seen_at)}</span>
+                      : <span className="fl-faint">—</span>
+                  ) },
+                  { key: "ends", head: t("Ends"), minor: true, cell: (one) => (
+                    one.expires_at
+                      ? (
+                        <span title={one.idle_expires_at
+                          ? t("or idle {when}", { when: absoluteTime(one.idle_expires_at) })
+                          : absoluteTime(one.expires_at)}>
+                          {relativeTime(one.expires_at)}
+                        </span>
+                      )
+                      : <span className="fl-faint">—</span>
+                  ) },
+                  { key: "how", head: t("How"), minor: true, tight: true, cell: (one) => (
+                    one.acr ? <span className="fl-mono">{one.acr}</span> : <span className="fl-faint">—</span>
+                  ) },
+                  { key: "this", head: "", cell: (one) => (one.current ? <Pill tone="ok">{t("this one")}</Pill> : null) },
+                ]}
+              />
+            </Card>
+          </C>
+          <C span={12}>{writing.card}</C>
+        </Grid>
+      )}
     </>
   );
 }
@@ -483,12 +529,13 @@ function OwnPassword({ forced, onChanged }: { forced: boolean; onChanged: () => 
   const ready = current !== "" && next !== "" && !mismatch && !change.isPending;
 
   return (
-    <Card
+    <Form
       title={t("Your password")}
       note={forced
         ? t("Somebody else chose the password you signed in with, so two people know it. Replace it here.")
         : t("The password you sign in with where this installation has no identity provider.")}
-      foot={
+      testId="your-password"
+      actions={
         <Actions>
           <button type="button" disabled={!ready} onClick={() => change.mutate()} data-testid="change-password">
             {change.isPending ? t("changing…") : t("Change the password")}
@@ -515,7 +562,7 @@ function OwnPassword({ forced, onChanged }: { forced: boolean; onChanged: () => 
         </Field>
       </Fields>
       {mismatch && <Problem>{t("The two new passwords are not the same.")}</Problem>}
-    </Card>
+    </Form>
   );
 }
 
@@ -752,6 +799,9 @@ function AskAboutToken({ ask, busy, blocked, onConfirm, onClose, children }: {
   );
 }
 
+/* The containers this screen used to stand on a board with, kept as the
+   record of what an installation may have arranged, as the host overview
+   kept its own. The screen itself is sub-tabs since 17.10. */
 export const PROFILE_SCREEN = "next_profile";
 
 export const PROFILE: BoardEntry[] = [

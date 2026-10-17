@@ -67,10 +67,18 @@ const fragment = (payload: unknown) => ({
   observed_at: "2026-10-16T08:00:00Z", payload,
 });
 
-function draw() {
+/**
+ * The module is two sub-tabs since 17.10 and the address names the open
+ * one, so a test of a decision asks for the tab a reader would follow a
+ * link to.
+ */
+function draw(tab?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const where = tab ? `/hosts/h1/kernel?tab=${tab}` : "/hosts/h1/kernel";
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[where]}>{children}</MemoryRouter>
+    </QueryClientProvider>
   );
   return render(<Kernel host={host} />, { wrapper });
 }
@@ -162,7 +170,7 @@ describe("the kernel settings of a host", () => {
       modules: [{ name: "br_netfilter", size_bytes: 1024, blacklisted: true }],
       blacklist: ["br_netfilter"],
     });
-    draw();
+    draw("change");
     await waitFor(() => expect(screen.getByTestId("module-name")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("module-name"), { target: { value: "br_netfilter" } });
     expect(screen.getByTestId("module-load")).toBeDisabled();

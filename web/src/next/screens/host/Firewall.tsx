@@ -5,11 +5,9 @@ import { useAllowed, useModuleAccess } from "../../../lib/actions";
 import { bytes, relativeTime, absoluteTime } from "../../../lib/format";
 import type { Host, InventoryFragment, Job } from "../../../lib/types";
 import { useT } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Banner, Bars, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Kpi, Meter,
-  Modal, Note, Pill, Row, Stack, Table, Toolbar,
+  Banner, Bars, Bones, Button, C, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Form, Grid,
+  Kpi, Meter, Modal, Note, Pill, Row, Stack, Table, Tabs, Toolbar, useTab,
 } from "../../kit";
 import {
   orderReady, refusalOf, registryOrder, type RegistryOrder,
@@ -200,10 +198,26 @@ function Allowed({ host, action, children }: { host: string; action: string; chi
 
 /* -------------------------------------------------------- the screen */
 
+/**
+ * The two readings this module has: what the host filters with, and the
+ * one decision it offers.
+ *
+ * A board treated the rule wizard and the rule table as the same kind of
+ * rectangle, which is exactly the fault the owner named on 17.10. The
+ * readings keep their containers; the decision stands on its own face in
+ * a sub-tab of its own, and the sub-tab is in the address so a colleague
+ * can be sent to it.
+ */
+const FIREWALL_TABS = ["state", "change"] as const;
+type FirewallTab = typeof FIREWALL_TABS[number];
+
 export function Firewall({ host }: { host: Host }) {
   const t = useT();
   const queryClient = useQueryClient();
   const access = useModuleAccess(host.id, FIREWALL_CHANGES);
+  const mayWriteRule = useAllowed(host.id, "firewall.rule.ensure").allowed;
+  const names: readonly FirewallTab[] = mayWriteRule ? FIREWALL_TABS : ["state"];
+  const [tab, goTab] = useTab(names);
 
   const module = useQuery({
     queryKey: ["inventory", host.id, "firewall"],
@@ -213,7 +227,6 @@ export function Firewall({ host }: { host: Host }) {
 
   const [intent, setIntent] = useState<Intent | null>(null);
   const [message, setMessage] = useState("");
-  const [wizard, setWizard] = useState(false);
   const [filter, setFilter] = useState("");
   const [ownOnly, setOwnOnly] = useState(false);
 
@@ -227,7 +240,6 @@ export function Firewall({ host }: { host: Host }) {
           : t("Job {id} has been queued.", { id: job.id.slice(0, 8) }),
       );
       setIntent(null);
-      setWizard(false);
       void queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
@@ -295,20 +307,7 @@ export function Firewall({ host }: { host: Host }) {
   }
   if (message) notices.push(<Banner key="message" tone="info">{message}</Banner>);
 
-  return (
-    <>
-      {intent && (
-        <Confirm
-          host={host}
-          title={intent.label}
-          what={intent.description}
-          busy={request.isPending}
-          danger={intent.action === "firewall.rule.remove"}
-          onConfirm={(reason) => request.mutate({ action: intent.action, reason, payload: intent.payload })}
-          onCancel={() => setIntent(null)}
-        />
-      )}
-      <Board screen={FIREWALL_SCREEN} catalogue={FIREWALL_BOARD} notices={notices.length > 0 ? <Stack>{notices}</Stack> : undefined} drawn={{
+  const panels: Record<string, ReactNode> = {
         ours: (
           <Kpi
             hero
@@ -342,9 +341,13 @@ export function Firewall({ host }: { host: Host }) {
             note={snapshot?.writable ? undefined : snapshot?.read_only_reason || t("read only")}
           />
         ),
+        /* Two containers of this screen were both called "Effective rules":
+           this band of who wrote them, and the table of the rules
+           themselves. A title that does not tell one container from
+           another is not a title, so the band says what it holds. */
         owners: (
           <Card
-            title={t("Effective rules")}
+            title={t("Effective rules by owner")}
             note={t("By who wrote them; only the rules in the Flotestro table are durable.")}
           >
             <Bars items={byOwner.map((one) => ({
@@ -363,11 +366,11 @@ export function Firewall({ host }: { host: Host }) {
                 <Button
                   kind="quiet"
                   testId="new-rule"
-                  onClick={() => setWizard((open) => !open)}
+                  onClick={() => goTab("change")}
                   disabled={!snapshot?.writable}
                   title={snapshot?.writable ? undefined : snapshot?.read_only_reason || t("The panel cannot write rules on this host.")}
                 >
-                  {wizard ? t("Cancel") : t("New rule")}
+                  {t("New rule")}
                 </Button>
               </Allowed>
             }
@@ -427,11 +430,11 @@ export function Firewall({ host }: { host: Host }) {
             </Facts>
           </Card>
         ),
-        wizard: wizard ? (
+        wizard: (
           <Allowed host={host.id} action="firewall.rule.ensure">
-            <RuleWizard fingerprint={snapshot?.hash ?? ""} onIntent={setIntent} onCancel={() => setWizard(false)} />
+            <RuleWizard fingerprint={snapshot?.hash ?? ""} onIntent={setIntent} onCancel={() => goTab("state")} />
           </Allowed>
-        ) : undefined,
+        ),
         differences: snapshot?.drift?.length ? (
           <Card
             title={t("Differences from the boot source")}
@@ -584,7 +587,53 @@ export function Firewall({ host }: { host: Host }) {
             </Facts>
           </Card>
         ),
-      }} />
+  };
+
+  return (
+    <>
+      {intent && (
+        <Confirm
+          host={host}
+          title={intent.label}
+          what={intent.description}
+          busy={request.isPending}
+          danger={intent.action === "firewall.rule.remove"}
+          onConfirm={(reason) => request.mutate({ action: intent.action, reason, payload: intent.payload })}
+          onCancel={() => setIntent(null)}
+        />
+      )}
+      {notices.length > 0 && <Stack>{notices}</Stack>}
+
+      {/* The band of measurements stays above the tabs: it is one shape,
+          it is what a reader looks at first, and it is the same whichever
+          part of the module is open. */}
+      <Grid>
+        <C span={3}>{panels.ours}</C>
+        <C span={3}>{panels.total}</C>
+        <C span={3}>{panels.drift}</C>
+        <C span={3}>{panels.adapter}</C>
+      </Grid>
+
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={names.map((one) => ({
+          value: one,
+          label: one === "state" ? t("State") : t("Change"),
+        }))}
+      />
+
+      {tab === "state" && (
+        <Grid>
+          <C span={8}>{panels.owners}</C>
+          <C span={4}>{panels.firewall}</C>
+          {panels.differences && <C span={12}>{panels.differences}</C>}
+          {panels.zones && <C span={12}>{panels.zones}</C>}
+          <C span={12}>{panels.rules}</C>
+          <C span={12}>{panels.source}</C>
+        </Grid>
+      )}
+      {tab === "change" && panels.wizard}
     </>
   );
 }
@@ -614,12 +663,33 @@ function RuleWizard({ fingerprint, onIntent, onCancel }: {
   }, fingerprint);
 
   return (
-    <Card
+    <Form
+      testId="rule-form"
       title={t("New rule")}
       note={t("The rule goes into Flotestro's own table. The host arms a rollback before applying it and cancels it only after the agent proves it can still reach the panel.")}
-      tools={<Button kind="quiet" onClick={onCancel}>{t("Cancel")}</Button>}
+      actions={
+        <>
+          <Button
+            testId="create-rule"
+            disabled={!orderReady(order)}
+            title={refusalOf(t, order)}
+            onClick={() => onIntent({
+              action: "firewall.rule.ensure",
+              label: t("Create rule"),
+              description: `${action} ${protocol || t("any protocol")}${
+                list(ports).length ? ` ${t("port")} ${list(ports).join(", ")}` : ""
+              }${list(sources).length ? ` ${t("from")} ${list(sources).join(", ")}` : ""} (${
+                chain === "input" ? t("incoming") : t("outgoing")
+              })`,
+              payload: order.payload,
+            })}
+          >
+            {t("Create rule")}
+          </Button>
+          <Button kind="quiet" onClick={onCancel}>{t("Cancel")}</Button>
+        </>
+      }
     >
-      <Stack>
         <Fields>
           <Field label={t("Rule")}>
             <input value={id} onChange={(event) => setId(event.target.value)} placeholder={t("Rule name, e.g. block-smtp")} data-testid="rule-id" />
@@ -665,25 +735,7 @@ function RuleWizard({ fingerprint, onIntent, onCancel }: {
         <Check checked={breakGlass} onChange={setBreakGlass}>
           {t("Allow a rule that can cut this host off from the panel (break glass)")}
         </Check>
-        <Button
-          testId="create-rule"
-          disabled={!orderReady(order)}
-          title={refusalOf(t, order)}
-          onClick={() => onIntent({
-            action: "firewall.rule.ensure",
-            label: t("Create rule"),
-            description: `${action} ${protocol || t("any protocol")}${
-              list(ports).length ? ` ${t("port")} ${list(ports).join(", ")}` : ""
-            }${list(sources).length ? ` ${t("from")} ${list(sources).join(", ")}` : ""} (${
-              chain === "input" ? t("incoming") : t("outgoing")
-            })`,
-            payload: order.payload,
-          })}
-        >
-          {t("Create rule")}
-        </Button>
-      </Stack>
-    </Card>
+    </Form>
   );
 }
 
@@ -874,20 +926,3 @@ function Confirm({ host, title, what, busy, danger, onConfirm, onCancel }: {
   );
 }
 
-/** The name this screen's arrangement is stored under. */
-export const FIREWALL_SCREEN = "next_host_firewall";
-
-/** The containers this screen can draw, and the shape each ships with. */
-export const FIREWALL_BOARD: BoardEntry[] = [
-  { key: "ours", title: "Rules owned by Flotestro", width: 3, height: 2 },
-  { key: "total", title: "Rules in force", width: 3, height: 2 },
-  { key: "drift", title: "Differences from the boot source", width: 3, height: 2 },
-  { key: "adapter", title: "Adapter", width: 3, height: 2 },
-  { key: "owners", title: "Effective rules by owner", width: 8, height: 4 },
-  { key: "firewall", title: "Firewall", width: 4, height: 5 },
-  { key: "wizard", title: "New rule", width: 12, height: 7 },
-  { key: "differences", title: "Differences from the boot source", width: 12, height: 5 },
-  { key: "zones", title: "Zones", width: 12, height: 5 },
-  { key: "rules", title: "Effective rules", width: 12, height: 9 },
-  { key: "source", title: "Where this came from", width: 12, height: 2 },
-];

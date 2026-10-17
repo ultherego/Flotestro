@@ -77,10 +77,18 @@ const everyPermission = {
   permissions: ["identity.host.enroll", "identity.read", "identity.keytab.rotate", "identity.host.leave"],
 };
 
-function draw(one: Host = host()) {
+/**
+ * The module is two sub-tabs since 17.10 and the address says which one
+ * is open: what the host and the directory say on the first, the three
+ * orders that change it on the second. A test asks for the tab whose
+ * content it reads, the way a reader following a link would.
+ */
+function draw(one: Host = host(), tab = "state") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[`/hosts/h1/identity?tab=${tab}`]}>{children}</MemoryRouter>
+    </QueryClientProvider>
   );
   return render(<Identity host={one} />, { wrapper });
 }
@@ -133,7 +141,7 @@ describe("a host's identity", () => {
       "/api/v1/hosts/h1/actions": allowed,
       "/api/v1/whoami": everyPermission,
     });
-    draw();
+    draw(host(), "change");
     fireEvent.change(await screen.findByTestId("domain"), { target: { value: "lab.test" } });
     fireEvent.change(screen.getByTestId("realm"), { target: { value: "lab.test" } });
     fireEvent.click(screen.getByTestId("join"));
@@ -166,7 +174,7 @@ describe("a host's identity", () => {
       "/api/v1/hosts/h1/actions": allowed,
       "/api/v1/whoami": everyPermission,
     });
-    draw();
+    draw(host(), "change");
     fireEvent.change(await screen.findByTestId("domain"), { target: { value: "lab.test" } });
     fireEvent.change(screen.getByTestId("realm"), { target: { value: "LAB.TEST" } });
     fireEvent.click(screen.getByTestId("preflight"));
@@ -183,7 +191,7 @@ describe("a host's identity", () => {
       "/api/v1/hosts/h1/actions": allowed,
       "/api/v1/whoami": everyPermission,
     });
-    draw(host({ identity: { enrolled: true, domain: "lab.test", realm: "LAB.TEST", sssd_online: true } }));
+    draw(host({ identity: { enrolled: true, domain: "lab.test", realm: "LAB.TEST", sssd_online: true } }), "change");
     const principal = await screen.findByTestId("principal");
     fireEvent.change(principal, { target: { value: "host/agent-arch.lab.test" } });
     expect(await screen.findByText(/not a service principal/)).toBeInTheDocument();
@@ -276,7 +284,7 @@ describe("a host's identity", () => {
       "/api/v1/hosts/h1/actions": allowed,
       "/api/v1/whoami": everyPermission,
     });
-    draw(host({ identity: { enrolled: true, domain: "lab.test", realm: "LAB.TEST", sssd_online: true } }));
+    draw(host({ identity: { enrolled: true, domain: "lab.test", realm: "LAB.TEST", sssd_online: true } }), "change");
     fireEvent.click(await screen.findByTestId("leave"));
     fireEvent.change(screen.getByTestId("confirm-leave-reason"), { target: { value: "decommissioning" } });
     fireEvent.change(screen.getByTestId("confirm-leave-typed"), { target: { value: "agent-arch.lab.test" } });

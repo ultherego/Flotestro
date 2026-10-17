@@ -117,6 +117,15 @@ function draw() {
   return render(<AddHost />, { wrapper });
 }
 
+/**
+ * The order is one guided form since 17.10 - five numbered steps as tabs,
+ * the wizard of `/bulk` as the pattern - so a test opens the step whose
+ * fields it is about instead of reading five cards at once.
+ */
+async function atStep(number: number) {
+  fireEvent.click(await screen.findByRole("tab", { name: new RegExp(`^${number}\\.`) }));
+}
+
 /** The whole of what a reader can see, attributes included. */
 function everythingOnScreen(): string {
   return document.body.innerHTML;
@@ -171,7 +180,7 @@ describe("placing the order", () => {
   it("sends the placement, the owner and the tags as the server reads them", async () => {
     Object.assign(answers, { "/api/v1/enrollment-requests": { ...order(), token: TOKEN } });
     draw();
-    await screen.findByTestId("place-order");
+    await atStep(2);
 
     fireEvent.change(screen.getByTestId("description"), { target: { value: "web-042" } });
     fireEvent.change(screen.getByTestId("site"), { target: { value: "lab" } });
@@ -180,6 +189,7 @@ describe("placing the order", () => {
     // Spaces are the separator and an extra one is not an empty tag.
     fireEvent.change(screen.getByTestId("tags"), { target: { value: "role=web  tier=gold" } });
     fireEvent.change(screen.getByTestId("minutes"), { target: { value: "30" } });
+    await atStep(5);
     fireEvent.click(screen.getByTestId("place-order"));
 
     await waitFor(() => expect(sent.some((one) => one.path === "/api/v1/enrollment-requests")).toBe(true));
@@ -200,8 +210,9 @@ describe("placing the order", () => {
 
   it("will not place an order with no placement, and says what is missing", async () => {
     draw();
-    await screen.findByTestId("place-order");
+    await atStep(2);
     fireEvent.change(screen.getByTestId("site"), { target: { value: "" } });
+    await atStep(5);
     await waitFor(() => expect(screen.getByTestId("place-order")).toBeDisabled());
     expect(screen.getByText(/site and environment first/)).toBeInTheDocument();
     expect(sent).toHaveLength(0);
@@ -210,11 +221,15 @@ describe("placing the order", () => {
   it("holds the order back until a reason is given where the server requires one", async () => {
     Object.assign(answers, { "/api/v1/installation-profiles": profile({ reason_required: true }) });
     draw();
+    await atStep(2);
     await waitFor(() => expect(screen.getByTestId("reason")).toBeInTheDocument());
+    await atStep(5);
     expect(screen.getByTestId("place-order")).toBeDisabled();
     expect(screen.getByText(/a reason first/)).toBeInTheDocument();
 
+    await atStep(2);
     fireEvent.change(screen.getByTestId("reason"), { target: { value: "ticket OPS-71" } });
+    await atStep(5);
     await waitFor(() => expect(screen.getByTestId("place-order")).toBeEnabled());
   });
 
@@ -223,7 +238,7 @@ describe("placing the order", () => {
       status: 422, code: "reason_required", message: "reason is required",
     };
     draw();
-    await screen.findByTestId("place-order");
+    await atStep(5);
     fireEvent.click(screen.getByTestId("place-order"));
 
     await waitFor(() => expect(screen.getByText(/The order needs a reason/)).toBeInTheDocument());
@@ -237,7 +252,7 @@ describe("placing the order", () => {
       status: 401, code: "reauthentication_required", message: "sign in again",
     };
     draw();
-    await screen.findByTestId("place-order");
+    await atStep(5);
     fireEvent.click(screen.getByTestId("place-order"));
     await waitFor(() => expect(screen.getByTestId("sign-in-again")).toBeInTheDocument());
     expect(screen.getByText(/Re-authentication required/)).toBeInTheDocument();
@@ -251,7 +266,7 @@ describe("the token", () => {
       "/api/v1/enrollment-requests/ord-1": order(),
     });
     draw();
-    await screen.findByTestId("place-order");
+    await atStep(5);
     fireEvent.click(screen.getByTestId("place-order"));
 
     await waitFor(() => expect(screen.getByTestId("copy-token")).toBeInTheDocument());
@@ -266,7 +281,7 @@ describe("the token", () => {
       "/api/v1/enrollment-requests/ord-1": order(),
     });
     draw();
-    await screen.findByTestId("place-order");
+    await atStep(5);
     fireEvent.click(screen.getByTestId("place-order"));
 
     await waitFor(() => expect(screen.getByTestId("copy-token")).toBeInTheDocument());
@@ -280,7 +295,7 @@ describe("the token", () => {
       "/api/v1/enrollment-requests/ord-1": order(),
     });
     draw();
-    await screen.findByTestId("place-order");
+    await atStep(5);
     fireEvent.click(screen.getByTestId("place-order"));
 
     await waitFor(() => expect(screen.getByTestId("command-repository")).toBeInTheDocument());
@@ -294,7 +309,7 @@ describe("the token", () => {
 describe("the route to the panel", () => {
   it("offers no relay where the site has none, and says so", async () => {
     draw();
-    await screen.findByTestId("place-order");
+    await atStep(3);
     await waitFor(() => expect(screen.getByText(/has no relay/)).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: /Through a relay/ })).toBeNull();
   });
@@ -305,9 +320,11 @@ describe("the route to the panel", () => {
       "/api/v1/enrollment-requests": { ...order(), token: TOKEN, relay_id: "r1" },
     });
     draw();
+    await atStep(3);
     await waitFor(() => expect(screen.getByRole("button", { name: /Through a relay/ })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /Through a relay/ }));
     fireEvent.change(await screen.findByTestId("relay"), { target: { value: "r1" } });
+    await atStep(5);
     await waitFor(() => expect(screen.getByTestId("place-order")).toBeEnabled());
     fireEvent.click(screen.getByTestId("place-order"));
 
@@ -319,10 +336,10 @@ describe("the route to the panel", () => {
 describe("what the permissions decide", () => {
   it("offers a relay only to somebody who may enroll one", async () => {
     draw();
-    await screen.findByTestId("place-order");
+    await screen.findByText(/relay.enroll.create permission/);
     expect(screen.queryByRole("button", { name: "Relay" })).toBeNull();
-    expect(screen.getByText(/relay.enroll.create permission/)).toBeInTheDocument();
     // One host per token, because this operator may not ask for a batch.
+    await atStep(2);
     expect(screen.getByTestId("uses")).toBeDisabled();
     expect(screen.getByText(/host.enroll.batch permission/)).toBeInTheDocument();
   });
@@ -332,10 +349,12 @@ describe("what the permissions decide", () => {
       "/api/v1/whoami": whoami(["host.enroll.create", "host.enroll.batch", "relay.enroll.create"]),
     });
     draw();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Relay" })).toBeInTheDocument());
+    await atStep(2);
     await waitFor(() => expect(screen.getByTestId("uses")).toBeEnabled());
-    expect(screen.getByRole("button", { name: "Relay" })).toBeInTheDocument();
     // More than one machine on one token is a reason the trail keeps.
     fireEvent.change(screen.getByTestId("uses"), { target: { value: "4" } });
+    await atStep(5);
     await waitFor(() => expect(screen.getByTestId("place-order")).toBeDisabled());
     expect(screen.getByText(/a reason first/)).toBeInTheDocument();
   });
@@ -354,7 +373,7 @@ describe("what the host has done so far", () => {
       }),
     });
     draw();
-    await screen.findByTestId("place-order");
+    await atStep(5);
     fireEvent.click(screen.getByTestId("place-order"));
 
     await waitFor(() => expect(screen.getByTestId("step-certificate")).toBeInTheDocument());

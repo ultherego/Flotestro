@@ -155,10 +155,18 @@ function given(over: Record<string, unknown> = {}) {
   });
 }
 
-function draw() {
+/**
+ * The screen, opened at an address.
+ *
+ * It was thirteen containers on one board until 17.10 and is six
+ * sub-tabs now, with the open one in `?tab=`, so a test that reads the
+ * roles, the mappings, the review or the permissions says which one it
+ * is on. A bare address opens on the people.
+ */
+function draw(at = "/") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}><MemoryRouter initialEntries={[at]}><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
   );
   return render(<Access />, { wrapper });
 }
@@ -499,7 +507,7 @@ describe("the state of a subject", () => {
 describe("editing a role of this installation", () => {
   it("names what everybody holding it loses before anything is sent", async () => {
     given();
-    draw();
+    draw("/access?tab=roles");
     fireEvent.click(await screen.findByTestId("edit-role-shift_lead"));
     await waitFor(() => expect(screen.getByTestId("role-save")).toBeInTheDocument());
     expect(screen.queryByTestId("role-losing")).not.toBeInTheDocument();
@@ -512,7 +520,7 @@ describe("editing a role of this installation", () => {
 
   it("writes the role whole, after a dialog and a reason of its own", async () => {
     given();
-    draw();
+    draw("/access?tab=roles");
     fireEvent.click(await screen.findByTestId("edit-role-shift_lead"));
     fireEvent.click(await screen.findByRole("checkbox", { name: "host.read" }));
     fireEvent.change(screen.getByTestId("role-description"), { target: { value: "the night rota" } });
@@ -541,7 +549,7 @@ describe("editing a role of this installation", () => {
 
   it("refuses to save a role carrying nothing, which the server would refuse too", async () => {
     given();
-    draw();
+    draw("/access?tab=roles");
     fireEvent.click(await screen.findByTestId("edit-role-shift_lead"));
     fireEvent.click(await screen.findByRole("checkbox", { name: "job.create" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "unit.restart" }));
@@ -553,7 +561,7 @@ describe("editing a role of this installation", () => {
     given();
     const { ApiError } = await import("../../lib/api");
     refuse = new ApiError(403, "escalation", "the role would carry secret.write, which you do not hold everywhere");
-    draw();
+    draw("/access?tab=roles");
     fireEvent.click(await screen.findByTestId("edit-role-shift_lead"));
     fireEvent.click(await screen.findByRole("checkbox", { name: "secret.write" }));
     fireEvent.click(screen.getByTestId("role-save"));

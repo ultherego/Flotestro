@@ -169,7 +169,10 @@ describe("the relays of the sites", () => {
     expect(screen.getByTestId("relay-relay-warsaw")).toHaveClass("fl-row-marked");
     expect(screen.getByTestId("relay-relay-krakow")).not.toHaveClass("fl-row-marked");
 
-    fireEvent.click(screen.getByTestId("pick-relay-krakow"));
+    // The relay is read on its own sub-tab since 17.10, so the mark moves
+    // with the address rather than with a card under the table.
+    cleanup();
+    draw("/relays/r2?tab=relays");
     await waitFor(() => expect(screen.getByTestId("relay-relay-krakow")).toHaveClass("fl-row-marked"));
     expect(screen.getByTestId("relay-relay-warsaw")).not.toHaveClass("fl-row-marked");
   });
@@ -225,7 +228,8 @@ describe("the relays of the sites", () => {
       "/api/v1/relays/r1": { relay: relay({}), hosts: [] },
       "/api/v1/whoami": { subject: "tszymanski", kind: "user", roles: [], bindings: [], permissions: ["relay.manage"] },
     });
-    draw();
+    // The relay itself is the second sub-tab; the revocation lives with it.
+    draw("/relays?tab=relay");
     await waitFor(() => expect(screen.getByTestId("revoke")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("revoke"));
     const confirm = screen.getByTestId("revoke-confirm");
@@ -303,7 +307,10 @@ describe("one relay from the address", () => {
     // The address is the one thing that changed: the list is still drawn
     // under it, so nothing was reloaded.
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/relays/r2"));
-    expect(screen.getByTestId("relay-relay-warsaw")).toBeInTheDocument();
+    // And the panel is the same one: the row opened the relay's own
+    // sub-tab, and the list is still there to go back to.
+    fireEvent.click(screen.getByRole("tab", { name: "Relays" }));
+    await waitFor(() => expect(screen.getByTestId("relay-relay-warsaw")).toBeInTheDocument());
   });
 });
 

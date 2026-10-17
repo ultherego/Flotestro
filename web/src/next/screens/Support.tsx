@@ -5,7 +5,7 @@ import { absoluteTime, relativeTime } from "../../lib/format";
 import type { Whoami } from "../../lib/types";
 import { useT, type Translate } from "../../i18n";
 import {
-  Actions, Banner, Bones, Card, Fact, Facts, Field, Fields, Kpi, Kpis, Note,
+  Actions, Banner, Bones, Card, Fact, Facts, Field, Fields, Form, Kpi, Kpis, Note,
   Pill, Problem, Screen, Table, type Tone,
 } from "../kit";
 
@@ -196,11 +196,15 @@ export function Support() {
         />
       </Kpis>
 
+      {/* Asking for a bundle is a decision, so it stands on a form of its
+          own above the table it adds a row to - not in a container, which
+          is where the panel read as a wall of identical rectangles. */}
       {canCreate && (
-        <Card
+        <Form
           title={t("Ask for a bundle")}
           note={t("The request needs fresh authentication and a reason, and both the request and every download are on the audit trail. What is in the bundle is not.")}
-          foot={
+          testId="ask-for-a-bundle"
+          actions={
             <Actions>
               <button type="button" onClick={() => ask.mutate()} disabled={!askReady} data-testid="ask">
                 {ask.isPending ? t("Asking…") : t("Ask for a bundle")}
@@ -221,13 +225,13 @@ export function Support() {
             </Field>
           </Fields>
           {ask.error ? <Problem>{String(ask.error instanceof Error ? ask.error.message : ask.error)}</Problem> : null}
-        </Card>
+        </Form>
       )}
 
+      {/* A sentence saying the reader may not do this is a notice, not a
+          container of its own with a title that promises a form. */}
       {!canCreate && (
-        <Card title={t("Ask for a bundle")}>
-          <Note>{t("Asking for a bundle requires the support.bundle.create permission.")}</Note>
-        </Card>
+        <Note>{t("Asking for a bundle requires the support.bundle.create permission.")}</Note>
       )}
 
       <Card

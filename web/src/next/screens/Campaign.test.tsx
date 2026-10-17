@@ -112,11 +112,16 @@ function world(over: Record<string, unknown> = {}) {
   };
 }
 
-function draw() {
+/**
+ * One campaign is read in five sub-tabs since 17.10 - how far it got, the
+ * hosts, the order, the approval and the trail - so a test asks for the
+ * one it is about by the address a link to it would carry.
+ */
+function draw(tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/campaigns/c1"]}>
+      <MemoryRouter initialEntries={[tab ? `/campaigns/c1?tab=${tab}` : "/campaigns/c1"]}>
         <ToastProvider>
           <Routes><Route path="/campaigns/:id" element={children} /></Routes>
         </ToastProvider>
@@ -224,7 +229,7 @@ describe("one campaign", () => {
         items: [target({ state: "queued_offline" })], count: 1, total: 1,
       },
     }));
-    draw();
+    draw("hosts");
     await waitFor(() => expect(screen.getByTestId("skip-h1")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("skip-h1"));
     expect(screen.getByTestId("confirm-skip")).toBeDisabled();
@@ -249,7 +254,7 @@ describe("one campaign", () => {
 
   it("narrows the targets on the server", async () => {
     Object.assign(answers, world());
-    draw();
+    draw("hosts");
     await waitFor(() => expect(screen.getByTestId("target-state")).toBeInTheDocument());
     asked.length = 0;
     fireEvent.change(screen.getByTestId("target-state"), { target: { value: "failed" } });
@@ -288,7 +293,7 @@ describe("one campaign", () => {
 
   it("reads the order the approval binds, payload and all", async () => {
     Object.assign(answers, world());
-    draw();
+    draw("order");
     await waitFor(() => expect(screen.getByTestId("order-payload")).toBeInTheDocument());
     expect(screen.getByTestId("order-payload")).toHaveTextContent("upgrade");
     expect(screen.getByText("Canary / wave").closest(".fl-fact")).toHaveTextContent("1 / 5");
@@ -313,7 +318,7 @@ describe("one campaign", () => {
         count: 2,
       },
     }));
-    draw();
+    draw("timeline");
     // The kinds also fill the filter, so the feed itself is what is read.
     const feed = () => document.querySelector(".fl-feed") as HTMLElement;
     await waitFor(() => expect(feed()).not.toBeNull());

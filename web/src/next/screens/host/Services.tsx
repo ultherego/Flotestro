@@ -9,12 +9,14 @@ import type { Host, InventoryFragment, Job } from "../../../lib/types";
 import { unitOrder, unitToggleOrder } from "../../../lib/host/services";
 import { useModuleRefresh } from "../../../lib/host/module";
 import { useT } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Actions, Band, Banner, Bars, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Find, HeadActions,
-  Modal, Note, PAGE_SIZES, Pager, Pill, Problem, Readout, Table, Tag, Tags, Toolbar, type Segment, type Tone,
+  Actions, Band, Banner, Bars, Button, C, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Grid,
+  HeadActions, Modal, Note, PAGE_SIZES, Pager, Pill, Problem, Readout, Table, Tabs, Tag, Tags, Toolbar,
+  useTab, type Segment, type Tone,
 } from "../../kit";
+
+/** The sub-tabs of this screen, in the order a reader wants them. */
+const SERVICE_TABS = ["state", "units"] as const;
 
 /**
  * The systemd units of one host: what failed, what runs, and what starts
@@ -139,6 +141,7 @@ function ReadOnlyNotice({ host, actions }: { host: string; actions: string[] }) 
 
 export function Services({ host }: { host: Host }) {
   const t = useT();
+  const [tab, go] = useTab(SERVICE_TABS);
   const queryClient = useQueryClient();
   const [params, setParams] = useSearchParams();
 
@@ -258,6 +261,9 @@ export function Services({ host }: { host: Host }) {
   const lead = (unit: string) => {
     const next = new URLSearchParams(params);
     next.set("unit", unit);
+    // The detail is drawn on the units tab, so a link taken from the
+    // failed list opens where the answer is rather than nowhere.
+    next.set("tab", "units");
     setParams(next);
   };
 
@@ -343,53 +349,213 @@ export function Services({ host }: { host: Host }) {
         />
       )}
 
-      <Board screen={HOST_SERVICES_SCREEN} catalogue={HOST_SERVICES} drawn={{
-        states: (
-          <Card
-            title={t("Unit states")}
-            note={t("Every unit the host lists, by its active state.")}
-            foot={freshness}
-          >
-            <Band segments={states} testId="unit-states" />
-          </Card>
-        ),
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "state", label: t("State") },
+          { value: "units", label: t("Units") },
+        ]}
+      />
 
-        failed: (
-          <Card
-            title={t("Failed units")}
-            note={t("The reason to open this screen: what the host could not keep running.")}
-            flush
-          >
-            {!known
-              ? <Empty icon="help">{t("Unit states could not be determined.")}</Empty>
-              : failed.length === 0
-                ? <Empty>{t("No unit is in a failed state.")}</Empty>
+      {tab === "state" && (
+        <Grid>
+          <C span={12}>
+            <Card
+              title={t("Unit states")}
+              note={t("Every unit the host lists, by its active state.")}
+              foot={freshness}
+            >
+              <Band segments={states} testId="unit-states" />
+            </Card>
+          </C>
+          <C span={12}>
+            <Card
+              title={t("Failed units")}
+              note={t("The reason to open this screen: what the host could not keep running.")}
+              flush
+            >
+              {!known
+                ? <Empty icon="help">{t("Unit states could not be determined.")}</Empty>
+                : failed.length === 0
+                  ? <Empty>{t("No unit is in a failed state.")}</Empty>
+                  : (
+                    <Table
+                      rows={failed}
+                      keyOf={(one) => one}
+                      testId="failed-units"
+                      rowTestId={(one) => `failed-${one}`}
+                      columns={[
+                        {
+                          key: "unit", head: t("Unit"), tight: true,
+                          cell: (one) => <Button kind="word" onClick={() => lead(one)}>{one}</Button>,
+                        },
+                        {
+                          key: "actions", head: t("Actions"), actions: true, optional: true, cell: (one) => (
+                            <>
+                              <Guard action="unit.restart" host={host.id}>
+                                <Button onClick={() => operation("unit.restart", one)}>{t("Restart")}</Button>
+                              </Guard>
+                              <Guard action="unit.start" host={host.id}>
+                                <Button kind="quiet" onClick={() => operation("unit.start", one)}>{t("Start")}</Button>
+                              </Guard>
+                              {/* Clearing the record after a fix: the next
+                                  failure is then told from the one seen. */}
+                              <Guard action="unit.reset_failed" host={host.id}>
+                                <Button kind="quiet" onClick={() => operation("unit.reset_failed", one)}>
+                                  {t("Reset failed")}
+                                </Button>
+                              </Guard>
+                            </>
+                          ),
+                        },
+                      ]}
+                    />
+                  )}
+            </Card>
+          </C>
+          <C span={12}>
+            <Card
+              title={t("On boot")}
+              note={t("What the unit files say happens at boot: enabled starts, disabled waits for a hand, static is pulled in by another unit, masked cannot start at all.")}
+            >
+              {listed
+                ? (
+                  <Bars items={[
+                    ...bootStates.map((state) => ({
+                      label: state,
+                      value: countWhere(listed, (unit) => unit.unit_file_state === state) ?? 0,
+                      tone: (state === "masked" ? "warn" : state === "enabled" ? "ok" : "info") as Tone,
+                    })),
+                    {
+                      label: t("other"),
+                      value: countWhere(listed, (unit) => !bootStates.includes(unit.unit_file_state ?? "")) ?? 0,
+                      tone: "info" as Tone,
+                    },
+                  ]} />
+                )
+                : <Empty icon="help">{t("Known after a read from the host.")}</Empty>}
+            </Card>
+          </C>
+        </Grid>
+      )}
+
+      {tab === "units" && (
+        <Grid>
+          <C span={12}>
+            <Card
+              title={t("All units")}
+              note={t("The full list is read from the host on request, not on every inventory cycle.")}
+              flush
+            >
+              <Toolbar
+                end={listing.data
+                  ? (
+                    <Pager
+                      page={page}
+                      size={size}
+                      total={units.length}
+                      onPage={setPage}
+                      onSize={setSize}
+                      sizes={PAGE_SIZES}
+                    />
+                  )
+                  : undefined}
+              >
+                <Find
+                  value={filter}
+                  onChange={(value) => { setFilter(value); setPage(1); }}
+                  placeholder={t("Filter by name")}
+                  testId="unit-filter"
+                />
+                <Check checked={activeOnly} onChange={(value) => { setActiveOnly(value); setPage(1); }}>
+                  {t("active only")}
+                </Check>
+              </Toolbar>
+              {!listing.data
+                ? <Empty icon="services">{t("This host has not been read yet. Use “Read from host”.")}</Empty>
                 : (
                   <Table
-                    rows={failed}
-                    keyOf={(one) => one}
-                    testId="failed-units"
-                    rowTestId={(one) => `failed-${one}`}
+                    rows={shown}
+                    keyOf={(one) => one.name}
+                    rowTestId={(one) => `unit-${one.name}`}
+                    testId="units"
+                    empty={t("No unit answers this filter.")}
+                    /* The unit's detail belongs under its own row: the panel
+                       being replaced put it in a second row there, and a card
+                       elsewhere on the board makes the reader hunt for it. */
+                    opened={(one) => one.name === expanded}
+                    detail={(one) => (
+                      <UnitDetailCard
+                        hostID={host.id}
+                        unit={one}
+                        detail={details[one.name]}
+                        loading={detail.isPending && detail.variables === one.name}
+                        error={detailError}
+                        onLead={lead}
+                        onRetry={() => open(one.name, true)}
+                      />
+                    )}
+                    /* The columns an operator folds away are this browser's,
+                       and the unit's name and its buttons always stay. */
+                    remember="fl.columns.host-services"
                     columns={[
                       {
-                        key: "unit", head: t("Unit"), tight: true,
-                        cell: (one) => <Button kind="word" onClick={() => lead(one)}>{one}</Button>,
+                        key: "unit", head: t("Unit"), tight: true, cell: (one) => (
+                          <Button
+                            kind="word"
+                            onClick={() => (expanded === one.name ? setExpanded(null) : open(one.name))}
+                            title={expanded === one.name ? t("Hide the detail") : t("Show the detail")}
+                          >
+                            {one.name}
+                          </Button>
+                        ),
                       },
+                      {
+                        key: "active", head: t("Active"), optional: true,
+                        cell: (one) => <Pill tone={unitTone(one.active_state)}>{one.active_state}</Pill>,
+                      },
+                      { key: "sub", head: t("Sub-state"), minor: true, optional: true, cell: (one) => one.sub_state || "—" },
+                      { key: "onboot", head: t("On boot"), optional: true, cell: (one) => one.unit_file_state || "—" },
                       {
                         key: "actions", head: t("Actions"), actions: true, optional: true, cell: (one) => (
                           <>
-                            <Guard action="unit.restart" host={host.id}>
-                              <Button onClick={() => operation("unit.restart", one)}>{t("Restart")}</Button>
+                            {one.active_state === "active" ? (
+                              <>
+                                <Guard action="unit.restart" host={host.id}>
+                                  <Button kind="quiet" onClick={() => operation("unit.restart", one.name)}>{t("Restart")}</Button>
+                                </Guard>
+                                <Guard action="unit.stop" host={host.id}>
+                                  <Button kind="quiet" onClick={() => operation("unit.stop", one.name)}>{t("Stop")}</Button>
+                                </Guard>
+                              </>
+                            ) : (
+                              <Guard action="unit.start" host={host.id}>
+                                <Button kind="quiet" onClick={() => operation("unit.start", one.name)}>{t("Start")}</Button>
+                              </Guard>
+                            )}
+                            {one.active_state === "failed" && (
+                              <Guard action="unit.reset_failed" host={host.id}>
+                                <Button kind="quiet" onClick={() => operation("unit.reset_failed", one.name)}>
+                                  {t("Reset failed")}
+                                </Button>
+                              </Guard>
+                            )}
+                            {/* Enabling changes what the host does after a
+                                reboot, so it is separate from starting now. */}
+                            <Guard action="unit.enable.set" host={host.id}>
+                              {one.unit_file_state === "enabled" ? (
+                                <Button kind="quiet" onClick={() => toggle("unit.enable.set", one.name, false)}>{t("Disable")}</Button>
+                              ) : one.unit_file_state === "disabled" ? (
+                                <Button kind="quiet" onClick={() => toggle("unit.enable.set", one.name, true)}>{t("Enable")}</Button>
+                              ) : <></>}
                             </Guard>
-                            <Guard action="unit.start" host={host.id}>
-                              <Button kind="quiet" onClick={() => operation("unit.start", one)}>{t("Start")}</Button>
-                            </Guard>
-                            {/* Clearing the record after a fix: the next
-                                failure is then told from the one seen. */}
-                            <Guard action="unit.reset_failed" host={host.id}>
-                              <Button kind="quiet" onClick={() => operation("unit.reset_failed", one)}>
-                                {t("Reset failed")}
-                              </Button>
+                            <Guard action="unit.mask.set" host={host.id}>
+                              {one.unit_file_state === "masked" ? (
+                                <Button kind="quiet" onClick={() => toggle("unit.mask.set", one.name, false)}>{t("Unmask")}</Button>
+                              ) : (
+                                <Button kind="danger" onClick={() => setToMask(one)} testId={`mask-${one.name}`}>{t("Mask")}</Button>
+                              )}
                             </Guard>
                           </>
                         ),
@@ -397,178 +563,32 @@ export function Services({ host }: { host: Host }) {
                     ]}
                   />
                 )}
-          </Card>
-        ),
-
-        onboot: (
-          <Card
-            title={t("On boot")}
-            note={t("What the unit files say happens at boot: enabled starts, disabled waits for a hand, static is pulled in by another unit, masked cannot start at all.")}
-          >
-            {listed
-              ? (
-                <Bars items={[
-                  ...bootStates.map((state) => ({
-                    label: state,
-                    value: countWhere(listed, (unit) => unit.unit_file_state === state) ?? 0,
-                    tone: (state === "masked" ? "warn" : state === "enabled" ? "ok" : "info") as Tone,
-                  })),
-                  {
-                    label: t("other"),
-                    value: countWhere(listed, (unit) => !bootStates.includes(unit.unit_file_state ?? "")) ?? 0,
-                    tone: "info" as Tone,
-                  },
-                ]} />
-              )
-              : <Empty icon="help">{t("Known after a read from the host.")}</Empty>}
-          </Card>
-        ),
-
-        units: (
-          <Card
-            title={t("All units")}
-            note={t("The full list is read from the host on request, not on every inventory cycle.")}
-            flush
-          >
-            <Toolbar
-              end={listing.data
-                ? (
-                  <Pager
-                    page={page}
-                    size={size}
-                    total={units.length}
-                    onPage={setPage}
-                    onSize={setSize}
-                    sizes={PAGE_SIZES}
-                  />
-                )
-                : undefined}
-            >
-              <Find
-                value={filter}
-                onChange={(value) => { setFilter(value); setPage(1); }}
-                placeholder={t("Filter by name")}
-                testId="unit-filter"
-              />
-              <Check checked={activeOnly} onChange={(value) => { setActiveOnly(value); setPage(1); }}>
-                {t("active only")}
-              </Check>
-            </Toolbar>
-            {!listing.data
-              ? <Empty icon="services">{t("This host has not been read yet. Use “Read from host”.")}</Empty>
-              : (
-                <Table
-                  rows={shown}
-                  keyOf={(one) => one.name}
-                  rowTestId={(one) => `unit-${one.name}`}
-                  testId="units"
-                  empty={t("No unit answers this filter.")}
-                  /* The unit's detail belongs under its own row: the panel
-                     being replaced put it in a second row there, and a card
-                     elsewhere on the board makes the reader hunt for it. */
-                  opened={(one) => one.name === expanded}
-                  detail={(one) => (
-                    <UnitDetailCard
-                      hostID={host.id}
-                      unit={one}
-                      detail={details[one.name]}
-                      loading={detail.isPending && detail.variables === one.name}
-                      error={detailError}
-                      onLead={lead}
-                      onRetry={() => open(one.name, true)}
-                    />
-                  )}
-                  /* The columns an operator folds away are this browser's,
-                     and the unit's name and its buttons always stay. */
-                  remember="fl.columns.host-services"
-                  columns={[
-                    {
-                      key: "unit", head: t("Unit"), tight: true, cell: (one) => (
-                        <Button
-                          kind="word"
-                          onClick={() => (expanded === one.name ? setExpanded(null) : open(one.name))}
-                          title={expanded === one.name ? t("Hide the detail") : t("Show the detail")}
-                        >
-                          {one.name}
-                        </Button>
-                      ),
-                    },
-                    {
-                      key: "active", head: t("Active"), optional: true,
-                      cell: (one) => <Pill tone={unitTone(one.active_state)}>{one.active_state}</Pill>,
-                    },
-                    { key: "sub", head: t("Sub-state"), minor: true, optional: true, cell: (one) => one.sub_state || "—" },
-                    { key: "onboot", head: t("On boot"), optional: true, cell: (one) => one.unit_file_state || "—" },
-                    {
-                      key: "actions", head: t("Actions"), actions: true, optional: true, cell: (one) => (
-                        <>
-                          {one.active_state === "active" ? (
-                            <>
-                              <Guard action="unit.restart" host={host.id}>
-                                <Button kind="quiet" onClick={() => operation("unit.restart", one.name)}>{t("Restart")}</Button>
-                              </Guard>
-                              <Guard action="unit.stop" host={host.id}>
-                                <Button kind="quiet" onClick={() => operation("unit.stop", one.name)}>{t("Stop")}</Button>
-                              </Guard>
-                            </>
-                          ) : (
-                            <Guard action="unit.start" host={host.id}>
-                              <Button kind="quiet" onClick={() => operation("unit.start", one.name)}>{t("Start")}</Button>
-                            </Guard>
-                          )}
-                          {one.active_state === "failed" && (
-                            <Guard action="unit.reset_failed" host={host.id}>
-                              <Button kind="quiet" onClick={() => operation("unit.reset_failed", one.name)}>
-                                {t("Reset failed")}
-                              </Button>
-                            </Guard>
-                          )}
-                          {/* Enabling changes what the host does after a
-                              reboot, so it is separate from starting now. */}
-                          <Guard action="unit.enable.set" host={host.id}>
-                            {one.unit_file_state === "enabled" ? (
-                              <Button kind="quiet" onClick={() => toggle("unit.enable.set", one.name, false)}>{t("Disable")}</Button>
-                            ) : one.unit_file_state === "disabled" ? (
-                              <Button kind="quiet" onClick={() => toggle("unit.enable.set", one.name, true)}>{t("Enable")}</Button>
-                            ) : <></>}
-                          </Guard>
-                          <Guard action="unit.mask.set" host={host.id}>
-                            {one.unit_file_state === "masked" ? (
-                              <Button kind="quiet" onClick={() => toggle("unit.mask.set", one.name, false)}>{t("Unmask")}</Button>
-                            ) : (
-                              <Button kind="danger" onClick={() => setToMask(one)} testId={`mask-${one.name}`}>{t("Mask")}</Button>
-                            )}
-                          </Guard>
-                        </>
-                      ),
-                    },
-                  ]}
+            </Card>
+          </C>
+          {/* A unit with a row shows its detail under that row. This block
+              is for the one that has none: a failed unit opened before the
+              listing was read, or one the filter leaves out. The detail is
+              its own read, not a row of the list. */}
+          {expanded !== null && !shown.some((one) => one.name === expanded) && (
+            <C span={12}>
+              <Card
+                title={expanded}
+                note={t("What the host says about this unit, read on its own.")}
+              >
+                <UnitDetailCard
+                  hostID={host.id}
+                  unit={opened ?? { name: expanded, load_state: "", active_state: "", sub_state: "" }}
+                  detail={details[expanded]}
+                  loading={detail.isPending && detail.variables === expanded}
+                  error={detailError}
+                  onLead={lead}
+                  onRetry={() => open(expanded, true)}
                 />
-              )}
-          </Card>
-        ),
-
-        /* A unit with a row shows its detail under that row. This container
-           is for the one that has none: a failed unit opened before the
-           listing was read, or one the filter leaves out. The detail is its
-           own read, not a row of the list. */
-        detail: expanded !== null && !shown.some((one) => one.name === expanded) && (
-          <Card
-            title={expanded}
-            note={t("What the host says about this unit, read on its own.")}
-          >
-            <UnitDetailCard
-              hostID={host.id}
-              unit={opened ?? { name: expanded, load_state: "", active_state: "", sub_state: "" }}
-              detail={details[expanded]}
-              loading={detail.isPending && detail.variables === expanded}
-              error={detailError}
-              onLead={lead}
-              onRetry={() => open(expanded, true)}
-            />
-          </Card>
-        ),
-      }} />
+              </Card>
+            </C>
+          )}
+        </Grid>
+      )}
     </>
   );
 }
@@ -644,14 +664,14 @@ function UnitDetailCard({ hostID, unit, detail, loading, error, onLead, onRetry 
         <Fact label={t("On boot")}>{state.unit_file_state || "—"}</Fact>
       </Facts>
 
-      {/* Every dependency leads to its unit: the list narrows to it and its
-          own detail opens. */}
+      {/* Every dependency leads to its unit, on the tab the list is drawn
+          on: the address names both, or the link lands on the readings. */}
       {dependencies.map((group) => (
         <Facts key={group.label}>
           <Fact label={group.label}>
             <Tags>
               {(group.units ?? []).map((name) => (
-                <Tag key={name} to={`/hosts/${hostID}/services?unit=${encodeURIComponent(name)}`}>{name}</Tag>
+                <Tag key={name} to={`/hosts/${hostID}/services?tab=units&unit=${encodeURIComponent(name)}`}>{name}</Tag>
               ))}
             </Tags>
           </Fact>
@@ -662,7 +682,7 @@ function UnitDetailCard({ hostID, unit, detail, loading, error, onLead, onRetry 
           <Fact label={group.label}>
             <Tags>
               {(group.units ?? []).map((name) => (
-                <Tag key={name} to={`/hosts/${hostID}/services?unit=${encodeURIComponent(name)}`}>{name}</Tag>
+                <Tag key={name} to={`/hosts/${hostID}/services?tab=units&unit=${encodeURIComponent(name)}`}>{name}</Tag>
               ))}
             </Tags>
           </Fact>
@@ -766,16 +786,3 @@ function MaskUnit({ host, unit, busy, onConfirm, onCancel }: {
     </Modal>
   );
 }
-
-/** The name this screen's arrangement is stored under. */
-export const HOST_SERVICES_SCREEN = "next_host_services";
-
-/** The containers this screen can draw, and the shape each ships with. */
-export const HOST_SERVICES: BoardEntry[] = [
-  { key: "states", title: "Unit states", width: 12, height: 4 },
-  { key: "failed", title: "Failed units", width: 6, height: 5 },
-  // The four unit-file states and "other": five bars on every host.
-  { key: "onboot", title: "On boot", width: 6, height: 4 },
-  { key: "units", title: "All units", width: 12, height: 9 },
-  { key: "detail", title: "The unit", width: 12, height: 9 },
-];

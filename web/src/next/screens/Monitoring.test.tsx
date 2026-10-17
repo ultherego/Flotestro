@@ -103,10 +103,21 @@ function serve(over: Record<string, unknown> = {}) {
   });
 }
 
-function draw() {
+/**
+ * The screen, on the sub-tab asked for.
+ *
+ * The rules, the form of a rule and the silences are sub-tabs since
+ * 17.10 and the sub-tab is in the address, so a test that reads the rule
+ * table opens the screen where the rule table is - the same address a
+ * colleague would be sent.
+ */
+function draw(tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const at = tab === "" ? "/monitoring" : `/monitoring?tab=${tab}`;
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[at]}><ToastProvider>{children}</ToastProvider></MemoryRouter>
+    </QueryClientProvider>
   );
   return render(<Monitoring />, { wrapper });
 }
@@ -239,7 +250,7 @@ describe("what nobody could evaluate", () => {
 describe("the rules", () => {
   it("reads a rule as its condition, how long it must hold and what a gap means", async () => {
     serve();
-    draw();
+    draw("rules");
     await waitFor(() => expect(screen.getByTestId("rule-root nearly full")).toBeInTheDocument());
     const row = screen.getByTestId("rule-root nearly full");
     expect(row).toHaveTextContent("filesystem_used_percent > 90%");
@@ -251,7 +262,7 @@ describe("the rules", () => {
 
   it("says a fleet with no rule is unwatched rather than well", async () => {
     serve({ "/api/v1/monitoring/rules": { items: [], count: 0, metrics: [], operators: [], severities: [] } });
-    draw();
+    draw("rules");
     await waitFor(() => expect(
       screen.getByText("No rules yet: the agents sample, but nothing turns the samples into alerts."),
     ).toBeInTheDocument());
@@ -259,7 +270,7 @@ describe("the rules", () => {
 
   it("turns a rule off on the server", async () => {
     serve();
-    draw();
+    draw("rules");
     await waitFor(() => expect(screen.getByTestId("rule-root nearly full")).toBeInTheDocument());
     fireEvent.click(within(screen.getByTestId("rule-root nearly full")).getByRole("checkbox"));
     await waitFor(() => expect(sent.some((one) => one.path === "/api/v1/monitoring/rules/r1")).toBe(true));
@@ -268,12 +279,41 @@ describe("the rules", () => {
 
   it("asks before deleting a rule, and names what the deletion does", async () => {
     serve();
-    draw();
+    draw("rules");
     await waitFor(() => expect(screen.getByTestId("rule-root nearly full")).toBeInTheDocument());
     fireEvent.click(within(screen.getByTestId("rule-root nearly full")).getByRole("button", { name: "Delete" }));
     expect(screen.getByRole("dialog")).toHaveTextContent("Its alerts resolve on the next evaluation.");
     fireEvent.click(screen.getByTestId("confirm-delete"));
     await waitFor(() => expect(sent.some((one) => one.path === "/api/v1/monitoring/rules/r1")).toBe(true));
+  });
+});
+
+describe("the form of a rule", () => {
+  /**
+   * The fault the owner named on 17.10: the form stood on the board as a
+   * container twelve wide, under its own title, beside the table it
+   * writes into. It is a decision, so it has a sub-tab of its own and
+   * the address says which.
+   */
+  it("opens on a sub-tab of its own and not inside the rules container", async () => {
+    serve();
+    draw("rules");
+    fireEvent.click(await screen.findByTestId("new-rule"));
+    const form = await screen.findByTestId("rule-form");
+    expect(form).toHaveClass("fl-form");
+    expect(form.closest(".fl-card")).toBeNull();
+    // The rules table is not on screen beside it: one sub-tab at a time.
+    expect(screen.queryByTestId("rules")).toBeNull();
+    expect(screen.getByRole("tab", { name: "New rule" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("is offered to nobody who may not write a rule", async () => {
+    serve({ "/api/v1/whoami": { permissions: [] } });
+    // An address asking for the form lands on the alerts instead.
+    draw("new");
+    await waitFor(() => expect(screen.getByTestId("firing")).toBeInTheDocument());
+    expect(screen.queryByTestId("rule-form")).toBeNull();
+    expect(screen.queryByRole("tab", { name: "New rule" })).toBeNull();
   });
 });
 

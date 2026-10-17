@@ -12,10 +12,9 @@ import type {
   FleetMonitoring, RuleCatalogue, RuleOperator, RuleSelector, Silence, Whoami,
 } from "../../lib/types";
 import { t as translate, useT } from "../../i18n";
-import { Board } from "../Board";
-import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Band, Banner, Bones, Card, Check, Empty, Field, Fields, Fig, Figs, Kpi, Modal, Pill, Problem, Row, Table, Toolbar, TwoLine, type Segment, type Tone,
+  Actions, Band, Banner, Bones, C, Card, Check, Empty, Field, Fields, Fig, Figs, Form, Grid, Kpi,
+  Modal, Pill, Problem, Row, Table, Tabs, Toolbar, TwoLine, useTab, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -197,6 +196,20 @@ function errorText(error: unknown): string {
 
 /* ------------------------------------------------------------ the screen */
 
+/**
+ * The sub-tabs of this screen, in the order a reader wants them.
+ *
+ * The form of a rule was a container twelve wide and eleven rows tall,
+ * standing on the same board as the readings - a decision drawn as a
+ * measurement. It has a tab of its own now, and the readings keep the
+ * board: what is firing, what the agents cost, and what has fired.
+ */
+const MONITORING_TABS = ["alerts", "rules", "new", "silences"] as const;
+type MonitoringTab = typeof MONITORING_TABS[number];
+
+/** The same screen for a reader who may not write a rule: no form, no tab. */
+const MONITORING_READING_TABS = ["alerts", "rules", "silences"] as const;
+
 export function Monitoring() {
   const t = useT();
   const toast = useToast();
@@ -222,6 +235,12 @@ export function Monitoring() {
   // Taking an alert is the right of a silence: both are a decision about
   // one sensor of one host.
   const canAcknowledge = permissions.has("monitoring.silence.write");
+  // The sub-tab is in the address, so a colleague is sent to the rules
+  // rather than to the screen. A reader who may not write a rule is not
+  // offered the form, and an address asking for it lands on the alerts.
+  const [tab, goTab] = useTab<MonitoringTab>(canWrite ? MONITORING_TABS : MONITORING_READING_TABS);
+  /** Opening the form of a rule, which lives on a tab of its own. */
+  const edit = (rule: AlertRule | "new") => { setEditing(rule); goTab("new"); };
 
   const overview = useQuery({
     queryKey: ["monitoring", "fleet"],
@@ -385,15 +404,13 @@ export function Monitoring() {
 
   return (
     <>
-      <Board
-        screen={MONITORING_SCREEN}
-        catalogue={MONITORING}
-        notices={notice !== "" && (
-          <Banner tone="info" actions={<button type="button" className="fl-plain fl-small" onClick={() => setNotice("")}>{t("Dismiss")}</button>}>
-            {notice}
-          </Banner>
-        )}
-        drawn={{
+      {notice !== "" && (
+        <Banner tone="info" actions={<button type="button" className="fl-plain fl-small" onClick={() => setNotice("")}>{t("Dismiss")}</button>}>
+          {notice}
+        </Banner>
+      )}
+
+      <Readings tab={tab} onTab={goTab} canWrite={canWrite} panels={{
         waiting: (
           <Kpi
             hero
@@ -526,7 +543,7 @@ export function Monitoring() {
             note={t("A rule fires when a metric stays past its threshold for the given minutes on every host its scope selects. Nothing fires without one.")}
             flush
             tools={canWrite
-              ? <button type="button" className="fl-small" onClick={() => setEditing("new")} data-testid="new-rule">{t("New rule")}</button>
+              ? <button type="button" className="fl-small" onClick={() => edit("new")} data-testid="new-rule">{t("New rule")}</button>
               : undefined}
             foot={rules.data ? t("{n} rules", { n: ruleItems.length }) : undefined}
           >
@@ -577,7 +594,7 @@ export function Monitoring() {
                     { key: "updated", head: t("Updated"), minor: true, cell: (one) => when(one.updated_at) },
                     { key: "do", head: "", actions: true, cell: (one) => canWrite ? (
                       <Actions>
-                        <button type="button" className="fl-quiet fl-small" onClick={() => setEditing(one)}>{t("Edit")}</button>
+                        <button type="button" className="fl-quiet fl-small" onClick={() => edit(one)}>{t("Edit")}</button>
                         <button type="button" className="fl-danger fl-small" onClick={() => setDeleting(one)}>{t("Delete")}</button>
                       </Actions>
                     ) : null },
@@ -586,11 +603,15 @@ export function Monitoring() {
               )}
           </Card>
         ),
-        rule_form: editing !== null && (
+        rule_form: canWrite && (
           <RuleForm
-            rule={editing === "new" ? undefined : editing}
+            // A rule opened for editing is a different form from the blank
+            // one, so it starts from its own values rather than keeping
+            // what the last one was filled with.
+            key={editing === null || editing === "new" ? "new" : editing.id}
+            rule={editing === null || editing === "new" ? undefined : editing}
             catalogue={rules.data}
-            onDone={(text) => { setEditing(null); if (text) said(text); refresh(); }}
+            onDone={(text) => { setEditing(null); goTab("rules"); if (text) said(text); refresh(); }}
           />
         ),
         history: (
@@ -703,6 +724,8 @@ export function Monitoring() {
         ),
       }} />
 
+      {/* Every decision of this screen is confirmed in a dialog of its own,
+          drawn here rather than inside the card that asked for it. */}
       {deleting && (
         <Modal
           title={t("Delete the rule")}
@@ -770,6 +793,60 @@ export function Monitoring() {
             silenceFleet.mutate({ reason, minutes, global: blind === true, send_summary: summary })}
         />
       )}
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+/**
+ * The whole screen in four readings rather than eleven containers.
+ *
+ * It was a board until 17.10, and what stood on it were four headline
+ * tiles, five readings and the form of a rule - a container twelve wide
+ * and eleven rows tall, under a title of its own, beside the table it
+ * writes into. The grid had no way to tell the form from the readings,
+ * because for a grid they are the same rectangle.
+ *
+ * The tiles stay above the tabs: they are one shape, they are what a
+ * reader looks at first, and they answer the same question on every tab.
+ */
+function Readings({ tab, onTab, canWrite, panels }: {
+  tab: MonitoringTab;
+  onTab: (next: MonitoringTab) => void;
+  /** Whoever may not write a rule is not offered the form or its tab. */
+  canWrite: boolean;
+  panels: Record<string, ReactNode>;
+}) {
+  const t = useT();
+  const tabs: { value: MonitoringTab; label: ReactNode }[] = [
+    { value: "alerts", label: t("Alerts") },
+    { value: "rules", label: t("Rules") },
+    ...(canWrite ? [{ value: "new" as const, label: t("New rule") }] : []),
+    { value: "silences", label: t("Silences") },
+  ];
+  return (
+    <>
+      <Grid>
+        <C span={3}>{panels.waiting}</C>
+        <C span={3}>{panels.reporting}</C>
+        <C span={3}>{panels.quiet}</C>
+        <C span={3}>{panels.watching}</C>
+      </Grid>
+
+      <Tabs value={tab} onChange={onTab} tabs={tabs} />
+
+      {tab === "alerts" && (
+        <Grid>
+          <C span={5}>{panels.severity}</C>
+          <C span={7}>{panels.footprint}</C>
+          <C span={12}>{panels.firing}</C>
+          <C span={12}>{panels.history}</C>
+        </Grid>
+      )}
+      {tab === "rules" && <Grid><C span={12}>{panels.rules}</C></Grid>}
+      {tab === "new" && <Grid><C span={12}>{panels.rule_form}</C></Grid>}
+      {tab === "silences" && <Grid><C span={12}>{panels.silences}</C></Grid>}
     </>
   );
 }
@@ -998,9 +1075,10 @@ function ruleBody(rule: RuleDraft): RuleDraft {
 }
 
 /**
- * The form of a rule, new or edited. It stands on the screen rather than
- * over it: a rule is written while its neighbours are being read, which
- * is the one thing a dialog would take away.
+ * The form of a rule, new or edited. It stands on a tab of its own rather
+ * than over the screen: a rule is written while its neighbours can still
+ * be read, which is the one thing a dialog would take away - and it is a
+ * decision, so it is not a container of the board either.
  */
 function RuleForm({ rule, catalogue, onDone }: {
   rule?: AlertRule;
@@ -1087,9 +1165,18 @@ function RuleForm({ rule, catalogue, onDone }: {
     && (expressionCheck === undefined || expressionCheck.ok);
 
   return (
-    <Card
+    <Form
       title={rule ? t("Edit rule {name}", { name: rule.name }) : t("New rule")}
       note={t("The condition must hold for the whole of “for” before the alert fires; zero fires on the first sample past the threshold.")}
+      testId="rule-form"
+      actions={
+        <>
+          <button type="button" onClick={() => save.mutate()} disabled={!ready || save.isPending} data-testid="save-rule">
+            {save.isPending ? t("Saving…") : rule ? t("Save rule") : t("Create rule")}
+          </button>
+          <button type="button" className="fl-quiet" onClick={() => onDone()} disabled={save.isPending}>{t("Cancel")}</button>
+        </>
+      }
     >
       <Fields>
         <Field label={t("Name")}>
@@ -1191,28 +1278,6 @@ function RuleForm({ rule, catalogue, onDone }: {
         <Check checked={enabled} onChange={setEnabled}>{t("Enabled")}</Check>
       </Row>
       {problem !== "" && <Problem>{problem}</Problem>}
-      <Actions>
-        <button type="button" onClick={() => save.mutate()} disabled={!ready || save.isPending} data-testid="save-rule">
-          {save.isPending ? t("Saving…") : rule ? t("Save rule") : t("Create rule")}
-        </button>
-        <button type="button" className="fl-quiet" onClick={() => onDone()} disabled={save.isPending}>{t("Cancel")}</button>
-      </Actions>
-    </Card>
+    </Form>
   );
 }
-
-export const MONITORING_SCREEN = "next_monitoring";
-
-export const MONITORING: BoardEntry[] = [
-  { key: "waiting", title: "Waiting for somebody", width: 3, height: 2 },
-  { key: "reporting", title: "Hosts reporting", width: 3, height: 2 },
-  { key: "quiet", title: "Gone quiet", width: 3, height: 2 },
-  { key: "watching", title: "Rules enabled", width: 3, height: 2 },
-  { key: "severity", title: "Firing now", width: 5, height: 4 },
-  { key: "footprint", title: "Agent footprint", width: 7, height: 4 },
-  { key: "firing", title: "Firing alerts", width: 12, height: 9 },
-  { key: "rule_form", title: "Rule", width: 12, height: 11 },
-  { key: "rules", title: "Rules", width: 12, height: 7 },
-  { key: "history", title: "Alerts", width: 8, height: 7 },
-  { key: "silences", title: "Silences in force", width: 4, height: 5 },
-];

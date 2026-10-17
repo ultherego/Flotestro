@@ -216,14 +216,7 @@ describe("what may stand on a board", () => {
    * reason this number is not the whole of the work.
    */
   const stillWrong = [
-    "Access.tsx: filter", "Audit.tsx: filter", "Profile.tsx: look",
-    "Profile.tsx: reading", "Schedules.tsx: form", "Security.tsx: remediate",
-    "Vulnerabilities.tsx: held", "host/Compose.tsx: project",
-    "host/Compose.tsx: deploy", "host/Identity.tsx: join",
-    "host/Identity.tsx: keytab", "host/Kernel.tsx: load", "host/Logs.tsx: read",
-    "host/Monitoring.tsx: silence", "host/Packages.tsx: change",
-    "host/Packages.tsx: agent", "host/Power.tsx: act", "host/Resolver.tsx: test",
-    "host/Time.tsx: probe", "host/Time.tsx: zone",
+    "Schedules.tsx: form",
   ];
 
   it("puts no form in a container of it", () => {

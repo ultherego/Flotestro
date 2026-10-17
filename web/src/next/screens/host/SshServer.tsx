@@ -10,11 +10,9 @@ import {
 import { relativeTime, absoluteTime } from "../../../lib/format";
 import type { Host, InventoryFragment, Job } from "../../../lib/types";
 import { useT, type Translate } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Banner, Bars, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Kpi, Modal, Note,
-  Pill, Readout, Stack, Table,
+  Banner, Bars, Bones, Button, C, Card, Check, Empty, Fact, Facts, Field, Fields, Form, Grid, Kpi,
+  Modal, Note, Pill, Readout, Stack, Table, Tabs, useTab,
 } from "../../kit";
 import {
   orderReady, refusalOf, registryOrder, type RegistryOrder,
@@ -110,10 +108,24 @@ function Allowed({ host, action, children }: { host: string; action: string; chi
 
 /* -------------------------------------------------------- the screen */
 
+/**
+ * What sshd is, and the one thing the panel writes.
+ *
+ * The readings - the ways in, the posture, the effective configuration,
+ * the methods, the keys and the drop-in - are containers. The editor is
+ * a decision, so it stands on its own face in a sub-tab of its own
+ * rather than as another rectangle between two tables.
+ */
+const SSH_TABS = ["state", "change"] as const;
+type SshTab = typeof SSH_TABS[number];
+
 export function SshServer({ host }: { host: Host }) {
   const t = useT();
   const queryClient = useQueryClient();
   const access = useModuleAccess(host.id, SSH_CHANGES);
+  const mayConfigure = useAllowed(host.id, "ssh.config.apply").allowed;
+  const names: readonly SshTab[] = mayConfigure ? SSH_TABS : ["state"];
+  const [tab, goTab] = useTab(names);
 
   const module = useQuery({
     queryKey: ["inventory", host.id, "ssh"],
@@ -123,7 +135,6 @@ export function SshServer({ host }: { host: Host }) {
 
   const [intent, setIntent] = useState<Intent | null>(null);
   const [message, setMessage] = useState("");
-  const [editor, setEditor] = useState(false);
 
   const request = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
@@ -135,7 +146,6 @@ export function SshServer({ host }: { host: Host }) {
           : t("Job {id} has been queued.", { id: job.id.slice(0, 8) }),
       );
       setIntent(null);
-      setEditor(false);
       void queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
@@ -193,20 +203,7 @@ export function SshServer({ host }: { host: Host }) {
   }
   if (message) notices.push(<Banner key="message" tone="info">{message}</Banner>);
 
-  return (
-    <>
-      {intent && (
-        <Confirm
-          host={host}
-          title={intent.label}
-          what={intent.description}
-          busy={request.isPending}
-          danger={intent.action === "ssh.hostkey.rotate"}
-          onConfirm={(reason) => request.mutate({ action: intent.action, reason, payload: intent.payload })}
-          onCancel={() => setIntent(null)}
-        />
-      )}
-      <Board screen={SSH_SCREEN} catalogue={SSH_BOARD} notices={notices.length > 0 ? <Stack>{notices}</Stack> : undefined} drawn={{
+  const panels: Record<string, ReactNode> = {
         ports: (
           <Kpi
             hero
@@ -262,8 +259,8 @@ export function SshServer({ host }: { host: Host }) {
             title={t("Posture")}
             tools={
               <Allowed host={host.id} action="ssh.config.apply">
-                <Button kind="quiet" testId="change-configuration" onClick={() => setEditor((open) => !open)}>
-                  {editor ? t("Cancel") : t("Change configuration")}
+                <Button kind="quiet" testId="change-configuration" onClick={() => goTab("change")}>
+                  {t("Change configuration")}
                 </Button>
               </Allowed>
             }
@@ -291,11 +288,11 @@ export function SshServer({ host }: { host: Host }) {
             </Facts>
           </Card>
         ),
-        editor: editor ? (
+        editor: (
           <Allowed host={host.id} action="ssh.config.apply">
-            <SshEditor state={snapshot} onIntent={setIntent} onCancel={() => setEditor(false)} />
+            <SshEditor state={snapshot} onIntent={setIntent} onCancel={() => goTab("state")} />
           </Allowed>
-        ) : undefined,
+        ),
         effective: (
           <Card title={t("Effective configuration")}>
             <Facts>
@@ -404,7 +401,51 @@ export function SshServer({ host }: { host: Host }) {
             </Facts>
           </Card>
         ),
-      }} />
+  };
+
+  return (
+    <>
+      {intent && (
+        <Confirm
+          host={host}
+          title={intent.label}
+          what={intent.description}
+          busy={request.isPending}
+          danger={intent.action === "ssh.hostkey.rotate"}
+          onConfirm={(reason) => request.mutate({ action: intent.action, reason, payload: intent.payload })}
+          onCancel={() => setIntent(null)}
+        />
+      )}
+      {notices.length > 0 && <Stack>{notices}</Stack>}
+
+      <Grid>
+        <C span={3}>{panels.ports}</C>
+        <C span={3}>{panels.open}</C>
+        <C span={3}>{panels.rootlogin}</C>
+        <C span={3}>{panels.keys}</C>
+      </Grid>
+
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={names.map((one) => ({
+          value: one,
+          label: one === "state" ? t("State") : t("Change"),
+        }))}
+      />
+
+      {tab === "state" && (
+        <Grid>
+          <C span={8}>{panels.ways}</C>
+          <C span={4}>{panels.posture}</C>
+          <C span={7}>{panels.effective}</C>
+          <C span={5}>{panels.methods}</C>
+          <C span={7}>{panels.hostkeys}</C>
+          <C span={5}>{panels.dropin}</C>
+          <C span={12}>{panels.source}</C>
+        </Grid>
+      )}
+      {tab === "change" && panels.editor}
     </>
   );
 }
@@ -435,31 +476,34 @@ function SshEditor({ state, onIntent, onCancel }: {
   const section = (order.payload.ssh ?? {}) as Record<string, unknown>;
 
   return (
-    <Card
+    <Form
+      testId="ssh-config-form"
       title={t("Change configuration")}
       note={t("Empty means “leave it alone”. The host validates the file with sshd itself before reloading, and reloads instead of restarting so open sessions survive.")}
-      tools={<Button kind="quiet" onClick={onCancel}>{t("Cancel")}</Button>}
+      actions={
+        <>
+          <Button
+            testId="apply-configuration"
+            disabled={!orderReady(order) || settings.length === 0 || json !== ""}
+            title={refusalOf(t, order)}
+            onClick={() => onIntent({
+              action: order.action,
+              label: t("Apply sshd configuration"),
+              description: t("{changes} on {unit}. Existing sessions stay open.", {
+                changes: settings.map((name) => `${name} = ${describe(section[name])}`).join(", "),
+                unit: state?.unit ?? "sshd",
+              }),
+              payload: order.payload,
+            })}
+          >
+            {t("Apply")}
+          </Button>
+          <Button kind="quiet" onClick={onCancel}>{t("Cancel")}</Button>
+        </>
+      }
     >
-      <Stack>
-        <RegistryFields entry={entry} value={value} onChange={setValue} json={json} onJson={setJson} />
-        <Button
-          testId="apply-configuration"
-          disabled={!orderReady(order) || settings.length === 0 || json !== ""}
-          title={refusalOf(t, order)}
-          onClick={() => onIntent({
-            action: order.action,
-            label: t("Apply sshd configuration"),
-            description: t("{changes} on {unit}. Existing sessions stay open.", {
-              changes: settings.map((name) => `${name} = ${describe(section[name])}`).join(", "),
-              unit: state?.unit ?? "sshd",
-            }),
-            payload: order.payload,
-          })}
-        >
-          {t("Apply")}
-        </Button>
-      </Stack>
-    </Card>
+      <RegistryFields entry={entry} value={value} onChange={setValue} json={json} onJson={setJson} />
+    </Form>
   );
 }
 
@@ -715,22 +759,3 @@ function Confirm({ host, title, what, busy, danger, onConfirm, onCancel }: {
   );
 }
 
-/** The name this screen's arrangement is stored under. */
-export const SSH_SCREEN = "next_host_ssh";
-
-/** The containers this screen can draw, and the shape each ships with. */
-export const SSH_BOARD: BoardEntry[] = [
-  { key: "ports", title: "Ports", width: 3, height: 2 },
-  { key: "open", title: "Methods enabled", width: 3, height: 2 },
-  { key: "rootlogin", title: "Root login", width: 3, height: 2 },
-  { key: "keys", title: "Host keys", width: 3, height: 2 },
-  { key: "ways", title: "Ways in", width: 8, height: 4 },
-  { key: "posture", title: "Posture", width: 4, height: 4 },
-  { key: "editor", title: "Change configuration", width: 12, height: 9 },
-  { key: "effective", title: "Effective configuration", width: 7, height: 4 },
-  // The four methods sshd has; the table is never longer.
-  { key: "methods", title: "Authentication methods", width: 5, height: 4 },
-  { key: "hostkeys", title: "Host keys", width: 7, height: 5 },
-  { key: "dropin", title: "Managed drop-in", width: 5, height: 5 },
-  { key: "source", title: "Where this came from", width: 12, height: 2 },
-];

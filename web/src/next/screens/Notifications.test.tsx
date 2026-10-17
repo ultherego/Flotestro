@@ -127,10 +127,20 @@ function serve(over: Record<string, unknown> = {}) {
   });
 }
 
-function draw() {
+/**
+ * The screen, on the sub-tab asked for.
+ *
+ * The queue and the form of a channel are sub-tabs since 17.10 and the
+ * sub-tab is in the address, so a test that reads the queue opens the
+ * screen where the queue is - the same address a colleague would be sent.
+ */
+function draw(tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const at = tab === "" ? "/notifications" : `/notifications?tab=${tab}`;
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[at]}><ToastProvider>{children}</ToastProvider></MemoryRouter>
+    </QueryClientProvider>
   );
   return render(<Notifications />, { wrapper });
 }
@@ -243,7 +253,7 @@ describe("what nobody has counted", () => {
 describe("the queue", () => {
   it("puts the filter to the server rather than sieving a page it already has", async () => {
     serve();
-    draw();
+    draw("queue");
     await screen.findByTestId("delivery-d1");
     asked.length = 0;
     fireEvent.change(screen.getByTestId("filter-state"), { target: { value: "dead_letter" } });
@@ -259,7 +269,7 @@ describe("the queue", () => {
         count: 2, dead_letters: 1,
       },
     });
-    draw();
+    draw("queue");
     await screen.findByTestId("delivery-d2");
     expect(screen.queryByTestId("retry-d1")).toBeNull();
     fireEvent.click(screen.getByTestId("retry-d2"));
@@ -275,7 +285,7 @@ describe("the queue", () => {
         count: 1, dead_letters: 0,
       },
     });
-    draw();
+    draw("queue");
     const row = await screen.findByTestId("delivery-d3");
     expect(within(row).getAllByText("kept back")[0]).toHaveClass("fl-pill");
     expect(within(row).getAllByText("—").length).toBeGreaterThan(0);
@@ -286,7 +296,7 @@ describe("the queue", () => {
       "/api/v1/notifications/channels": { items: [], count: 0, kinds: [], subjects: [], severities: [], states: [] },
       "/api/v1/notifications/deliveries": { items: [], count: 0, dead_letters: 0 },
     });
-    draw();
+    draw("queue");
     await waitFor(() => expect(screen.getByText(
       "Nothing has been sent yet: there is no channel to send to.",
     )).toBeInTheDocument());
@@ -368,7 +378,7 @@ describe("a decision", () => {
       },
     });
     mood.refuse = "/retry";
-    draw();
+    draw("queue");
     await screen.findByTestId("delivery-d2");
     fireEvent.click(screen.getByTestId("retry-d2"));
     // A toast says it once and goes; a write that failed is a fact about

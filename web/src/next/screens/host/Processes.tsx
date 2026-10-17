@@ -7,12 +7,13 @@ import type { Host, InventoryFragment, Job } from "../../../lib/types";
 import { kernelThread, stateWords } from "../../../lib/host/processes";
 import { useModuleRefresh } from "../../../lib/host/module";
 import { useT } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Band, Banner, Bars, Button, Card, Check, Empty, Field, Fields, Find, HeadActions, Meter, Modal, Note,
-  Pill, Problem, Seg, Table, Toolbar, type Segment, type Tone,
+  Band, Banner, Bars, Button, C, Card, Check, Empty, Field, Fields, Find, Grid, HeadActions, Meter,
+  Modal, Note, Pill, Problem, Seg, Table, Tabs, Toolbar, useTab, type Segment, type Tone,
 } from "../../kit";
+
+/** The sub-tabs of this screen, in the order a reader wants them. */
+const PROCESS_TABS = ["state", "list"] as const;
 
 /**
  * The processes of one host, as a slice the operator asked for.
@@ -149,6 +150,7 @@ type Sort = "rss" | "cpu" | "started" | "pid";
 
 export function Processes({ host }: { host: Host }) {
   const t = useT();
+  const [tab, go] = useTab(PROCESS_TABS);
   const queryClient = useQueryClient();
 
   const module = useQuery({
@@ -310,186 +312,199 @@ export function Processes({ host }: { host: Host }) {
         />
       )}
 
-      <Board screen={HOST_PROCESSES_SCREEN} catalogue={HOST_PROCESSES} drawn={{
-        states: (
-          <Card
-            title={t("Process states")}
-            note={t("The processes in the snapshot, by their scheduler state.")}
-            foot={freshness}
-          >
-            <Band segments={states} testId="process-states" />
-          </Card>
-        ),
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "state", label: t("State") },
+          { value: "list", label: t("List") },
+        ]}
+      />
 
-        users: (
-          <Card title={t("By user")} note={t("Who runs the most of the slice.")}>
-            {listed
-              ? <Bars items={users.map(([user, count]) => ({ label: user, value: count }))} />
-              : <Empty icon="help">{t("Known after a read from the host.")}</Empty>}
-          </Card>
-        ),
+      {tab === "state" && (
+        <Grid>
+          <C span={12}>
+            <Card
+              title={t("Process states")}
+              note={t("The processes in the snapshot, by their scheduler state.")}
+              foot={freshness}
+            >
+              <Band segments={states} testId="process-states" />
+            </Card>
+          </C>
+          <C span={12}>
+            <Card title={t("By user")} note={t("Who runs the most of the slice.")}>
+              {listed
+                ? <Bars items={users.map(([user, count]) => ({ label: user, value: count }))} />
+                : <Empty icon="help">{t("Known after a read from the host.")}</Empty>}
+            </Card>
+          </C>
+          <C span={12}>
+            <Card
+              title={t("Managed by")}
+              note={t("Whether something on the host answers for a process, or nothing does.")}
+            >
+              {listed
+                ? (
+                  <Bars items={[
+                    { label: t("units"), value: countWhere(listed, (one) => !!one.unit && !one.container) ?? 0, tone: "info" },
+                    { label: t("containers"), value: countWhere(listed, (one) => !!one.container) ?? 0, tone: "info" },
+                    { label: t("neither"), value: countWhere(listed, (one) => !one.unit && !one.container) ?? 0, tone: "info" },
+                  ]} />
+                )
+                : <Empty icon="help">{t("Known after a read from the host.")}</Empty>}
+            </Card>
+          </C>
+        </Grid>
+      )}
 
-        managed: (
-          <Card
-            title={t("Managed by")}
-            note={t("Whether something on the host answers for a process, or nothing does.")}
-          >
-            {listed
-              ? (
-                <Bars items={[
-                  { label: t("units"), value: countWhere(listed, (one) => !!one.unit && !one.container) ?? 0, tone: "info" },
-                  { label: t("containers"), value: countWhere(listed, (one) => !!one.container) ?? 0, tone: "info" },
-                  { label: t("neither"), value: countWhere(listed, (one) => !one.unit && !one.container) ?? 0, tone: "info" },
-                ]} />
-              )
-              : <Empty icon="help">{t("Known after a read from the host.")}</Empty>}
-          </Card>
-        ),
-
-        list: (
-          <Card
-            title={t("Processes")}
-            note={t("A snapshot is read from the host on request; the trend over time is on Monitoring.")}
-            foot={snapshot
-              ? t("{shown} of {listed} shown · {total} on the host", {
-                  shown: rows.length,
-                  listed: snapshot.processes?.length ?? 0,
-                  total: snapshot.total ?? 0,
-                })
-              : undefined}
-            flush
-          >
-            <Toolbar>
-              <Find
-                value={filter}
-                onChange={setFilter}
-                placeholder={t("Filter by command, user, unit or PID")}
-                testId="process-filter"
-              />
-              {/* The tree nests children under parents; the flat slice in
-                  the chosen order stays the default. */}
-              <Check checked={tree} onChange={setTree}>{t("Tree")}</Check>
-            </Toolbar>
-            {!snapshot
-              ? <Empty icon="processes">{t("This host has not been read yet. Use “Read from host”.")}</Empty>
-              : (
-                <Table
-                  rows={rows}
-                  keyOf={({ process }) => String(process.pid)}
-                  rowTestId={({ process }) => `process-${process.pid}`}
-                  testId="processes"
-                  empty={t("No process answers this filter.")}
-                  /* The columns an operator folds away are this browser's;
-                     the PID and the command are the row's identity and
-                     cannot be folded. */
-                  remember="fl.columns.host-processes"
-                  columns={[
-                    { key: "pid", head: "PID", num: true, cell: ({ process }) => process.pid },
-                    {
-                      key: "user", head: t("User"), optional: true,
-                      cell: ({ process }) => process.user || <Pill tone="unknown">{t("unknown")}</Pill>,
-                    },
-                    {
-                      key: "memory", head: t("Memory"), optional: true, cell: ({ process }) => (
-                        kernelThread(process)
-                          ? <span title={t("A kernel thread has no address space of its own.")}>—</span>
-                          : <Meter share={process.rss_bytes / maxRss} tone="info" text={bytes(process.rss_bytes)} />
-                      ),
-                    },
-                    {
-                      key: "cpu", head: t("CPU time share"), minor: true, optional: true, cell: ({ process }) => (
-                        <Meter
-                          share={cpuTotal > 0 ? process.cpu_ticks / cpuTotal : 0}
-                          tone="info"
-                          text={cpuTotal > 0 ? `${(process.cpu_ticks / cpuTotal * 100).toFixed(1)}%` : "—"}
-                        />
-                      ),
-                    },
-                    {
-                      key: "threads", head: t("Threads"), num: true, minor: true, optional: true,
-                      cell: ({ process }) => process.threads,
-                    },
-                    {
-                      key: "state", head: t("State"), optional: true, cell: ({ process }) => (
-                        <Pill tone={processTone(process.state)} title={process.state}>
-                          {t(stateWords(process.state))}
-                        </Pill>
-                      ),
-                    },
-                    /* The PID alone says nothing about whose process it is. */
-                    {
-                      key: "managed", head: t("Managed by"), minor: true, tight: true, optional: true,
-                      cell: ({ process }) => (
-                        process.container
-                          ? `${t("container")} ${process.container.slice(0, 12)}`
-                          : process.unit || (kernelThread(process) ? t("kernel") : "—")
-                      ),
-                    },
-                    /* In the tree the command is set in by its depth and a
-                       parent carries the fold; the flat table has neither.
-                       The setting-in is the kit's and is measured: a run of
-                       non-breaking spaces is read aloud by a screen reader
-                       and travels with the command when it is copied. */
-                    {
-                      key: "command", head: t("Command"), tight: true,
-                      indent: ({ depth }) => (tree ? depth : 0),
-                      cell: ({ process, children }) => (
-                        <>
-                          {tree && children > 0 && (
-                            <Button
-                              kind="word"
-                              onClick={() => toggleNode(process.pid)}
-                              title={collapsed.has(process.pid)
-                                ? t("Show {n} children", { n: children })
-                                : t("Hide children")}
-                            >
-                              {collapsed.has(process.pid) ? "▸" : "▾"}
-                            </Button>
-                          )}
-                          {tree && children > 0 ? " " : ""}
-                          <span title={process.command || process.name}>
-                            {(process.command || process.name).slice(0, 60)}
-                          </span>
-                        </>
-                      ),
-                    },
-                    /* PID 1 and a kernel thread take no signal from here:
-                       init ignores what it does not handle and a kernel
-                       thread cannot be ended, so the cell says so rather
-                       than ordering a job the host will refuse. The
-                       agent's own process is a warning, not a refusal. */
-                    {
-                      key: "actions", head: t("Actions"), actions: true, optional: true, cell: ({ process }) => (
-                        process.pid === 1 || kernelThread(process) ? (
-                          <span title={process.pid === 1
-                            ? t("PID 1 ignores signals it does not handle; a reboot is ordered on the Power screen.")
-                            : t("A kernel thread cannot be signalled.")}>
-                            {t("no signal")}
-                          </span>
-                        ) : (
-                          <Guard action="process.signal" host={host.id}>
-                            <Button
-                              kind="quiet"
-                              onClick={() => setToSignal({ process, signal: "TERM" })}
-                              title={agentProcess(process)
-                                ? t("This is the agent that carries out the order: the host goes offline until systemd restarts it.")
-                                : undefined}
-                              testId={`term-${process.pid}`}
-                            >
-                              {t("Term")}
-                            </Button>
-                            <Button kind="quiet" onClick={() => setToSignal({ process, signal: "HUP" })}>HUP</Button>
-                            <Button kind="danger" onClick={() => setToSignal({ process, signal: "KILL" })}>{t("Kill")}</Button>
-                          </Guard>
-                        )
-                      ),
-                    },
-                  ]}
+      {tab === "list" && (
+        <Grid>
+          <C span={12}>
+            <Card
+              title={t("Processes")}
+              note={t("A snapshot is read from the host on request; the trend over time is on Monitoring.")}
+              foot={snapshot
+                ? t("{shown} of {listed} shown · {total} on the host", {
+                    shown: rows.length,
+                    listed: snapshot.processes?.length ?? 0,
+                    total: snapshot.total ?? 0,
+                  })
+                : undefined}
+              flush
+            >
+              <Toolbar>
+                <Find
+                  value={filter}
+                  onChange={setFilter}
+                  placeholder={t("Filter by command, user, unit or PID")}
+                  testId="process-filter"
                 />
-              )}
-          </Card>
-        ),
-      }} />
+                {/* The tree nests children under parents; the flat slice in
+                    the chosen order stays the default. */}
+                <Check checked={tree} onChange={setTree}>{t("Tree")}</Check>
+              </Toolbar>
+              {!snapshot
+                ? <Empty icon="processes">{t("This host has not been read yet. Use “Read from host”.")}</Empty>
+                : (
+                  <Table
+                    rows={rows}
+                    keyOf={({ process }) => String(process.pid)}
+                    rowTestId={({ process }) => `process-${process.pid}`}
+                    testId="processes"
+                    empty={t("No process answers this filter.")}
+                    /* The columns an operator folds away are this browser's;
+                       the PID and the command are the row's identity and
+                       cannot be folded. */
+                    remember="fl.columns.host-processes"
+                    columns={[
+                      { key: "pid", head: "PID", num: true, cell: ({ process }) => process.pid },
+                      {
+                        key: "user", head: t("User"), optional: true,
+                        cell: ({ process }) => process.user || <Pill tone="unknown">{t("unknown")}</Pill>,
+                      },
+                      {
+                        key: "memory", head: t("Memory"), optional: true, cell: ({ process }) => (
+                          kernelThread(process)
+                            ? <span title={t("A kernel thread has no address space of its own.")}>—</span>
+                            : <Meter share={process.rss_bytes / maxRss} tone="info" text={bytes(process.rss_bytes)} />
+                        ),
+                      },
+                      {
+                        key: "cpu", head: t("CPU time share"), minor: true, optional: true, cell: ({ process }) => (
+                          <Meter
+                            share={cpuTotal > 0 ? process.cpu_ticks / cpuTotal : 0}
+                            tone="info"
+                            text={cpuTotal > 0 ? `${(process.cpu_ticks / cpuTotal * 100).toFixed(1)}%` : "—"}
+                          />
+                        ),
+                      },
+                      {
+                        key: "threads", head: t("Threads"), num: true, minor: true, optional: true,
+                        cell: ({ process }) => process.threads,
+                      },
+                      {
+                        key: "state", head: t("State"), optional: true, cell: ({ process }) => (
+                          <Pill tone={processTone(process.state)} title={process.state}>
+                            {t(stateWords(process.state))}
+                          </Pill>
+                        ),
+                      },
+                      /* The PID alone says nothing about whose process it is. */
+                      {
+                        key: "managed", head: t("Managed by"), minor: true, tight: true, optional: true,
+                        cell: ({ process }) => (
+                          process.container
+                            ? `${t("container")} ${process.container.slice(0, 12)}`
+                            : process.unit || (kernelThread(process) ? t("kernel") : "—")
+                        ),
+                      },
+                      /* In the tree the command is set in by its depth and a
+                         parent carries the fold; the flat table has neither.
+                         The setting-in is the kit's and is measured: a run of
+                         non-breaking spaces is read aloud by a screen reader
+                         and travels with the command when it is copied. */
+                      {
+                        key: "command", head: t("Command"), tight: true,
+                        indent: ({ depth }) => (tree ? depth : 0),
+                        cell: ({ process, children }) => (
+                          <>
+                            {tree && children > 0 && (
+                              <Button
+                                kind="word"
+                                onClick={() => toggleNode(process.pid)}
+                                title={collapsed.has(process.pid)
+                                  ? t("Show {n} children", { n: children })
+                                  : t("Hide children")}
+                              >
+                                {collapsed.has(process.pid) ? "▸" : "▾"}
+                              </Button>
+                            )}
+                            {tree && children > 0 ? " " : ""}
+                            <span title={process.command || process.name}>
+                              {(process.command || process.name).slice(0, 60)}
+                            </span>
+                          </>
+                        ),
+                      },
+                      /* PID 1 and a kernel thread take no signal from here:
+                         init ignores what it does not handle and a kernel
+                         thread cannot be ended, so the cell says so rather
+                         than ordering a job the host will refuse. The
+                         agent's own process is a warning, not a refusal. */
+                      {
+                        key: "actions", head: t("Actions"), actions: true, optional: true, cell: ({ process }) => (
+                          process.pid === 1 || kernelThread(process) ? (
+                            <span title={process.pid === 1
+                              ? t("PID 1 ignores signals it does not handle; a reboot is ordered on the Power screen.")
+                              : t("A kernel thread cannot be signalled.")}>
+                              {t("no signal")}
+                            </span>
+                          ) : (
+                            <Guard action="process.signal" host={host.id}>
+                              <Button
+                                kind="quiet"
+                                onClick={() => setToSignal({ process, signal: "TERM" })}
+                                title={agentProcess(process)
+                                  ? t("This is the agent that carries out the order: the host goes offline until systemd restarts it.")
+                                  : undefined}
+                                testId={`term-${process.pid}`}
+                              >
+                                {t("Term")}
+                              </Button>
+                              <Button kind="quiet" onClick={() => setToSignal({ process, signal: "HUP" })}>HUP</Button>
+                              <Button kind="danger" onClick={() => setToSignal({ process, signal: "KILL" })}>{t("Kill")}</Button>
+                            </Guard>
+                          )
+                        ),
+                      },
+                    ]}
+                  />
+                )}
+            </Card>
+          </C>
+        </Grid>
+      )}
     </>
   );
 }
@@ -555,16 +570,3 @@ function SignalProcess({ host, process, signal, busy, onConfirm, onCancel }: {
     </Modal>
   );
 }
-
-/** The name this screen's arrangement is stored under. */
-export const HOST_PROCESSES_SCREEN = "next_host_processes";
-
-/** The containers this screen can draw, and the shape each ships with. */
-export const HOST_PROCESSES: BoardEntry[] = [
-  { key: "states", title: "Process states", width: 12, height: 4 },
-  { key: "users", title: "By user", width: 6, height: 5 },
-  // Three buckets, whatever the host runs: a unit answers for the process,
-  // a container does, or nothing does.
-  { key: "managed", title: "Managed by", width: 6, height: 4 },
-  { key: "list", title: "Processes", width: 12, height: 11 },
-];

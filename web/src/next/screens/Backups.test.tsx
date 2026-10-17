@@ -63,10 +63,16 @@ const page = (over: Record<string, unknown> = {}) => ({
 /** The arrangement the board reads before it draws anything. */
 const layout = { widgets: [], present: false, revision: 0 };
 
-function draw() {
+/**
+ * The screen opens on Coverage; the definitions are the second sub-tab,
+ * and a test that reads the table asks for that tab by its address, the
+ * way a colleague sent a link would arrive at it.
+ */
+function draw(tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const where = tab ? `/backups?tab=${tab}` : "/backups";
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}><MemoryRouter initialEntries={[where]}><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
   );
   return render(<Backups />, { wrapper });
 }
@@ -80,7 +86,7 @@ afterEach(() => {
 describe("the fleet's backups", () => {
   it("draws a definition as its age, its host, what copies it, where to, and whether anybody read it back", async () => {
     Object.assign(answers, { "/api/v1/settings/layout": layout, "/api/v1/backups": page() });
-    draw();
+    draw("definitions");
     await waitFor(() => expect(screen.getByTestId("backup-db-pgdata")).toBeInTheDocument());
     const row = screen.getByTestId("backup-db-pgdata");
     expect(within(row).getByText("6 h")).toBeInTheDocument();
@@ -106,7 +112,7 @@ describe("the fleet's backups", () => {
         counts: { never: 1, critical: 1, warning: 1, ok: 1, unknown: 1 },
       }),
     });
-    draw();
+    draw("definitions");
     await waitFor(() => expect(screen.getByTestId("backup-db-fresh")).toBeInTheDocument());
     const names = [...screen.getByTestId("backups").querySelectorAll("tbody tr")]
       .map((row) => row.getAttribute("data-testid"));
@@ -137,7 +143,7 @@ describe("the fleet's backups", () => {
         counts: { never: 1, critical: 0, warning: 0, ok: 0, unknown: 0 },
       }),
     });
-    draw();
+    draw("definitions");
     await waitFor(() => expect(screen.getByTestId("backup-db-nothing")).toBeInTheDocument());
     const row = screen.getByTestId("backup-db-nothing");
     expect(row).toHaveTextContent("never ran");
@@ -203,14 +209,14 @@ describe("the fleet's backups", () => {
 
   it("says the answer did not come instead of drawing an empty fleet", async () => {
     Object.assign(answers, { "/api/v1/settings/layout": layout });
-    draw();
+    draw("definitions");
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
     expect(screen.queryByTestId("backups")).not.toBeInTheDocument();
   });
 
   it("asks the server again when the page size changes", async () => {
     Object.assign(answers, { "/api/v1/settings/layout": layout, "/api/v1/backups": page() });
-    draw();
+    draw("definitions");
     await waitFor(() => expect(screen.getByTestId("backups")).toBeInTheDocument());
     asked.length = 0;
     fireEvent.click(screen.getByRole("button", { name: "200" }));

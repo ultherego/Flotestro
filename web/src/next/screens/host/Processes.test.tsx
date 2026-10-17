@@ -75,11 +75,17 @@ const process = (over: Partial<Process> = {}): Process => ({
   ...over,
 });
 
-function draw(one: Host = host()) {
+/**
+ * The screen is two sub-tabs since 17.10, and the address names which one
+ * is open - so a test that reads the process table asks for that tab, the
+ * way a reader following a link would.
+ */
+function draw(one: Host = host(), tab?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const where = tab ? `/hosts/${one.id}/processes?tab=${tab}` : `/hosts/${one.id}/processes`;
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter>
+      <MemoryRouter initialEntries={[where]}><ToastProvider>{children}</ToastProvider></MemoryRouter>
     </QueryClientProvider>
   );
   return render(<Processes host={one} />, { wrapper });
@@ -97,7 +103,7 @@ afterEach(() => {
 describe("the processes of one host", () => {
   it("reads a bounded slice, in the order the operator chose", async () => {
     Object.assign(answers, { "/api/v1/hosts/h1/actions": allow("process.list", "process.signal") });
-    draw();
+    draw(host(), "list");
     await waitFor(() => expect(screen.getByTestId("read-processes")).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "by CPU time" }));
     fireEvent.click(screen.getByTestId("read-processes"));
@@ -113,7 +119,7 @@ describe("the processes of one host", () => {
       "/api/v1/hosts/h1/actions": allow("process.list", "process.signal"),
       "/api/v1/hosts/h1/inventory/processes": fragment({ processes: [process()], total: 1 }),
     });
-    draw();
+    draw(host(), "list");
     await waitFor(() => expect(screen.getByTestId("term-100")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("term-100"));
     expect(sent).toHaveLength(0);
@@ -149,7 +155,7 @@ describe("the processes of one host", () => {
         total: 3,
       }),
     });
-    draw();
+    draw(host(), "list");
     await waitFor(() => expect(screen.getByTestId("process-1")).toBeInTheDocument());
     expect(within(screen.getByTestId("process-1")).getByText("no signal")).toBeInTheDocument();
     // A kernel thread cannot be ended, and has no address space to report.
@@ -166,7 +172,7 @@ describe("the processes of one host", () => {
         total: 1,
       }),
     });
-    draw();
+    draw(host(), "list");
     await waitFor(() => expect(screen.getByTestId("term-300")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("term-300"));
     expect(screen.getByText(/This is the agent itself/)).toBeInTheDocument();
@@ -178,15 +184,21 @@ describe("the processes of one host", () => {
     await waitFor(() => expect(screen.getByTestId("process-states")).toBeInTheDocument());
     // No snapshot: every state says it was not counted rather than nought.
     expect(screen.getByTestId("process-states")).toHaveTextContent("running: not counted");
-    expect(screen.getByText("This host has not been read yet. Use “Read from host”.")).toBeInTheDocument();
     unmount();
+
+    // And the list, on its own tab, says why it is empty rather than
+    // showing an empty table as though the host had no processes.
+    const empty = draw(host(), "list");
+    await waitFor(() =>
+      expect(screen.getByText("This host has not been read yet. Use “Read from host”.")).toBeInTheDocument());
+    empty.unmount();
 
     Object.assign(answers, {
       "/api/v1/hosts/h1/inventory/processes": fragment({
         processes: [process({ user: undefined })], total: 1,
       }),
     });
-    draw();
+    draw(host(), "list");
     await waitFor(() => expect(screen.getByTestId("process-100")).toBeInTheDocument());
     expect(within(screen.getByTestId("process-100")).getByText("unknown")).toBeInTheDocument();
   });
@@ -196,7 +208,7 @@ describe("the processes of one host", () => {
       "/api/v1/hosts/h1/actions": allow("process.list"),
       "/api/v1/hosts/h1/inventory/processes": fragment({ processes: [process()], truncated: true, total: 412 }),
     });
-    draw();
+    draw(host(), "list");
     await waitFor(() => expect(screen.getByText(/Showing 1 of 412 processes/)).toBeInTheDocument());
   });
 
@@ -208,7 +220,7 @@ describe("the processes of one host", () => {
         total: 2,
       }),
     });
-    draw();
+    draw(host(), "list");
     await waitFor(() => expect(screen.getByTestId("process-200")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("process-filter"), { target: { value: "sshd" } });
     await waitFor(() => expect(screen.queryByTestId("process-100")).toBeNull());
@@ -273,7 +285,7 @@ describe("what the process table kept from the panel being replaced", () => {
 
   it("sets a child in by its depth, measured, rather than by a run of spaces", async () => {
     snapshot();
-    draw();
+    draw(host(), "list");
     await waitFor(() => expect(screen.getByTestId("process-11")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("checkbox", { name: "Tree" }));
     await waitFor(() => {
@@ -289,7 +301,7 @@ describe("what the process table kept from the panel being replaced", () => {
 
   it("folds a column away and keeps the choice in this browser", async () => {
     snapshot();
-    draw();
+    draw(host(), "list");
     await waitFor(() => expect(screen.getByTestId("processes")).toBeInTheDocument());
     expect(within(screen.getByTestId("processes")).getByText("Threads")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("processes-columns"));

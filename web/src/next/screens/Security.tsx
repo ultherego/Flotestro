@@ -1,15 +1,13 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { api, LIST_PAGE, loadedItems } from "../../lib/api";
 import { absoluteTime, relativeTime } from "../../lib/format";
 import type { Facet, FleetActivity, RemediationOrder, RemediationPreview, Whoami } from "../../lib/types";
 import { useT } from "../../i18n";
-import { Board } from "../Board";
-import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Band, Bars, Bones, Button, Card, Check, Empty, Field, Fields, Kpi, Modal, Note, Pill,
-  Problem, Stack, Table, Tags, type Segment, type Tone,
+  Actions, Band, Bars, Bones, Button, C, Card, Check, Empty, Field, Fields, Form, Grid, Kpi, Modal,
+  Note, Pill, Problem, Stack, Table, Tabs, Tags, useTab, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -129,6 +127,20 @@ function refusalText(error: unknown): string {
   return error instanceof Error ? error.message : error ? String(error) : "";
 }
 
+/**
+ * The sub-tabs of this screen.
+ *
+ * The remediation was a container of the board nine rows tall which
+ * appeared under the checks the moment one was ticked, pushing them
+ * down the screen. Ticking is reading - it belongs with the table - and
+ * what is done with the ticks is a decision, so it has a tab of its own.
+ */
+const SECURITY_TABS = ["checks", "remediate"] as const;
+type SecurityTab = typeof SECURITY_TABS[number];
+
+/** A reader who may not remediate is offered the checks and nothing else. */
+const SECURITY_READING_TABS = ["checks"] as const;
+
 /** The values the fleet already uses, offered under an input that still takes any word. */
 function Known({ id, facets }: { id: string; facets?: Facet[] }) {
   return (
@@ -169,6 +181,10 @@ export function Security() {
   // Ordering a remediation is its own right. Without it nothing on this
   // screen can be ticked, so nobody fills a form in to be refused at the end.
   const remediates = (me.data?.permissions ?? []).includes("security.remediate");
+  // The sub-tab is in the address; whoever may not remediate is offered
+  // neither the form nor its tab, and an address asking for it lands on
+  // the checks rather than on an empty page.
+  const [tab, goTab] = useTab<SecurityTab>(remediates ? SECURITY_TABS : SECURITY_READING_TABS);
   const facets = useQuery({
     queryKey: ["fleet-activity"],
     queryFn: () => api.get<FleetActivity>("/api/v1/fleet/activity?hours=24"),
@@ -250,7 +266,7 @@ export function Security() {
 
   return (
     <>
-      <Board screen={SECURITY_SCREEN} catalogue={SECURITY} drawn={{
+      <Readings tab={tab} onTab={goTab} remediates={remediates} ticked={picked.length} panels={{
         findings: (
           <Kpi
             hero
@@ -409,11 +425,24 @@ export function Security() {
           </Card>
         ),
 
+        /* Nothing is ticked, so there is nothing to remediate - and that
+           is said in as many words, with the way back to the checks,
+           rather than by an empty form that reads as a broken screen. */
+        nothing: remediates && picked.length === 0 && (
+          <Empty
+            icon="security"
+            testId="remediation-none"
+            action={<Button kind="quiet" onClick={() => goTab("checks")}>{t("Go to the checks")}</Button>}
+          >
+            {t("No check is ticked. On the checks, tick the ones to fix on the fleet; what they would do is worked out here.")}
+          </Empty>
+        ),
         remediate: remediates && picked.length > 0 && (
-          <Card
+          <Form
             title={t("Remediate on the fleet")}
             note={t("{n} checks ticked. Every host gets its own plan of module jobs; hosts with the same steps are one group, and one approval covers the whole set. Nothing changes until the campaign is approved.", { n: chosen.length })}
-            tools={
+            testId="remediation-form"
+            actions={
               <Button kind="quiet" onClick={() => { setPicked([]); setShown(null); }} testId="remediation-clear">
                 {t("Clear the ticks")}
               </Button>
@@ -611,7 +640,7 @@ export function Security() {
                 </>
               )}
             </Stack>
-          </Card>
+          </Form>
         ),
       }} />
 
@@ -653,6 +682,56 @@ export function Security() {
           {order.error !== null && <Problem>{refusalText(order.error)}</Problem>}
         </Modal>
       )}
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+/**
+ * The screen in two readings rather than eight containers.
+ *
+ * What the sweep found is read on one tab - how the checks came out, by
+ * severity, where to start, and the checks themselves with the ticks on
+ * them. What is done about it is a decision, and a decision is a form on
+ * a tab of its own: it was a container of the board that opened in the
+ * middle of the readings the moment somebody ticked a row.
+ */
+function Readings({ tab, onTab, remediates, ticked, panels }: {
+  tab: SecurityTab;
+  onTab: (next: SecurityTab) => void;
+  /** Whoever may not remediate is offered neither the form nor its tab. */
+  remediates: boolean;
+  /** How many checks are ticked, which the tab carries as its count. */
+  ticked: number;
+  panels: Record<string, ReactNode>;
+}) {
+  const t = useT();
+  const tabs: { value: SecurityTab; label: ReactNode; count?: number }[] = [
+    { value: "checks", label: t("Checks") },
+    ...(remediates ? [{ value: "remediate" as const, label: t("Remediation"), count: ticked || undefined }] : []),
+  ];
+  return (
+    <>
+      <Grid>
+        <C span={4}>{panels.findings}</C>
+        <C span={4}>{panels.fixable}</C>
+        <C span={4}>{panels.unjudged}</C>
+      </Grid>
+
+      <Tabs value={tab} onChange={onTab} tabs={tabs} />
+
+      {tab === "checks" && (
+        <Grid>
+          <C span={5}>{panels.outcome}</C>
+          <C span={3}>{panels.severity}</C>
+          <C span={4}>{panels.worst}</C>
+          <C span={12}>{panels.checks}</C>
+        </Grid>
+      )}
+      {/* One of the two: the form once something is ticked, and until
+          then the sentence saying what to tick and where. */}
+      {tab === "remediate" && <Grid><C span={12}>{panels.remediate || panels.nothing}</C></Grid>}
     </>
   );
 }
@@ -736,16 +815,3 @@ function CheckHosts({ check }: { check: FleetCheck }) {
     </Card>
   );
 }
-
-export const SECURITY_SCREEN = "next_security";
-
-export const SECURITY: BoardEntry[] = [
-  { key: "findings", title: "Findings", width: 4, height: 2 },
-  { key: "fixable", title: "Fixable from here", width: 4, height: 2 },
-  { key: "unjudged", title: "Not judged", width: 4, height: 2 },
-  { key: "outcome", title: "How the checks came out", width: 5, height: 2 },
-  { key: "severity", title: "By severity", width: 3, height: 4 },
-  { key: "worst", title: "Where to start", width: 4, height: 4 },
-  { key: "checks", title: "Checks", width: 12, height: 7 },
-  { key: "remediate", title: "Remediate on the fleet", width: 12, height: 9 },
-];

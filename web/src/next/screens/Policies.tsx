@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../../lib/api";
@@ -16,16 +16,14 @@ import { absoluteTime, relativeTime } from "../../lib/format";
 import { stateName } from "../../lib/states";
 import { useToast } from "../../components/Toast";
 import { useT, type Translate } from "../../i18n";
-import { Board } from "../Board";
-import type { BoardEntry } from "../../components/board";
 import { buildExpression, describeExpression, RULE_FIELDS, type Rule, type RuleField } from "../../lib/selectors";
 import { useFleetFacets } from "../../lib/orders";
 import { FacetList } from "../../components/FacetList";
 import { campaignTone } from "./Campaigns";
 import {
-  Actions, Band, Banner, Bones, Button, Card, Check, Download, Empty, Fact, Facts, Field, Fields,
-  HeadActions, Kpi, Modal, Note, Pill, Problem, Stack, Table, Toolbar, TwoLine,
-  type Segment,
+  Actions, Band, Banner, Bones, Button, C, Card, Check, Download, Empty, Fact, Facts, Field, Fields,
+  Form, Grid, HeadActions, Kpi, Modal, Note, Pill, Problem, Stack, Table, Tabs, Toolbar, TwoLine,
+  useTab, type Segment,
 } from "../kit";
 
 /**
@@ -160,6 +158,20 @@ const REASON_MINIMUM = 8;
 /* ------------------------------------------------------------ the screen */
 
 /**
+ * The sub-tabs of this screen.
+ *
+ * Seven containers were drawn at once and six of them were empty until
+ * somebody chose a policy: the policy, its compliance, its document, its
+ * results, its versions and its campaigns, all standing beside the list
+ * saying "open a policy from the list". The detail belongs behind the
+ * choice, so it is a tab - and an address that names a policy opens on
+ * it, because that address is a policy somebody was sent.
+ */
+const POLICY_LIST_FIRST = ["policies", "policy"] as const;
+const POLICY_DETAIL_FIRST = ["policy", "policies"] as const;
+type PolicyTab = typeof POLICY_LIST_FIRST[number];
+
+/**
  * The desired-state policies of the fleet, and the one that is open.
  */
 export function Policies() {
@@ -170,6 +182,10 @@ export function Policies() {
   // The address names the policy that is open; a row of the list leads to
   // it, so the screen and the single policy are one place and not two.
   const { id = "" } = useParams();
+  // An address that names a policy opens on the policy; the bare screen
+  // opens on the list. Either way the sub-tab is in the address, so a
+  // colleague is sent to the one that was being read.
+  const [tab, goTab] = useTab<PolicyTab>(id === "" ? POLICY_LIST_FIRST : POLICY_DETAIL_FIRST);
 
   const [creating, setCreating] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -308,7 +324,7 @@ export function Policies() {
 
       {open.error && <Problem>{String(open.error)}</Problem>}
 
-      <Board screen={POLICIES_SCREEN} catalogue={POLICIES} drawn={{
+      <Readings tab={tab} onTab={goTab} chosen={id !== ""} panels={{
         count: (
           <Kpi
             hero
@@ -494,6 +510,13 @@ export function Policies() {
         results: <Results policyID={id} />,
         versions: <Versions policyID={id} />,
         campaigns: <PolicyCampaigns policyID={id} />,
+        /* Until a policy is chosen the tab holds this one sentence
+           instead of six containers with nothing in them. */
+        none: (
+          <Empty icon="security" testId="no-policy-open">
+            {t("Open a policy from the list to read what it declares and how the fleet stands against it.")}
+          </Empty>
+        ),
       }} />
 
       {/* The publication is the approval: the document is frozen as it
@@ -542,6 +565,64 @@ export function Policies() {
           onDelete={(why) => remove.mutate(why)}
         />
       )}
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+/**
+ * The screen in two readings rather than twelve containers.
+ *
+ * Six of those twelve were empty until somebody chose a policy, which
+ * is the fault the owner pointed at on 17.10: a detail screen spread
+ * over the board beside the list it belongs under. The list is one
+ * reading and the policy that was opened is another.
+ */
+function Readings({ tab, onTab, chosen, panels }: {
+  tab: PolicyTab;
+  onTab: (next: PolicyTab) => void;
+  /** Whether the address names a policy; the detail is behind that choice. */
+  chosen: boolean;
+  panels: Record<string, ReactNode>;
+}) {
+  const t = useT();
+  return (
+    <>
+      <Grid>
+        <C span={3}>{panels.count}</C>
+        <C span={3}>{panels.published}</C>
+        <C span={3}>{panels.drifting}</C>
+        <C span={3}>{panels.erring}</C>
+      </Grid>
+
+      <Tabs
+        value={tab}
+        onChange={onTab}
+        tabs={[
+          { value: "policies", label: t("Policies") },
+          { value: "policy", label: t("Policy") },
+        ]}
+      />
+
+      {tab === "policies" && (
+        <Grid>
+          <C span={12}>{panels.standing}</C>
+          <C span={12}>{panels.list}</C>
+        </Grid>
+      )}
+      {tab === "policy" && (chosen
+        ? (
+          <Grid>
+            <C span={6}>{panels.policy}</C>
+            <C span={6}>{panels.compliance}</C>
+            <C span={12}>{panels.document}</C>
+            <C span={12}>{panels.results}</C>
+            <C span={6}>{panels.versions}</C>
+            <C span={6}>{panels.campaigns}</C>
+          </Grid>
+        )
+        : <Grid><C span={12}>{panels.none}</C></Grid>)}
     </>
   );
 }
@@ -628,17 +709,18 @@ function NewPolicy({ onDone, onCancel }: { onDone: (created: Policy) => void; on
   });
 
   return (
-    <Card
+    <Form
       title={t("New policy")}
-      note={t("A draft: the rules and the hosts are written below once it exists, and nothing is judged until it is published.")}
-      foot={
-        <Actions>
+      note={t("A draft: the rules and the hosts are written on the policy itself once it exists, and nothing is judged until it is published.")}
+      testId="new-policy-form"
+      actions={
+        <>
           <Button onClick={() => { setMessage(""); create.mutate(); }} disabled={name.trim() === "" || create.isPending} testId="create-policy">
             {t("Create the draft")}
           </Button>
           <Button kind="quiet" onClick={onCancel} disabled={create.isPending}>{t("Cancel")}</Button>
           {message && <Problem>{message}</Problem>}
-        </Actions>
+        </>
       }
     >
       <Fields>
@@ -651,7 +733,7 @@ function NewPolicy({ onDone, onCancel }: { onDone: (created: Policy) => void; on
           </select>
         </Field>
       </Fields>
-    </Card>
+    </Form>
   );
 }
 
@@ -819,29 +901,30 @@ function Editor({ policy, etag, canWrite, onSaved }: {
     : describeSelector(selector, t);
 
   return (
-    <Card
+    <Form
       title={t("Document")}
       note={policy.draft
         ? t("This draft differs from version {v}; the loop keeps judging by the published text until the next publication.", { v: policy.version })
         : policy.version === 0
           ? t("A draft nobody has published; nothing is judged yet.")
           : t("As published in version {v}.", { v: policy.version })}
-      foot={canWrite
+      testId="policy-document"
+      actions={canWrite
         ? (
-          <Actions>
+          <>
             <Button onClick={() => save.mutate()} disabled={save.isPending || draft.name.trim() === ""} testId="save-draft">
               {t("Save the draft")}
             </Button>
             <Button kind="quiet" onClick={() => setDraft(draftOf(policy))} disabled={save.isPending}>
               {t("Discard changes")}
             </Button>
-          </Actions>
+          </>
         )
         : undefined}
     >
-      {/* Everything the editor holds sits inside one stack: a Toolbar left
-          as a direct child of the card would be lifted out of the body and
-          into the card's own bar, and every rule row with it. */}
+      {/* Everything the editor holds sits inside one stack, as it did
+          when this was a card: the rows of a rule are toolbars, and a
+          toolbar left as a direct child was lifted into the card's bar. */}
       <Stack>
         <Fields>
           <Field label={t("Name")}>
@@ -990,7 +1073,7 @@ function Editor({ policy, etag, canWrite, onSaved }: {
         <Note>{t("the policy will carry {what}", { what: carried })}</Note>
         {error && <Problem>{error}</Problem>}
       </Stack>
-    </Card>
+    </Form>
   );
 }
 
@@ -1317,22 +1400,3 @@ function PolicyCampaigns({ policyID }: { policyID: string }) {
     </Card>
   );
 }
-
-/* ------------------------------------------------------------- the board */
-
-export const POLICIES_SCREEN = "next_policies";
-
-export const POLICIES: BoardEntry[] = [
-  { key: "count", title: "How many policies", width: 3, height: 2 },
-  { key: "published", title: "Published", width: 3, height: 2 },
-  { key: "drifting", title: "With drift", width: 3, height: 2 },
-  { key: "erring", title: "With errors", width: 3, height: 2 },
-  { key: "standing", title: "Standing", width: 12, height: 2 },
-  { key: "list", title: "Policies", width: 12, height: 9 },
-  { key: "policy", title: "The policy", width: 6, height: 5 },
-  { key: "compliance", title: "Compliance", width: 6, height: 4 },
-  { key: "document", title: "Document", width: 12, height: 11 },
-  { key: "results", title: "Results", width: 12, height: 9 },
-  { key: "versions", title: "Versions", width: 6, height: 7 },
-  { key: "campaigns", title: "Remediation campaigns", width: 6, height: 7 },
-];

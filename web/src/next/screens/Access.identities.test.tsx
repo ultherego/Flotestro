@@ -89,10 +89,18 @@ function fig(card: HTMLElement, label: string): string {
   return found?.querySelector(".fl-fig-value")?.textContent ?? "";
 }
 
-function draw() {
+/**
+ * The screen, opened at an address.
+ *
+ * It was thirteen containers on one board until 17.10 and is six
+ * sub-tabs now, with the open one in `?tab=`, so a test that reads the
+ * roles, the mappings, the review or the permissions says which one it
+ * is on. A bare address opens on the people.
+ */
+function draw(at = "/") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}><MemoryRouter initialEntries={[at]}><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
   );
   return render(<Access />, { wrapper });
 }
@@ -106,7 +114,7 @@ afterEach(() => {
 describe("the access review", () => {
   it("says who has been checked and who has not, with what to look at", async () => {
     given();
-    draw();
+    draw("/access?tab=review");
     await waitFor(() => expect(screen.getByTestId("review-tszymanski")).toBeInTheDocument());
     const flagged = screen.getByTestId("review-tszymanski");
     expect(within(flagged).getByText("unused for 90 days")).toBeInTheDocument();
@@ -120,7 +128,7 @@ describe("the access review", () => {
 
   it("counts the flags over everything the review carries", async () => {
     given();
-    draw();
+    draw("/access?tab=review");
     await waitFor(() => expect(screen.getByTestId("review-tszymanski")).toBeInTheDocument());
     const card = screen.getByText("Access review").closest(".fl-card") as HTMLElement;
     expect(fig(card, "Flagged")).toBe("1");
@@ -132,7 +140,7 @@ describe("the access review", () => {
   it("draws an em dash where the review has not arrived, never a nought", async () => {
     // A promise that never settles is a review still on its way.
     given({ "/api/v1/access/review": new Promise(() => { /* never */ }) });
-    draw();
+    draw("/access?tab=review");
     await waitFor(() => expect(screen.getByText("Access review")).toBeInTheDocument());
     const card = screen.getByText("Access review").closest(".fl-card") as HTMLElement;
     expect(fig(card, "Identities")).toBe("—");
@@ -141,7 +149,7 @@ describe("the access review", () => {
 
   it("narrows to one flag without asking the server a second question", async () => {
     given();
-    draw();
+    draw("/access?tab=review");
     await waitFor(() => expect(screen.getByTestId("review-backup-runner")).toBeInTheDocument());
     asked.length = 0;
     fireEvent.change(screen.getByTestId("review-only"), { target: { value: "flagged" } });
@@ -152,7 +160,7 @@ describe("the access review", () => {
 
   it("is not on the screen at all for a reader who may not manage access", async () => {
     given({ "/api/v1/whoami": { permissions: ["host.read"] } });
-    draw();
+    draw("/access?tab=review");
     await waitFor(() => expect(screen.getByText("Group mappings")).toBeInTheDocument());
     expect(screen.queryByText("Access review")).not.toBeInTheDocument();
     expect(screen.queryByTestId("access-review")).not.toBeInTheDocument();

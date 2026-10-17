@@ -55,10 +55,18 @@ const fragment = (payload: Record<string, unknown>) => ({
   observed_at: "2026-10-16T08:00:00Z", payload,
 });
 
-function draw(one: Host = host()) {
+/**
+ * The screen is two sub-tabs since 17.10, and the address names which one
+ * is open - so a test that reads the kernel history asks for that tab, the
+ * way a reader following a link would.
+ */
+function draw(one: Host = host(), tab?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const where = tab ? `/hosts/${one.id}/system?tab=${tab}` : `/hosts/${one.id}/system`;
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[where]}><ToastProvider>{children}</ToastProvider></MemoryRouter>
+    </QueryClientProvider>
   );
   return render(<System host={one} />, { wrapper });
 }
@@ -152,7 +160,7 @@ describe("the platform of one host", () => {
         ],
       },
     });
-    draw();
+    draw(host(), "history");
     await waitFor(() => expect(screen.getByTestId("system-history")).toHaveTextContent("6.10.9-arch1-1"));
     expect(screen.getByTestId("system-history")).toHaveTextContent("6.11.4-arch1-1");
   });

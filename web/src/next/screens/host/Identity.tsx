@@ -11,11 +11,9 @@ import type {
   Host, HostAccess, InventoryFragment, Job, LocalSudoRule, OfflineVerdict, Whoami,
 } from "../../../lib/types";
 import { useT } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Actions, Banner, Bones, Button, Card, Fact, Facts, Field, Fields, Modal, Note, Pill,
-  Problem, Table, type Tone,
+  Banner, Bones, Button, C, Card, Fact, Facts, Field, Fields, Form, Grid, Modal, Note,
+  Pill, Problem, Table, Tabs, useTab, type Tone,
 } from "../../kit";
 
 /**
@@ -72,6 +70,18 @@ const IDENTITY_CHANGES = ["identity.host.enroll", "identity.keytab.renew", "iden
 
 /** The shortest reason the API takes for a critical operation. */
 const MIN_REASON = 8;
+
+/**
+ * What is read about this host's identity, and what is done to it, in the
+ * address so a link leads to the one that was meant.
+ *
+ * The three decisions here - joining a domain, renewing a keytab, leaving
+ * a domain - each change who can enter the machine, and until 17.10 they
+ * stood on the same grid as the readings that say who can enter it today,
+ * in containers of the same shape. They are forms now, on a tab of their
+ * own, and nothing that measures anything stands among them.
+ */
+const IDENTITY_TABS = ["state", "change"] as const;
 
 /** A name that reaches the directory: at least two labels, as the API requires. */
 const DOMAIN_PATTERN = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/;
@@ -308,6 +318,7 @@ function Confirm({ host, title, children, label, busy, typed = true, onConfirm, 
 
 export function Identity({ host }: { host: Host }) {
   const t = useT();
+  const [tab, go] = useTab(IDENTITY_TABS);
   const [asking, setAsking] = useState<"join" | "keytab" | "leave" | null>(null);
 
   const module = useQuery({
@@ -333,6 +344,9 @@ export function Identity({ host }: { host: Host }) {
   const mayPreflight = permissions.includes("identity.read");
   const mayRenew = permissions.includes("identity.keytab.rotate");
   const mayLeave = permissions.includes("identity.host.leave");
+  // A module takes a "Change" tab only where it has something to put on
+  // it: a reader who may order nothing is offered no empty tab.
+  const mayChange = enrolled ? (mayRenew || mayLeave) : (mayJoin || mayPreflight);
 
   // A host outside any domain has no principal, no keytab and no cache to
   // speak of: those facts do not apply, which is not the same as unknown.
@@ -396,258 +410,298 @@ export function Identity({ host }: { host: Host }) {
       {leave.message && <Banner tone="error">{leave.message}</Banner>}
       {preflight.message && <Banner tone="error">{preflight.message}</Banner>}
 
-      <Board screen="next_host_identity" catalogue={HOST_IDENTITY} drawn={{
-        domain: (
-          <Card
-            title={t("Domain")}
-            note={t("Domain membership and the directory client, as the host last checked them.")}
-            foot={module.data
-              ? t("Source: {source}, revision {revision}, observed {when}", {
-                  source: module.data.source,
-                  revision: module.data.revision.slice(0, 12),
-                  when: relativeTime(module.data.observed_at),
-                })
-              : undefined}
-          >
-            <Facts>
-              <Fact label={t("In domain")}>
-                {enrolled ? <Pill tone="ok">{t("yes")}</Pill> : <Pill tone="neutral">{t("no")}</Pill>}
-              </Fact>
-              <Fact label={t("Domain")}>{host.identity.domain || "—"}</Fact>
-              <Fact label={t("Realm")}>{host.identity.realm || "—"}</Fact>
-              <Fact label={t("Servers")}>{(identity.servers ?? []).join(", ") || "—"}</Fact>
-              <Fact label={t("Host principal")}>
-                {identity.host_principal ? identity.host_principal : enrolled ? <Unknown /> : notInDomain}
-              </Fact>
-              <Fact label={t("Keytab KVNO")}>
-                {identity.keytab_kvno ?? (enrolled ? <Unknown /> : notInDomain)}
-              </Fact>
-            </Facts>
-          </Card>
-        ),
-        client: (
-          <Card title={t("Directory client")}>
-            <Facts>
-              <Fact label={t("SSSD running")}>{identity.sssd_running ? t("yes") : t("no")}</Fact>
-              <Fact label={t("SSSD online")}>
-                {enrolled || (host.identity.sssd_online !== undefined && host.identity.sssd_online !== null)
-                  ? <Flag value={host.identity.sssd_online} />
-                  : notInDomain}
-              </Fact>
-              <Fact label={t("Cache age")}>
-                {identity.cache_age_seconds !== undefined
-                  ? <span title={t("{n} seconds", { n: identity.cache_age_seconds })}>{duration(identity.cache_age_seconds)}</span>
-                  : enrolled ? <Unknown /> : notInDomain}
-              </Fact>
-              <Fact label={t("Clock synchronized")}>
-                <Flag value={identity.time_synchronized ?? null} />
-              </Fact>
-              <Fact label={t("Checked")}>
-                {host.identity.checked_at
-                  ? <span title={absoluteTime(host.identity.checked_at)}>{relativeTime(host.identity.checked_at)}</span>
-                  : <Unknown />}
-              </Fact>
-            </Facts>
-          </Card>
-        ),
-        offline: enrolled && (
-          <OfflinePolicy policy={identity.sssd_offline_policy} verdict={host.identity.offline_verdict} />
-        ),
-        access: (
-          <Card
-            title={t("Effective access")}
-            note={t("Who may enter this host and with what privileges, as the directory's rules and the local sudoers say.")}
-          >
-            {accessRefusal ? (
-              <Note><Unknown /> {accessRefusal}</Note>
-            ) : !data ? (
-              <Bones rows={4} />
-            ) : !data.known ? (
-              <Note><Unknown /> {data.detail}</Note>
-            ) : (
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={mayChange
+          ? [{ value: "state" as const, label: t("State") }, { value: "change" as const, label: t("Change") }]
+          : [{ value: "state" as const, label: t("State") }]}
+      />
+
+      {tab === "state" && (
+        <Grid>
+          <C span={6}>
+            <Card
+              title={t("Domain")}
+              note={t("Domain membership and the directory client, as the host last checked them.")}
+              foot={module.data
+                ? t("Source: {source}, revision {revision}, observed {when}", {
+                    source: module.data.source,
+                    revision: module.data.revision.slice(0, 12),
+                    when: relativeTime(module.data.observed_at),
+                  })
+                : undefined}
+            >
               <Facts>
-                <Fact label={t("Directory entry")}>{data.fqdn || "—"}</Fact>
-                <Fact label={t("Enrolled in the directory")}>
-                  {data.enrolled ? <Pill tone="ok">{t("yes")}</Pill> : <Pill tone="neutral">{t("no")}</Pill>}
+                <Fact label={t("In domain")}>
+                  {enrolled ? <Pill tone="ok">{t("yes")}</Pill> : <Pill tone="neutral">{t("no")}</Pill>}
                 </Fact>
-                <Fact label={t("Host groups")}>{data.host_groups.join(", ") || t("none")}</Fact>
+                <Fact label={t("Domain")}>{host.identity.domain || "—"}</Fact>
+                <Fact label={t("Realm")}>{host.identity.realm || "—"}</Fact>
+                <Fact label={t("Servers")}>{(identity.servers ?? []).join(", ") || "—"}</Fact>
+                <Fact label={t("Host principal")}>
+                  {identity.host_principal ? identity.host_principal : enrolled ? <Unknown /> : notInDomain}
+                </Fact>
+                <Fact label={t("Keytab KVNO")}>
+                  {identity.keytab_kvno ?? (enrolled ? <Unknown /> : notInDomain)}
+                </Fact>
               </Facts>
-            )}
-          </Card>
-        ),
-        hbac: data?.known && (
-          <Card
-            title={t("HBAC rules reaching this host")}
-            note={t("{n} of them", { n: data.hbac_rules.length })}
-            foot={t("A disabled rule is listed because it would apply the moment somebody enables it.")}
-            flush
-          >
-            <Table
-              rows={data.hbac_rules}
-              keyOf={(rule) => rule.name}
-              empty={t("No HBAC rule reaches this host: nobody from the directory can sign in.")}
-              columns={[
-                { key: "name", head: t("Rule"), cell: (rule) => (
-                  <>
-                    {rule.name}
-                    {rule.allows_everything && <> <Pill tone="error">{t("covers the whole fleet")}</Pill></>}
-                  </>
-                ) },
-                { key: "enabled", head: t("Enabled"), cell: (rule) => rule.enabled ? t("yes") : <Pill tone="neutral">{t("no")}</Pill> },
-                { key: "via", head: t("Via"), minor: true, cell: (rule) => rule.via.join(", ") },
-                { key: "who", head: t("Who"), cell: (rule) => rule.all_users
-                  ? t("every user")
-                  : (rule.reached_users ?? []).join(", ") || [...(rule.users ?? []), ...(rule.user_groups ?? [])].join(", ") || "—" },
-                { key: "services", head: t("Services"), cell: (rule) => rule.all_services
-                  ? t("every service")
-                  : [...(rule.services ?? []), ...(rule.service_groups ?? [])].join(", ") || "—" },
-              ]}
-            />
-          </Card>
-        ),
-        sudo: data?.known && (
-          <Card
-            title={t("sudo rules reaching this host")}
-            note={t("{n} of them", { n: data.sudo_rules.length })}
-            flush
-          >
-            <Table
-              rows={data.sudo_rules}
-              keyOf={(rule) => rule.name}
-              empty={t("No sudo rule from the directory reaches this host.")}
-              columns={[
-                { key: "name", head: t("Rule"), cell: (rule) => rule.name },
-                { key: "enabled", head: t("Enabled"), cell: (rule) => rule.enabled ? t("yes") : <Pill tone="neutral">{t("no")}</Pill> },
-                { key: "via", head: t("Via"), minor: true, cell: (rule) => rule.via.join(", ") },
-                { key: "who", head: t("Who"), cell: (rule) => rule.all_users
-                  ? t("every user")
-                  : (rule.reached_users ?? []).join(", ") || [...(rule.users ?? []), ...(rule.user_groups ?? [])].join(", ") || "—" },
-                { key: "commands", head: t("Commands"), tight: true, cell: (rule) => rule.all_commands
-                  ? t("every command")
-                  : [...(rule.commands ?? []), ...(rule.command_groups ?? [])].join(", ") || "—" },
-                { key: "runas", head: t("Run as"), minor: true, cell: (rule) => rule.run_as_any_user
-                  ? t("any user")
-                  : [...(rule.run_as ?? []), ...(rule.run_as_groups ?? [])].join(", ") || "—" },
-                { key: "risk", head: t("Risk"), cell: (rule) => rule.critical
-                  ? <Pill tone="error" title={(rule.critical_reasons ?? []).join("; ")}>{t("critical")}</Pill>
-                  : "—" },
-              ]}
-            />
-          </Card>
-        ),
-        localsudo: data && <LocalSudoRules access={data} />,
-        join: !enrolled && (mayJoin || mayPreflight) && (
-          <Card
-            title={t("Join the domain")}
-            note={t("The host joins with a one-time password the panel fetches from the directory connector when the task is delivered; nothing is typed here and the password reaches neither the database nor the audit trail. A panel without a connector lets the order through and the host refuses it as missing_credential.")}
-          >
-            <Fields>
-              <Field label={t("Domain")} hint={t("The DNS domain of the directory, e.g. example.internal.")}>
-                <input value={domain} placeholder="example.internal" onChange={(event) => setDomain(event.target.value)} data-testid="domain" />
-              </Field>
-              <Field label={t("Realm")} hint={t("The Kerberos realm; usually the domain in capitals.")}>
-                <input value={realm} placeholder="EXAMPLE.INTERNAL" onChange={(event) => setRealm(event.target.value)} data-testid="realm" />
-              </Field>
-              <Field label={t("Server")} hint={t("Optional; the directory server to talk to instead of the one DNS names.")}>
-                <input value={server} placeholder="ipa.example.internal" onChange={(event) => setServer(event.target.value)} />
-              </Field>
-              <Field label={t("Host name in the directory")} hint={t("The FQDN the host is entered under; the one-time password is issued for it.")}>
-                <input value={hostname} onChange={(event) => setHostname(event.target.value)} data-testid="join-hostname" />
-              </Field>
-            </Fields>
-            {domain.trim() !== "" && !joinValid && (
-              <Problem>
-                {refusalOf(t, order) || t("The domain and the host name must be fully qualified names, and the realm must not be empty.")}
-              </Problem>
-            )}
-            <Actions>
-              {/* The preview of the host's actions decides in the scope of
-                  the host; the permission list of the session is the
-                  cheaper first gate. */}
-              {mayPreflight && (
-                <Guard action="identity.host.preflight" host={host.id} explain>
-                  <Button
-                    kind="quiet"
-                    disabled={!joinValid || preflight.busy || host.connection_state !== "online"}
-                    title={!joinValid
-                      ? t("Fill in the domain, the realm and the fully qualified host name first.")
-                      : host.connection_state !== "online"
-                        ? t("The host is not online; a preflight needs an answer from it.")
-                        : t("The host checks DNS, the clock and the reach of the directory before anything changes; nothing is joined.")}
-                    testId="preflight"
-                    onClick={() => preflight.order({ action: "identity.host.preflight", payload })}
-                  >
-                    {preflight.busy ? t("Checking…") : t("Preflight first")}
-                  </Button>
-                </Guard>
+            </Card>
+          </C>
+          <C span={6}>
+            <Card title={t("Directory client")}>
+              <Facts>
+                <Fact label={t("SSSD running")}>{identity.sssd_running ? t("yes") : t("no")}</Fact>
+                <Fact label={t("SSSD online")}>
+                  {enrolled || (host.identity.sssd_online !== undefined && host.identity.sssd_online !== null)
+                    ? <Flag value={host.identity.sssd_online} />
+                    : notInDomain}
+                </Fact>
+                <Fact label={t("Cache age")}>
+                  {identity.cache_age_seconds !== undefined
+                    ? <span title={t("{n} seconds", { n: identity.cache_age_seconds })}>{duration(identity.cache_age_seconds)}</span>
+                    : enrolled ? <Unknown /> : notInDomain}
+                </Fact>
+                <Fact label={t("Clock synchronized")}>
+                  <Flag value={identity.time_synchronized ?? null} />
+                </Fact>
+                <Fact label={t("Checked")}>
+                  {host.identity.checked_at
+                    ? <span title={absoluteTime(host.identity.checked_at)}>{relativeTime(host.identity.checked_at)}</span>
+                    : <Unknown />}
+                </Fact>
+              </Facts>
+            </Card>
+          </C>
+          {enrolled && (
+            <C span={6}>
+              <OfflinePolicy policy={identity.sssd_offline_policy} verdict={host.identity.offline_verdict} />
+            </C>
+          )}
+          <C span={6}>
+            <Card
+              title={t("Effective access")}
+              note={t("Who may enter this host and with what privileges, as the directory's rules and the local sudoers say.")}
+            >
+              {accessRefusal ? (
+                <Note><Unknown /> {accessRefusal}</Note>
+              ) : !data ? (
+                <Bones rows={4} />
+              ) : !data.known ? (
+                <Note><Unknown /> {data.detail}</Note>
+              ) : (
+                <Facts>
+                  <Fact label={t("Directory entry")}>{data.fqdn || "—"}</Fact>
+                  <Fact label={t("Enrolled in the directory")}>
+                    {data.enrolled ? <Pill tone="ok">{t("yes")}</Pill> : <Pill tone="neutral">{t("no")}</Pill>}
+                  </Fact>
+                  <Fact label={t("Host groups")}>{data.host_groups.join(", ") || t("none")}</Fact>
+                </Facts>
               )}
-              {mayJoin && (
-                <Guard action="identity.host.enroll" host={host.id}>
-                  <Button
-                    disabled={!joinValid || join.busy}
-                    title={!joinValid ? t("Fill in the domain, the realm and the fully qualified host name first.") : undefined}
-                    testId="join"
-                    onClick={() => setAsking("join")}
-                  >
-                    {t("Join the domain…")}
-                  </Button>
-                </Guard>
-              )}
-            </Actions>
-            {join.job && <JobNotice job={join.job} hostID={host.id} />}
-          </Card>
-        ),
-        preflight: preflight.attempt !== undefined && (
-          <PreflightResult attempt={preflight.attempt} blocked={blocked} />
-        ),
-        keytab: enrolled && mayRenew && (
-          <Card
-            title={t("Renew a keytab")}
-            note={t("The host fetches a new key for a service principal with its own credentials and writes it into /etc/krb5.keytab. The old key stops working the moment the new one lands; restart the service that uses it afterwards.")}
-          >
-            <Fields>
-              <Field
-                label={t("Service principal")}
-                hint={t("service/host.fqdn, optionally @REALM. The host's own principal (host/) is replaced by a re-join, not renewed.")}
-                wide
+            </Card>
+          </C>
+          {data?.known && (
+            <C span={12}>
+              <Card
+                title={t("HBAC rules reaching this host")}
+                note={t("{n} of them", { n: data.hbac_rules.length })}
+                foot={t("A disabled rule is listed because it would apply the moment somebody enables it.")}
+                flush
               >
-                <input
-                  value={principal}
-                  onChange={(event) => setPrincipal(event.target.value)}
-                  placeholder={`HTTP/${host.hostname}`}
-                  data-testid="principal"
+                <Table
+                  rows={data.hbac_rules}
+                  keyOf={(rule) => rule.name}
+                  empty={t("No HBAC rule reaches this host: nobody from the directory can sign in.")}
+                  columns={[
+                    { key: "name", head: t("Rule"), cell: (rule) => (
+                      <>
+                        {rule.name}
+                        {rule.allows_everything && <> <Pill tone="error">{t("covers the whole fleet")}</Pill></>}
+                      </>
+                    ) },
+                    { key: "enabled", head: t("Enabled"), cell: (rule) => rule.enabled ? t("yes") : <Pill tone="neutral">{t("no")}</Pill> },
+                    { key: "via", head: t("Via"), minor: true, cell: (rule) => rule.via.join(", ") },
+                    { key: "who", head: t("Who"), cell: (rule) => rule.all_users
+                      ? t("every user")
+                      : (rule.reached_users ?? []).join(", ") || [...(rule.users ?? []), ...(rule.user_groups ?? [])].join(", ") || "—" },
+                    { key: "services", head: t("Services"), cell: (rule) => rule.all_services
+                      ? t("every service")
+                      : [...(rule.services ?? []), ...(rule.service_groups ?? [])].join(", ") || "—" },
+                  ]}
                 />
-              </Field>
-            </Fields>
-            {principalName !== "" && !principalValid && (
-              <Problem>{t("This is not a service principal: expected service/host.example.test, and not host/.")}</Problem>
-            )}
-            <Actions>
-              <Guard action="identity.keytab.renew" host={host.id}>
-                <Button disabled={!principalValid || keytab.busy} testId="renew" onClick={() => setAsking("keytab")}>
-                  {t("Renew the keytab…")}
-                </Button>
-              </Guard>
-            </Actions>
-            {keytab.job && <JobNotice job={keytab.job} hostID={host.id} />}
-          </Card>
-        ),
-        leave: enrolled && mayLeave && (
-          <Card
-            title={t("Leave the domain")}
-            note={t("The host unenrolls itself with its own keytab and restores the files the join changed. Directory accounts stop signing in here at once; the entry in the directory stays, and a new join needs a new one-time password.")}
-          >
-            <Actions>
-              <Guard action="identity.host.leave" host={host.id}>
-                <Button kind="danger" disabled={leave.busy} testId="leave" onClick={() => setAsking("leave")}>
-                  {t("Leave domain")}
-                </Button>
-              </Guard>
-            </Actions>
-            {leave.job && <JobNotice job={leave.job} hostID={host.id} />}
-          </Card>
-        ),
-      }} />
+              </Card>
+            </C>
+          )}
+          {data?.known && (
+            <C span={12}>
+              <Card
+                title={t("sudo rules reaching this host")}
+                note={t("{n} of them", { n: data.sudo_rules.length })}
+                flush
+              >
+                <Table
+                  rows={data.sudo_rules}
+                  keyOf={(rule) => rule.name}
+                  empty={t("No sudo rule from the directory reaches this host.")}
+                  columns={[
+                    { key: "name", head: t("Rule"), cell: (rule) => rule.name },
+                    { key: "enabled", head: t("Enabled"), cell: (rule) => rule.enabled ? t("yes") : <Pill tone="neutral">{t("no")}</Pill> },
+                    { key: "via", head: t("Via"), minor: true, cell: (rule) => rule.via.join(", ") },
+                    { key: "who", head: t("Who"), cell: (rule) => rule.all_users
+                      ? t("every user")
+                      : (rule.reached_users ?? []).join(", ") || [...(rule.users ?? []), ...(rule.user_groups ?? [])].join(", ") || "—" },
+                    { key: "commands", head: t("Commands"), tight: true, cell: (rule) => rule.all_commands
+                      ? t("every command")
+                      : [...(rule.commands ?? []), ...(rule.command_groups ?? [])].join(", ") || "—" },
+                    { key: "runas", head: t("Run as"), minor: true, cell: (rule) => rule.run_as_any_user
+                      ? t("any user")
+                      : [...(rule.run_as ?? []), ...(rule.run_as_groups ?? [])].join(", ") || "—" },
+                    { key: "risk", head: t("Risk"), cell: (rule) => rule.critical
+                      ? <Pill tone="error" title={(rule.critical_reasons ?? []).join("; ")}>{t("critical")}</Pill>
+                      : "—" },
+                  ]}
+                />
+              </Card>
+            </C>
+          )}
+          {data && <C span={12}><LocalSudoRules access={data} /></C>}
+        </Grid>
+      )}
+
+      {tab === "change" && (
+        <Grid>
+          {!enrolled && (mayJoin || mayPreflight) && (
+            <C span={12}>
+              <Form
+                title={t("Join the domain")}
+                note={t("The host joins with a one-time password the panel fetches from the directory connector when the task is delivered; nothing is typed here and the password reaches neither the database nor the audit trail. A panel without a connector lets the order through and the host refuses it as missing_credential.")}
+                testId="join-form"
+                actions={
+                  <>
+                    {/* The preview of the host's actions decides in the scope of
+                        the host; the permission list of the session is the
+                        cheaper first gate. */}
+                    {mayPreflight && (
+                      <Guard action="identity.host.preflight" host={host.id} explain>
+                        <Button
+                          kind="quiet"
+                          disabled={!joinValid || preflight.busy || host.connection_state !== "online"}
+                          title={!joinValid
+                            ? t("Fill in the domain, the realm and the fully qualified host name first.")
+                            : host.connection_state !== "online"
+                              ? t("The host is not online; a preflight needs an answer from it.")
+                              : t("The host checks DNS, the clock and the reach of the directory before anything changes; nothing is joined.")}
+                          testId="preflight"
+                          onClick={() => preflight.order({ action: "identity.host.preflight", payload })}
+                        >
+                          {preflight.busy ? t("Checking…") : t("Preflight first")}
+                        </Button>
+                      </Guard>
+                    )}
+                    {mayJoin && (
+                      <Guard action="identity.host.enroll" host={host.id}>
+                        <Button
+                          disabled={!joinValid || join.busy}
+                          title={!joinValid ? t("Fill in the domain, the realm and the fully qualified host name first.") : undefined}
+                          testId="join"
+                          onClick={() => setAsking("join")}
+                        >
+                          {t("Join the domain…")}
+                        </Button>
+                      </Guard>
+                    )}
+                  </>
+                }
+              >
+                <Fields>
+                  <Field label={t("Domain")} hint={t("The DNS domain of the directory, e.g. example.internal.")}>
+                    <input value={domain} placeholder="example.internal" onChange={(event) => setDomain(event.target.value)} data-testid="domain" />
+                  </Field>
+                  <Field label={t("Realm")} hint={t("The Kerberos realm; usually the domain in capitals.")}>
+                    <input value={realm} placeholder="EXAMPLE.INTERNAL" onChange={(event) => setRealm(event.target.value)} data-testid="realm" />
+                  </Field>
+                  <Field label={t("Server")} hint={t("Optional; the directory server to talk to instead of the one DNS names.")}>
+                    <input value={server} placeholder="ipa.example.internal" onChange={(event) => setServer(event.target.value)} />
+                  </Field>
+                  <Field label={t("Host name in the directory")} hint={t("The FQDN the host is entered under; the one-time password is issued for it.")}>
+                    <input value={hostname} onChange={(event) => setHostname(event.target.value)} data-testid="join-hostname" />
+                  </Field>
+                </Fields>
+                {domain.trim() !== "" && !joinValid && (
+                  <Problem>
+                    {refusalOf(t, order) || t("The domain and the host name must be fully qualified names, and the realm must not be empty.")}
+                  </Problem>
+                )}
+                {join.job && <JobNotice job={join.job} hostID={host.id} />}
+              </Form>
+            </C>
+          )}
+          {/* What the host answered the preflight with is a reading, so it
+              keeps a container - under the form that ordered it, where the
+              answer belongs. */}
+          {preflight.attempt !== undefined && (
+            <C span={12}>
+              <PreflightResult attempt={preflight.attempt} blocked={blocked} />
+            </C>
+          )}
+          {enrolled && mayRenew && (
+            <C span={12}>
+              <Form
+                title={t("Renew a keytab")}
+                note={t("The host fetches a new key for a service principal with its own credentials and writes it into /etc/krb5.keytab. The old key stops working the moment the new one lands; restart the service that uses it afterwards.")}
+                testId="keytab-form"
+                actions={
+                  <Guard action="identity.keytab.renew" host={host.id}>
+                    <Button disabled={!principalValid || keytab.busy} testId="renew" onClick={() => setAsking("keytab")}>
+                      {t("Renew the keytab…")}
+                    </Button>
+                  </Guard>
+                }
+              >
+                <Fields>
+                  <Field
+                    label={t("Service principal")}
+                    hint={t("service/host.fqdn, optionally @REALM. The host's own principal (host/) is replaced by a re-join, not renewed.")}
+                    wide
+                  >
+                    <input
+                      value={principal}
+                      onChange={(event) => setPrincipal(event.target.value)}
+                      placeholder={`HTTP/${host.hostname}`}
+                      data-testid="principal"
+                    />
+                  </Field>
+                </Fields>
+                {principalName !== "" && !principalValid && (
+                  <Problem>{t("This is not a service principal: expected service/host.example.test, and not host/.")}</Problem>
+                )}
+                {keytab.job && <JobNotice job={keytab.job} hostID={host.id} />}
+              </Form>
+            </C>
+          )}
+          {enrolled && mayLeave && (
+            <C span={12}>
+              <Form
+                title={t("Leave the domain")}
+                note={t("The host unenrolls itself with its own keytab and restores the files the join changed. Directory accounts stop signing in here at once; the entry in the directory stays, and a new join needs a new one-time password.")}
+                testId="leave-form"
+                actions={
+                  <Guard action="identity.host.leave" host={host.id}>
+                    <Button kind="danger" disabled={leave.busy} testId="leave" onClick={() => setAsking("leave")}>
+                      {t("Leave domain")}
+                    </Button>
+                  </Guard>
+                }
+              >
+                <Note>
+                  {t("Nothing is filled in: the host leaves the domain it is in, and the dialog asks for the reason and the hostname typed out.")}
+                </Note>
+                {leave.job && <JobNotice job={leave.job} hostID={host.id} />}
+              </Form>
+            </C>
+          )}
+        </Grid>
+      )}
 
       {asking === "join" && "domain_enroll" in payload && (
         <Confirm
@@ -937,20 +991,3 @@ function LocalSudoRules({ access }: { access: HostAccess }) {
   );
 }
 
-/** The containers this module can draw, and the shape each ships with. */
-export const HOST_IDENTITY: BoardEntry[] = [
-  { key: "domain", title: "Domain", width: 6, height: 4 },
-  { key: "client", title: "Directory client", width: 6, height: 4 },
-  { key: "offline", title: "Logins during a directory outage", width: 6, height: 4 },
-  { key: "access", title: "Effective access", width: 6, height: 4 },
-  { key: "hbac", title: "HBAC rules reaching this host", width: 12, height: 5 },
-  { key: "sudo", title: "sudo rules reaching this host", width: 12, height: 5 },
-  { key: "localsudo", title: "Local sudoers rules", width: 12, height: 5 },
-  { key: "join", title: "Join the domain", width: 12, height: 5 },
-  { key: "preflight", title: "Preflight", width: 12, height: 5 },
-  { key: "keytab", title: "Renew a keytab", width: 6, height: 4 },
-  { key: "leave", title: "Leave the domain", width: 6, height: 4 },
-];
-
-/** The name this module's arrangement is stored under. */
-export const HOST_IDENTITY_SCREEN = "next_host_identity";

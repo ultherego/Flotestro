@@ -383,7 +383,11 @@ describe("one policy", () => {
     // No policy is open, so nothing is read for one.
     expect(asked.some((one) => one.startsWith("/api/v1/policies/p1"))).toBe(false);
     expect(screen.queryByTestId("save-draft")).toBeNull();
-    expect(screen.getAllByText(/Open a policy from the list/).length).toBeGreaterThan(0);
+    // The detail is behind the choice since 17.10: the list no longer
+    // stands beside six containers waiting for a policy to be opened.
+    expect(screen.queryByText(/Open a policy from the list/)).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Policy" }));
+    expect(screen.getByTestId("no-policy-open")).toHaveTextContent("Open a policy from the list");
   });
 });
 

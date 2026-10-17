@@ -71,10 +71,17 @@ const allowed = {
   ].map((action) => ({ action, permission: "host.write", mutating: true, risk: "high", allowed: true })),
 };
 
-function draw() {
+/**
+ * The module is two sub-tabs since 17.10 and the address says which one
+ * is open. Every test below reads the register of accounts, so that is
+ * the tab they open on - the way a reader following a link would.
+ */
+function draw(tab = "accounts") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[`/hosts/h1/accounts?tab=${tab}`]}>{children}</MemoryRouter>
+    </QueryClientProvider>
   );
   return render(<Accounts host={host} />, { wrapper });
 }

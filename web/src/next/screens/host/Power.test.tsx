@@ -76,10 +76,18 @@ function base(payload: unknown, actions: { version: number; items: Verdict[] } =
   });
 }
 
-function draw(over: Record<string, unknown> = {}) {
+/**
+ * The module is two sub-tabs since 17.10 and the address names the open
+ * one, so a test of a decision asks for the tab a reader would follow a
+ * link to.
+ */
+function draw(over: Record<string, unknown> = {}, tab?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const where = tab ? `/hosts/h1/power?tab=${tab}` : "/hosts/h1/power";
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[where]}>{children}</MemoryRouter>
+    </QueryClientProvider>
   );
   return render(<Power host={{ ...host, ...over }} />, { wrapper });
 }
@@ -93,7 +101,7 @@ afterEach(() => {
 describe("the power module of a host", () => {
   it("reboots with the payload the server expects, once a reason is given", async () => {
     base({ uptime_seconds: 93784, reboot_required: false, inhibitors_known: true, inhibitors: [] });
-    draw();
+    draw({}, "change");
     await waitFor(() => expect(screen.getByTestId("reboot")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("reboot"));
     fireEvent.change(screen.getByTestId("confirm-reason"), { target: { value: "kernel upgrade, ticket 42" } });
@@ -111,7 +119,7 @@ describe("the power module of a host", () => {
 
   it("refuses a shutdown nobody gave a reason for, before the dialog is offered", async () => {
     base({ inhibitors_known: true, inhibitors: [] });
-    draw();
+    draw({}, "change");
     await waitFor(() => expect(screen.getByTestId("shutdown")).toBeInTheDocument());
     // Nobody will read the panel to find out why the host is dark, so the
     // reason is asked for on the screen and not only in the dialog.
@@ -127,7 +135,7 @@ describe("the power module of a host", () => {
       inhibitors_known: true,
       inhibitors: [{ who: "packagekit", mode: "block", why: "updating" }],
     });
-    draw();
+    draw({}, "change");
     await waitFor(() => expect(screen.getByTestId("shutdown")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("shutdown-reason"), { target: { value: "disk replacement, ticket 1234" } });
     fireEvent.click(screen.getByText("override inhibitors"));
@@ -190,7 +198,7 @@ describe("the power module of a host", () => {
         { action: "system.shutdown", permission: "host.reboot", mutating: true, risk: "critical", allowed: false, reason_code: "permission_denied", missing_permission: "host.reboot", reason: "you may not shut this host down" },
       ],
     });
-    draw();
+    draw({}, "change");
     await waitFor(() => expect(screen.getByText(/You can read this module/)).toBeInTheDocument());
     // The control is gone and the refusal stands where it was, so the
     // reader learns that the thing exists and what it would take.
@@ -200,7 +208,7 @@ describe("the power module of a host", () => {
 
   it("starts a maintenance window without going through the job queue", async () => {
     base({});
-    draw();
+    draw({}, "change");
     await waitFor(() => expect(screen.getByTestId("window-start")).toBeInTheDocument());
     expect(screen.getByTestId("window-start")).toBeDisabled();
     fireEvent.change(screen.getByTestId("window-reason"), { target: { value: "disk swap" } });

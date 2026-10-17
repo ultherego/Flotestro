@@ -155,7 +155,10 @@ describe("the logs module of a host", () => {
 
   it("counts nothing before a read, and never draws a nought for it", async () => {
     Object.assign(answers, { "/api/v1/settings/layout": layout, "/api/v1/hosts/h1/actions": reads });
-    draw();
+    // The counts and the shape of the read are the result, which is the
+    // second sub-tab since 17.10; a read of its own accord moves the
+    // screen there, and a link may land on it too.
+    draw("/hosts/h1/logs?tab=result");
     const band = await screen.findByTestId("line-counts");
     // Nothing has been read, so no line has been sorted: every count is a
     // dash. A nought here would say the host logged nothing.

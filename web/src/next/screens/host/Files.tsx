@@ -1,14 +1,13 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../../lib/api";
 import { absoluteTime, bytes, relativeTime } from "../../../lib/format";
 import type { Host } from "../../../lib/types";
 import { useT } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
+import { useAllowed } from "../../../lib/actions";
 import {
-  Band, Banner, Bars, Button, Card, Diff, Empty, Field, Fields, Kpi, Note, Pill, Problem,
-  Table, type Segment,
+  Band, Banner, Bars, Button, C, Card, Diff, Empty, Field, Fields, Form, Grid, Kpi, Note, Pill,
+  Problem, Table, Tabs, useTab, type Segment,
 } from "../../kit";
 import {
   Confirm, Guard, JobLine, ReadOnlyNotice, useOrder, type Intent,
@@ -139,13 +138,26 @@ export function differenceText(before: string, after: string): string {
 /** The changes this module offers; when every one is refused, it says so once. */
 const FILE_CHANGES = ["file.ensure", "file.remove", "file.rollback"];
 
+/**
+ * What the host has, and the one thing the panel writes.
+ *
+ * The states, the content, the file list, the versions and the
+ * difference are readings and keep their containers. Taking a file under
+ * management is a decision: it stands on its own face in a sub-tab, not
+ * as a container wedged between two tables.
+ */
+const FILES_TABS = ["state", "change"] as const;
+type FilesTab = typeof FILES_TABS[number];
+
 export function Files({ host }: { host: Host }) {
   const t = useT();
   const queryClient = useQueryClient();
   const [intent, setIntent] = useState<Intent | null>(null);
   const [selected, setSelected] = useState("");
-  const [adding, setAdding] = useState(false);
   const [comparison, setComparison] = useState("");
+  const mayWrite = useAllowed(host.id, "file.ensure").allowed;
+  const names: readonly FilesTab[] = mayWrite ? FILES_TABS : ["state"];
+  const [tab, goTab] = useTab(names);
 
   const files = useQuery({
     queryKey: ["managed-files", host.id],
@@ -154,7 +166,6 @@ export function Files({ host }: { host: Host }) {
 
   const order = useOrder(host, () => {
     setIntent(null);
-    setAdding(false);
     void queryClient.invalidateQueries({ queryKey: ["managed-files", host.id] });
   });
 
@@ -207,13 +218,7 @@ export function Files({ host }: { host: Host }) {
     no_checksum: t("The host reports no checksum for this version."),
   };
 
-  return (
-    <>
-      <ReadOnlyNotice host={host.id} actions={FILE_CHANGES} />
-      {order.message && <Banner tone="error">{order.message}</Banner>}
-      {order.job && <JobLine job={order.job} hostID={host.id} />}
-
-      <Board screen={FILES_SCREEN} catalogue={HOST_FILES} drawn={{
+  const panels: Record<string, ReactNode> = {
         managed: (
           <Kpi
             icon="files"
@@ -265,19 +270,19 @@ export function Files({ host }: { host: Host }) {
             )}
           </Card>
         ),
-        add: adding ? (
+        add: (
           <Guard action="file.ensure" host={host.id} explain>
-            <NewFile host={host} onIntent={setIntent} onClose={() => setAdding(false)} />
+            <NewFile host={host} onIntent={setIntent} onClose={() => goTab("state")} />
           </Guard>
-        ) : undefined,
+        ),
         list: (
           <Card
             title={t("Files")}
             note={known === undefined ? undefined : t("{n} managed on this host.", { n: known.length })}
             tools={(
               <Guard action="file.ensure" host={host.id}>
-                <Button kind="quiet" testId="manage-file" onClick={() => setAdding((open) => !open)}>
-                  {adding ? t("Cancel") : t("Manage a file")}
+                <Button kind="quiet" testId="manage-file" onClick={() => goTab("change")}>
+                  {t("Manage a file")}
                 </Button>
               </Guard>
             )}
@@ -493,7 +498,40 @@ export function Files({ host }: { host: Host }) {
             />
           </Card>
         ) : undefined,
-      }} />
+  };
+
+  return (
+    <>
+      <ReadOnlyNotice host={host.id} actions={FILE_CHANGES} />
+      {order.message && <Banner tone="error">{order.message}</Banner>}
+      {order.job && <JobLine job={order.job} hostID={host.id} />}
+
+      <Grid>
+        <C span={4}>{panels.managed}</C>
+        <C span={4}>{panels.drifted}</C>
+        <C span={4}>{panels.missing}</C>
+      </Grid>
+
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={names.map((one) => ({
+          value: one,
+          label: one === "state" ? t("State") : t("Change"),
+        }))}
+      />
+
+      {tab === "state" && (
+        <Grid>
+          <C span={7}>{panels.states}</C>
+          <C span={5}>{panels.content}</C>
+          <C span={12}>{panels.list}</C>
+          {panels.history && <C span={7}>{panels.history}</C>}
+          {panels.kept && <C span={5}>{panels.kept}</C>}
+          {panels.difference && <C span={12}>{panels.difference}</C>}
+        </Grid>
+      )}
+      {tab === "change" && panels.add}
 
       {intent && (
         <Confirm
@@ -532,10 +570,35 @@ function NewFile({ host, onIntent, onClose }: {
   const fromSecret = secret.trim() !== "";
 
   return (
-    <Card
+    <Form
+      testId="manage-file-form"
       title={t("Manage a file")}
       note={t("A file that already exists needs the checksum of the content you reviewed — read it first. Without that, a change someone made after you looked would vanish under this write.")}
-      tools={<Button kind="quiet" onClick={onClose} testId="new-file-cancel">{t("Cancel")}</Button>}
+      actions={
+        <>
+          <Button
+            testId="new-write"
+            disabled={!path || (!content && !fromSecret)}
+            onClick={() => onIntent({
+              action: "file.ensure",
+              label: t("Write file"),
+              description: fromSecret
+                ? t("{path} will be written with the value of secret {secret}, mode {mode}. The value is fetched by the host at execution time and is stored nowhere else.", { path, secret, mode })
+                : t("{path} will be written with {lines} lines, mode {mode}. The host validates the content first where it knows how.", {
+                    path, lines: content.split("\n").length, mode,
+                  }),
+              payload: {
+                file: fromSecret
+                  ? { path, content_secret: { name: secret.trim() }, mode, expected_sha256: fingerprint }
+                  : { path, content, mode, expected_sha256: fingerprint },
+              },
+            })}
+          >
+            {t("Write")}
+          </Button>
+          <Button kind="quiet" onClick={onClose} testId="new-file-cancel">{t("Cancel")}</Button>
+        </>
+      }
     >
       <Fields>
         <Field label={t("Path")} wide>
@@ -564,44 +627,8 @@ function NewFile({ host, onIntent, onClose }: {
           </Field>
         )}
       </Fields>
-      <Button
-        testId="new-write"
-        disabled={!path || (!content && !fromSecret)}
-        onClick={() => onIntent({
-          action: "file.ensure",
-          label: t("Write file"),
-          description: fromSecret
-            ? t("{path} will be written with the value of secret {secret}, mode {mode}. The value is fetched by the host at execution time and is stored nowhere else.", { path, secret, mode })
-            : t("{path} will be written with {lines} lines, mode {mode}. The host validates the content first where it knows how.", {
-                path, lines: content.split("\n").length, mode,
-              }),
-          payload: {
-            file: fromSecret
-              ? { path, content_secret: { name: secret.trim() }, mode, expected_sha256: fingerprint }
-              : { path, content, mode, expected_sha256: fingerprint },
-          },
-        })}
-      >
-        {t("Write")}
-      </Button>
       <Note>{t("It will be written to {host}.", { host: host.hostname })}</Note>
-    </Card>
+    </Form>
   );
 }
 
-/** The name this module's arrangement is stored under. */
-export const FILES_SCREEN = "next_host_files";
-
-/** The containers this module can draw, and the shape each ships with. */
-export const HOST_FILES: BoardEntry[] = [
-  { key: "managed", title: "Managed files", width: 4, height: 2 },
-  { key: "drifted", title: "Changed outside the panel", width: 4, height: 2 },
-  { key: "missing", title: "Missing on host", width: 4, height: 2 },
-  { key: "states", title: "What the host has", width: 7, height: 4 },
-  { key: "content", title: "Content", width: 5, height: 4 },
-  { key: "add", title: "Manage a file", width: 12, height: 7 },
-  { key: "list", title: "Files", width: 12, height: 7 },
-  { key: "history", title: "Versions the panel wrote", width: 7, height: 5 },
-  { key: "kept", title: "Versions kept on the host", width: 5, height: 5 },
-  { key: "difference", title: "Difference", width: 12, height: 5 },
-];
