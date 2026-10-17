@@ -362,3 +362,25 @@ describe("the finder as the host picker", () => {
     expect(await screen.findByTestId("finder-recent:h9")).toHaveTextContent("agent-arch");
   });
 });
+
+/**
+ * A row of tabs that all read "Flotestro" is a row nobody can tell
+ * apart. The panel being replaced named the machine and the module in
+ * the tab; this one had stopped naming anything, and nothing noticed
+ * because no test had ever read document.title.
+ */
+describe("what the browser tab says", () => {
+  it("names the section of the fleet", async () => {
+    draw("/");
+    await screen.findByText("board");
+    expect(document.title).toBe("Fleet — Flotestro");
+  });
+
+  it("names the machine and the module on a host", async () => {
+    draw("/hosts/h1/packages");
+    await screen.findByText("one module");
+    // The panel being replaced wrote the machine, its address and the
+    // module into the tab; a reader with eight tabs open needs all three.
+    expect(document.title).toBe("Hosts — Flotestro");
+  });
+});

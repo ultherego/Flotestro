@@ -1,5 +1,5 @@
-import { expect, test } from "@playwright/test";
-import { absent, fleetHosts, hostWith, openHostList, type Host } from "./fleet";
+import { expect, test, type Locator } from "@playwright/test";
+import { absent, card, fleetHosts, hostWith, openHostList, type Host } from "./fleet";
 
 /**
  * The acceptance criteria of the host management document (HOST-UI): unknown
@@ -15,7 +15,7 @@ test.beforeAll(async ({ request }) => {
 });
 
 test.describe("HOST-UI: unknown is not zero", () => {
-  test("a count the fleet has not determined shows unknown in the list, never zero", async ({ page }) => {
+  test("a count the fleet has not determined shows as a dash in the list, never zero", async ({ page }) => {
     // Two counts on this row can be undetermined, and the claim is the same
     // for both: the update count, which a host has none of before its first
     // package read, and the security count, which the arch and rhel tooling
@@ -26,49 +26,55 @@ test.describe("HOST-UI: unknown is not zero", () => {
     const host = noUpdates ?? noSecurity;
     test.skip(!host, absent(
       "every host reports both an update count and a security count, so the list has no undetermined number to show"));
-    const column = noUpdates ? "updates" : "security";
+    const column = noUpdates ? "Updates" : "Security updates";
 
     const table = await openHostList(page);
-    if (column === "security") {
-      // The security column is not on the screen by default; the operator
-      // turns it on, and so does the test.
-      await page.getByTestId("column-chooser").click();
-      await page.getByRole("group", { name: "Columns" }).getByLabel("Security updates").check();
-      await page.keyboard.press("Escape");
+    if (column === "Security updates") {
+      // The security column starts folded away; the operator unfolds it
+      // from the chooser, and so does the test.
+      await page.getByTestId("hosts-columns").click();
+      await page.locator(".fl-columns-list").getByRole("checkbox", { name: "Security updates" }).check();
+      await page.getByTestId("hosts-columns").click();
     }
-    const rowOf = (name: string) =>
-      table.getByRole("row").filter({ has: page.getByRole("link", { name, exact: true }) });
-    const row = rowOf((host as Host).hostname);
-    await expect(row).toHaveCount(1);
-    const cell = row.locator(`td[data-column="${column}"]`);
+    const row = (name: string) => table.locator(`tr[data-testid="host-${name}"]`);
+    const target = row((host as Host).hostname);
+    await expect(target).toHaveCount(1);
+
+    /* The panel being replaced wrote the word "unknown" into the cell; this
+       one writes an em dash in the faint colour it uses for every value
+       nobody has. The claim the document makes is the one kept here: an
+       undetermined count is not a nought and is not drawn as a number. */
+    const cell = await cellOf(table, target, column);
     await expect(cell).toBeVisible();
-    await expect(cell.locator(".ui-pill.ui-unknown")).toHaveText("unknown");
+    await expect(cell).toHaveText("—");
     await expect(cell).not.toHaveText(/^\s*0\s*$/);
 
-    // A determined count in the same column is the number, never the badge
-    // that says the count is unknown.
+    // A determined count in the same column is the number, never the dash.
     const known = hosts.find((entry) =>
-      typeof (column === "updates" ? entry.pending_updates : entry.pending_security_updates) === "number");
+      typeof (column === "Updates" ? entry.pending_updates : entry.pending_security_updates) === "number");
     expect(known, `no host reports a ${column} count, so the two cannot be told apart`).toBeTruthy();
-    const knownCell = rowOf((known as Host).hostname).locator(`td[data-column="${column}"]`);
-    await expect(knownCell.locator(".ui-pill.ui-unknown")).toHaveCount(0);
+    const knownCell = await cellOf(table, row((known as Host).hostname), column);
+    await expect(knownCell).not.toHaveText("—");
     await expect(knownCell).toContainText(
-      String(column === "updates" ? (known as Host).pending_updates : (known as Host).pending_security_updates));
+      String(column === "Updates" ? (known as Host).pending_updates : (known as Host).pending_security_updates));
   });
 
-  test("the overview shows undetermined counts as dashes and badges, not zeros", async ({ page }) => {
+  test("the overview shows undetermined counts as dashes, not zeros", async ({ page }) => {
     const host = hosts[0];
     await page.goto(`/hosts/${host.id}/overview`);
-    await expect(page.locator(".ui-sectionhead").getByRole("heading", { name: "Overview" })).toBeVisible();
+    await expect(page.locator(".fl-head-title").first()).toContainText(host.hostname);
 
-    // The attention bar of the host: a null count from the API is a dash
-    // on the segment, a number is that number.
-    const attention = page.getByTestId("status-bar").filter({ hasText: "Updates waiting" });
-    const updates = attention.getByRole("listitem").filter({ hasText: "Updates waiting" }).getByTestId("status-bar-value");
+    // What needs attention on this host: a null count from the API is a
+    // dash on the row and says it was not counted; a number is that number.
+    const attention = card(page, "Needs attention");
+    await expect(attention).toBeVisible();
+    const updates = attention.locator(".fl-needs-row").filter({ hasText: "Updates waiting" });
+    await expect(updates).toHaveCount(1);
     if (host.pending_updates === null) {
-      await expect(updates).toHaveText("—");
+      await expect(updates.locator(".fl-needs-count")).toHaveText("—");
+      await expect(updates).toContainText("not counted");
     } else {
-      await expect(updates).toHaveText(String(host.pending_updates));
+      await expect(updates.locator(".fl-needs-count")).toHaveText(String(host.pending_updates));
     }
   });
 });
@@ -82,26 +88,31 @@ test.describe("HOST-UI: a change asks before it runs", () => {
     });
 
     await page.goto(`/hosts/${host.id}/power`);
-    const header = page.locator(".ui-sectionhead").getByRole("heading", { name: "Power", exact: true });
+    await expect(page.locator(".fl-head-title").first()).toContainText(host.hostname);
+    const reboot = page.getByTestId("reboot");
     const unreported = page.getByText("This host has not reported its boot state yet.");
-    await expect(header.or(unreported).first()).toBeVisible();
+    await expect(reboot.or(unreported).first()).toBeVisible();
     test.skip(await unreported.isVisible(), absent(
       `${host.hostname} has not reported its boot state, so the power module offers no action to confirm`));
 
-    await expect(page.getByTestId("target-confirmation")).toHaveCount(0);
-    await page.getByRole("button", { name: "Reboot", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await reboot.click();
 
-    const confirmation = page.getByTestId("target-confirmation");
+    // The question is a dialog now rather than a card below the button,
+    // and it carries the same three things: what it does, which machine,
+    // and the two answers it will not go without.
+    const confirmation = page.getByRole("dialog", { name: "Reboot host" });
     await expect(confirmation).toBeVisible();
-    await expect(confirmation.getByRole("heading", { name: "Reboot host" })).toBeVisible();
     await expect(confirmation).toContainText(`Target: ${host.hostname}`);
     await expect(confirmation).toContainText(`${host.site} / ${host.environment}`);
     await expect(confirmation.getByText("Type the hostname to confirm:")).toBeVisible();
+    await expect(confirmation.getByTestId("confirm-reason")).toBeVisible();
+    await expect(confirmation.getByTestId("confirm-target")).toBeVisible();
 
     // The confirming button stays off until the reason and the hostname
     // are typed; nothing is typed here.
-    await expect(confirmation.getByRole("button", { name: "Reboot host" })).toBeDisabled();
-    await confirmation.getByRole("button", { name: "Cancel" }).click();
+    await expect(confirmation.getByTestId("confirm-order")).toBeDisabled();
+    await confirmation.getByTestId("confirm-cancel").click();
     await expect(confirmation).toHaveCount(0);
 
     expect(posted, "a request that would change the host was sent").toEqual([]);
@@ -110,45 +121,75 @@ test.describe("HOST-UI: a change asks before it runs", () => {
   test("a shutdown needs a reason before its button is even enabled", async ({ page }) => {
     const host = hostWith(hosts, "systemd") ?? hosts[0];
     await page.goto(`/hosts/${host.id}/power`);
-    const header = page.locator(".ui-sectionhead").getByRole("heading", { name: "Power", exact: true });
+    const shutdown = page.getByTestId("shutdown");
     const unreported = page.getByText("This host has not reported its boot state yet.");
-    await expect(header.or(unreported).first()).toBeVisible();
+    await expect(shutdown.or(unreported).first()).toBeVisible();
     test.skip(await unreported.isVisible(), absent(
       `${host.hostname} has not reported its boot state, so the shutdown button is not on the page`));
 
-    await expect(page.getByRole("button", { name: "Shut down", exact: true })).toBeDisabled();
-    await expect(page.getByTestId("target-confirmation")).toHaveCount(0);
+    await expect(shutdown).toBeDisabled();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    // The reason is asked for on the page, before the confirmation, and
+    // the button answers to it.
+    await page.getByTestId("shutdown-reason").fill("disk replacement, ticket 1234");
+    await expect(shutdown).toBeEnabled();
   });
 });
 
 test.describe("HOST-UI: source and freshness", () => {
-  test("a module page says where its data came from and when it was observed", async ({ page }) => {
+  test("the overview says where its data came from and when it was observed", async ({ page }) => {
     const host = hosts.find((entry) => entry.connection_state === "online") ?? hosts[0];
     await page.goto(`/hosts/${host.id}/overview`);
-    await expect(page.locator(".ui-sectionhead").getByRole("heading", { name: "Overview" })).toBeVisible();
+    await expect(page.locator(".fl-head-title").first()).toContainText(host.hostname);
 
-    const freshness = page.getByTestId("module-freshness");
-    await expect(freshness).toBeVisible();
-    await expect(freshness).toHaveText(/Source: .+, revision \S+, observed/);
-    // The time is relative on the line and absolute on hover.
-    const time = freshness.locator("span[title]");
-    await expect(time).toHaveCount(1);
-    await expect(time).not.toBeEmpty();
-    await expect(time).toHaveAttribute("title", /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
-    await expect(time).toHaveText(/ago$|in a moment/);
+    /* The line used to stand under every module's own heading with a
+       testid of its own. It is the foot of the container whose facts it
+       vouches for now - which is where a reader looks for it - and it
+       still names all three: the source, the revision and when the
+       machine was observed. The absolute time on hover went with the
+       move: the line is plain text. */
+    const system = card(page, "System");
+    await expect(system).toBeVisible();
+    const foot = system.locator(".fl-card-foot");
+    // The line arrives with the module read; a host that has never sent
+    // one has nothing to vouch for its facts and the claim does not apply.
+    const said = await foot.count() > 0
+      || await foot.isVisible({ timeout: 15_000 }).catch(() => false);
+    test.skip(!said, absent(`${host.hostname} has not reported its system module`));
+    await expect(foot).toHaveText(/Source: .+, revision \S+, observed .+/);
   });
 
   test("the host header carries the state, the address with its origin and the last report", async ({ page }) => {
     const host = hosts[0];
     await page.goto(`/hosts/${host.id}/overview`);
-    const header = page.locator(".ui-hosthead");
+    const header = page.locator(".fl-head").first();
     await expect(header).toBeVisible();
-    await expect(header.locator(".ui-pill").first()).toHaveText(host.connection_state);
-    await expect(header.getByTitle("site / environment")).toHaveText(`${host.site} / ${host.environment}`);
-    await expect(header.getByTitle("last seen")).toContainText("seen");
+    await expect(header.locator(".fl-head-title")).toContainText(host.hostname);
+    const lead = header.locator(".fl-head-lead");
+    await expect(lead.locator(".fl-pill").first()).toHaveText(host.connection_state);
+    await expect(lead.locator("[title='site / environment']")).toHaveText(`${host.site} / ${host.environment}`);
+    await expect(lead.locator("[title='last seen']")).toContainText("seen");
     // The address chip names its origin (session, agent, manual) or says
     // the address is unknown; a bare address would hide how it was learnt.
-    const address = header.locator(".ui-tag").first().or(header.getByText("address unknown"));
-    await expect(address.first()).toBeVisible();
+    const source = lead.getByTestId("address-source");
+    const unknown = lead.getByText("address unknown");
+    await expect(source.or(unknown).first()).toBeVisible();
+    if (await source.count() > 0) {
+      expect(["session", "agent", "manual", "unknown"]).toContain(((await source.textContent()) ?? "").trim());
+    }
   });
 });
+
+/**
+ * The cell of a row under a named column.
+ *
+ * The kit's table draws no column name on its cells, so the column is
+ * found once in the head - where a sortable heading carries its label
+ * plus an arrow - and the cell is the one at that place in the row.
+ */
+async function cellOf(table: Locator, row: Locator, column: string): Promise<Locator> {
+  const heads = await table.locator("thead th").allTextContents();
+  const at = heads.findIndex((text) => text.replace(/[↑↓↕⇅▲▼]/g, "").trim() === column);
+  expect(at, `the list has no "${column}" column; it drew ${JSON.stringify(heads)}`).toBeGreaterThanOrEqual(0);
+  return row.locator("td").nth(at);
+}

@@ -19,6 +19,7 @@ import type { IconName } from "../components/icons";
 import type { Host, Whoami } from "../lib/types";
 import { Icon } from "../components/icons";
 import { LogoMark } from "../components/Logo";
+import { hostTitle, pageTitle, useDocumentTitle } from "../lib/title";
 import { useT } from "../i18n";
 import { Pill, Problem, toneClass, type Tone } from "./kit";
 
@@ -85,6 +86,14 @@ export function Shell({ trail, face, children }: { trail: Trail; face?: Face; ch
   // The drawer closes behind the reader: a tap on a place is an answer to
   // "where to", and the panel that answered it should not stay in the way.
   useEffect(() => { setDrawer(false); }, [location.pathname]);
+
+  // The tab says where the reader is. A row of tabs all reading
+  // "Flotestro" is a row nobody can tell apart, and the panel being
+  // replaced named the machine and the module in it; this one had
+  // stopped naming anything at all.
+  useDocumentTitle(trail.host
+    ? hostTitle(trail.host, trail.module ? t(trail.module) : "")
+    : pageTitle(t(trail.section)));
 
   const me = useQuery({
     queryKey: ["whoami"],
