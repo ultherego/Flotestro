@@ -112,6 +112,16 @@ export function card(page: Page, title: string) {
   return page.locator(".fl-card").filter({ has: page.locator(".fl-card-title", { hasText: exact(title) }) });
 }
 
+/**
+ * A form of a screen by its title.
+ *
+ * A form is not a container: it stands on a face of its own, with its name
+ * in `.fl-form-title` and its buttons in `.fl-form-foot`.
+ */
+export function formOf(page: Page, title: string) {
+  return page.locator("form.fl-form").filter({ has: page.locator(".fl-form-title", { hasText: exact(title) }) });
+}
+
 /** Opens the user menu at the foot of the rail and returns it. */
 export async function openUserMenu(page: Page) {
   await page.getByTestId("user").click();
@@ -139,8 +149,13 @@ export async function openHostList(page: Page) {
  * as it used to - what changed is where the sentence lives, not whether
  * the panel says it.
  */
-export async function openModule(page: Page, host: Host, segment: string, name: string): Promise<string | null> {
-  await page.goto(`/hosts/${host.id}/${segment}`);
+export async function openModule(
+  page: Page, host: Host, segment: string, name: string, tab?: string,
+): Promise<string | null> {
+  /* A module's content is behind sub-tabs kept in the address, so a reader
+     following a link lands on one; the first tab is what a bare address
+     opens, and `tab` names any other. */
+  await page.goto(`/hosts/${host.id}/${segment}${tab ? `?tab=${tab}` : ""}`);
   // The machine's own head carries its name whichever module is open; it
   // is the one thing on the page that means "this host has loaded".
   await expect(page.locator(".fl-head-title").first()).toContainText(host.hostname, { timeout: 30_000 });
@@ -211,4 +226,14 @@ export async function expectBanded(band: Locator) {
   for (const value of await values.all()) {
     await expect(value).toHaveText(/^\d+$/);
   }
+}
+
+/**
+ * Opens a sub-tab of the screen by its name, as a reader clicking it would,
+ * and waits for it to be the selected one.
+ */
+export async function openTab(page: Page, name: string | RegExp) {
+  const tab = page.getByRole("tab", { name, exact: typeof name === "string" });
+  await tab.click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
 }

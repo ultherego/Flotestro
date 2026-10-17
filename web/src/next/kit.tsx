@@ -488,13 +488,15 @@ export function Problem({ children }: { children: ReactNode }) {
  * the one a bare address lands on, and a name nobody serves lands there
  * too rather than drawing nothing.
  */
-export function useTab<T extends string>(names: readonly T[]): [T, (next: T) => void] {
+export function useTab<T extends string>(names: readonly T[], param = "tab"): [T, (next: T) => void] {
   const [address, setAddress] = useSearchParams();
-  const asked = address.get("tab") ?? "";
+  const asked = address.get(param) ?? "";
   const open = (names as readonly string[]).includes(asked) ? asked as T : names[0];
   const go = (next: T) => {
     const after = new URLSearchParams(address);
-    if (next === names[0]) after.delete("tab"); else after.set("tab", next);
+    if (next === names[0]) after.delete(param); else after.set(param, next);
+    // Another area has other tabs: the inner choice does not carry over.
+    if (param !== "tab") after.delete("tab");
     setAddress(after, { replace: true });
   };
   return [open, go];
@@ -2147,7 +2149,7 @@ export function Copy({ value, title, testId }: {
   return (
     <button
       type="button"
-      className="fl-plain"
+      className="fl-plain fl-copy"
       onClick={() => { void take(); }}
       title={title ?? value}
       data-testid={testId}

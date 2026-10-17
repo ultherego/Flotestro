@@ -204,6 +204,9 @@ function ValueField({ label, value, onChange, testId }: {
 /** The sub-tabs of the store: what is in it, and what goes into it. */
 const SECRET_TABS = ["secrets", "new"] as const;
 
+/** The sub-tabs of one secret: what it is, and the versions it has had. */
+const ONE_SECRET_TABS = ["secret", "versions"] as const;
+
 /** What the store is doing beside the list; one thing at a time. */
 type Aside =
   | { kind: "create" }
@@ -685,6 +688,7 @@ function RetireSecret({ secret, onDone, onClose }: {
  */
 function OneSecret({ name }: { name: string }) {
   const t = useT();
+  const [tab, goTab] = useTab(ONE_SECRET_TABS);
   const queryClient = useQueryClient();
   const permissions = usePermissions();
   const canDestroy = permissions.has(SECRET_DESTROY_PERMISSION);
@@ -793,7 +797,17 @@ function OneSecret({ name }: { name: string }) {
         />
       </Kpis>
 
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "secret", label: t("Secret") },
+          { value: "versions", label: t("Versions") },
+        ]}
+      />
+
       <Grid>
+        {tab === "secret" && (<>
         <Card
           span={6}
           title={t("Secret")}
@@ -836,6 +850,9 @@ function OneSecret({ name }: { name: string }) {
           </Stack>
         </Card>
 
+        </>)}
+
+        {tab === "versions" && (
         <Card
           span={12}
           title={t("Versions")}
@@ -893,6 +910,7 @@ function OneSecret({ name }: { name: string }) {
             ]}
           />
         </Card>
+        )}
       </Grid>
 
       {pending && (

@@ -1,3 +1,6 @@
+import { Access } from "./Access";
+import { Teams } from "./Teams";
+import { Notifications } from "./Notifications";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../lib/api";
@@ -12,7 +15,7 @@ import { Board } from "../Board";
 import { CertificateAuthority, CertificateAuthorityWarning } from "./CertificateAuthority";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Bones, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Form, Note, Pill, Problem, Screen, stacked,
+  Banner, Bones, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Form, Note, Pill, Problem, Screen, Stack, stacked, Tabs, Toolbar, useTab,
 } from "../kit";
 
 /**
@@ -94,6 +97,9 @@ export const TABS: Section[] = [
 
 export type TabKey = string;
 
+/** The sections of this screen that CHANGE something; a sign-in sees those it may read. */
+type SettingsTab = "monitoring" | "address" | "authority";
+
 /**
  * Where an address naming a tab lands.
  *
@@ -119,18 +125,18 @@ export function Settings() {
   return (
     <Screen
       title={t("Settings")}
-      lead={t("Everything this installation is configured with.")}
+      lead={t("Everything that can be changed in this installation.")}
       icon="settings"
       help={
         <>
           <p>{t("What the panel stores is set here and takes effect without a restart: who may sign in and what they hold, the retentions, the address the agents dial, the channels, the budgets and the policies.")}</p>
           <p>{t("Your own preferences - the theme, your sessions and what your sign-in carries - are under your name at the top right.")}</p>
-          <p>{t("Under General, below those, are the values the process was started with. They come from the deployment and are read when the panel starts, so a change to them needs a restart.")}</p>
+          <p>{t("The values the process was started with are read-only and live under Status, because nothing here can change them: they come from the deployment and need a restart.")}</p>
           <p>{t("A tab is here only if this sign-in may read what is inside it.")}</p>
         </>
       }
     >
-      <General permissions={permissions} />
+      <Areas permissions={permissions} />
     </Screen>
   );
 }
@@ -143,36 +149,47 @@ export function Settings() {
  * and then leads to where it is done.
  */
 
+/* ---------------------------------------------------------------- areas */
+
+/**
+ * Everything that is changed lives here, one area to a tab: who may sign
+ * in, the teams, where the panel sends what it has to say, and what the
+ * installation itself stores. Each area keeps its own sub-tabs, so a form
+ * is never beside a reading it does not belong to.
+ */
+function Areas({ permissions }: { permissions: Set<string> }) {
+  const t = useT();
+  const areas: { key: string; label: string }[] = [
+    ...(permissions.has("principal.manage") ? [{ key: "access", label: "Users and access" }] : []),
+    { key: "teams", label: "Teams" },
+    ...(permissions.has("notification.read") ? [{ key: "notifications", label: "Notifications" }] : []),
+    { key: "installation", label: "Installation" },
+  ];
+  const [area, goArea] = useTab(areas.map((one) => one.key), "area");
+  return (
+    <>
+      <Tabs
+        value={area}
+        onChange={goArea}
+        tabs={areas.map((one) => ({ value: one.key, label: t(one.label) }))}
+      />
+      {area === "access" && <Access />}
+      {area === "teams" && <Teams />}
+      {area === "notifications" && <Notifications />}
+      {area === "installation" && <Installation permissions={permissions} />}
+    </>
+  );
+}
+
 /* --------------------------------------------------------------- general */
 
 /**
- * The panel's own settings, and under them the values it was started with.
- *
- * The two are kept apart on purpose and labelled: the first take effect as
- * soon as they are stored, the second need the deployment changed and the
- * process restarted.
+ * What can be changed here, and only that: the retention of what the hosts
+ * send, the address the agents dial, and the authority their certificates
+ * come from. Each takes effect as soon as it is stored.
  */
-function General({ permissions }: { permissions: Set<string> }) {
+function Installation({ permissions }: { permissions: Set<string> }) {
   const t = useT();
-  const { data, error } = useQuery({
-    queryKey: ["settings"],
-    queryFn: () => api.get<SettingsView>("/api/v1/settings"),
-    retry: false,
-  });
-
-  // What somebody is looking for. A settings screen is read with a name in
-  // mind - "where is the session timeout" - and the way to answer that is a
-  // search, not nine open cards to scan.
-  const [query, setQuery] = useState("");
-  const needle = query.trim().toLowerCase();
-  const areas = (data?.areas ?? []).map((area) => ({
-    area,
-    facts: needle === ""
-      ? area.facts
-      : area.facts.filter((fact) =>
-          fact.key.toLowerCase().includes(needle)
-          || t(FACT_LABELS[fact.key] ?? fact.key).toLowerCase().includes(needle)),
-  })).filter(({ area, facts }) => needle === "" || facts.length > 0 || t(area.title).toLowerCase().includes(needle));
 
   const mayReadAddress = permissions.has("settings.read") || permissions.has("principal.manage");
   // The fleet CA is the root of trust of the whole installation, so the
@@ -189,77 +206,118 @@ function General({ permissions }: { permissions: Set<string> }) {
   // cell of the grid - a hand's width of empty floor across the screen.
   const retention = useMonitoringSettings();
 
+  // The tabs a sign-in may open. A tab is drawn only for one that may read
+  // what is inside it, and a panel without the monitoring has no retention.
+  const open: { key: SettingsTab; label: string }[] = [
+    ...(!retention.error ? [{ key: "monitoring" as const, label: "Monitoring" }] : []),
+    ...(mayReadAddress ? [{ key: "address" as const, label: "Address" }] : []),
+    ...(mayReadCA ? [{ key: "authority" as const, label: "Certificate authority" }] : []),
+  ];
+  const [tab, goTab] = useTab(open.map((one) => one.key));
+  if (open.length === 0) {
+    return <Card><Empty icon="settings">{t("There is nothing here this sign-in may change.")}</Empty></Card>;
+  }
+
   return (
-    <Board
-      screen={SETTINGS_SCREEN}
-      catalogue={settingsCatalogue(data?.areas ?? [])}
-      /* What has to be read before the settings are: the read that
-         failed, and the search nothing answered. Neither is a container
-         somebody arranges. */
-      notices={stacked(
-        error ? <Problem>{String(error)}</Problem> : null,
-        /* The element is only made when there is something to say: an
-           element that renders null is still something to stack, and the
-           screen would open with a band of empty floor across it. */
+    <>
+      {stacked(
+        // A refused change to the trust set is the section's own answer and
+        // stands above whatever tab is open: a banner is not a container.
         caWarning
           ? <CertificateAuthorityWarning error={caWarning} close={() => setCaWarning(null)} />
           : null,
-        data && areas.length === 0
-          ? <Card><Empty icon="search">{t("No setting of that name.")}</Empty></Card>
-          : null,
       )}
-      drawn={{
-        retention: !retention.error && <MonitoringRetention />,
 
-        address: mayReadAddress && (
-          <Card
-            title={t("Advertised address")}
-            note={t("The address the agents dial to reach this panel.")}
-          >
-            <AdvertisedAddress mayConfirm={permissions.has("settings.advertise.write")} />
-          </Card>
-        ),
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={open.map((one) => ({ value: one.key, label: t(one.label) }))}
+      />
 
-        fleet_ca: mayReadCA && (
+      {tab === "monitoring" && <Stack><MonitoringRetention /></Stack>}
+
+      {tab === "address" && (
+        <AdvertisedAddress mayConfirm={permissions.has("settings.advertise.write")} />
+      )}
+
+      {tab === "authority" && (
+        <Stack>
           <CertificateAuthority
             mayRotate={permissions.has("pki.rotate")}
             reportError={setCaWarning}
           />
-        ),
+        </Stack>
+      )}
 
-        started_with: (
-          <Card
-            title={t("What the process was started with")}
-            note={t("Read at start, changed where the deployment is defined.")}
-            tools={
-              <Find
-                value={query}
-                onChange={setQuery}
-                placeholder={t("Find a setting")}
-                testId="settings-search"
-              />
-            }
-          >
-            {!data && !error && <Bones rows={2} />}
-          </Card>
-        ),
+    </>
+  );
+}
 
-        /* One container per area of the configuration, as the screen
-           being replaced had: which of them comes first belongs to the
-           installation. An area the search narrowed away is not drawn,
-           so it keeps no cell either. */
-        ...Object.fromEntries(areas.map(({ area, facts }) => [
-          areaKey(area.key),
-          <Card
-            key={area.key}
-            title={t(area.title)}
-            note={facts.length === 1 ? t("{n} value", { n: facts.length }) : t("{n} values", { n: facts.length })}
-          >
-            <AreaFacts area={area} facts={facts} />
-          </Card>,
-        ])),
-      }}
-    />
+/**
+ * What the process was started with, read-only.
+ *
+ * It was the lower half of the settings screen, and the owner's words were
+ * that most of that screen was showing information, not something one could
+ * change - which is true: these come from the deployment and need a restart,
+ * so no control on this panel can touch them. Information about the
+ * installation belongs with its condition, under Status.
+ */
+export function Configuration() {
+  const t = useT();
+  const { data, error } = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => api.get<SettingsView>("/api/v1/settings"),
+    retry: false,
+  });
+  // What somebody is looking for. A settings screen is read with a name in
+  // mind - "where is the session timeout" - and the way to answer that is a
+  // search, not nine open cards to scan.
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLowerCase();
+  const areas = (data?.areas ?? []).map((area) => ({
+    area,
+    facts: needle === ""
+      ? area.facts
+      : area.facts.filter((fact) =>
+          fact.key.toLowerCase().includes(needle)
+          || t(FACT_LABELS[fact.key] ?? fact.key).toLowerCase().includes(needle)),
+  })).filter(({ area, facts }) => needle === "" || facts.length > 0 || t(area.title).toLowerCase().includes(needle));
+
+
+  return (
+    <>
+      {error ? <Problem>{String(error)}</Problem> : null}
+      <>
+          <Toolbar>
+            <Find
+              value={query}
+              onChange={setQuery}
+              placeholder={t("Find a setting")}
+              testId="settings-search"
+            />
+          </Toolbar>
+          {data && areas.length === 0 && (
+            <Card><Empty icon="search">{t("No setting of that name.")}</Empty></Card>
+          )}
+          {!data && !error && <Bones rows={3} />}
+          {/* One container per area of the configuration: these are readings,
+              so they are the one place on this screen that is a board. */}
+          <Board
+            screen={SETTINGS_SCREEN}
+            catalogue={settingsCatalogue(data?.areas ?? [])}
+            drawn={Object.fromEntries(areas.map(({ area, facts }) => [
+              areaKey(area.key),
+              <Card
+                key={area.key}
+                title={t(area.title)}
+                note={facts.length === 1 ? t("{n} value", { n: facts.length }) : t("{n} values", { n: facts.length })}
+              >
+                <AreaFacts area={area} facts={facts} />
+              </Card>,
+            ]))}
+          />
+      </>
+    </>
   );
 }
 
@@ -811,6 +869,11 @@ function AdvertisedAddress({ mayConfirm }: { mayConfirm: boolean }) {
 
   return (
     <div data-testid="advertised-address">
+      <Stack>
+      <Card
+        title={t("Advertised address")}
+        note={t("The address the agents dial to reach this panel.")}
+      >
       <Facts>
         <Fact label={t("In force")}>
           <span className="fl-mono">{state.in_force.join(", ")}</span>{" "}
@@ -850,9 +913,32 @@ function AdvertisedAddress({ mayConfirm }: { mayConfirm: boolean }) {
         </Note>
       ) : !mayConfirm ? (
         <Note>{t("Only a platform administrator names the address the fleet connects to; ask one.")}</Note>
-      ) : (
-        <>
-          <Note>{t("The panel read these off its own interfaces. It cannot tell which of them the hosts route to, so none of them is in use until you pick one and confirm it.")}</Note>
+      ) : null}
+      </Card>
+
+      {/* Naming the address is a decision, so it is a form of its own and
+          not the lower half of the card that reads what is in force. */}
+      {!state.environment_in_force && mayConfirm && (
+        <Form
+          title={t("Confirm the address")}
+          note={t("The panel read these off its own interfaces. It cannot tell which of them the hosts route to, so none of them is in use until you pick one and confirm it.")}
+          actions={
+            <>
+              <button
+                type="button"
+                disabled={!ready || confirm.isPending}
+                onClick={() => confirm.mutate(names)}
+                data-testid="advertised-confirm"
+              >
+                {confirm.isPending
+                  ? t("Confirming…")
+                  : names.length > 0
+                    ? t("Confirm {names}", { names: names.join(", ") })
+                    : t("Confirm the address")}
+              </button>
+            </>
+          }
+        >
           <Fields>
             {state.candidates.map((candidate) => (
               <Field key={`${candidate.kind}:${candidate.name}`} label={candidate.name} hint={candidateNote(candidate, t)}>
@@ -901,23 +987,10 @@ function AdvertisedAddress({ mayConfirm }: { mayConfirm: boolean }) {
               </span>
             </Problem>
           )}
-          <Actions>
-            <button
-              type="button"
-              disabled={!ready || confirm.isPending}
-              onClick={() => confirm.mutate(names)}
-              data-testid="advertised-confirm"
-            >
-              {confirm.isPending
-                ? t("Confirming…")
-                : names.length > 0
-                  ? t("Confirm {names}", { names: names.join(", ") })
-                  : t("Confirm the address")}
-            </button>
-          </Actions>
-          <Note>{state.note}</Note>
-        </>
+          {state.note && <Note>{state.note}</Note>}
+        </Form>
       )}
+      </Stack>
 
       {/* What was just confirmed decides this, not the query: the answer to
           the confirmation is the newest word on the address, and the read
@@ -966,16 +1039,12 @@ export const SETTINGS_SCREEN = "next_settings";
 export const SETTINGS: BoardEntry[] = [
   // Six fields, each with the sentence that says what it costs, and the
   // count of what a change would remove under them.
-  { key: "retention", title: "Monitoring retention", width: 12, height: 7 },
   // What is in force, and the interfaces this panel read off itself with
   // a choice between them.
-  { key: "address", title: "Advertised address", width: 12, height: 7 },
   // The trust set, what still hangs on each authority, and the two phases
   // of a rotation. It is the one section on this tab that changes what a
   // thousand machines will accept, so it is given the room to be read.
-  { key: "fleet_ca", title: "Fleet CA", width: 12, height: 7 },
   // A heading and the search under it: the areas themselves are below.
-  { key: "started_with", title: "What the process was started with", width: 12, height: 2 },
 ];
 
 /**

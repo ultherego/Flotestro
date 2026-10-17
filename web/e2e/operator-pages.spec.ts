@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
 import {
-  absent, card, exact, expectHealthy, fleetHosts, head, openModule, permissions, watchErrors, type Host,
+  absent, card, exact, expectHealthy, fleetHosts, formOf, head, openModule, openTab, permissions, watchErrors, type Host,
 } from "./fleet";
 
 /**
@@ -34,7 +34,6 @@ test.describe("jobs", () => {
     const { errors } = watchErrors(page);
     await page.goto("/jobs");
     await expect(head(page, "Jobs")).toBeVisible();
-    await expect(card(page, "State").getByTestId("job-states")).toBeVisible();
 
     // The table or the honest empty state; the host column is a header of
     // its own when there is a table.
@@ -68,6 +67,11 @@ test.describe("jobs", () => {
     await chip.getByRole("button", { name: "Remove the host filter" }).click();
     await expect(chip).toHaveCount(0);
     await expect(page).not.toHaveURL(/[?&]host_id=/);
+
+    // What the list is made of - the states, the day, the operations - is
+    // the second reading, not a row of containers over the list.
+    await openTab(page, "Statistics");
+    await expect(card(page, "State").getByTestId("job-states")).toBeVisible();
     await expectHealthy(page, errors);
   });
 
@@ -82,13 +86,16 @@ test.describe("jobs", () => {
     // One job names itself rather than the section it is in, so it draws
     // its own heading and the operation is what it says.
     await expect(head(page, job.action_type)).toBeVisible();
+    // The job is read in four tabs; the order, with the payload as the host
+    // receives it, is the first.
     await expect(card(page, "The order")).toBeVisible();
-    await expect(card(page, "Decision and result")).toBeVisible();
-    // The payload is the order as the host receives it; the hash of the
-    // job stands beside it.
     const payload = card(page, "Payload");
     await expect(payload).toBeVisible();
     await expect(payload.locator("pre").first()).toBeVisible();
+    // The decision and the hash of the job that stands beside the payload
+    // are the second.
+    await openTab(page, "Result");
+    await expect(card(page, "Decision and result")).toBeVisible();
     await expect(card(page, "Decision and result")).toContainText("Payload hash");
     await expectHealthy(page, errors);
   });
@@ -102,7 +109,6 @@ test.describe("campaigns", () => {
 
     await page.goto("/campaigns");
     await expect(head(page, "Campaigns")).toBeVisible();
-    await expect(card(page, "State").getByTestId("campaign-states")).toBeVisible();
 
     const list = card(page, "Campaigns");
     await expect(list).toBeVisible();
@@ -124,6 +130,10 @@ test.describe("campaigns", () => {
     await expect(page).toHaveURL(/[?&]state=canceled/);
     await expect(list.locator("tbody tr").first().or(list.locator(".fl-empty")).first()).toBeVisible();
     await list.getByTestId("state").selectOption("");
+
+    // The counts by state are the second reading, over the same filter.
+    await openTab(page, "Summary");
+    await expect(card(page, "State").getByTestId("campaign-states")).toBeVisible();
     await expectHealthy(page, errors);
   });
 
@@ -141,6 +151,8 @@ test.describe("campaigns", () => {
       page.getByTestId("schedules").or(schedules.locator(".fl-empty")).first(),
     ).toBeVisible();
 
+    // The calendar is the second reading of the screen, the schedules the first.
+    await openTab(page, "Calendar");
     const calendar = card(page, "Maintenance calendar");
     await expect(calendar).toBeVisible();
     const month = page.getByTestId("calendar");
@@ -192,6 +204,8 @@ test.describe("secrets", () => {
     await expect(page).toHaveURL(new RegExp(`/secrets/${encodeURIComponent(first.name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
     await expect(card(page, "Secret")).toContainText("cannot be read back");
     await expect(card(page, "Reference")).toBeVisible();
+    // The versions are the second reading of one secret.
+    await openTab(page, "Versions");
     await expect(card(page, "Versions")).toBeVisible();
     await expectHealthy(page, errors);
   });
@@ -207,12 +221,14 @@ test.describe("access", () => {
        on it. The old address /access is the one it answers to. */
     await page.goto("/access");
     await expect(head(page, "Users and access")).toBeVisible();
-    await expect(card(page, "Find somebody").getByTestId("filter-subject")).toBeVisible();
+    await expect(formOf(page, "Find somebody").getByTestId("filter-subject")).toBeVisible();
     // The token itself is an identity, so the list is never empty.
     const identities = page.getByTestId("access-rows");
     await expect(identities.locator("tbody tr").first()).toBeVisible();
     await expect(identities.locator("th", { hasText: "Roles and scopes" }).first()).toBeVisible();
 
+    // The catalogue of permissions is a reading of its own, the last tab.
+    await openTab(page, "Permissions");
     const roles = card(page, "What a role may be given");
     await expect(roles).toBeVisible();
     const matrix = page.getByTestId("permission-catalogue");
@@ -229,6 +245,7 @@ test.describe("access", () => {
     for (const cell of await matrix.locator("tbody tr td:first-child").all()) {
       await expect(cell).toContainText("job.");
     }
+    await openTab(page, "Roles");
     await expect(card(page, "Roles of this installation")).toBeVisible();
     await expectHealthy(page, errors);
   });
@@ -283,14 +300,21 @@ test.describe("tags", () => {
 
     await page.goto("/tags");
     await expect(head(page, "Tags")).toBeVisible();
-    await expect(card(page, "How the tags are written").getByTestId("tag-shape")).toBeVisible();
-    await expect(card(page, "By key")).toBeVisible();
     const filter = page.getByTestId("tag-search");
     await expect(filter).toBeVisible();
+
+    // How the tags are written, and the keys with the most values, are the
+    // second reading; the list of tags is the first.
+    const keys = async () => {
+      await openTab(page, "Keys");
+      await expect(card(page, "How the tags are written").getByTestId("tag-shape")).toBeVisible();
+      await expect(card(page, "By key")).toBeVisible();
+    };
 
     const catalogue = card(page, "Tags");
     if (tags.length === 0) {
       await expect(catalogue).toContainText("No host you may read carries a tag.");
+      await keys();
       await expectHealthy(page, errors);
       return;
     }
@@ -301,6 +325,7 @@ test.describe("tags", () => {
     await expect(catalogue).toContainText("No tag matches this.");
     await filter.fill("");
     await expect(table.locator("tbody tr")).toHaveCount(tags.length);
+    await keys();
     await expectHealthy(page, errors);
   });
 });
@@ -314,10 +339,14 @@ test.describe("reports", () => {
     await expect(period).toBeVisible();
     await expect(period.locator("button[aria-pressed='true']")).toHaveCount(1);
 
-    // The campaigns report needs the right to read campaigns; the other
-    // two come with the hosts.
-    const titles = granted.has("campaign.read") ? ["Patch status", "Campaigns", "Compliance"] : ["Patch status", "Compliance"];
-    for (const title of titles) {
+    // One report at a time, each on a tab of its own; the campaigns report
+    // needs the right to read campaigns, so that tab is not offered without
+    // it. The tab and the container it opens are named differently.
+    const reports = granted.has("campaign.read")
+      ? [["Patching", "Patch status"], ["Campaigns", "Campaigns"], ["Compliance", "Compliance"]]
+      : [["Patching", "Patch status"], ["Compliance", "Compliance"]];
+    for (const [tab, title] of reports) {
+      await openTab(page, tab);
       const report = card(page, title);
       await expect(report, `no container for ${title}`).toHaveCount(1);
       // The compliance report carries one export per section; the first
@@ -326,6 +355,7 @@ test.describe("reports", () => {
     }
     // The patch report has settled: a table of hosts, or the reason it
     // could not be drawn.
+    await openTab(page, "Patching");
     const patch = card(page, "Patch status");
     await expect(
       page.getByTestId("patch-hosts").or(patch.locator(".fl-empty, .fl-problem, .fl-note").first()).first(),
@@ -373,8 +403,9 @@ test.describe("status", () => {
     expect(judged + notJudged).toBe(blocks.length);
     await expect(page.getByTestId("kpi-unknown")).toContainText("unknown is not the same as fine");
 
-    // Every part is on the screen at once; each one carries the word its
+    // Every part is on the Components tab, each one carrying the word its
     // verdict reads as - and unknown is not fine.
+    await openTab(page, "Components");
     for (const [name, block] of Object.entries(status.blocks)) {
       if (name === "build") continue;
       const judgedBlock = block as { ok: boolean | null; attention?: string };
@@ -460,25 +491,26 @@ test.describe("unresolved operations", () => {
        whole fleet's counts, so nobody can filter until the fleet looks
        settled. */
     const list = card(page, "Unconfirmed operations");
-    const filter = list.locator(".fl-seg").filter({ hasText: "Did it happen?" }).first();
-    await expect(filter).toBeVisible();
+    await expect(list).toBeVisible();
 
-    await filter.getByRole("button", { name: "Did it hold?" }).click();
-    await expect(filter.getByRole("button", { name: "Did it hold?" })).toHaveAttribute("aria-pressed", "true");
+    // Choosing one question narrows the list to it - each question is a tab
+    // now, rather than a switch in the bar of the list - and the counts
+    // stay the whole fleet's. A list that narrowed its own counter would
+    // let an operator filter until the fleet looked settled.
+    await openTab(page, "Did it hold?");
     await expect(page.getByTestId("count-outcome_unknown").locator(".fl-kpi-value"))
       .toHaveText(String(counts.outcome_unknown_operations));
     for (const question of await list.locator("tbody tr td:nth-child(3)").allTextContents()) {
       expect(question.trim(), "the list filtered to one question shows the other").toBe("Did it hold?");
     }
 
-    await filter.getByRole("button", { name: "Both" }).click();
-    await expect(filter.getByRole("button", { name: "Both" })).toHaveAttribute("aria-pressed", "true");
+    await openTab(page, "All");
     await expectHealthy(page, errors);
   });
 });
 
 test.describe("setup", () => {
-  test("the first-run checklist has a container for every step the server counts", async ({ page, request }) => {
+  test("the first-run checklist has a row for every step the server counts", async ({ page, request }) => {
     test.skip(!granted.has("settings.read") && !granted.has("principal.manage"), absent("the token may not read the checklist (settings.read)"));
     const { errors } = watchErrors(page);
     const response = await request.get("/api/v1/setup");
@@ -493,28 +525,32 @@ test.describe("setup", () => {
 
     await page.goto("/setup");
     await expect(head(page, "First run")).toBeVisible();
-    const cards = page.locator(".fl-card");
-    // The summary container and one per step, numbered in order.
-    await expect(cards).toHaveCount(1 + checklist.steps.length);
-    await expect(cards.first()).toContainText(checklist.complete ? "Every required step is done" : `${checklist.done} of ${checklist.total} required steps done`);
+    // The summary container says how far the list has got.
+    await expect(card(page, checklist.complete ? "Every required step is done" : `${checklist.done} of ${checklist.total} required steps done`)).toBeVisible();
+    // The steps are rows of one table, in order, each with its state in a
+    // word; twelve containers were not a list a reader could take in.
+    const rows = page.getByTestId("setup-steps").locator("tbody tr");
+    await expect(rows).toHaveCount(checklist.steps.length);
     for (let index = 0; index < checklist.steps.length; index += 1) {
-      const step = cards.nth(index + 1);
-      await expect(step.locator(".fl-card-title")).toContainText(`${index + 1}.`);
-      await expect(step.locator(".fl-card-title .fl-pill").first()).toHaveText(/^(Done|To do|Warning|Optional)$/);
-      // Which card is which step is read off the page, not off a table kept
-      // here: the card carries a link to the page the server named for that
-      // step, and a step dealt with on this screen carries none.
-      const away = step.locator(".fl-card-tools a");
-      if (checklist.steps[index].path === "/setup") {
-        await expect(away).toHaveCount(0);
+      const step = checklist.steps[index];
+      const row = page.getByTestId(`step-${step.key}`);
+      await expect(row.getByRole("cell").first()).toContainText(`${index + 1}.`);
+      // The state is the second cell; the first may carry the mark of the next step.
+      await expect(row.getByRole("cell").nth(1).locator(".fl-pill")).toHaveText(/^(Done|To do|Warning|Optional)$/);
+      // Which row is which step is read off the page, not off a table kept
+      // here: the row carries a link to the page the server named for that
+      // step, and a step dealt with on this screen says "here" instead.
+      if (step.path === "/setup") {
+        await expect(page.getByTestId(`go-${step.key}`)).toHaveCount(0);
+        await expect(row).toContainText("here");
       } else {
-        await expect(away).toHaveCount(1);
+        await expect(page.getByTestId(`go-${step.key}`)).toHaveCount(1);
       }
     }
     /* The step to do next is said in a word rather than in a coloured
        frame: the kit colours a state, never a container. */
     const undone = checklist.steps.findIndex((step) => step.state === "undone");
-    await expect(page.locator(".fl-card-title .fl-pill", { hasText: "do this next" }))
+    await expect(page.locator("[data-testid='setup-steps'] .fl-pill", { hasText: "do this next" }))
       .toHaveCount(undone === -1 ? 0 : 1);
     await expectHealthy(page, errors);
   });
@@ -549,8 +585,10 @@ test.describe("notifications", () => {
       await expect(newChannel).toHaveCount(0);
     }
     // The log became a queue: a delivery is a durable row with a state,
-    // and the container says so.
+    // and the container says so. The queue is a tab of its own.
+    await openTab(page, "Queue");
     await expect(card(page, "Delivery queue")).toBeVisible();
+    await expect(card(page, "What the queue is made of").getByTestId("queue-states")).toBeVisible();
     await expectHealthy(page, errors);
   });
 });
@@ -560,17 +598,23 @@ test.describe("profile", () => {
     const { errors } = watchErrors(page);
     await page.goto("/profile");
     await expect(head(page, "My settings")).toBeVisible();
+    // Who the reader is and what they may do are two tabs; the account is
+    // the first, and the permissions the fourth.
     await expect(card(page, "Who you are signed in as")).toBeVisible();
+    await openTab(page, "Permissions");
     await expect(card(page, "What you may do")).toBeVisible();
 
-    const preferences = card(page, "How the panel reads to you");
+    // The preferences are decisions, so they are forms on the Appearance
+    // tab - the look, and how the panel reads - not containers.
+    await openTab(page, "Appearance");
+    const preferences = formOf(page, "How the panel reads to you");
     await expect(preferences).toBeVisible();
     await expect(preferences.getByTestId("zone")).toBeVisible();
     await expect(preferences.getByTestId("page-size-preference")).toBeVisible();
     await expect(preferences.getByTestId("landing")).toBeVisible();
     await expect(preferences.getByTestId("store-preferences")).toBeVisible();
     // The language is chosen where the look is, beside the theme.
-    await expect(card(page, "How the panel looks").getByRole("group", { name: "Language" })).toBeVisible();
+    await expect(formOf(page, "How the panel looks").getByRole("group", { name: "Language" })).toBeVisible();
     // Nothing is typed, nothing is saved: the form is looked at only.
     await expectHealthy(page, errors);
   });
@@ -613,6 +657,15 @@ test.describe("host workspace", () => {
     await page.goto(`/hosts/${host.id}/overview`);
     await expect(page.locator(".fl-head-title").first()).toContainText(host.hostname);
 
+    // The overview is read in five tabs: the notes are on the summary, the
+    // failure domain among the system's facts, and the quarantine door with
+    // the lifecycle.
+    const notes = card(page, "Notes");
+    await expect(notes).toBeVisible();
+    await expect(notes.locator(".fl-card-note")).toContainText("audit trail");
+
+
+    await openTab(page, "System");
     // The failure domain is a fact of the system container: the domain,
     // or the badge that says the host is not placed.
     const domain = card(page, "System").locator(".fl-fact")
@@ -624,10 +677,7 @@ test.describe("host workspace", () => {
       await expect(domain.locator(".fl-pill", { hasText: "not placed" })).toBeVisible();
     }
 
-    const notes = card(page, "Notes");
-    await expect(notes).toBeVisible();
-    await expect(notes.locator(".fl-card-note")).toContainText("audit trail");
-
+    await openTab(page, "Lifecycle");
     // The quarantine button is looked at, never pressed: the door stands
     // for whoever may quarantine a live host, and is absent otherwise.
     const lifecycle = card(page, "Lifecycle");

@@ -6,7 +6,7 @@ import type { Whoami } from "../../lib/types";
 import { useT, type Translate } from "../../i18n";
 import {
   Actions, Banner, Bones, Card, Fact, Facts, Field, Fields, Form, Kpi, Kpis, Note,
-  Pill, Problem, Screen, Table, type Tone,
+  Pill, Problem, Screen, Table, Tabs, useTab, type Tone,
 } from "../kit";
 
 /**
@@ -19,6 +19,9 @@ import {
  * length of its window, so it goes from the answer that minted it
  * straight into the fetch and nowhere else.
  */
+
+/** The sub-tabs: what is held, and asking for more. */
+const SUPPORT_TABS = ["bundles", "request"] as const;
 
 export type SupportBundle = {
   id: string;
@@ -82,6 +85,7 @@ export function bundleState(bundle: SupportBundle, t: Translate): { tone: Tone; 
 
 export function Support() {
   const t = useT();
+  const [tab, goTab] = useTab(SUPPORT_TABS);
   const queryClient = useQueryClient();
 
   const whoami = useQuery({
@@ -196,6 +200,17 @@ export function Support() {
         />
       </Kpis>
 
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "bundles", label: t("Bundles") },
+          { value: "request", label: t("Request") },
+        ]}
+      />
+
+      {tab === "request" && (
+        <>
       {/* Asking for a bundle is a decision, so it stands on a form of its
           own above the table it adds a row to - not in a container, which
           is where the panel read as a wall of identical rectangles. */}
@@ -233,7 +248,10 @@ export function Support() {
       {!canCreate && (
         <Note>{t("Asking for a bundle requires the support.bundle.create permission.")}</Note>
       )}
+        </>
+      )}
 
+      {tab === "bundles" && (
       <Card
         title={t("The bundles of this panel")}
         note={t("Newest first, as the panel assembled them.")}
@@ -327,6 +345,7 @@ export function Support() {
           />
         )}
       </Card>
+      )}
     </Screen>
   );
 }

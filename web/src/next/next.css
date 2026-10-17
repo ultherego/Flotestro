@@ -816,6 +816,11 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  /* What stands in a card keeps its distance from what stands beside it.
+     A band, a chart and a table put into one card touched each other with
+     nothing between - the owner's words were that they were stuck to one
+     another - because the body had padding and no gap. */
+  gap: var(--s4);
   padding: var(--s4) var(--s5) var(--s5);
 }
 
@@ -1679,6 +1684,23 @@
   font-family: var(--font-mono);
 }
 
+/* A copy button that stands among tags is one of them: the same height,
+   the same mono label, the same border. It was a 30px button with a
+   different font between 22px tags, which read as a thing that did not
+   belong to the row - and, on a panel without a secure context, did
+   nothing when pressed. */
+.fl-app .fl-copy {
+  height: auto;
+  padding: 1px var(--s2);
+  gap: var(--s1);
+  background: var(--bg-sunken);
+  font-family: var(--font-mono);
+  font-size: var(--t-label);
+  color: var(--text-muted);
+}
+.fl-app .fl-copy svg { width: 12px; height: 12px; }
+.fl-app .fl-copy:hover { color: var(--text); background: var(--bg-hover); }
+
 /* The words a screen may use, and the only ones. */
 .fl-app .fl-note { font-size: var(--t-small); color: var(--text-faint); }
 .fl-app .fl-faint { color: var(--text-faint); }
@@ -1984,6 +2006,8 @@
 }
 
 .fl-app .fl-tab {
+  flex: none;
+  white-space: nowrap;
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -2224,10 +2248,11 @@
   grid-auto-flow: row dense;
 }
 .fl-app .fl-placed.fl-flowing .fl-held { height: auto; }
-.fl-app .fl-placed.fl-flowing .fl-held > * { height: 100%; min-height: 0; }
 .fl-app .fl-placed.fl-flowing .fl-card-body { overflow: visible; }
 .fl-app .fl-held { position: relative; min-width: 0; min-height: 0; }
-.fl-app .fl-held > * { height: 100%; }
+.fl-app .fl-held { display: flex; flex-direction: column; }
+.fl-app .fl-held-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.fl-app .fl-held-body > * { flex: 1 1 auto; min-height: 0; }
 
 /* Below the width where twelfths mean anything, the board stops being a
    grid and becomes one card after another, each as tall as what is in
@@ -2242,7 +2267,7 @@
 @media (max-width: 999px) {
   .fl-app .fl-placed { display: block; }
   .fl-app .fl-held,
-  .fl-app .fl-held > * { height: auto; }
+  .fl-app .fl-held-body > * { height: auto; }
   .fl-app .fl-held + .fl-held { margin-top: var(--fl-gutter); }
   /* Nothing scrolls inside a card that is no longer held to a height. */
   .fl-app .fl-placed .fl-card-body { overflow: visible; }
@@ -2251,57 +2276,74 @@
 /* A notice is a line, not a box the height of its cell. Stretched to
    fill one it read as a tall empty frame with a sentence floating in
    the middle of it. */
-.fl-app .fl-held > .fl-banner,
-.fl-app .fl-held > .fl-problem { height: auto; }
+.fl-app .fl-held-body > .fl-banner,
+.fl-app .fl-held-body > .fl-problem { flex: 0 0 auto; }
 
+/* Arranging: the container as it will be read, under a bar of its own. */
 .fl-app .fl-editing .fl-held {
-  padding-top: 26px;
-  outline: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent);
-  outline-offset: 2px;
+  padding: var(--s2);
+  gap: var(--s2);
+  outline: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 0;
   border-radius: var(--radius-card);
 }
+.fl-app .fl-editing .fl-held-body { pointer-events: none; user-select: none; }
 
-.fl-app .fl-dragging { z-index: 5; }
-.fl-app .fl-dragging > * { box-shadow: var(--fl-lift-high); }
+.fl-app .fl-dragging { z-index: 5; opacity: 0.85; }
+.fl-app .fl-dragging > .fl-held-body { box-shadow: var(--fl-lift-high); }
 .fl-app .fl-holding { user-select: none; cursor: grabbing; }
 
 .fl-app .fl-grip {
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 24px;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: var(--s2);
+  gap: var(--s3);
   padding: var(--s1) var(--s2);
   border-radius: var(--radius-sm);
   background: var(--bg-raised);
   border: 1px solid var(--border-strong);
-  font-size: var(--t-label);
+  font-size: var(--t-small);
   color: var(--text-muted);
+}
+.fl-app .fl-grip-handle {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) 0;
   cursor: grab;
-  z-index: 6;
+  touch-action: none;
 }
+.fl-app .fl-grip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-app .fl-grip-width { flex: 0 0 auto; display: inline-flex; align-items: center; gap: var(--s1); }
+.fl-app .fl-grip-width button { min-width: 28px; height: 28px; padding: 0; }
+.fl-app .fl-grip-size { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; color: var(--text-faint); }
 
-.fl-app .fl-grip-dots { color: var(--text-faint); }
-.fl-app .fl-grip-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fl-app .fl-grip-size { font-variant-numeric: tabular-nums; color: var(--text-faint); }
-
-.fl-app .fl-corner {
+/* The right edge: a strip to pull, not a button the height of the cell. */
+.fl-app .fl-edge {
   position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 0;
-  border-radius: 0 0 var(--radius-card) 0;
-  background: linear-gradient(135deg, transparent 50%, var(--accent) 50%);
-  opacity: 0.7;
-  cursor: nwse-resize;
+  top: 0;
+  bottom: 0;
+  right: -6px;
+  width: 12px;
+  cursor: ew-resize;
+  touch-action: none;
   z-index: 6;
 }
-
-.fl-app .fl-corner:hover { opacity: 1; }
+.fl-app .fl-edge::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  width: 4px;
+  height: 40px;
+  margin-top: -20px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+.fl-app .fl-edge:hover::after { opacity: 1; }
 
 /* What a screen may group inside a card without inventing a layout. */
 .fl-app .fl-zones { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--s4); }
@@ -2319,7 +2361,12 @@
   .fl-app .fl-page { margin-left: 0; }
   .fl-app .fl-rail { transform: translateX(-100%); box-shadow: var(--fl-lift-high); }
   .fl-app .fl-rail.fl-open { transform: none; }
-  .fl-app .fl-head-title { font-size: 24px; }
+  .fl-app .fl-head-title { font-size: 24px; overflow-wrap: anywhere; }
+  /* Actions drop under the name instead of squeezing it to a column. */
+  .fl-app .fl-head { flex-wrap: wrap; }
+  .fl-app .fl-head-text { flex: 1 1 calc(100% - 60px); }
+  .fl-app .fl-head-actions { flex: 1 1 100%; }
+  .fl-app .fl-page { overflow-x: clip; }
   .fl-app .fl-search { flex: 1 1 auto; }
   .fl-app .fl-search-key, .fl-app .fl-crumbs { display: none; }
   .fl-app .fl-user-name { display: none; }
@@ -2853,7 +2900,7 @@
      card after another, each as tall as what is in it. */
   .fl-app .fl-placed { display: block; }
   .fl-app .fl-held,
-  .fl-app .fl-held > * { height: auto; }
+  .fl-app .fl-held-body > * { height: auto; }
   .fl-app .fl-held + .fl-held { margin-top: var(--s5); }
 
   /* Nothing scrolls on paper, and nothing is cut off by a height that

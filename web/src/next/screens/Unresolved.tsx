@@ -15,8 +15,8 @@ import { useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Card, Field, Fields, Find, Kpi, Modal, Note, Pager, Pill, Problem, Seg, Table,
-  Toolbar, TwoLine, type Tone,
+  Card, Field, Fields, Find, Kpi, Modal, Note, Pager, Pill, Problem, Table, Tabs,
+  Toolbar, TwoLine, useTab, type Tone,
 } from "../kit";
 
 /**
@@ -145,13 +145,12 @@ const RULINGS: { value: UnresolvedRulingKind; label: string }[] = [
 export function Unresolved() {
   const t = useT();
   const client = useQueryClient();
-  const [kind, setKind] = useState<UnresolvedKind | "">("");
-  // Which of the three readings to show, or all of them. It narrows inside
-  // the question rather than beside it, so choosing one clears the other
-  // control: two narrowings that overlap would let an operator ask for a
-  // combination that cannot hold anything and read the empty answer as
-  // good news.
-  const [reading, setReading] = useState<ReadingKind | "">("");
+  // Each tab is one question the fleet could not answer, and the server
+  // filter behind it: a question and a reading never overlap, so no
+  // combination of them can hold nothing and be read as good news.
+  const [tab, goTab] = useTab(UNRESOLVED_TABS);
+  const kind: UnresolvedKind | "" = tab === "happen" ? "outcome_unknown" : tab === "hold" ? "applied_unverified" : "";
+  const reading: ReadingKind | "" = tab === "notheld" ? "did_not_hold" : tab === "unreadable" ? "could_not_read" : "";
   const [size, setSize] = useState(50);
   const [page, setPage] = useState(1);
   // What is typed, and what has been asked of the server. Two states on
@@ -198,8 +197,7 @@ export function Unresolved() {
 
   const counts = list.data?.counts;
   const items = list.data?.items ?? [];
-  const showKind = (next: UnresolvedKind | "") => { setKind(next); setReading(""); setPage(1); };
-  const showReading = (next: ReadingKind | "") => { setReading(next); setKind(""); setPage(1); };
+  const open = (next: UnresolvedTab) => { goTab(next); setPage(1); };
 
   /* What the table says when it has no rows. The fleet's state is read
      from the counts and never from the rows in front of the operator: a
@@ -221,6 +219,17 @@ export function Unresolved() {
 
   return (
     <>
+      <Tabs
+        value={tab}
+        onChange={open}
+        tabs={[
+          { value: "all", label: t("All") },
+          { value: "happen", label: t("Did it happen?") },
+          { value: "hold", label: t("Did it hold?") },
+          { value: "notheld", label: t("Did not hold") },
+          { value: "unreadable", label: t("Could not be read") },
+        ]}
+      />
       <Board screen={UNRESOLVED_SCREEN} catalogue={UNRESOLVED} drawn={{
         happen: (
           <Kpi
@@ -275,30 +284,9 @@ export function Unresolved() {
             ) : undefined}
             foot={<Pager page={page} size={size} total={total} onPage={setPage} onSize={setSize} />}
           >
-            <Toolbar
-              end={
-                <Seg<ReadingKind | "">
-                  value={reading}
-                  onChange={showReading}
-                  options={[
-                    { value: "", label: t("Any reading") },
-                    { value: "did_not_hold", label: t("Did not hold") },
-                    { value: "could_not_read", label: t("Could not be read") },
-                  ]}
-                />
-              }
-            >
+            <Toolbar>
               <Find value={typed} onChange={setTyped} placeholder={t("a host or an operation")}
                     testId="unresolved-search" />
-              <Seg<UnresolvedKind | "">
-                value={kind}
-                onChange={showKind}
-                options={[
-                  { value: "", label: t("Both") },
-                  { value: "outcome_unknown", label: t("Did it happen?") },
-                  { value: "applied_unverified", label: t("Did it hold?") },
-                ]}
-              />
             </Toolbar>
             <Table
               rows={items}
@@ -598,6 +586,9 @@ function BatchRulingForm({ kind, reading, search, total, onClose, onRuled }: {
     </Modal>
   );
 }
+
+const UNRESOLVED_TABS = ["all", "happen", "hold", "notheld", "unreadable"] as const;
+type UnresolvedTab = typeof UNRESOLVED_TABS[number];
 
 export const UNRESOLVED_SCREEN = "next_unresolved";
 

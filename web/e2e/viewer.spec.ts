@@ -89,7 +89,9 @@ test.describe("a viewer sees no mutating control", () => {
 
     // The administrator's session: the unit list is read once, and its
     // rows carry the restart button.
-    const missing = await openModule(page, target, "services", "Services");
+    // The list is the second tab of the module, and so is what the viewer
+    // is shown; both sessions open it by its address.
+    const missing = await openModule(page, target, "services", "Services", "units");
     test.skip(missing !== null, absent(missing ?? ""));
     const unread = page.getByText("This host has not been read yet.");
     await expect(units(page).or(unread).first()).toBeVisible();
@@ -111,7 +113,7 @@ test.describe("a viewer sees no mutating control", () => {
     const context = await viewerContext(browser, baseURL);
     const other = await context.newPage();
     const { errors } = watchErrors(other);
-    await other.goto(`/hosts/${target.id}/services`);
+    await other.goto(`/hosts/${target.id}/services?tab=units`);
     await expect(other.locator(".fl-head-title").first()).toContainText(target.hostname);
     await expect(units(other).locator("tbody tr").first()).toBeVisible();
 
@@ -166,7 +168,7 @@ test.describe("a viewer sees no mutating control", () => {
       // A container of the module, an honest empty state, or the banner
       // that says what the viewer may not do: any of them is a page that
       // settled rather than crashed.
-      const settled = other.locator(".fl-card, .fl-empty, .fl-kpi, .fl-banner");
+      const settled = other.locator(".fl-card, .fl-form, .fl-empty, .fl-kpi, .fl-banner");
       await expect(settled.first(), `${segment} did not settle`).toBeVisible();
       await expectHealthy(other, errors);
     }

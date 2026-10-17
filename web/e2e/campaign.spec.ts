@@ -34,7 +34,9 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   test.skip(await noEngine.count() > 0, absent("this installation has no campaign engine; the wizard is not offered"));
 
   // Step 1: the order.
-  const scope = page.locator(".fl-card").filter({ hasText: /^1\. Scope/ }).first();
+  // The steps are forms (and the eligibility reading a container), each
+  // named by its number and its step.
+  const scope = page.getByRole("heading", { name: "1. Scope", exact: true });
   await expect(scope).toBeVisible();
   const next = page.getByTestId("step-next");
   /* A step the order is not ready for is no longer a disabled tab with
@@ -62,7 +64,7 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   await next.click();
 
   // Step 2: the site.
-  await expect(page.locator(".fl-card").filter({ hasText: /^2\. Targets/ }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "2. Targets", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "by site, environment and OS" })).toHaveAttribute("aria-pressed", "true");
   const siteField = page.getByTestId("target-site");
   await siteField.fill(site);
@@ -76,7 +78,7 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   const count = matchedCount(await matched.textContent());
   expect(count).toBeGreaterThan(0);
   // The sample under the count names hosts of the site.
-  const step = page.locator(".fl-card").filter({ hasText: /^2\. Targets/ }).first();
+  const step = page.locator("form.fl-form").filter({ has: matched });
   const sample = (await step.textContent()) ?? "";
   expect(inSite.some((host) => sample.includes(host.hostname)), `the targets step names no host of ${site}`).toBe(true);
   await expect(page.getByTestId("scope-targets")).toHaveText(/^\d+$/);
@@ -85,15 +87,15 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   // a unit; a host without it stays on the list with its reason.
   await expect(page.getByTestId("step-next")).toBeEnabled();
   await page.getByTestId("step-next").click();
-  await expect(page.locator(".fl-card").filter({ hasText: /^3\. Eligibility/ }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "3. Eligibility", exact: true })).toBeVisible();
 
   // Back leads to the targets with the site still typed, and the tab of
   // the third step brings the operator forward again.
   await page.getByTestId("step-back").click();
-  await expect(page.locator(".fl-card").filter({ hasText: /^2\. Targets/ }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "2. Targets", exact: true })).toBeVisible();
   await expect(siteField).toHaveValue(site);
   await page.getByRole("tab", { name: "3. Eligibility" }).click();
-  await expect(page.locator(".fl-card").filter({ hasText: /^3\. Eligibility/ }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "3. Eligibility", exact: true })).toBeVisible();
 
   const table = page.getByTestId("eligibility");
   const eligibleRow = table.locator("tbody tr").filter({ has: page.locator(".fl-pill.fl-ok", { hasText: "eligible" }) });
@@ -121,7 +123,7 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   // not touched.
   await expect(page.getByTestId("step-next")).toBeEnabled();
   await expect(page.getByRole("tab", { name: "6. Create" })).toBeVisible();
-  await expect(page.locator(".fl-card").filter({ hasText: /^6\. Create/ })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "6. Create", exact: true })).toHaveCount(0);
   expect(writes, "the preview must not write anything").toEqual([]);
   await expectHealthy(page, errors);
 });

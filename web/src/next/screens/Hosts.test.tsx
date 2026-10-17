@@ -598,8 +598,8 @@ describe("the chrome of the list", () => {
 
   it("takes a count in the composition to the hosts it counted", async () => {
     Object.assign(answers, fleet());
-    draw();
-    await waitFor(() => expect(screen.getByTestId("host-agent-arch")).toBeInTheDocument());
+    draw("/hosts?tab=composition");
+    await waitFor(() => expect(screen.getByRole("button", { name: "lab" })).toBeInTheDocument());
     // The composition carries every dimension the old one did; "lab" is a
     // site, and pressing it asks the server for that site alone.
     asked.length = 0;

@@ -4,13 +4,12 @@ import { api } from "../../lib/api";
 import { copyToClipboard } from "../../lib/clipboard";
 import { absoluteTime, bytes, duration, goDuration, relativeTime } from "../../lib/format";
 import { useT } from "../../i18n";
+import { Configuration } from "./Settings";
 import type { Translate } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Band, Banner, Bars, Bones, Card, Chart, Empty, Fact, Facts, Feed, FeedRow, Kpi,
-  Note, Pie, Pill, Problem, Ring, Screen, type Segment, type Series, Squares, Stack, Table,
-  type Tone,
+  Band, Banner, Bars, Bones, Card, Chart, Empty, Fact, Facts, Feed, FeedRow, Kpi, Note, Pie, Pill, Problem, Ring, Screen, Squares, Stack, Table, Tabs, useTab, type Segment, type Series, type Tone,
 } from "../kit";
 
 /**
@@ -229,8 +228,30 @@ export function numberFact(facts: Record<string, unknown> | undefined, key: stri
   return typeof value === "number" ? value : undefined;
 }
 
+/** The three readings of this screen, one at a time. */
+const STATUS_TABS = ["overview", "components", "configuration"] as const;
+type StatusTab = typeof STATUS_TABS[number];
+
+/** The containers that say how the panel is as a whole; every other is a part. */
+const OVERVIEW_KEYS = [
+  "judged", "fine", "wanting", "not_judged", "latency",
+  "division", "squares", "pool", "attention", "since",
+];
+
+/**
+ * Only the containers of the open tab. What is not drawn is left out of the
+ * record, so it keeps no cell either: nothing is hidden by a style.
+ */
+function forStatusTab(tab: StatusTab, record: Record<string, ReactNode>): Record<string, ReactNode> {
+  const wanted = tab === "overview";
+  return Object.fromEntries(
+    Object.entries(record).filter(([key]) => OVERVIEW_KEYS.includes(key) === wanted),
+  );
+}
+
 export function Status() {
   const t = useT();
+  const [tab, goTab] = useTab(STATUS_TABS);
   const { data, error, dataUpdatedAt } = useQuery({
     queryKey: ["status"],
     queryFn: () => api.get<StatusView>("/api/v1/status"),
@@ -320,10 +341,24 @@ export function Status() {
       {!error && !data && <Bones rows={6} />}
 
       {data && (
+        <Tabs
+          value={tab}
+          onChange={goTab}
+          tabs={[
+            { value: "overview", label: t("Overview") },
+            { value: "components", label: t("Components") },
+            { value: "configuration", label: t("Configuration") },
+          ]}
+        />
+      )}
+
+      {data && tab === "configuration" && <Configuration />}
+
+      {data && tab !== "configuration" && (
         <Board
           screen={STATUS_SCREEN}
           catalogue={statusCatalogue(blocks, Boolean(data.blocks.build))}
-          drawn={{
+          drawn={forStatusTab(tab, {
             judged: (
               <Kpi
                 hero
@@ -495,7 +530,7 @@ export function Status() {
               key, <Block key={key} name={key} block={data.blocks[key]} />,
             ])),
             ...(data.blocks.build ? { build: <About block={data.blocks.build} /> } : {}),
-          }}
+          })}
         />
       )}
     </Screen>

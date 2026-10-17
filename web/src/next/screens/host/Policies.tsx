@@ -8,7 +8,7 @@ import { useT } from "../../../i18n";
 import { Board } from "../../Board";
 import type { BoardEntry } from "../../../components/board";
 import {
-  Band, Card, Empty, Pill, Problem, Table, type Segment, type Tone,
+  Band, Card, Empty, Pill, Problem, Table, Tabs, useTab, type Segment, type Tone,
 } from "../../kit";
 
 /**
@@ -64,8 +64,12 @@ export function worstVerdict(results: PolicyResult[]): PolicyVerdict | undefined
   return undefined;
 }
 
+/** The sub-tabs: the verdicts counted, the policies, and every rule. */
+const POLICY_TABS = ["verdicts", "policies", "rules"] as const;
+
 export function Policies({ host }: { host: Host }) {
   const t = useT();
+  const [tab, goTab] = useTab(POLICY_TABS);
 
   const results = useQuery({
     queryKey: ["host-policies", host.id],
@@ -88,8 +92,18 @@ export function Policies({ host }: { host: Host }) {
   }));
 
   return (
+    <>
+    <Tabs
+      value={tab}
+      onChange={goTab}
+      tabs={[
+        { value: "verdicts", label: t("Verdicts") },
+        { value: "policies", label: t("Policies"), count: results.data ? groups.length : undefined },
+        { value: "rules", label: t("Rules"), count: results.data ? rows.length : undefined },
+      ]}
+    />
     <Board screen="next_host_policies" catalogue={HOST_POLICIES} drawn={{
-      verdicts: (
+      verdicts: tab !== "verdicts" ? undefined : (
         <Card
           title={t("Verdicts")}
           note={t("What the declared state says about this host, rule by rule.")}
@@ -100,7 +114,7 @@ export function Policies({ host }: { host: Host }) {
           <Band segments={segments} testId="verdicts" />
         </Card>
       ),
-      policies: (
+      policies: tab !== "policies" ? undefined : (
         <Card title={t("Policies that select this host")} flush>
           <Table
             rows={groups}
@@ -151,7 +165,7 @@ export function Policies({ host }: { host: Host }) {
           />
         </Card>
       ),
-      rules: (
+      rules: tab !== "rules" ? undefined : (
         <Card
           title={t("Rules")}
           note={rows.length > 0 ? t("Every rule of every policy that selects this host.") : undefined}
@@ -214,6 +228,7 @@ export function Policies({ host }: { host: Host }) {
         </Card>
       ),
     }} />
+    </>
   );
 }
 

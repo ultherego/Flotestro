@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { absent, card, expectHealthy, head, permissions, watchErrors } from "./fleet";
+import { absent, card, expectHealthy, head, openTab, permissions, watchErrors } from "./fleet";
 
 /**
  * The budgets page: the capacity of the fleet, the sites and the backup
@@ -55,19 +55,15 @@ function rowOf(page: Page, key: string) {
 }
 
 test.describe("budgets", () => {
-  test("the settings lead to the page and the table agrees with the API", async ({ page, request }) => {
+  test("the page opens on its list and the table agrees with the API", async ({ page, request }) => {
     test.skip(!granted.has("budget.read"), absent("the token may not read the budgets (budget.read)"));
     const { errors } = watchErrors(page);
     const items = await budgets(request);
 
-    /* The budgets are a screen of their own again rather than a tab of
-       the settings. The settings still name the section and lead to it,
-       which is the way a reader gets there, so that is the way in here. */
-    await page.goto("/settings");
-    await page.getByRole("tab", { name: "Budgets" }).click();
-    await expect(page).toHaveURL(/\/settings\?tab=budgets$/);
-    await page.getByTestId("settings-open-section").click();
-    await expect(page).toHaveURL(/\/budgets$/);
+    /* The budgets are a screen of their own, and the settings no longer
+       signpost it, so the address is the way in; a bare address lands on
+       the first tab, the list of keys. */
+    await page.goto("/budgets");
     await expect(head(page, "Budgets")).toBeVisible();
 
     if (items === null) {
@@ -145,15 +141,15 @@ test.describe("budgets", () => {
        whoever may write and is replaced by the reason for whoever may
        not. */
     await page.getByTestId(`pick-${items[0].key}`).click();
-    // The container the key opens into: the one that holds the editor, or
-    // the sentence that stands in its place.
-    const detail = page.locator(".fl-card").filter({ hasText: "Share per claimant" })
-      .filter({ hasNot: page.getByTestId("budgets") });
+    // Choosing a key opens its tab: the container that reads it, and under
+    // it - for whoever may write - the form that changes its capacity, on
+    // a face of its own rather than inside the container.
+    const detail = page.locator(".fl-card").filter({ has: page.locator(".fl-card-title code", { hasText: items[0].key }) });
     await expect(detail).toHaveCount(1);
     if (granted.has("budget.write")) {
-      await expect(detail.getByTestId("capacity-save")).toBeVisible();
+      await expect(page.getByTestId("capacity-save")).toBeVisible();
     } else {
-      await expect(detail.getByTestId("capacity-save")).toHaveCount(0);
+      await expect(page.getByTestId("capacity-save")).toHaveCount(0);
       await expect(detail).toContainText("You may not change this budget");
     }
   });
@@ -192,7 +188,9 @@ test.describe("budgets", () => {
       await note.fill(`e2e ${stamp}`);
       await page.getByTestId("capacity-save").click();
 
-      // The row shows the new capacity once the write is through.
+      // The row shows the new capacity once the write is through; the list
+      // is the other tab.
+      await openTab(page, "Budgets");
       await expect(rowOf(page, chosen.key).getByRole("cell").nth(1)).toHaveText(String(raised));
       const written = await limitOf(request, chosen.key);
       expect(written.limit.capacity).toBe(raised);

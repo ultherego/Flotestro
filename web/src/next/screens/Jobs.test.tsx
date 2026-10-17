@@ -72,10 +72,10 @@ const job = (over: Record<string, unknown>) => ({
 const layout = { widgets: [], present: false, revision: 0 };
 const noActivity = { hours: [], succeeded: [], failed: [], other: [] };
 
-function draw() {
+function draw(where = "/") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}><MemoryRouter initialEntries={[where]}><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
   );
   return render(<Jobs />, { wrapper });
 }
@@ -128,8 +128,8 @@ describe("the job list", () => {
       },
       "/api/v1/settings/layout": layout,
     });
-    draw();
-    await waitFor(() => expect(screen.getByTestId("job-j3")).toBeInTheDocument());
+    draw("/?tab=statistics");
+    await waitFor(() => expect(screen.getAllByText("among the 2 listed").length).toBeGreaterThan(0));
     const band = screen.getByTestId("job-states");
     expect(band).toHaveTextContent("Awaiting approval");
     expect(band).toHaveTextContent("Succeeded");

@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Locator } from "@playwright/test";
 import {
-  absent, card, expectHealthy, fleetHosts, head, hostTags, onlineHostWith, onlineHosts, permissions,
+  absent, card, expectHealthy, fleetHosts, formOf, openTab, head, hostTags, onlineHostWith, onlineHosts, permissions,
   setHostTags, watchErrors, type Host,
 } from "./fleet";
 
@@ -64,7 +64,8 @@ test.describe("groups", () => {
       await page.goto("/groups");
       await expect(head(page, "Groups")).toBeVisible();
       await page.getByTestId("new-group").click();
-      const form = card(page, "New group");
+      // A form of its own, on the New group tab.
+      const form = formOf(page, "New group");
       await expect(form).toBeVisible();
       await form.getByTestId("group-name").fill(groupName);
       await form.getByTestId("group-kind").selectOption("dynamic");
@@ -120,7 +121,7 @@ test.describe("groups", () => {
     await page.goto("/groups");
     await expect(head(page, "Groups")).toBeVisible();
     await page.getByTestId("new-group").click();
-    const form = card(page, "New group");
+    const form = formOf(page, "New group");
     await expect(form.getByTestId("create-group")).toBeDisabled();
     await form.getByTestId("group-name").fill("nobody");
     // A static group needs at least one member; the name alone is not one.
@@ -145,8 +146,9 @@ test.describe("reads", () => {
     await expect(card(page, "Your reads")).toBeVisible();
     await expect(card(page, "By operation")).toBeVisible();
 
+    // The order is a form on a tab of its own, not a container of the list.
     await page.getByTestId("new-read").click();
-    const form = card(page, "New read");
+    const form = formOf(page, "New read");
     await expect(form).toBeVisible();
     const operation = form.getByTestId("read-action");
     await expect(operation.locator("option").first()).toBeAttached();
@@ -255,14 +257,6 @@ test.describe("monitoring", () => {
     await expectCounted(firing.getByTestId("severities"));
     await expect(firing.locator(".fl-figs")).toContainText("acknowledged");
 
-    // The rules table lists as many rules as the catalogue holds, or says
-    // that there are none.
-    const rules = card(page, "Rules");
-    await expect(
-      page.getByTestId("rules").or(rules.getByText(/No rules yet|You do not have permission/)).first(),
-    ).toBeVisible();
-    if (listed && listed.length > 0) await expect(page.getByTestId("rules").locator("tbody tr")).toHaveCount(listed.length);
-
     // The history filter runs on the server.
     const history = card(page, "Alerts");
     await expect(
@@ -278,6 +272,18 @@ test.describe("monitoring", () => {
     for (const row of await page.getByTestId("alerts").locator("tbody tr").all()) {
       await expect(row.locator(".fl-pill", { hasText: "resolved" }).first()).toBeVisible();
     }
+    /* The rules and the silences are tabs of their own: the alerts are
+       what a reader opens the screen for, and the first tab. */
+    await openTab(page, "Rules");
+    // The rules table lists as many rules as the catalogue holds, or says
+    // that there are none.
+    const rules = card(page, "Rules");
+    await expect(
+      page.getByTestId("rules").or(rules.getByText(/No rules yet|You do not have permission/)).first(),
+    ).toBeVisible();
+    if (listed && listed.length > 0) await expect(page.getByTestId("rules").locator("tbody tr")).toHaveCount(listed.length);
+
+    await openTab(page, "Silences");
     await expect(card(page, "Silences in force")).toBeVisible();
     await expectHealthy(page, errors);
   });
@@ -303,27 +309,37 @@ test.describe("monitoring", () => {
     // The alert band of the host settles on numbers once the report is in.
     await expectCounted(page.getByTestId("alert-states"));
 
-    // A sample means a chart; none means the page says so instead of a
-    // chart of zeros.
-    const cpu = card(page, "CPU");
-    if ((series.points ?? []).length > 0) {
-      await expect(page.getByTestId("cpu-chart")).toBeVisible();
-    } else {
-      await expect(cpu.locator(".fl-empty")).toBeVisible();
-    }
-
-    // The window switch asks the server for another range.
+    // The window switch stands in the heading, over every tab, and asks the
+    // server for another range.
     const window = page.getByRole("group", { name: "Window" });
     const wider = page.waitForResponse((response) => response.url().includes(`/api/v1/hosts/${target.id}/metrics?range=24h`));
     await window.getByRole("button", { name: "24 hours" }).click();
     expect((await wider).ok()).toBeTruthy();
     await expect(window.getByRole("button", { name: "24 hours" })).toHaveAttribute("aria-pressed", "true");
 
-    for (const title of ["Load", "Memory", "Network", "Filesystems", "Facts", "Silence", "Silences in force"]) {
+    // What the state tab reads besides the bands: the newest sample, the
+    // alerts and the silences in force.
+    for (const title of ["Last reading", "Alerts", "Silences in force"]) {
       await expect(card(page, title).first()).toBeVisible();
     }
-    // The silence button stays off without a reason: a silence is a
-    // decision with a reason and an owner.
+
+    // A sample means a chart; none means the page says so instead of a
+    // chart of zeros. The charts are the second tab.
+    await openTab(page, "Charts");
+    const cpu = card(page, "CPU");
+    if ((series.points ?? []).length > 0) {
+      await expect(page.getByTestId("cpu-chart")).toBeVisible();
+    } else {
+      await expect(cpu.locator(".fl-empty")).toBeVisible();
+    }
+    for (const title of ["Load", "Memory", "Network", "Filesystems"]) {
+      await expect(card(page, title).first()).toBeVisible();
+    }
+
+    // The silence is a decision with a reason and an owner, so it is a form
+    // of its own on the Change tab and stays off without a reason.
+    await openTab(page, "Change");
+    await expect(formOf(page, "Silence")).toBeVisible();
     await expect(page.getByTestId("silence")).toBeDisabled();
     await expectHealthy(page, errors);
   });
@@ -379,20 +395,20 @@ test.describe("settings", () => {
     };
     expect(settings.areas.length).toBeGreaterThan(0);
 
+    /* What the process was started with is read-only, so it is not on the
+       settings screen any more: it is the Configuration tab of the status,
+       with the rest of what is true of this installation. The settings say
+       so in their help, in the screen's own words and not in the server's
+       - these values are read at start and a change needs a restart. */
     await page.goto("/settings");
     await expect(head(page, "Settings")).toBeVisible();
-    // Where the values come from is the long answer, and it waits behind the
-    // mark beside the title rather than taking the top of every page view.
     await expect(page.getByTestId("screen-help")).toHaveCount(0);
     await page.getByTestId("screen-help-toggle").click();
-    // In the screen's own words, not in the server's. The API sends a source
-    // string, but putting it on the page would print an English constant to
-    // a Polish reader - so what is checked is that the page states the rule
-    // that string exists for: these values are read at start and a change
-    // needs a restart.
-    await expect(page.getByTestId("screen-help")).toContainText("needs a restart");
-    await expect(card(page, "What the process was started with")).toContainText("Read at start");
+    await expect(page.getByTestId("screen-help")).toContainText("need a restart");
+    await expect(page.getByTestId("screen-help")).toContainText("Status");
 
+    await page.goto("/status?tab=configuration");
+    await expect(head(page, "Status")).toBeVisible();
     // One container per area the API reports.
     for (const area of settings.areas) {
       const tile = card(page, area.title);
@@ -429,10 +445,9 @@ test.describe("access", () => {
     expect(response.ok(), `GET /api/v1/access/review answered ${response.status()}`).toBeTruthy();
     const review = (await response.json()) as { count: number; flagged: number; items: { flags: string[] }[] };
 
-    /* Access is a screen of its own again rather than a tab of the
-       settings: /access is where the identities, the roles and the
-       review are read. */
-    await page.goto("/access");
+    /* Access is a screen of its own with six sub-tabs; the review is the
+       fifth, and a link is sent into it by its address. */
+    await page.goto("/access?tab=review");
     await expect(head(page, "Users and access")).toBeVisible();
 
     const table = card(page, "Access review");
@@ -466,10 +481,6 @@ test.describe("audit", () => {
     await page.goto("/audit");
     await expect(head(page, "Audit")).toBeVisible();
 
-    const chart = card(page, "Events per hour");
-    await expect(chart.locator("svg").or(chart.getByText("No event answers this.")).first()).toBeVisible();
-    await expectCounted(card(page, "Outcome").getByTestId("outcomes"));
-
     const events = card(page, "Events");
     const rows = page.getByTestId("events").locator("tbody tr:not(.fl-row-detail):not(.fl-row-under)");
     await expect(rows.first().or(events.getByText("No event answers this.")).first()).toBeVisible();
@@ -483,6 +494,14 @@ test.describe("audit", () => {
     for (const row of await rows.all()) {
       await expect(row.locator("td").nth(5).locator(".fl-pill")).toHaveText("denied");
     }
+
+    /* The chart and the counts are the second reading, over the same
+       filter: the trail is read on the first tab, what it is made of on
+       the other. */
+    await openTab(page, "Summary");
+    const chart = card(page, "Events per hour");
+    await expect(chart.locator("svg").or(chart.getByText("No event answers this.")).first()).toBeVisible();
+    await expectCounted(card(page, "Outcome").getByTestId("outcomes"));
     await expectHealthy(page, errors);
   });
 

@@ -90,10 +90,10 @@ const allowed = {
   items: [{ action: "packages.list", permission: "packages.read", mutating: false, risk: "low", allowed: true }],
 };
 
-function draw(one: Host = host()) {
+function draw(one: Host = host(), tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}><MemoryRouter initialEntries={[tab ? `/?tab=${tab}` : "/"]}>{children}</MemoryRouter></QueryClientProvider>
   );
   return render(<Vulnerabilities host={one} />, { wrapper });
 }
@@ -129,7 +129,7 @@ describe("what the vendor says about this host", () => {
       "/api/v1/hosts/h1/vulnerabilities": report(),
       "/api/v1/hosts/h1/actions": allowed,
     });
-    draw();
+    draw(host(), "coverage");
     expect(await screen.findByText("99.7% of packages covered")).toBeInTheDocument();
   });
 
@@ -153,6 +153,7 @@ describe("what the vendor says about this host", () => {
     expect(band).toHaveTextContent("—");
     expect(band).toHaveTextContent("critical: not counted");
     expect(screen.getByText(/The list is empty because nothing was checked/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Packages" }));
     expect(screen.getByText(/no package on this host was checked against a feed/)).toBeInTheDocument();
   });
 

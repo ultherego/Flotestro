@@ -11,7 +11,7 @@ import { useTeams } from "../../lib/teams";
 import { useT } from "../../i18n";
 import {
   Actions, Bars, Bones, Button, C, Card, Check, Dot, Download, Empty, Field, Fields, Find, Form, Grid, HeadActions,
-  Meter, Modal, Note, Pill, Problem, RowsPerPage, Seg, Stack, Table, Tag, Tags, Toolbar, TwoLine,
+  Meter, Modal, Note, Pill, Problem, RowsPerPage, Seg, Stack, Table, Tabs, Tag, Tags, Toolbar, TwoLine, useTab,
   type Column, type Tone,
 } from "../kit";
 
@@ -156,6 +156,8 @@ function usePermissions(): Set<string> {
   return new Set(whoami.data?.permissions ?? []);
 }
 
+const HOST_TABS = ["hosts", "composition"] as const;
+
 export function Hosts() {
   const t = useT();
   const navigate = useNavigate();
@@ -163,17 +165,21 @@ export function Hosts() {
   // row and a bookmark all link here with some already set, and every
   // change goes back into the address so the view can be handed on.
   const [address, setAddress] = useSearchParams();
+  const [tab, goTab] = useTab(HOST_TABS);
   const [filters, setFilters] = useState<HostFilters>(() => readFilters(address));
   const setFilter = (key: keyof HostFilters, value: string) =>
     setFilters((previous) => ({ ...previous, [key]: value }));
   const written = useRef(address.toString());
   useEffect(() => {
-    const next = filterParams(filters).toString();
+    const after = filterParams(filters);
+    // The open tab is not a filter, and it stays where the link put it.
+    if (address.get("tab")) after.set("tab", address.get("tab")!);
+    const next = after.toString();
     if (next !== written.current) {
       written.current = next;
       setAddress(new URLSearchParams(next), { replace: true });
     }
-  }, [filters, setAddress]);
+  }, [filters, address, setAddress]);
   useEffect(() => {
     const current = address.toString();
     if (current !== written.current) {
@@ -379,8 +385,17 @@ export function Hosts() {
           rest it would lead only to a refusal. */}
       {canAdd && <HeadActions>{addHost}</HeadActions>}
 
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "hosts", label: t("Hosts") },
+          { value: "composition", label: t("Composition") },
+        ]}
+      />
+
       <Grid>
-        <Card span={9} flush
+        {tab === "hosts" && <Card span={12} flush
           title={t("The fleet")}
           note={
             <>
@@ -723,10 +738,10 @@ export function Hosts() {
               ]}
             />
           )}
-        </Card>
+        </Card>}
 
-        <Card
-          span={3}
+        {tab === "composition" && <Card
+          span={12}
           title={t("Fleet composition")}
           note={fleetSize === undefined
             ? t("Counted in the database over the hosts you can see.")
@@ -735,35 +750,35 @@ export function Hosts() {
           {a ? (
             <Stack>
               <Dimension label={t("Connection")} items={[
-                { label: t("Online"), value: count("online"), tone: "ok", onPick: () => setConnection("online") },
-                { label: t("Stale"), value: count("stale"), tone: "warn", onPick: () => setConnection("stale") },
-                { label: t("Offline"), value: count("offline"), tone: "error", onPick: () => setConnection("offline") },
-                { label: t("Unknown"), value: count("unknown"), tone: "unknown", onPick: () => setConnection("unknown") },
+                { label: t("Online"), value: count("online"), tone: "ok", onPick: () => { setConnection("online"); goTab("hosts"); } },
+                { label: t("Stale"), value: count("stale"), tone: "warn", onPick: () => { setConnection("stale"); goTab("hosts"); } },
+                { label: t("Offline"), value: count("offline"), tone: "error", onPick: () => { setConnection("offline"); goTab("hosts"); } },
+                { label: t("Unknown"), value: count("unknown"), tone: "unknown", onPick: () => { setConnection("unknown"); goTab("hosts"); } },
               ]} pick={t("show only these hosts")} />
               <Dimension label={t("By system")} pick={t("show only these hosts")} items={(a.by_os_family ?? []).map((f) => (
-                { label: facet(f.key), value: f.count, tone: "accent" as Tone, onPick: () => setFilter("os_family", f.key) }
+                { label: facet(f.key), value: f.count, tone: "accent" as Tone, onPick: () => { setFilter("os_family", f.key); goTab("hosts"); } }
               ))} />
               {/* Two dimensions under two headings: "lab 6, test 6" in one
                   list reads as two sites. */}
               <Dimension label={t("Sites")} pick={t("show only these hosts")} items={(a.by_site ?? []).map((f) => (
-                { label: facet(f.key), value: f.count, tone: "info" as Tone, onPick: () => setFilter("site", f.key) }
+                { label: facet(f.key), value: f.count, tone: "info" as Tone, onPick: () => { setFilter("site", f.key); goTab("hosts"); } }
               ))} />
               <Dimension label={t("Environments")} pick={t("show only these hosts")} items={(a.by_environment ?? []).map((f) => (
-                { label: facet(f.key), value: f.count, tone: "ok" as Tone, onPick: () => setFilter("environment", f.key) }
+                { label: facet(f.key), value: f.count, tone: "ok" as Tone, onPick: () => { setFilter("environment", f.key); goTab("hosts"); } }
               ))} />
               <Dimension label={t("Agent builds")} items={(a.by_agent_version ?? []).map((f) => (
                 { label: facet(f.key), value: f.count, tone: "neutral" as Tone }
               ))} />
               <Dimension label={t("Lifecycle")} pick={t("show only these hosts")} items={(a.by_lifecycle_state ?? []).map((f) => (
-                { label: facet(f.key), value: f.count, tone: "info" as Tone, onPick: () => setFilter("lifecycle_state", f.key) }
+                { label: facet(f.key), value: f.count, tone: "info" as Tone, onPick: () => { setFilter("lifecycle_state", f.key); goTab("hosts"); } }
               ))} />
             </Stack>
           ) : activity.isError ? (
             <Empty>{t("The composition could not be counted.")}</Empty>
           ) : <Bones rows={4} />}
-        </Card>
+        </Card>}
 
-        {editing && chosen.length > 0 && (
+        {tab === "hosts" && editing && chosen.length > 0 && (
           <C span={12}><Metadata
             hosts={chosen}
             canTag={canTag}

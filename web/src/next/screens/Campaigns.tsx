@@ -11,7 +11,7 @@ import { useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Band, Card, Find, Pager, Pill, Problem, Seg, Table, Toolbar, type Segment, type Tone,
+  Band, Card, Find, Pager, Pill, Problem, Seg, Table, Tabs, Toolbar, useTab, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -33,9 +33,12 @@ const STATES = [
 
 const PAGE = 50;
 
+const CAMPAIGN_TABS = ["campaigns", "summary"] as const;
+
 export function Campaigns() {
   const t = useT();
   const [params, setParams] = useSearchParams();
+  const [tab, goTab] = useTab(CAMPAIGN_TABS);
   const state = params.get("state") ?? "";
   const [action, setAction] = useState(params.get("action") ?? "");
   const [requester, setRequester] = useState(params.get("requester") ?? "");
@@ -54,6 +57,7 @@ export function Campaigns() {
   // reader narrowed the list to is what the link they copy carries.
   useEffect(() => {
     const next = new URLSearchParams();
+    if (params.get("tab")) next.set("tab", params.get("tab")!);
     if (state) next.set("state", state);
     if (settledAction) next.set("action", settledAction);
     if (settledRequester) next.set("requester", settledRequester);
@@ -99,8 +103,17 @@ export function Campaigns() {
   if (list.error) return <Problem>{String(list.error)}</Problem>;
 
   return (
+    <>
+    <Tabs
+      value={tab}
+      onChange={goTab}
+      tabs={[
+        { value: "campaigns", label: t("Campaigns") },
+        { value: "summary", label: t("Summary") },
+      ]}
+    />
     <Board screen={CAMPAIGNS_SCREEN} catalogue={CAMPAIGNS} drawn={{
-      state: (
+      state: tab !== "summary" ? undefined : (
         <Card
           title={t("State")}
           note={list.data ? t("{shown} of {total} shown", { shown: rows.length, total: list.data.total }) : undefined}
@@ -108,7 +121,7 @@ export function Campaigns() {
           <Band segments={band} testId="campaign-states" />
         </Card>
       ),
-      list: (
+      list: tab !== "campaigns" ? undefined : (
         <Card
           title={t("Campaigns")}
           flush
@@ -204,6 +217,7 @@ export function Campaigns() {
         </Card>
       ),
     }} />
+    </>
   );
 }
 

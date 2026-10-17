@@ -8,7 +8,7 @@ import type { AuditEvent } from "../../lib/types";
 import { useT } from "../../i18n";
 import type { BoardEntry } from "../../components/board";
 import {
-  Band, Banner, Bars, C, Card, Chart, Empty, Fact, Facts, Field, Fields, Form, Grid, HeadActions, Note, Pill, Problem, Readout, Row, Seg, type Segment, type Series, Stack, Table, type Tone, TwoLine,
+  Band, Banner, Bars, C, Card, Chart, Empty, Fact, Facts, Field, Fields, Form, Grid, HeadActions, Note, Pill, Problem, Readout, Row, Seg, type Segment, type Series, Stack, Table, Tabs, type Tone, TwoLine, useTab,
 } from "../kit";
 
 /**
@@ -46,6 +46,7 @@ const WINDOWS: Record<string, number> = { "1h": 1, "24h": 24, "7d": 24 * 7 };
 export function Audit() {
   const t = useT();
   const [address, setAddress] = useSearchParams();
+  const [tab, goTab] = useTab(AUDIT_TABS);
   const [outcome, setOutcome] = useState(address.get("outcome") ?? "");
   const [actor, setActor] = useState(address.get("actor") ?? "");
   const [action, setAction] = useState(address.get("action") ?? "");
@@ -87,9 +88,15 @@ export function Audit() {
   if (toInstant(since)) filter.set("since", toInstant(since));
   if (toInstant(until)) filter.set("until", toInstant(until));
   const filterKey = filter.toString();
+  const openTab = address.get("tab") ?? "";
   useEffect(() => {
-    setAddress(new URLSearchParams(filterKey), { replace: true });
-  }, [filterKey, setAddress]);
+    // The open tab is not part of the filter, and it stays in the address.
+    const next = new URLSearchParams(filterKey);
+    if (openTab) next.set("tab", openTab);
+    if (next.toString() !== new URLSearchParams(window.location.search).toString()) {
+      setAddress(next, { replace: true });
+    }
+  }, [filterKey, openTab, setAddress]);
 
   const query = new URLSearchParams(filter);
   query.set("limit", String(PAGE_LIMIT));
@@ -193,6 +200,8 @@ export function Audit() {
   // One actor from the breakdown narrows the trail to that actor by the
   // identifier it keeps, whatever it was called at the time.
   const pickActor = (event: AuditEvent) => {
+    // The narrowed trail is read on the Trail tab, where the filter is.
+    goTab("trail");
     const who = event.actor;
     if (!who) {
       setActor(event.actor_id);
@@ -212,24 +221,35 @@ export function Audit() {
             {exporting ? t("Exporting…") : t("Export the trail")}
           </button></HeadActions>
 
+      {exportError && (
+        <Banner
+          tone="error"
+          actions={<button type="button" className="fl-quiet" onClick={() => setExportError(null)}>{t("Close")}</button>}
+        >
+          {t("The export failed: {message}", { message: exportError })}
+        </Banner>
+      )}
+
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "trail", label: t("Trail") },
+          { value: "summary", label: t("Summary") },
+        ]}
+      />
+
       {/* What to read is a decision, so it stands on a form of its own
           above the table it narrows. It was a container of the board
           until 17.10, which put a block of fields among the readings and
           left the reader to work out which rectangle did what. */}
+      {tab === "trail" && (
       <Form
         title={t("What to read")}
         note={t("The trail narrows on the server: what is asked for is what is read.")}
         testId="what-to-read"
       >
         <Stack>
-          {exportError && (
-            <Banner
-              tone="error"
-              actions={<button type="button" className="fl-quiet" onClick={() => setExportError(null)}>{t("Close")}</button>}
-            >
-              {t("The export failed: {message}", { message: exportError })}
-            </Banner>
-          )}
           <Fields>
             <Field label={t("Outcome")}>
               <select value={outcome} onChange={(event) => setOutcome(event.target.value)} data-testid="outcome">
@@ -279,10 +299,12 @@ export function Audit() {
           </Row>
         </Stack>
       </Form>
+      )}
 
       {/* What was read, read: the shape of it over time, how it came out,
           who it was made of - and then the trail itself. */}
       <Grid>
+        {tab === "summary" && <>
         <C span={8}>
           <Card title={t("Events per hour")} note={`${t("By outcome")} · ${listed}`}>
             {!loaded
@@ -303,7 +325,7 @@ export function Audit() {
             <Band segments={outcomes} testId="outcomes" />
           </Card>
         </C>
-        <C span={4}>
+        <C span={12}>
           <Card title={t("By actor")} note={t("Who the read trail is made of. One of them narrows it to that actor.")}>
             {!loaded
               ? <Empty>{t("Reading the trail…")}</Empty>
@@ -322,6 +344,8 @@ export function Audit() {
                 )}
           </Card>
         </C>
+        </>}
+        {tab === "trail" && (
         <C span={12}>
           <Card
             title={t("Events")}
@@ -387,6 +411,7 @@ export function Audit() {
             />
           </Card>
         </C>
+        )}
       </Grid>
     </>
   );
@@ -732,6 +757,8 @@ export function digest(detail: Record<string, unknown>, t: (key: string) => stri
 /* The containers this screen used to stand on a board with, kept as the
    record of what an installation may have arranged, as the host overview
    kept its own. The screen itself is sub-tabs since 17.10. */
+const AUDIT_TABS = ["trail", "summary"] as const;
+
 export const AUDIT_SCREEN = "next_audit";
 
 export const AUDIT: BoardEntry[] = [

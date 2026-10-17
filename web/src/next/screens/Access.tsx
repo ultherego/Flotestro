@@ -842,66 +842,101 @@ export function Access() {
               its own. It was a container headed "Find somebody" among the
               readings, which is how a block of fields came to look like a
               measurement. */}
-          <Form
-            title={t("Find somebody")}
-            note={t("The subject and the name go to the server; the role and the kind narrow the page it returned.")}
-            testId="find-somebody"
-          >
-            <Stack>
-              <Fields>
-                <Field label={t("Subject")} hint={t("The name the trail records.")}>
-                  <input
-                    value={draft.subject}
-                    onChange={(event) => setDraft({ ...draft, subject: event.target.value })}
-                    data-testid="filter-subject"
-                  />
-                </Field>
-                <Field label={t("Name")}>
-                  <input
-                    value={draft.name}
-                    onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                    data-testid="filter-name"
-                  />
-                </Field>
-                <Field label={t("Role")}>
-                  <select
-                    value={draft.role}
-                    onChange={(event) => setDraft({ ...draft, role: event.target.value })}
-                    data-testid="filter-role"
-                  >
-                    <option value="">{t("any role")}</option>
-                    {roleNames.map((one) => <option key={one} value={one}>{one}</option>)}
-                  </select>
-                </Field>
-                <Field label={t("Kind")}>
-                  <select
-                    value={draft.kind}
-                    onChange={(event) => setDraft({ ...draft, kind: event.target.value })}
-                    data-testid="filter-kind"
-                  >
-                    <option value="">{t("any kind")}</option>
-                    {kindOptions.map((one) => <option key={one} value={one}>{one}</option>)}
-                  </select>
-                </Field>
-                <Field label={t("Status")}>
-                  <select
-                    value={draft.status}
-                    onChange={(event) => setDraft({ ...draft, status: event.target.value as Filter["status"] })}
-                    data-testid="filter-status"
-                  >
-                    <option value="enabled">{t("Enabled")}</option>
-                    <option value="disabled">{t("Disabled")}</option>
-                  </select>
-                </Field>
-              </Fields>
-              <Actions>
-                <button type="button" onClick={apply} data-testid="filter-apply">{t("Apply")}</button>
-                <button type="button" className="fl-quiet" onClick={reset} data-testid="filter-reset">
-                  {t("Reset")}
-                </button>
-              </Actions>
-            </Stack>
-          </Form>
+          <Grid>
+            <C span={8}>
+            <Form
+              title={t("Find somebody")}
+              note={t("The subject and the name go to the server; the role and the kind narrow the page it returned.")}
+              testId="find-somebody"
+            >
+              <Stack>
+                <Fields>
+                  <Field label={t("Subject")} hint={t("The name the trail records.")}>
+                    <input
+                      value={draft.subject}
+                      onChange={(event) => setDraft({ ...draft, subject: event.target.value })}
+                      data-testid="filter-subject"
+                    />
+                  </Field>
+                  <Field label={t("Name")}>
+                    <input
+                      value={draft.name}
+                      onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+                      data-testid="filter-name"
+                    />
+                  </Field>
+                  <Field label={t("Role")}>
+                    <select
+                      value={draft.role}
+                      onChange={(event) => setDraft({ ...draft, role: event.target.value })}
+                      data-testid="filter-role"
+                    >
+                      <option value="">{t("any role")}</option>
+                      {roleNames.map((one) => <option key={one} value={one}>{one}</option>)}
+                    </select>
+                  </Field>
+                  <Field label={t("Kind")}>
+                    <select
+                      value={draft.kind}
+                      onChange={(event) => setDraft({ ...draft, kind: event.target.value })}
+                      data-testid="filter-kind"
+                    >
+                      <option value="">{t("any kind")}</option>
+                      {kindOptions.map((one) => <option key={one} value={one}>{one}</option>)}
+                    </select>
+                  </Field>
+                  <Field label={t("Status")}>
+                    <select
+                      value={draft.status}
+                      onChange={(event) => setDraft({ ...draft, status: event.target.value as Filter["status"] })}
+                      data-testid="filter-status"
+                    >
+                      <option value="enabled">{t("Enabled")}</option>
+                      <option value="disabled">{t("Disabled")}</option>
+                    </select>
+                  </Field>
+                </Fields>
+                <Actions>
+                  <button type="button" onClick={apply} data-testid="filter-apply">{t("Apply")}</button>
+                  <button type="button" className="fl-quiet" onClick={reset} data-testid="filter-reset">
+                    {t("Reset")}
+                  </button>
+                </Actions>
+              </Stack>
+            </Form>
+            </C>
+            <C span={4}>
+              <Card
+                title={t("By kind and by role")}
+                note={serverPaged
+                  // The fault the owner named by name: this card counted the
+                  // fifty on screen and said it had counted the fleet.
+                  ? t("Counted over all {n} that match, not only the {listed} listed.", {
+                      n: principals.data?.total ?? 0, listed: rows.length,
+                    })
+                  : t("Counted over the {n} listed.", { n: narrowed.length })}
+              >
+                {kinds.length === 0 && byRole.length === 0
+                  ? (loading ? <Bones rows={3} /> : <Empty>{t("Nothing to count here.")}</Empty>)
+                  : (
+                    <Stack>
+                      <Bars items={kinds.map(([kind, n]) => ({ label: kind, value: n, tone: "info" as Tone }))} />
+                      {byRole.length > 0 && (
+                        <>
+                          <h3 className="fl-subhead">{t("Direct roles")}</h3>
+                          <Bars items={byRole.map(([role, n]) => ({ label: role, value: n, tone: "ok" as Tone }))} />
+                        </>
+                      )}
+                      <Note>
+                        {principals.data?.without_bindings === undefined
+                          ? t("How many hold no role of their own is unknown here.")
+                          : t("{n} hold no role of their own.", { n: principals.data.without_bindings })}
+                      </Note>
+                    </Stack>
+                  )}
+              </Card>
+            </C>
+          </Grid>
           <Grid>
             <C span={12}>
               <Card
@@ -1084,37 +1119,6 @@ export function Access() {
                 />
               </C>
             )}
-            <C span={4}>
-              <Card
-                title={t("By kind and by role")}
-                note={serverPaged
-                  // The fault the owner named by name: this card counted the
-                  // fifty on screen and said it had counted the fleet.
-                  ? t("Counted over all {n} that match, not only the {listed} listed.", {
-                      n: principals.data?.total ?? 0, listed: rows.length,
-                    })
-                  : t("Counted over the {n} listed.", { n: narrowed.length })}
-              >
-                {kinds.length === 0 && byRole.length === 0
-                  ? (loading ? <Bones rows={3} /> : <Empty>{t("Nothing to count here.")}</Empty>)
-                  : (
-                    <Stack>
-                      <Bars items={kinds.map(([kind, n]) => ({ label: kind, value: n, tone: "info" as Tone }))} />
-                      {byRole.length > 0 && (
-                        <>
-                          <h3 className="fl-subhead">{t("Direct roles")}</h3>
-                          <Bars items={byRole.map(([role, n]) => ({ label: role, value: n, tone: "ok" as Tone }))} />
-                        </>
-                      )}
-                      <Note>
-                        {principals.data?.without_bindings === undefined
-                          ? t("How many hold no role of their own is unknown here.")
-                          : t("{n} hold no role of their own.", { n: principals.data.without_bindings })}
-                      </Note>
-                    </Stack>
-                  )}
-              </Card>
-            </C>
           </Grid>
         </>
       )}

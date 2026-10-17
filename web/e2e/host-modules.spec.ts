@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
-  absent, card, expectHealthy, fleetHosts, jobState, onlineHostWith, openModule, permissions, watchErrors, type Host,
+  absent, card, expectHealthy, fleetHosts, jobState, onlineHostWith, openModule, openTab, permissions, watchErrors, type Host,
 } from "./fleet";
 
 /**
@@ -49,13 +49,14 @@ test.describe("services", () => {
 
     const missing = await openModule(page, target, "services", "Services");
     test.skip(missing !== null, absent(missing ?? ""));
+    // The first tab is the state of the units; the list is the second.
     await expect(page.getByTestId("unit-states")).toBeVisible();
     await expect(card(page, "Failed units")).toBeVisible();
 
     // A unit named in the address is opened: the detail is its own read,
     // whether or not the full list has been read yet.
     const ordered = nextJob(page, target.id);
-    await page.goto(`/hosts/${target.id}/services?unit=${encodeURIComponent(unit)}`);
+    await page.goto(`/hosts/${target.id}/services?tab=units&unit=${encodeURIComponent(unit)}`);
     await ordered;
     const detail = page.getByTestId("unit-detail");
     const refused = page.locator(".fl-problem");
@@ -92,7 +93,7 @@ test.describe("services", () => {
     const unit = cronUnit(target);
     test.slow();
 
-    const missing = await openModule(page, target, "services", "Services");
+    const missing = await openModule(page, target, "services", "Services", "units");
     test.skip(missing !== null, absent(missing ?? ""));
     const all = card(page, "All units");
     const table = page.getByTestId("units");
@@ -137,7 +138,8 @@ test.describe("services", () => {
     } else {
       test.info().annotations.push({ type: "note", description: `${target.hostname} has no failed unit; the reset-failed button has nothing to stand on` });
     }
-    // The failed list beside it shows the same button per failed unit.
+    // The failed list, on the state tab, shows the same button per failed unit.
+    await openTab(page, "State");
     for (const row of await page.getByTestId("failed-units").locator("tbody tr").all()) {
       await expect(row.getByRole("button", { name: "Reset failed" })).toBeVisible();
     }
@@ -156,14 +158,15 @@ test.describe("schedules", () => {
     const missing = await openModule(page, target, "schedules", "Schedules");
     test.skip(missing !== null, absent(missing ?? ""));
     await expect(card(page, "By kind")).toBeVisible();
+    await openTab(page, "Schedules");
     const list = page.getByTestId("schedules");
     await expect(list.or(card(page, "Schedules").locator(".fl-empty")).first()).toBeVisible();
 
     // The form opens from the heading; the preview is a read the host
     // answers, so the dates come in the host's zone rather than the
-    // browser's.
+    // browser's. It is a form of its own now, not a card on the list.
     await page.getByTestId("new-schedule").click();
-    const form = card(page, "New schedule");
+    const form = page.locator("form.fl-form").filter({ has: page.locator(".fl-form-title", { hasText: /^New schedule$/ }) });
     await expect(form).toBeVisible();
     const expression = form.getByTestId("schedule-expression");
     await expect(expression).toHaveValue("0 3 * * *");
@@ -211,6 +214,7 @@ test.describe("processes", () => {
     const missing = await openModule(page, target, "processes", "Processes");
     test.skip(missing !== null, absent(missing ?? ""));
     await expect(page.getByTestId("process-states")).toBeVisible();
+    await openTab(page, "List");
     const list = card(page, "Processes");
     const table = page.getByTestId("processes");
     const unread = list.getByText("This host has not been read yet.");
@@ -230,11 +234,14 @@ test.describe("processes", () => {
     await expect(rows.first()).toBeVisible();
     const flat = await rows.count();
     expect(flat).toBeGreaterThan(1);
-    // The band has settled on numbers once the snapshot is in.
+    // The band has settled on numbers once the snapshot is in; it is on the
+    // state tab, the list on the other.
+    await openTab(page, "State");
     for (const value of await page.getByTestId("process-states").locator(".fl-band-value").all()) {
       await expect(value).toHaveText(/^\d+$/);
     }
     await expect(card(page, "By user").locator(".fl-bar-fill").first()).toBeVisible();
+    await openTab(page, "List");
 
     // The tree nests every child under its parent: a child is set in, a
     // parent carries a fold, and nothing is lost in the nesting.
@@ -281,14 +288,18 @@ test.describe("logs", () => {
 
     const missing = await openModule(page, target, "logs", "Logs");
     test.skip(missing !== null, absent(missing ?? ""));
-    const reading = card(page, "Reading");
+    /* The tab is the reading and the other is its result: what is being
+       read, and the counts, are on Result. Nothing read yet is a pill and
+       a band that draws no segment, not a row of noughts. */
+    await openTab(page, "Result");
+    const reading = card(page, "What is being read");
     await expect(reading.locator(".fl-pill", { hasText: "nothing read yet" })).toBeVisible();
-    // Nothing read means nothing counted: the band draws no segment and
-    // says so under itself rather than printing noughts.
     await expect(page.getByTestId("line-counts").locator(".fl-band-value")).toHaveCount(0);
 
-    // A page of the journal, bounded by the line count.
-    const form = card(page, "Read");
+    // A page of the journal, bounded by the line count: a form on the
+    // Reading tab, which hands the reader to Result when it is ordered.
+    await openTab(page, "Reading");
+    const form = page.getByTestId("read-form");
     await form.getByTestId("unit").fill("");
     await form.getByTestId("line-count").fill("50");
     const ordered = nextJob(page, target.id);
@@ -308,18 +319,23 @@ test.describe("logs", () => {
 
     // The follow holds a process on the host; Stop cancels the job, so
     // the host does not keep the journal open for the rest of the timeout.
+    // The read handed the reader to Result; the follow is ordered from the form.
+    await openTab(page, "Reading");
     const followed = nextJob(page, target.id);
     await form.getByTestId("follow").click();
     const followJob = await followed;
     await expect(card(page, "Live")).toBeVisible();
     await expect(reading.locator(".fl-pill", { hasText: /^live$/ })).toBeVisible();
-    await expect(form.getByTestId("pause")).toBeVisible();
+    // Pausing and stopping steer what is arriving, so they stand over the
+    // output on the Result tab rather than in the form.
+    await expect(page.getByTestId("pause")).toBeVisible();
 
     const canceled = page.waitForResponse((response) => response.url().endsWith(`/api/v1/jobs/${followJob}/cancel`));
-    await form.getByTestId("stop").click();
+    await page.getByTestId("stop").click();
     expect((await canceled).ok(), "the cancel of the follow job went through").toBeTruthy();
     await expect(card(page, "Live")).toHaveCount(0);
-    await expect(form.getByTestId("follow")).toBeVisible();
+    await openTab(page, "Reading");
+    await expect(page.getByTestId("read-form").getByTestId("follow")).toBeVisible();
     await expect.poll(() => jobState(request, followJob), { timeout: 30_000 }).toBe("canceled");
     await expectHealthy(page, errors);
   });
@@ -379,11 +395,12 @@ test.describe("security and ssh", () => {
     }
 
     /* The editor is opened from the posture card - the one it changes -
-       and the same control closes it again. */
+       and is a form of its own on the Change tab; Cancel leaves it. */
     await page.getByTestId("change-configuration").click();
-    const editor = card(page, "Change configuration");
+    const editor = page.getByTestId("ssh-config-form");
     await expect(editor).toBeVisible();
-    await page.getByTestId("change-configuration").click();
+    await expect(editor.locator(".fl-form-title")).toHaveText("Change configuration");
+    await editor.getByRole("button", { name: "Cancel" }).click();
     await expect(editor).toHaveCount(0);
     expect(posted, "opening the editor must not write anything").toEqual([]);
     await expectHealthy(page, errors);

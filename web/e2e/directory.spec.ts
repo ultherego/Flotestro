@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { absent, card, expectHealthy, head, permissions, watchErrors } from "./fleet";
+import { absent, card, expectHealthy, formOf, head, permissions, watchErrors } from "./fleet";
 
 /**
  * The identity directory page, one tab at a time.
@@ -76,7 +76,8 @@ test("HBAC rules are listed with the simulation below them", async ({ page }) =>
   const { errors } = watchErrors(page);
   await openTab(page, "HBAC rules");
   await expectSettled(page, "hbac", /^No rules\.$/);
-  await expect(card(page, "Simulate access")).toBeVisible();
+  // The simulation is a form, not a container: a question put to the directory.
+  await expect(formOf(page, "Simulate access")).toBeVisible();
   await expectHealthy(page, errors);
 });
 

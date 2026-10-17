@@ -87,7 +87,8 @@ test.describe("HOST-UI: a change asks before it runs", () => {
       if (request.method() !== "GET" && request.url().includes("/api/v1/")) posted.push(`${request.method()} ${request.url()}`);
     });
 
-    await page.goto(`/hosts/${host.id}/power`);
+    // The orders are on the Change tab; the first one is the state.
+    await page.goto(`/hosts/${host.id}/power?tab=change`);
     await expect(page.locator(".fl-head-title").first()).toContainText(host.hostname);
     const reboot = page.getByTestId("reboot");
     const unreported = page.getByText("This host has not reported its boot state yet.");
@@ -120,7 +121,8 @@ test.describe("HOST-UI: a change asks before it runs", () => {
 
   test("a shutdown needs a reason before its button is even enabled", async ({ page }) => {
     const host = hostWith(hosts, "systemd") ?? hosts[0];
-    await page.goto(`/hosts/${host.id}/power`);
+    // The orders are on the Change tab; the first one is the state.
+    await page.goto(`/hosts/${host.id}/power?tab=change`);
     const shutdown = page.getByTestId("shutdown");
     const unreported = page.getByText("This host has not reported its boot state yet.");
     await expect(shutdown.or(unreported).first()).toBeVisible();
@@ -139,7 +141,8 @@ test.describe("HOST-UI: a change asks before it runs", () => {
 test.describe("HOST-UI: source and freshness", () => {
   test("the overview says where its data came from and when it was observed", async ({ page }) => {
     const host = hosts.find((entry) => entry.connection_state === "online") ?? hosts[0];
-    await page.goto(`/hosts/${host.id}/overview`);
+    // The System container is the second reading of the overview.
+    await page.goto(`/hosts/${host.id}/overview?tab=system`);
     await expect(page.locator(".fl-head-title").first()).toContainText(host.hostname);
 
     /* The line used to stand under every module's own heading with a

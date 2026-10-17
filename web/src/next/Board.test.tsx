@@ -15,7 +15,7 @@ import { Card } from "./kit";
  * screen is remembered as taken off rather than forgotten.
  *
  * And the part the owner asked for by name: a container is taken hold of
- * by its corner and made wider or taller on the grid.
+ * by its corner and made wider on the grid.
  */
 
 const stored: { board: Record<string, unknown> } = { board: { widgets: [], present: false, revision: 3 } };
@@ -120,18 +120,30 @@ describe("arranging a screen", () => {
     expect(screen.getByTestId("held-first")).toBeInTheDocument();
   });
 
-  it("makes a container wider and taller when its corner is dragged", async () => {
+  it("makes a container wider, and only wider, when its corner is dragged", async () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("arrange")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("arrange"));
     const corner = screen.getByTestId("corner-first");
     // A column is a twelfth of 1200 less the gaps; two columns to the
-    // right and one row down makes a container of 8 by 3.
+    // right make a container of 8; how tall it is, is what is in it.
     const column = (1200 - 20 * 11) / 12;
     point(corner, "pointerdown", 600, 300);
     point(screen.getByTestId("board"), "pointermove", 600 + 2 * column, 300 + 80);
     point(screen.getByTestId("board"), "pointerup", 600 + 2 * column, 300 + 80);
-    expect(screen.getByTestId("held-first")).toHaveTextContent("8×3");
+    expect(screen.getByTestId("held-first")).toHaveTextContent("8");
+  });
+
+  it("widens and narrows a container by its arrows, to the column", async () => {
+    draw();
+    await waitFor(() => expect(screen.getByTestId("arrange")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("arrange"));
+    const before = Number(screen.getByTestId("width-first").textContent?.split("/")[0]);
+    fireEvent.click(screen.getByTestId("wider-first"));
+    expect(screen.getByTestId("width-first")).toHaveTextContent(`${before + 1}/12`);
+    fireEvent.click(screen.getByTestId("narrower-first"));
+    fireEvent.click(screen.getByTestId("narrower-first"));
+    expect(screen.getByTestId("width-first")).toHaveTextContent(`${before - 1}/12`);
   });
 
   it("stores an arrangement with one press and asks for nothing first", async () => {

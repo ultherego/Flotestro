@@ -110,7 +110,8 @@ describe("the trail", () => {
     expect(pill("event-1", "success")).toHaveClass("fl-ok");
     expect(pill("event-2", "denied")).toHaveClass("fl-warn");
     expect(pill("event-3", "failure")).toHaveClass("fl-error");
-    // And the three are counted apart above the list.
+    // And the three are counted apart on the summary.
+    fireEvent.click(screen.getByRole("tab", { name: "Summary" }));
     const band = screen.getByTestId("outcomes");
     expect(band).toHaveTextContent("denied");
     expect(band).toHaveTextContent("failure");

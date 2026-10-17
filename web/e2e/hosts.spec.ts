@@ -210,7 +210,7 @@ test.describe("host workspace", () => {
         // The module settled: it drew something of the panel's own - a
         // container, an honest empty state, a banner - rather than
         // nothing or an error.
-        const settled = page.locator(".fl-card, .fl-empty, .fl-banner, .fl-kpi");
+        const settled = page.locator(".fl-card, .fl-form, .fl-empty, .fl-banner, .fl-kpi");
         await expect(settled.first(), `${module.name} drew nothing`).toBeVisible();
         await expectHealthy(page, errors);
       });

@@ -6,8 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import {
   Settings, areaKey, chosenAddress, confirmable, hubState, settingsCatalogue, settingsTab,
-  sourceTone, OWN_ADDRESS, SETTINGS_SCREEN,
-} from "./Settings";
+  sourceTone, OWN_ADDRESS, SETTINGS_SCREEN, Configuration } from "./Settings";
 import { ToastProvider } from "../../components/Toast";
 
 /**
@@ -143,6 +142,9 @@ const admin = {
 const reader = { subject: "t", kind: "user", roles: [], bindings: [], permissions: ["host.read"] };
 
 function draw(at = "/settings") {
+  // The tests of this file are about the installation's own settings; the
+  // other areas are whole screens with tests of their own.
+  if (!at.includes("area=")) at += `${at.includes("?") ? "&" : "?"}area=installation`;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
@@ -150,6 +152,17 @@ function draw(at = "/settings") {
     </QueryClientProvider>
   );
   return render(<Settings />, { wrapper });
+}
+
+/** The read-only values live under Status now, drawn by their own component. */
+function drawConfiguration() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/status?tab=configuration"]}><ToastProvider>{children}</ToastProvider></MemoryRouter>
+    </QueryClientProvider>
+  );
+  return render(<Configuration />, { wrapper });
 }
 
 afterEach(() => {
@@ -224,7 +237,7 @@ describe("the tabs", () => {
 describe("the values the process was started with", () => {
   it("says whether a secret is set, and never what it is", async () => {
     Object.assign(answers, base(), { "/api/v1/whoami": admin });
-    draw();
+    drawConfiguration();
     await waitFor(() => expect(screen.getByText("Client secret")).toBeInTheDocument());
     expect(screen.getByText("set")).toBeInTheDocument();
     expect(screen.getByText("not set")).toBeInTheDocument();
@@ -232,7 +245,7 @@ describe("the values the process was started with", () => {
 
   it("does not turn a value nobody has read into a nought", async () => {
     Object.assign(answers, base(), { "/api/v1/whoami": admin });
-    draw();
+    drawConfiguration();
     // A retention left unset keeps the record for good; a dash would read
     // as "nothing kept", which is the opposite of what happens.
     await waitFor(() => expect(screen.getByText("forever")).toBeInTheDocument());
@@ -242,7 +255,7 @@ describe("the values the process was started with", () => {
 
   it("narrows the areas to the setting somebody is looking for", async () => {
     Object.assign(answers, base(), { "/api/v1/whoami": admin });
-    draw();
+    drawConfiguration();
     await waitFor(() => expect(screen.getByText("Build")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("settings-search"), { target: { value: "issuer" } });
     await waitFor(() => expect(screen.queryByText("Build")).toBeNull());
@@ -251,7 +264,7 @@ describe("the values the process was started with", () => {
 
   it("says nothing answers rather than drawing an empty board", async () => {
     Object.assign(answers, base(), { "/api/v1/whoami": admin });
-    draw();
+    drawConfiguration();
     await waitFor(() => expect(screen.getByText("Build")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("settings-search"), { target: { value: "zzz" } });
     await waitFor(() => expect(screen.getByText("No setting of that name.")).toBeInTheDocument());
@@ -370,7 +383,10 @@ describe("the monitoring retentions", () => {
       "/api/v1/settings/monitoring": new ApiError(404, "not_found", "no monitoring here"),
     });
     draw();
-    await waitFor(() => expect(screen.getByText("Build")).toBeInTheDocument());
+    // Without the monitoring there is no tab for it, and the screen opens on
+    // the first one the sign-in may use - the address.
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Address" })).toBeInTheDocument());
+    expect(screen.queryByRole("tab", { name: "Monitoring" })).toBeNull();
     expect(screen.queryByText("Monitoring retention")).toBeNull();
   });
 });
@@ -381,7 +397,7 @@ describe("the address the agents dial", () => {
     Object.assign(writes, {
       "/api/v1/settings/advertised": { ...advertised, in_force: ["192.168.56.10"], source: "confirmed", loopback_only: false },
     });
-    draw();
+    draw("/settings?tab=address");
     await waitFor(() => expect(screen.getByTestId("advertised-address")).toBeInTheDocument());
     // Nothing the panel found is in use until somebody says which one.
     expect(screen.getByTestId("advertised-confirm")).toBeDisabled();
@@ -411,7 +427,7 @@ describe("the address the agents dial", () => {
         environment: ["panel.example.org"],
       },
     });
-    draw();
+    draw("/settings?tab=address");
     await waitFor(() => expect(screen.getByTestId("advertised-address")).toBeInTheDocument());
     expect(screen.getByText(/that declaration decides/)).toBeInTheDocument();
     expect(screen.queryByTestId("advertised-confirm")).toBeNull();
@@ -422,7 +438,7 @@ describe("the address the agents dial", () => {
       "/api/v1/whoami": admin,
       "/api/v1/settings/advertised": { ...advertised, in_force: undefined },
     });
-    draw();
+    draw("/settings?tab=address");
     await waitFor(() =>
       expect(screen.getByTestId("advertised-address"))
         .toHaveTextContent("This panel did not say which address is in force."));
@@ -430,7 +446,7 @@ describe("the address the agents dial", () => {
 
   it("is not offered at all to somebody who may not name it", async () => {
     Object.assign(answers, base(), { "/api/v1/whoami": { ...admin, permissions: ["settings.read"] } });
-    draw();
+    draw("/settings?tab=address");
     await waitFor(() => expect(screen.getByTestId("advertised-address")).toBeInTheDocument());
     expect(screen.getByText("Only a platform administrator names the address the fleet connects to; ask one."))
       .toBeInTheDocument();
@@ -439,8 +455,8 @@ describe("the address the agents dial", () => {
 
   it("keeps the whole card away from a sign-in with neither permission", async () => {
     Object.assign(answers, base(), { "/api/v1/whoami": reader });
-    draw();
-    await waitFor(() => expect(screen.getByText("Build")).toBeInTheDocument());
+    draw("/settings?tab=address");
+    await waitFor(() => expect(screen.getAllByRole("tab").length).toBeGreaterThan(0));
     expect(screen.queryByTestId("advertised-address")).toBeNull();
   });
 });
@@ -461,13 +477,13 @@ describe("what has not arrived yet", () => {
  * rewrite drew them on a plain screen, so the control was gone and the
  * arrangement stored for it could not be reached.
  */
-describe("arranging the general tab", () => {
+describe("arranging the configuration", () => {
   it("offers the arrange bar and draws its containers on the board", async () => {
     Object.assign(answers, base(), {
       "/api/v1/whoami": admin,
       "/api/v1/settings/layout": { widgets: [], present: false, revision: 1 },
     });
-    draw();
+    drawConfiguration();
     await waitFor(() => expect(screen.getByTestId("board")).toBeInTheDocument());
     await waitFor(() => expect(screen.getByTestId("arrange")).toBeInTheDocument());
     expect(screen.getByTestId("arrange")).toHaveTextContent("Arrange this screen");
@@ -500,33 +516,32 @@ describe("arranging the general tab", () => {
  * could not be done from the new panel.
  */
 describe("the fleet CA on the general tab", () => {
-  it("stands as a container of the board, with the trust set in it", async () => {
+  it("stands in a tab of its own, with the trust set read and the rotation a form", async () => {
     Object.assign(answers, base(), { "/api/v1/whoami": admin });
-    draw();
+    draw("/settings?tab=authority");
     await waitFor(() => expect(screen.getByTestId("authority-aa11bb22cc33dd44")).toBeInTheDocument());
     expect(asked).toContain("/api/v1/pki");
-    // A container of the board, so it can be moved and sized like the
-    // rest of the tab rather than being nailed to the foot of it.
-    expect(settingsCatalogue([]).map((one) => one.key)).toContain("fleet_ca");
-    const entry = settingsCatalogue([]).find((one) => one.key === "fleet_ca");
-    expect(entry?.height).toBeGreaterThan(1);
+    // What the authority IS is read, in a card; what is done to it is a form
+    // under its own name, not the lower half of that card.
+    expect(screen.getByTestId("ca-rotation").tagName).toBe("FORM");
+    expect(screen.getByTestId("ca-rotation").closest(".fl-card")).toBeNull();
   });
 
   it("is not drawn for a sign-in that may not read it, and asks nothing of the server", async () => {
     Object.assign(answers, base(), { "/api/v1/whoami": reader });
-    draw();
+    draw("/settings?tab=authority");
     await waitFor(() => expect(screen.getByText("Monitoring retention")).toBeInTheDocument());
     expect(screen.queryByTestId("ca-authorities")).toBeNull();
     expect(asked).not.toContain("/api/v1/pki");
   });
 
-  it("puts a refused change above the board rather than in a container of it", async () => {
+  it("puts a refused change above the tabs rather than in one of them", async () => {
     const { ApiError } = await import("../../lib/api");
     Object.assign(answers, base(), { "/api/v1/whoami": admin });
     Object.assign(writes, {
       "/api/v1/pki/prepare": new ApiError(409, "prepared_not_announced", "not announced"),
     });
-    draw();
+    draw("/settings?tab=authority");
 
     fireEvent.change(await screen.findByTestId("ca-reason"),
       { target: { value: "planned CA rotation before expiry" } });
@@ -534,8 +549,27 @@ describe("the fleet CA on the general tab", () => {
 
     const warning = await screen.findByTestId("ca-warning");
     expect(warning).toHaveTextContent("Prepare nothing further.");
-    // A notice is not a container somebody arranges: it stands above the
-    // grid, not in a cell of it.
-    expect(screen.getByTestId("board").contains(warning)).toBe(false);
+    // A notice stands above whatever tab is open, not inside one.
+    const inner = screen.getAllByRole("tablist").at(-1) as HTMLElement;
+    expect(inner.contains(warning)).toBe(false);
+    expect(warning.compareDocumentPosition(inner) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("the areas of the screen", () => {
+  it("offers who may sign in, the teams and the notifications beside the installation's own", async () => {
+    answers["/api/v1/whoami"] = { permissions: ["settings.read", "principal.manage", "notification.read"] };
+    draw("/settings?area=installation");
+    expect(await screen.findByRole("tab", { name: "Users and access" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Teams" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Notifications" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Installation" })).toBeInTheDocument();
+  });
+
+  it("does not offer users to a sign-in that may not manage them", async () => {
+    answers["/api/v1/whoami"] = { permissions: ["settings.read"] };
+    draw("/settings?area=installation");
+    await screen.findByRole("tab", { name: "Installation" });
+    expect(screen.queryByRole("tab", { name: "Users and access" })).toBeNull();
   });
 });

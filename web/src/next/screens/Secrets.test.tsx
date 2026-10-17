@@ -228,11 +228,12 @@ describe("one secret from the address", () => {
       "/api/v1/secrets/repo.token": { ...history(), value: VALUE },
       "/api/v1/whoami": writer,
     });
-    draw("/secrets/repo.token");
+    draw("/secrets/repo.token?tab=versions");
     await waitFor(() => expect(screen.getByTestId("version-2")).toBeInTheDocument());
     expect(screen.getByTestId("version-1")).toBeInTheDocument();
     expect(within(screen.getByTestId("version-2")).getByText("current")).toBeInTheDocument();
     expect(screen.getByTestId("kpi-secret-version")).toHaveTextContent("2");
+    fireEvent.click(screen.getByRole("tab", { name: "Secret" }));
     // The reference is what a reader takes away, by name and pinned.
     expect(screen.getByTestId("reference-current")).toHaveTextContent('{"name":"repo.token"}');
     expect(screen.getByTestId("reference-pinned")).toHaveTextContent('{"name":"repo.token","version":2}');
@@ -268,6 +269,7 @@ describe("one secret from the address", () => {
     expect(screen.getByTestId("where")).toHaveTextContent("/secrets");
     fireEvent.click(within(screen.getByTestId("secret-repo.token")).getByRole("link", { name: "repo.token" }));
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/secrets/repo.token"));
+    fireEvent.click(await screen.findByRole("tab", { name: "Versions" }));
     await waitFor(() => expect(screen.getByTestId("secret-versions")).toBeInTheDocument());
   });
 
@@ -278,7 +280,7 @@ describe("one secret from the address", () => {
       "/api/v1/whoami": writer,
     });
     Object.assign(writes, { "/api/v1/secrets/repo.token/versions/1": history() });
-    draw("/secrets/repo.token");
+    draw("/secrets/repo.token?tab=versions");
     await waitFor(() => expect(screen.getByTestId("destroy-1")).toBeInTheDocument());
     // The current version is not offered while the secret is still issuable.
     expect(screen.queryByTestId("destroy-2")).not.toBeInTheDocument();
@@ -304,7 +306,7 @@ describe("one secret from the address", () => {
       "/api/v1/secrets/repo.token": history(),
       "/api/v1/whoami": reader,
     });
-    draw("/secrets/repo.token");
+    draw("/secrets/repo.token?tab=versions");
     await waitFor(() => expect(screen.getByTestId("version-1")).toBeInTheDocument());
     expect(screen.queryByTestId("destroy-1")).not.toBeInTheDocument();
   });

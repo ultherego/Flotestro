@@ -13,7 +13,7 @@ import { useToast } from "../../components/Toast";
 import { useT } from "../../i18n";
 import {
   Actions, Banner, Bones, Button, Card, Fact, Facts, Field, Fields, Form, Meter, Note, Pill,
-  Problem, Readout, Screen, Stack, Table,
+  Problem, Readout, Screen, Stack, Table, Tabs, useTab,
 } from "../kit";
 import {
   candidateNote, chosenAddress, confirmable, sourceTone, OWN_ADDRESS,
@@ -52,8 +52,12 @@ export function stepLink(path: string): string {
   return path;
 }
 
+/** The sub-tabs: the checklist, and the steps finished on this screen. */
+const SETUP_TABS = ["steps", "actions"] as const;
+
 export function Setup() {
   const t = useT();
+  const [tab, goTab] = useTab(SETUP_TABS);
   const capabilities = useCapabilities();
   const checklist = useQuery(setupChecklistQuery);
   const whoami = useQuery({
@@ -152,6 +156,16 @@ export function Setup() {
 
   return frame(
     <>
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "steps", label: t("Steps") },
+          { value: "actions", label: t("Actions"), count: decisions.length || undefined },
+        ]}
+      />
+
+      {tab === "steps" && (<>
       <Card
         title={list.complete
           ? t("Every required step is done")
@@ -172,7 +186,7 @@ export function Setup() {
           in it, and what the panel found is the line beside it. */}
       <Card
         title={t("The steps")}
-        note={t("In the order the work is done. What each step is for is under its name; the ones finished on this screen are below the list.")}
+        note={t("In the order the work is done. What each step is for is under its name; the ones finished on this screen are under Actions.")}
         flush
       >
         <Table
@@ -219,8 +233,11 @@ export function Setup() {
           ]}
         />
       </Card>
+      </>)}
 
-      {decisions.length > 0 && <Stack wide>{decisions}</Stack>}
+      {tab === "actions" && (decisions.length > 0
+        ? <Stack wide>{decisions}</Stack>
+        : <Note>{t("No step is finished on this screen with what you may do here.")}</Note>)}
     </>,
     banner,
   );

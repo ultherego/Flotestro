@@ -82,10 +82,10 @@ describe("the campaign list", () => {
         count: 2, total: 9, limit: 50, offset: 0,
       },
     });
-    draw();
-    // The band draws before the answer arrives, so the wait is for a row:
-    // waiting for the band alone measured an empty list.
-    await waitFor(() => expect(screen.getByTestId("campaign-second")).toBeInTheDocument());
+    draw("/campaigns?tab=summary");
+    // The band draws before the answer arrives, so the wait is for the
+    // count the card reports: waiting for the band alone measured an empty list.
+    await waitFor(() => expect(screen.getByText("2 of 9 shown")).toBeInTheDocument());
     const band = screen.getByTestId("campaign-states");
     expect(band).toHaveTextContent("Awaiting approval");
     expect(band).toHaveTextContent("In progress");

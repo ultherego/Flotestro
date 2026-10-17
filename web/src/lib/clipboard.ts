@@ -15,15 +15,50 @@
  */
 export async function copyToClipboard(text: string): Promise<boolean> {
   const api = navigator.clipboard;
-  if (!api || typeof api.writeText !== "function") {
-    return false;
+  if (api && typeof api.writeText === "function") {
+    try {
+      await api.writeText(text);
+      return true;
+    } catch {
+      // A denied permission, a document without focus: fall through to the
+      // older way rather than give up while one is left.
+    }
   }
+  return copyThroughTheSelection(text);
+}
+
+/**
+ * The way that works without a secure context.
+ *
+ * A text is put in a box that is not on the page's flow, selected, and the
+ * browser is told to copy the selection. Every browser still has it and it
+ * needs no HTTPS, which a laboratory and a first installation do not have -
+ * so "copy" did nothing at all on the panel the owner was looking at, and
+ * said "copy by hand" while it did. The answer is still the browser's own:
+ * `execCommand` returns whether it happened, and that is what is reported.
+ */
+function copyThroughTheSelection(text: string): boolean {
+  if (typeof document === "undefined" || typeof document.execCommand !== "function") return false;
+  const box = document.createElement("textarea");
+  box.value = text;
+  // Read-only so a phone does not raise its keyboard, and off the screen so
+  // nothing flashes; not display:none, which cannot be selected.
+  box.setAttribute("readonly", "");
+  box.style.position = "fixed";
+  box.style.top = "0";
+  box.style.left = "-9999px";
+  box.style.opacity = "0";
+  const holder = document.activeElement as HTMLElement | null;
+  document.body.appendChild(box);
   try {
-    await api.writeText(text);
-    return true;
+    box.select();
+    box.setSelectionRange(0, text.length);
+    return document.execCommand("copy");
   } catch {
-    // A denied permission, a document without focus, a browser that refuses
-    // the write: all of them mean the text is not on the clipboard.
     return false;
+  } finally {
+    document.body.removeChild(box);
+    // The page keeps the focus it had; a copy is not a navigation.
+    holder?.focus?.();
   }
 }

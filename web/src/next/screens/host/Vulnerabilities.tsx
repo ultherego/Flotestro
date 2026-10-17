@@ -9,7 +9,7 @@ import { bulkPrefill } from "../../../lib/orders";
 import { useT } from "../../../i18n";
 import {
   Actions, Band, Banner, Bars, Bones, Button, C, Card, Empty, Fact, Facts, Find, Grid, HeadActions,
-  Meter, Note, Pill, Problem, Seg, Table, Toolbar, TwoLine, type Segment, type Tone,
+  Meter, Note, Pill, Problem, Seg, Table, Tabs, Toolbar, useTab, TwoLine, type Segment, type Tone,
 } from "../../kit";
 
 /**
@@ -267,8 +267,12 @@ function ReadOnlyNotice({ host, actions }: { host: string; actions: string[] }) 
 
 /* ------------------------------------------------------------ the module */
 
+/** The sub-tabs: the findings, the packages they fall on, and how far the assessment reaches. */
+const VULNERABILITY_TABS = ["findings", "packages", "coverage"] as const;
+
 export function Vulnerabilities({ host }: { host: Host }) {
   const t = useT();
+  const [tab, goTab] = useTab(VULNERABILITY_TABS);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<"fixable" | "no-fix" | "unknown">("fixable");
@@ -397,13 +401,11 @@ export function Vulnerabilities({ host }: { host: Host }) {
         </Banner>
       )}
 
-      {/* No sub-tabs: everything here is read, and the one order the
-          screen places - patch what has a fix - belongs to the screen
-          and stands in its heading. The containers are as tall as what
-          is in them, so none of them opens with a hand's width of empty
-          floor under a band. */}
+      {/* The severity band is the measurement and stays above the tabs;
+          the one order the screen places - patch what has a fix - belongs
+          to the screen and stands in its heading. */}
       <Grid>
-        <C span={8}>
+        <C span={12}>
           <Card
             title={t("Affected packages by severity")}
             note={t("As the distribution vendor rates them; a package without a rating is unrated, not harmless.")}
@@ -420,6 +422,20 @@ export function Vulnerabilities({ host }: { host: Host }) {
             {!data ? <Bones rows={2} height={18} /> : <Band segments={bySeverity} testId="by-severity" />}
           </Card>
         </C>
+      </Grid>
+
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "findings", label: t("Findings") },
+          { value: "packages", label: t("Packages") },
+          { value: "coverage", label: t("Coverage") },
+        ]}
+      />
+
+      {tab === "coverage" && (
+      <Grid>
         <C span={4}>
           <Card title={t("Coverage")}>
             <Facts>
@@ -447,19 +463,6 @@ export function Vulnerabilities({ host }: { host: Host }) {
                 )}
               </Fact>
             </Facts>
-          </Card>
-        </C>
-        <C span={4}>
-          <Card title={t("Most affected packages")} note={t("Findings per package; one advisory can touch several.")}>
-            {!data ? (
-              <Bones rows={4} />
-            ) : affected === undefined ? (
-              <Empty icon="vulnerabilities">{t("Not assessed: no package on this host was checked against a feed.")}</Empty>
-            ) : !packages.length ? (
-              <Empty>{t("No package on this host is known to be affected.")}</Empty>
-            ) : (
-              <Bars items={packages.map(([name, count]) => ({ label: name, value: count, tone: "warn" as Tone }))} />
-            )}
           </Card>
         </C>
         <C span={8}>
@@ -521,6 +524,29 @@ export function Vulnerabilities({ host }: { host: Host }) {
             </Actions>
           </Card>
         </C>
+      </Grid>
+      )}
+
+      {tab === "packages" && (
+      <Grid>
+        <C span={12}>
+          <Card title={t("Most affected packages")} note={t("Findings per package; one advisory can touch several.")}>
+            {!data ? (
+              <Bones rows={4} />
+            ) : affected === undefined ? (
+              <Empty icon="vulnerabilities">{t("Not assessed: no package on this host was checked against a feed.")}</Empty>
+            ) : !packages.length ? (
+              <Empty>{t("No package on this host is known to be affected.")}</Empty>
+            ) : (
+              <Bars items={packages.map(([name, count]) => ({ label: name, value: count, tone: "warn" as Tone }))} />
+            )}
+          </Card>
+        </C>
+      </Grid>
+      )}
+
+      {tab === "findings" && (
+      <Grid>
         <C span={12}>
           <Card
             title={t("Findings")}
@@ -688,6 +714,7 @@ export function Vulnerabilities({ host }: { host: Host }) {
           </Card>
         </C>
       </Grid>
+      )}
     </>
   );
 }

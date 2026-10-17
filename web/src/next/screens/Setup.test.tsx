@@ -98,11 +98,11 @@ const base = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-function draw() {
+function draw(tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/setup"]}><ToastProvider>{children}</ToastProvider></MemoryRouter>
+      <MemoryRouter initialEntries={[tab ? `/setup?tab=${tab}` : "/setup"]}><ToastProvider>{children}</ToastProvider></MemoryRouter>
     </QueryClientProvider>
   );
   return render(<Setup />, { wrapper });
@@ -196,7 +196,7 @@ describe("the first run", () => {
         provider: { issuer: "https://id.example.org", jwks_url: "https://id.example.org/jwks", keys: 2, at: "" },
       },
     });
-    draw();
+    draw("actions");
     await waitFor(() => expect(screen.getByTestId("test-oidc")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("test-oidc"));
     await waitFor(() => expect(screen.getByTestId("test-oidc-verdict")).toHaveTextContent("Answered in 42 ms"));
@@ -207,8 +207,9 @@ describe("the first run", () => {
 
   it("offers no test and no form to somebody who may not act", async () => {
     Object.assign(answers, base({ "/api/v1/whoami": reader }));
-    draw();
-    await waitFor(() => expect(screen.getByTestId("found-group_mapping")).toBeInTheDocument());
+    draw("actions");
+    await waitFor(() => expect(screen.getByText("Only whoever manages access can add a mapping; ask an administrator."))
+      .toBeInTheDocument());
     expect(screen.queryByTestId("test-oidc")).toBeNull();
     expect(screen.queryByTestId("test-directory")).toBeNull();
     expect(screen.queryByTestId("mapping-add")).toBeNull();
@@ -224,7 +225,7 @@ describe("the first run", () => {
     Object.assign(writes, {
       "/api/v1/group-mappings": { group_name: "flotestro-admins", role: "platform_admin" },
     });
-    draw();
+    draw("actions");
     // An undone mapping step opens its form without being asked.
     await waitFor(() => expect(screen.getByTestId("mapping-add")).toBeInTheDocument());
     expect(screen.getByTestId("mapping-add")).toBeDisabled();
@@ -258,7 +259,7 @@ describe("the first run", () => {
     Object.assign(writes, {
       "/api/v1/group-mappings": new ApiError(401, "reauthentication_required", "Sign in again to change access."),
     });
-    draw();
+    draw("actions");
     await waitFor(() => expect(screen.getByTestId("mapping-add")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("mapping-group"), { target: { value: "flotestro-admins" } });
     fireEvent.change(screen.getByTestId("mapping-reason"), { target: { value: "first run: the platform team" } });
@@ -272,7 +273,7 @@ describe("the first run", () => {
     Object.assign(writes, {
       "/api/v1/settings/advertised": { ...advertised, in_force: ["192.168.56.10"], source: "confirmed", loopback_only: false },
     });
-    draw();
+    draw("actions");
     await waitFor(() => expect(screen.getByTestId("advertised-address")).toBeInTheDocument());
     // A proposal is not a setting: nothing is picked and nothing can be sent.
     expect(screen.getByTestId("advertised-confirm")).toBeDisabled();

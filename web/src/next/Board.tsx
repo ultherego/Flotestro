@@ -2,7 +2,7 @@ import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNod
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import {
-  BOARD_COLUMNS, BOARD_HEIGHTS, boardToDraw, isPlaced, placeAll,
+  BOARD_COLUMNS, boardToDraw, placeAll,
   type BoardEntry, type BoardWidget, type StoredBoard,
 } from "../components/board";
 import { useToast } from "../components/Toast";
@@ -77,6 +77,25 @@ export function settle(widgets: BoardWidget[], held: string): BoardWidget[] {
   }
   // The record keeps the order it had; only the places changed.
   return widgets.map((one) => settled.find((other) => other.key === one.key) ?? one);
+}
+
+/**
+ * The containers in the order a reader meets them: by row, then by column.
+ *
+ * It is the whole of an arrangement now. A container's height is what is
+ * in it, so the only things a person can say about one are WHERE it comes
+ * and HOW WIDE it is - and that is the same thing in the editor and on the
+ * screen, because both lay it out the same way. Until 17.10 the editor
+ * snapped containers to fixed rows while the screen laid them out by their
+ * content, so a person arranged one board and saved another.
+ */
+export function sequenced(widgets: BoardWidget[]): BoardWidget[] {
+  return [...widgets].sort((a, b) => (a.y ?? 0) - (b.y ?? 0) || (a.x ?? 0) - (b.x ?? 0));
+}
+
+/** Positions that say nothing but the order: row i, column 0. */
+export function renumbered(widgets: BoardWidget[]): BoardWidget[] {
+  return sequenced(widgets).map((one, index) => ({ ...one, x: 0, y: index }));
 }
 
 /**
@@ -177,10 +196,7 @@ export function Board({ screen, catalogue, drawn, notices }: {
      the owner's words, and he is right. A container is as tall as its
      cell and its content scrolls inside it; the corner is there to
      change that. */
-  const settled = settle(placeAll(shown), "");
-  const placed = editing !== null
-    ? settled
-    : [...settled].sort((a, b) => (a.y ?? 0) - (b.y ?? 0) || (a.x ?? 0) - (b.x ?? 0));
+  const placed = sequenced(editing !== null ? shown : settle(placeAll(shown), ""));
   const titleOf = (key: string) => catalogue.find((one) => one.key === key)?.title ?? key;
   const absent = catalogue.filter((one) => known.has(one.key) && !shown.some((on) => on.key === one.key));
 
@@ -204,36 +220,50 @@ export function Board({ screen, catalogue, drawn, notices }: {
     if (editing === null) return;
     const start = placed.find((one) => one.key === key);
     if (!start) return;
-    // The first hold on an arrangement that was only ever ordered fixes
-    // everybody's place, so nothing jumps as it is picked up.
-    if (!isPlaced(current)) {
-      setEditing([...placeAll(shown), ...current.filter((one) => one.hidden)]);
-    }
     (event.target as Element).setPointerCapture?.(event.pointerId);
     setHold({ key, mode, fromX: event.clientX, fromY: event.clientY, start });
     event.preventDefault();
   };
 
+  const lastSwap = useRef(0);
+
+  const widen = (key: string, by: number) => {
+    if (editing === null) return;
+    setEditing(current.map((one) => (
+      one.key === key ? { ...one, width: Math.min(Math.max(one.width + by, 1), BOARD_COLUMNS) } : one
+    )));
+  };
+
   const moveTo = (event: ReactPointerEvent) => {
     if (!hold || editing === null) return;
-    const column = columnWidth();
-    if (column <= 0) return;
-    const dx = Math.round((event.clientX - hold.fromX) / column);
-    const dy = Math.round((event.clientY - hold.fromY) / ROW);
-    const start = hold.start;
-    const next = { ...start };
-    if (hold.mode === "move") {
-      next.x = Math.min(Math.max((start.x ?? 0) + dx, 0), BOARD_COLUMNS - start.width);
-      next.y = Math.max((start.y ?? 0) + dy, 0);
-    } else {
-      // The corner: never off the grid, and never smaller than something
-      // a person can take hold of again.
-      next.width = Math.min(Math.max(start.width + dx, 1), BOARD_COLUMNS - (start.x ?? 0));
-      next.height = Math.min(Math.max((start.height ?? 2) + dy, BOARD_HEIGHTS.min), BOARD_HEIGHTS.max);
+
+    if (hold.mode === "size") {
+      // The corner widens and nothing else: how tall a container is, is
+      // what is in it.
+      const column = columnWidth();
+      if (column <= 0) return;
+      const dx = Math.round((event.clientX - hold.fromX) / column);
+      const width = Math.min(Math.max(hold.start.width + dx, 1), BOARD_COLUMNS);
+      setEditing(current.map((one) => (one.key === hold.key ? { ...one, width } : one)));
+      return;
     }
-    const moved = current.map((one) => (one.key === hold.key ? { ...one, ...next } : one));
-    const visible = settle(moved.filter((one) => !one.hidden), hold.key);
-    setEditing([...visible, ...moved.filter((one) => one.hidden)]);
+
+    // Moving: the container takes the place of the one under the pointer,
+    // and the rest close up around it. Not faster than a person can see -
+    // a tall container dragged over a short one reflows what is under the
+    // pointer, and without this it swapped back and forth every frame.
+    if (event.timeStamp - lastSwap.current < 140) return;
+    const under = document.elementFromPoint?.(event.clientX, event.clientY)?.closest("[data-held-key]");
+    const target = under?.getAttribute("data-held-key");
+    if (!target || target === hold.key) return;
+    const visible = sequenced(current.filter((one) => !one.hidden));
+    const from = visible.findIndex((one) => one.key === hold.key);
+    const to = visible.findIndex((one) => one.key === target);
+    if (from < 0 || to < 0) return;
+    const [moving] = visible.splice(from, 1);
+    visible.splice(to, 0, moving);
+    lastSwap.current = event.timeStamp;
+    setEditing([...renumbered(visible), ...current.filter((one) => one.hidden)]);
   };
 
   const letGo = () => setHold(null);
@@ -248,7 +278,7 @@ export function Board({ screen, catalogue, drawn, notices }: {
 
       {layout.data !== undefined && editing === null && (
         <HeadActions>
-          <button type="button" className="fl-quiet" onClick={() => setEditing([...settle(placeAll(shown), ""), ...current.filter((one) => one.hidden)])} data-testid="arrange">
+          <button type="button" className="fl-quiet" onClick={() => setEditing([...renumbered(settle(placeAll(shown), "")), ...current.filter((one) => one.hidden)])} data-testid="arrange">
             <Icon name="dashboard" />
             {t("Arrange this screen")}
           </button>
@@ -259,7 +289,7 @@ export function Board({ screen, catalogue, drawn, notices }: {
         <div className="fl-arrange">
           {(
             <>
-              <span className="fl-arrange-what">{t("Hold the bar to move a container, the corner to size it.")}</span>
+              <span className="fl-arrange-what">{t("Hold a name to move a container; widen it with the arrows or by its right edge.")}</span>
               <button
                 type="button"
                 onClick={() => save.mutate(current)}
@@ -311,7 +341,8 @@ export function Board({ screen, catalogue, drawn, notices }: {
         className={[
           "fl-grid",
           "fl-placed",
-          editing !== null ? "fl-editing" : "fl-flowing",
+          "fl-flowing",
+          editing !== null ? "fl-editing" : "",
           hold ? "fl-holding" : "",
         ].join(" ").trim()}
         onPointerMove={hold ? moveTo : undefined}
@@ -326,24 +357,47 @@ export function Board({ screen, catalogue, drawn, notices }: {
           // somebody had to guess. A guessed number cannot be right: measured
           // at three window widths, 65 of 318 containers changed height by
           // more than a line, one of them from 171px to 843px.
-          const style = editing !== null
-            ? {
-                gridColumn: `${(one.x ?? 0) + 1} / span ${one.width}`,
-                gridRow: `${(one.y ?? 0) + 1} / span ${one.height ?? 2}`,
-              }
-            : { gridColumn: `span ${one.width}` };
+          // The same layout whether the board is read or arranged: a width
+          // in columns, and the height the content makes.
+          const style = { gridColumn: `span ${one.width}` };
           return (
             <div
               key={one.key}
               className={["fl-held", hold?.key === one.key ? "fl-dragging" : ""].join(" ").trim()}
               style={style}
+              data-held-key={one.key}
               data-testid={editing !== null ? `held-${one.key}` : undefined}
             >
               {editing !== null && (
-                <div className="fl-grip" onPointerDown={(event) => take(event, one.key, "move")}>
-                  <span className="fl-grip-dots" aria-hidden="true">⠿</span>
-                  <span className="fl-grip-name">{t(titleOf(one.key))}</span>
-                  <span className="fl-grip-size">{one.width}×{one.height ?? 2}</span>
+                <div className="fl-grip">
+                  <span
+                    className="fl-grip-handle"
+                    onPointerDown={(event) => take(event, one.key, "move")}
+                    title={t("Hold to move this container")}
+                    data-testid={`grip-${one.key}`}
+                  >
+                    <span aria-hidden="true">⠿</span>
+                    <span className="fl-grip-name">{t(titleOf(one.key))}</span>
+                  </span>
+                  <span className="fl-grip-width" role="group" aria-label={t("Width")}>
+                    <button
+                      type="button"
+                      className="fl-plain"
+                      disabled={one.width <= 1}
+                      onClick={() => widen(one.key, -1)}
+                      aria-label={t("Narrower")}
+                      data-testid={`narrower-${one.key}`}
+                    >−</button>
+                    <span className="fl-grip-size" data-testid={`width-${one.key}`}>{one.width}/{BOARD_COLUMNS}</span>
+                    <button
+                      type="button"
+                      className="fl-plain"
+                      disabled={one.width >= BOARD_COLUMNS}
+                      onClick={() => widen(one.key, 1)}
+                      aria-label={t("Wider")}
+                      data-testid={`wider-${one.key}`}
+                    >+</button>
+                  </span>
                   <button
                     type="button"
                     className="fl-word"
@@ -354,11 +408,11 @@ export function Board({ screen, catalogue, drawn, notices }: {
                   </button>
                 </div>
               )}
-              {drawn[one.key]}
+              <div className="fl-held-body">{drawn[one.key]}</div>
               {editing !== null && (
-                <button
-                  type="button"
-                  className="fl-corner"
+                <span
+                  className="fl-edge"
+                  role="separator"
                   aria-label={t("Drag to resize")}
                   title={t("Drag to resize")}
                   data-testid={`corner-${one.key}`}
