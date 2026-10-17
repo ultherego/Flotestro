@@ -885,21 +885,55 @@ export function Meter({ share, text, tone }: { share: number; text: ReactNode; t
  * sat on the colour - and it is the reason this is a component rather than
  * a layout each screen arranges for itself.
  */
+/**
+ * A reading that follows the pointer over a drawing.
+ *
+ * Every chart answers "what is this one?" the same way: a small card at
+ * the pointer with the name and the figure. `bind(text)` goes on whatever
+ * is pointed at, `node` is drawn once beside it.
+ */
+function useTip() {
+  const [at, setAt] = useState<{ x: number; y: number; text: ReactNode } | null>(null);
+  const bind = (text: ReactNode) => ({
+    onPointerMove: (event: { clientX: number; clientY: number }) => setAt({ x: event.clientX, y: event.clientY, text }),
+    onPointerLeave: () => setAt(null),
+  });
+  const node = at && (
+    <div
+      className="fl-tip"
+      role="tooltip"
+      style={{ left: Math.min(at.x + 14, (typeof window === "undefined" ? 9999 : window.innerWidth) - 240), top: at.y + 16 }}
+    >
+      {at.text}
+    </div>
+  );
+  return { bind, node };
+}
+
 export function Bars({ items }: {
   /** A value nobody took is undefined: no bar at all, and a dash for it. */
   items: { label: ReactNode; value?: number; tone?: Tone | string }[];
 }) {
   const counted = items.map((item) => item.value).filter((one): one is number => one !== undefined);
   const top = Math.max(1, ...counted);
+  const sum = counted.reduce((into, one) => into + one, 0);
+  const { bind, node } = useTip();
   return (
     <dl className="fl-bars">
       {items.map((item, index) => (
-        <div className={join("fl-bars-row", item.value === undefined && toneClass("unknown"))} key={index}>
+        <div
+          className={join("fl-bars-row", item.value === undefined && toneClass("unknown"))}
+          key={index}
+          {...(item.value === undefined ? {} : bind(
+            <><b>{item.label}</b> {item.value}{sum > 0 ? <span className="fl-faint"> · {share100(item.value / sum)}</span> : null}</>,
+          ))}
+        >
           <dt>{item.label}</dt>
           <dd>{item.value === undefined ? <span className="fl-bar-track" /> : <Bar share={item.value / top} tone={item.tone ?? "accent"} />}</dd>
           <dd className="fl-bars-count">{item.value === undefined ? "—" : item.value}</dd>
         </div>
       ))}
+      {node}
     </dl>
   );
 }
@@ -919,6 +953,7 @@ export function Band({ segments, testId }: { segments: Segment[]; testId?: strin
   const zero = segments.filter((one) => one.value === 0);
   const unknown = segments.filter((one) => one.value === undefined);
   const total = counted.reduce((sum, one) => sum + (one.value ?? 0), 0);
+  const { bind, node } = useTip();
   return (
     <div data-testid={testId}>
       {counted.length > 0 && (
@@ -933,8 +968,8 @@ export function Band({ segments, testId }: { segments: Segment[]; testId?: strin
             const className = join("fl-band-seg", toneClass(one.tone));
             const style = { "--fl-share": (one.value ?? 0) / total } as CSSProperties;
             return one.to
-              ? <Link key={one.label} role="listitem" className={className} style={style} to={one.to} title={one.label}>{body}</Link>
-              : <div key={one.label} role="listitem" className={className} style={style} title={one.label}>{body}</div>;
+              ? <Link key={one.label} role="listitem" className={className} style={style} to={one.to} aria-label={one.label} {...bind(<><b>{one.label}</b> {one.value} <span className="fl-faint">· {share100((one.value ?? 0) / total)}</span></>)}>{body}</Link>
+              : <div key={one.label} role="listitem" className={className} style={style} aria-label={one.label} {...bind(<><b>{one.label}</b> {one.value} <span className="fl-faint">· {share100((one.value ?? 0) / total)}</span></>)}>{body}</div>;
           })}
         </div>
       )}
@@ -950,6 +985,7 @@ export function Band({ segments, testId }: { segments: Segment[]; testId?: strin
           ))}
         </div>
       )}
+      {node}
     </div>
   );
 }
@@ -1330,6 +1366,7 @@ export function Chart({ labels, series, everyLabel = 3, height = 160, shape = "b
  */
 export function Spark({ values, tone }: { values: number[]; tone?: Tone }) {
   const mine = useId().replace(/:/g, "");
+  const { bind, node } = useTip();
   if (values.length < 2) return null;
   const W = 120;
   const H = 32;
@@ -1339,9 +1376,13 @@ export function Spark({ values, tone }: { values: number[]; tone?: Tone }) {
   const at = (value: number, i: number) =>
     `${(i / (values.length - 1)) * W},${H - ((value - low) / span) * (H - 3) - 1.5}`;
   const line = values.map(at).join(" ");
+  const reading = (
+    <>last <b>{values[values.length - 1]}</b> <span className="fl-faint">· low {Math.min(...values)} · high {Math.max(...values)}</span></>
+  );
   return (
+    <>
     <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className={toneClass(tone)}
-         style={{ color: "var(--tone, var(--accent))" }} aria-hidden="true">
+         style={{ color: "var(--tone, var(--accent))" }} aria-hidden="true" {...bind(reading)}>
       <defs>
         <linearGradient id={mine} x1="0" x2="0" y1="0" y2="1">
           <stop offset="0%" stopColor="currentColor" stopOpacity="0.3" />
@@ -1351,6 +1392,8 @@ export function Spark({ values, tone }: { values: number[]; tone?: Tone }) {
       <polygon className="fl-chart-area" points={`0,${H} ${line} ${W},${H}`} fill={`url(#${mine})`} />
       <polyline className="fl-chart-line" points={line} vectorEffect="non-scaling-stroke" />
     </svg>
+    {node}
+    </>
   );
 }
 
@@ -1391,9 +1434,10 @@ export function Ring({ share, label, tone = "accent", legend }: {
   const radius = (size - stroke) / 2;
   const round = 2 * Math.PI * radius;
   const filled = known ? Math.min(1, Math.max(0, share)) : 0;
+  const { bind, node } = useTip();
   return (
     <div className="fl-ring">
-      <div className={join("fl-ring-plot", toneClass(tone))}>
+      <div className={join("fl-ring-plot", toneClass(tone))} {...bind(<><b>{label}</b> {known ? share100(filled) : "—"}</>)}>
         <svg viewBox={`0 0 ${size} ${size}`} role="img" aria-hidden="true">
           <circle className="fl-ring-track" cx={size / 2} cy={size / 2} r={radius} strokeWidth={stroke} />
           {known && (
@@ -1411,6 +1455,7 @@ export function Ring({ share, label, tone = "accent", legend }: {
           <span className="fl-ring-value">{known ? share100(filled) : "—"}</span>
           <span className="fl-ring-label">{label}</span>
         </div>
+        {node}
       </div>
       {legend && legend.length > 0 && (
         <dl className="fl-ring-legend">
@@ -1630,6 +1675,7 @@ export function Arcs({ items, label }: {
   const stroke = 11;
   const gap = 5;
   const shown = items.slice(0, 6);
+  const { bind, node } = useTip();
   return (
     <div className="fl-arcs">
       <div className="fl-arcs-plot">
@@ -1640,7 +1686,7 @@ export function Arcs({ items, label }: {
             const round = 2 * Math.PI * radius;
             const filled = Math.min(1, Math.max(0, one.share));
             return (
-              <g key={index} className={toneClass(one.tone ?? "accent")}>
+              <g key={index} className={join("fl-arcs-one", toneClass(one.tone ?? "accent"))} {...bind(<><b>{one.label}</b> {share100(filled)}</>)}>
                 <circle className="fl-arcs-track" cx={size / 2} cy={size / 2} r={radius} strokeWidth={stroke} />
                 <circle
                   className="fl-arcs-arc"
@@ -1665,6 +1711,7 @@ export function Arcs({ items, label }: {
           </div>
         ))}
       </dl>
+      {node}
     </div>
   );
 }
@@ -1935,9 +1982,11 @@ export function Pie({ slices, total, label, hole = 0.62, testId }: {
   const width = radius - inner;
   const round = 2 * Math.PI * middle;
 
+  const { bind, node } = useTip();
+  const [active, setActive] = useState<number | null>(null);
   let before = 0;
   return (
-    <div className="fl-pie" data-testid={testId}>
+    <div className={join("fl-pie", active !== null && "fl-pie-live")} data-testid={testId}>
       <div className="fl-pie-plot">
         <svg viewBox={`0 0 ${size} ${size}`} role="img" aria-hidden="true">
           <circle className="fl-pie-track" cx={size / 2} cy={size / 2} r={middle} strokeWidth={width} />
@@ -1952,7 +2001,12 @@ export function Pie({ slices, total, label, hole = 0.62, testId }: {
             return (
               <circle
                 key={index}
-                className={join("fl-pie-slice", toneClass(one.tone))}
+                className={join("fl-pie-slice", toneClass(one.tone), active === index && "fl-pie-on")}
+                onPointerEnter={() => setActive(index)}
+                {...(() => {
+                  const mine = bind(<><b>{one.label}</b> {one.value} <span className="fl-faint">· {share100(share)}</span></>);
+                  return { onPointerMove: mine.onPointerMove, onPointerLeave: () => { setActive(null); mine.onPointerLeave(); } };
+                })()}
                 cx={size / 2}
                 cy={size / 2}
                 r={middle}
@@ -1960,7 +2014,6 @@ export function Pie({ slices, total, label, hole = 0.62, testId }: {
                 strokeDasharray={`${Math.max(0, round * share - 2)} ${round}`}
                 transform={`rotate(${turn} ${size / 2} ${size / 2})`}
               >
-                <title>{`${one.value}`}</title>
               </circle>
             );
           })}
@@ -1980,11 +2033,13 @@ export function Pie({ slices, total, label, hole = 0.62, testId }: {
             </>
           );
           const className = join("fl-ring-legend-row", toneClass(one.tone));
+          const live = { onPointerEnter: () => setActive(drawn.indexOf(one)), onPointerLeave: () => setActive(null) };
           return one.to
-            ? <Link key={index} to={one.to} className={className}>{body}</Link>
-            : <div key={index} className={className}>{body}</div>;
+            ? <Link key={index} to={one.to} className={className} {...live}>{body}</Link>
+            : <div key={index} className={className} {...live}>{body}</div>;
         })}
       </dl>
+      {node}
     </div>
   );
 }

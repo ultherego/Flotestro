@@ -169,7 +169,7 @@ describe("the policy list", () => {
     // One piece per verdict that has a count, in the fixed order, each
     // as wide as its share of the ten verdicts.
     const pieces = within(bar).getAllByRole("listitem");
-    expect(pieces.map((one) => one.getAttribute("title"))).toEqual(["compliant", "drift", "not applicable"]);
+    expect(pieces.map((one) => one.getAttribute("aria-label"))).toEqual(["compliant", "drift", "not applicable"]);
     expect(pieces[0]).toHaveStyle({ "--fl-share": String(7 / 10) });
     expect(pieces[1]).toHaveStyle({ "--fl-share": String(2 / 10) });
     // And the counts are still readable on it.

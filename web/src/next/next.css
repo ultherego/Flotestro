@@ -50,9 +50,10 @@
      the owner pointed at. It is three parts in a hundred: enough that a
      card has a face, little enough that twenty of them on a screen do
      not shimmer. */
-  --fl-face: linear-gradient(152deg,
-    color-mix(in srgb, var(--text) 4%, var(--fl-card)),
-    var(--fl-card) 58%);
+  --fl-face: linear-gradient(150deg,
+    color-mix(in srgb, var(--text) 8%, var(--fl-card)) 0%,
+    var(--fl-card) 42%,
+    color-mix(in srgb, var(--bg-sunken) 55%, var(--fl-card)) 100%);
   --fl-edge: color-mix(in srgb, var(--text) 9%, transparent);
   --fl-lift: 0 1px 2px rgba(0, 0, 0, 0.18), 0 8px 24px -12px rgba(0, 0, 0, 0.45);
   --fl-lift-high: 0 2px 4px rgba(0, 0, 0, 0.2), 0 18px 40px -16px rgba(0, 0, 0, 0.55);
@@ -4428,3 +4429,48 @@
 /* Notes are readable; faint is for what can be missed. */
 .fl-app .fl-note { color: var(--text-muted); }
 .fl-app .fl-fact.fl-whole dd { font-size: 12px; }
+
+/* The small tiles take the accent the reader chose, as a light that falls
+   across them, and their labels a second colour of their own so a label is
+   never the same grey as what it labels. */
+.fl-app .fl-fact {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--accent) 16%, transparent),
+    color-mix(in srgb, var(--accent) 4%, transparent) 62%,
+    transparent);
+  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.fl-app .fl-fact dt { color: color-mix(in srgb, var(--blue) 78%, var(--text)); }
+
+/* ---------------------------------------------------------------------
+   20. Drawings answer the pointer
+   ------------------------------------------------------------------ */
+.fl-app .fl-tip {
+  position: fixed;
+  z-index: 90;
+  max-width: 240px;
+  padding: var(--s2) var(--s3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
+  box-shadow: var(--fl-lift-high);
+  font-size: var(--t-small);
+  color: var(--text);
+  pointer-events: none;
+}
+.fl-app .fl-bars:hover .fl-bars-row:not(:hover) { opacity: 0.5; }
+.fl-app .fl-bars-row { transition: opacity var(--fl-quick); }
+.fl-app .fl-bars-row:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); border-radius: var(--radius-sm); }
+.fl-app .fl-band:hover .fl-band-seg:not(:hover) { opacity: 0.55; }
+.fl-app .fl-band-seg { transition: opacity var(--fl-quick), transform var(--fl-quick); }
+.fl-app .fl-band-seg:hover { transform: translateY(-1px); }
+.fl-app .fl-pie-slice { transition: opacity var(--fl-quick), stroke-width var(--fl-quick); cursor: pointer; }
+.fl-app .fl-pie-live .fl-pie-slice:not(.fl-pie-on) { opacity: 0.45; }
+.fl-app .fl-pie-on { stroke-width: calc(var(--fl-pie-w, 20) * 1.0); filter: brightness(1.15); }
+.fl-app .fl-ring-plot, .fl-app .fl-arcs-one { cursor: default; }
+.fl-app .fl-arcs-plot:hover .fl-arcs-one:not(:hover) { opacity: 0.5; }
+.fl-app .fl-arcs-one { transition: opacity var(--fl-quick); }
+.fl-app .fl-ring-legend-row { transition: background var(--fl-quick); border-radius: var(--radius-sm); }
+.fl-app .fl-ring-legend-row:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.fl-app .fl-pie-face, .fl-app .fl-ring-face { pointer-events: none; }
