@@ -295,8 +295,10 @@ describe("the counter", () => {
       },
     });
     await onIdentities();
-    const card = screen.getByText("By kind and by role").closest(".fl-card") as HTMLElement;
-    expect(card.querySelector(".fl-card-note")).toHaveTextContent("over all 1805 that match");
+    // The counts stand above the table, in the card that holds it.
+    const card = (await screen.findByText("By kind")).closest(".fl-card") as HTMLElement;
+    expect(card).toHaveTextContent("over all 1805 that match");
+    expect(card.querySelector("table")).not.toBeNull();
   });
 });
 

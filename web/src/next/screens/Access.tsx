@@ -843,7 +843,7 @@ export function Access() {
               readings, which is how a block of fields came to look like a
               measurement. */}
           <Grid>
-            <C span={8}>
+            <C span={12}>
             <Form
               title={t("Find somebody")}
               note={t("The subject and the name go to the server; the role and the kind narrow the page it returned.")}
@@ -904,37 +904,6 @@ export function Access() {
                 </Actions>
               </Stack>
             </Form>
-            </C>
-            <C span={4}>
-              <Card
-                title={t("By kind and by role")}
-                note={serverPaged
-                  // The fault the owner named by name: this card counted the
-                  // fifty on screen and said it had counted the fleet.
-                  ? t("Counted over all {n} that match, not only the {listed} listed.", {
-                      n: principals.data?.total ?? 0, listed: rows.length,
-                    })
-                  : t("Counted over the {n} listed.", { n: narrowed.length })}
-              >
-                {kinds.length === 0 && byRole.length === 0
-                  ? (loading ? <Bones rows={3} /> : <Empty>{t("Nothing to count here.")}</Empty>)
-                  : (
-                    <Stack>
-                      <Bars items={kinds.map(([kind, n]) => ({ label: kind, value: n, tone: "info" as Tone }))} />
-                      {byRole.length > 0 && (
-                        <>
-                          <h3 className="fl-subhead">{t("Direct roles")}</h3>
-                          <Bars items={byRole.map(([role, n]) => ({ label: role, value: n, tone: "ok" as Tone }))} />
-                        </>
-                      )}
-                      <Note>
-                        {principals.data?.without_bindings === undefined
-                          ? t("How many hold no role of their own is unknown here.")
-                          : t("{n} hold no role of their own.", { n: principals.data.without_bindings })}
-                      </Note>
-                    </Stack>
-                  )}
-              </Card>
             </C>
           </Grid>
           <Grid>
@@ -1004,6 +973,33 @@ export function Access() {
                   </>
                 }
               >
+                <Stack>
+                  <Grid>
+                    <C span={6}>
+                      <h3 className="fl-subhead">{t("By kind")}</h3>
+                      {kinds.length === 0
+                        ? (loading ? <Bones rows={2} /> : <Empty>{t("Nothing to count here.")}</Empty>)
+                        : <Bars items={kinds.map(([kind, n]) => ({ label: kind, value: n, tone: "info" as Tone }))} />}
+                    </C>
+                    <C span={6}>
+                      <h3 className="fl-subhead">{t("Direct roles")}</h3>
+                      {byRole.length === 0
+                        ? <Note>{t("Nothing to count here.")}</Note>
+                        : <Bars items={byRole.map(([role, n]) => ({ label: role, value: n, tone: "ok" as Tone }))} />}
+                    </C>
+                  </Grid>
+                  <Note>
+                    {(serverPaged
+                      ? t("Counted over all {n} that match, not only the {listed} listed.", {
+                          n: principals.data?.total ?? 0, listed: rows.length,
+                        })
+                      : t("Counted over the {n} listed.", { n: narrowed.length }))}
+                    {" "}
+                    {principals.data?.without_bindings === undefined
+                      ? t("How many hold no role of their own is unknown here.")
+                      : t("{n} hold no role of their own.", { n: principals.data.without_bindings })}
+                  </Note>
+                </Stack>
                 <Toolbar
                   end={
                     scope === "signin"
