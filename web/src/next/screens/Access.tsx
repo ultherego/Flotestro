@@ -10,7 +10,7 @@ import type {
 import { useT, type Translate } from "../../i18n";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Bars, Bones, C, Card, Check, Download, Empty, Fact, Facts, Fig, Field, Fields, Figs, Find, Form, Grid, HeadActions, Kpi, Kpis, Modal, Note, Pager, Pill, Problem, Seg, stacked, Stack, Table, Tabs, Tags, Toolbar, TwoLine, useTab, type Column, type Tone,
+  Actions, Banner, Bars, Bones, C, Card, Check, Download, Empty, Fact, Facts, Fig, Field, Fields, Figs, Find, Form, Grid, HeadActions, Kpi, Kpis, Lead, Modal, Note, Pager, Pill, Problem, Seg, stacked, Stack, Table, Tabs, Tags, Toolbar, TwoLine, useTab, type Column, type Tone,
 } from "../kit";
 
 /**
@@ -973,7 +973,7 @@ export function Access() {
                   </>
                 }
               >
-                <Stack>
+                <Lead><Stack>
                   <Grid>
                     <C span={6}>
                       <h3 className="fl-subhead">{t("By kind")}</h3>
@@ -999,7 +999,7 @@ export function Access() {
                       ? t("How many hold no role of their own is unknown here.")
                       : t("{n} hold no role of their own.", { n: principals.data.without_bindings })}
                   </Note>
-                </Stack>
+                </Stack></Lead>
                 <Toolbar
                   end={
                     scope === "signin"

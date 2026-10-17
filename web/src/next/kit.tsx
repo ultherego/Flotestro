@@ -222,6 +222,15 @@ export function C({ span = 12, children }: { span?: Span; children: ReactNode })
   return <div className={`fl-c${span}`}>{children}</div>;
 }
 
+/**
+ * A reading that stands above a table inside a card with no padding of its
+ * own: the card is flush so the table can run edge to edge, and what is
+ * drawn over it needs the room the card's body would have given it.
+ */
+export function Lead({ children }: { children: ReactNode }) {
+  return <div className="fl-lead">{children}</div>;
+}
+
 export function Stack({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   return <div className={wide ? "fl-stack-l" : "fl-stack"}>{children}</div>;
 }

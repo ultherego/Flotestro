@@ -149,7 +149,7 @@ export function Board({ screen, catalogue, drawn, notices }: {
   const [editing, setEditing] = useState<BoardWidget[] | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [hold, setHold] = useState<
-    { key: string; mode: "move" | "size"; fromX: number; fromY: number; start: BoardWidget } | null
+    { key: string; mode: "move" | "size" | "width" | "height"; fromX: number; fromY: number; start: BoardWidget; startPx: number } | null
   >(null);
 
   const layout = useQuery({
@@ -216,12 +216,15 @@ export function Board({ screen, catalogue, drawn, notices }: {
     return (box.width - gap * (BOARD_COLUMNS - 1)) / BOARD_COLUMNS;
   };
 
-  const take = (event: ReactPointerEvent, key: string, mode: "move" | "size") => {
+  const take = (event: ReactPointerEvent, key: string, mode: "move" | "size" | "width" | "height") => {
     if (editing === null) return;
     const start = placed.find((one) => one.key === key);
     if (!start) return;
     (event.target as Element).setPointerCapture?.(event.pointerId);
-    setHold({ key, mode, fromX: event.clientX, fromY: event.clientY, start });
+    // Where the container is NOW, in pixels: a height is dragged from what
+    // is drawn, not from a number the catalogue guessed.
+    const box = (event.currentTarget as HTMLElement).closest("[data-held-key]")?.getBoundingClientRect();
+    setHold({ key, mode, fromX: event.clientX, fromY: event.clientY, start, startPx: box?.height ?? 0 });
     event.preventDefault();
   };
 
@@ -237,14 +240,20 @@ export function Board({ screen, catalogue, drawn, notices }: {
   const moveTo = (event: ReactPointerEvent) => {
     if (!hold || editing === null) return;
 
-    if (hold.mode === "size") {
-      // The corner widens and nothing else: how tall a container is, is
-      // what is in it.
+    if (hold.mode !== "move") {
+      // The edges size: the right one widens, the bottom one makes the
+      // container at least so tall (what is in it can still push it
+      // taller), the corner does both.
       const column = columnWidth();
-      if (column <= 0) return;
-      const dx = Math.round((event.clientX - hold.fromX) / column);
-      const width = Math.min(Math.max(hold.start.width + dx, 1), BOARD_COLUMNS);
-      setEditing(current.map((one) => (one.key === hold.key ? { ...one, width } : one)));
+      const widthWanted = hold.mode === "width" || hold.mode === "size";
+      const heightWanted = hold.mode === "height" || hold.mode === "size";
+      const width = widthWanted && column > 0
+        ? Math.min(Math.max(hold.start.width + Math.round((event.clientX - hold.fromX) / column), 1), BOARD_COLUMNS)
+        : hold.start.width;
+      const rows = Math.max(Math.round((hold.startPx + event.clientY - hold.fromY) / ROW), 1);
+      setEditing(current.map((one) => (
+        one.key === hold.key ? { ...one, width, ...(heightWanted ? { height: rows } : {}) } : one
+      )));
       return;
     }
 
@@ -289,7 +298,7 @@ export function Board({ screen, catalogue, drawn, notices }: {
         <div className="fl-arrange">
           {(
             <>
-              <span className="fl-arrange-what">{t("Hold a name to move a container; widen it with the arrows or by its right edge.")}</span>
+              <span className="fl-arrange-what">{t("Hold a name to move a container; size it by its right edge, its bottom edge or the corner.")}</span>
               <button
                 type="button"
                 onClick={() => save.mutate(current)}
@@ -359,7 +368,12 @@ export function Board({ screen, catalogue, drawn, notices }: {
           // more than a line, one of them from 171px to 843px.
           // The same layout whether the board is read or arranged: a width
           // in columns, and the height the content makes.
-          const style = { gridColumn: `span ${one.width}` };
+          const wanted = one.height !== undefined && one.height !== catalogue.find((on) => on.key === one.key)?.height
+            ? one.height : undefined;
+          const style = {
+            gridColumn: `span ${one.width}`,
+            ...(wanted !== undefined ? { minHeight: wanted * ROW } : {}),
+          };
           return (
             <div
               key={one.key}
@@ -416,8 +430,27 @@ export function Board({ screen, catalogue, drawn, notices }: {
                   aria-label={t("Drag to resize")}
                   title={t("Drag to resize")}
                   data-testid={`corner-${one.key}`}
-                  onPointerDown={(event) => take(event, one.key, "size")}
+                  onPointerDown={(event) => take(event, one.key, "width")}
                 />
+              )}
+              {editing !== null && (
+                <>
+                  <span
+                    className="fl-edge-low"
+                    role="separator"
+                    aria-label={t("Drag to change the height")}
+                    title={t("Drag to change the height")}
+                    data-testid={`low-${one.key}`}
+                    onPointerDown={(event) => take(event, one.key, "height")}
+                  />
+                  <span
+                    className="fl-edge-corner"
+                    aria-label={t("Drag to resize")}
+                    title={t("Drag to resize")}
+                    data-testid={`both-${one.key}`}
+                    onPointerDown={(event) => take(event, one.key, "size")}
+                  />
+                </>
               )}
             </div>
           );

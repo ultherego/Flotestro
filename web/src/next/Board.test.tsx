@@ -134,6 +134,21 @@ describe("arranging a screen", () => {
     expect(screen.getByTestId("held-first")).toHaveTextContent("8");
   });
 
+  it("makes a container taller by its bottom edge, without touching its width", async () => {
+    draw();
+    await waitFor(() => expect(screen.getByTestId("arrange")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("arrange"));
+    const width = screen.getByTestId("width-first").textContent;
+    point(screen.getByTestId("low-first"), "pointerdown", 600, 300);
+    point(screen.getByTestId("board"), "pointermove", 600, 300 + 6 * 76);
+    point(screen.getByTestId("board"), "pointerup", 600, 300 + 6 * 76);
+    // Dragged from the height drawn (the box is stubbed), by six rows.
+    const tall = parseInt(screen.getByTestId("held-first").style.minHeight, 10);
+    expect(tall).toBeGreaterThanOrEqual(456);
+    expect(tall % 76).toBe(0);
+    expect(screen.getByTestId("width-first").textContent).toBe(width);
+  });
+
   it("widens and narrows a container by its arrows, to the column", async () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("arrange")).toBeInTheDocument());

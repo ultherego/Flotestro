@@ -1916,6 +1916,7 @@
 
 .fl-app .fl-danger { background: var(--error) !important; color: var(--error-contrast) !important; border-color: transparent !important; }
 
+.fl-app .fl-lead { padding: var(--s4) var(--s5); border-bottom: 1px solid var(--border); }
 .fl-app .fl-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); margin-bottom: var(--s4); }
 
 /* The bar that steers a list stands between the card's head and the part
@@ -2348,6 +2349,45 @@
   opacity: 0.6;
 }
 .fl-app .fl-edge:hover::after { opacity: 1; }
+
+/* The bottom edge pulls the height; the corner pulls both. */
+.fl-app .fl-edge-low {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -6px;
+  height: 12px;
+  cursor: ns-resize;
+  touch-action: none;
+  z-index: 6;
+}
+.fl-app .fl-edge-low::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  width: 40px;
+  height: 4px;
+  margin-left: -20px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+.fl-app .fl-edge-low:hover::after { opacity: 1; }
+.fl-app .fl-edge-corner {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  touch-action: none;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.7;
+  z-index: 7;
+}
+.fl-app .fl-edge-corner:hover { opacity: 1; }
 
 /* What a screen may group inside a card without inventing a layout. */
 .fl-app .fl-zones { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--s4); }
