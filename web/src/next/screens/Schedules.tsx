@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Collection } from "../../lib/api";
@@ -13,8 +13,7 @@ import { useT, type Translate } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Form, Kpi, Kpis,
-  Modal, Note, Pill, Presets, Problem, Row, Stack, Table, Toolbar, TwoLine, type Tone,
+  Actions, Banner, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Form, Kpi, Kpis, Modal, Note, Pill, Presets, Problem, Row, Stack, Table, Tabs, Toolbar, TwoLine, type Tone, useTab,
 } from "../kit";
 import { campaignTone } from "./Campaigns";
 
@@ -363,6 +362,7 @@ type Ask =
 
 export function Schedules() {
   const t = useT();
+  const [tab, goTab] = useTab(SCHEDULE_TABS);
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<ScheduleForm | null>(null);
   const [editingID, setEditingID] = useState("");
@@ -654,7 +654,16 @@ export function Schedules() {
       </Form>
       )}
 
-      <Board screen={SCHEDULES_SCREEN} catalogue={SCHEDULES} drawn={{
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "schedules", label: t("Schedules") },
+          { value: "calendar", label: t("Calendar") },
+        ]}
+      />
+
+      <Board screen={SCHEDULES_SCREEN} catalogue={SCHEDULES} drawn={forTab(tab, {
         counts: (
           <Kpis>
             <Kpi
@@ -839,7 +848,7 @@ export function Schedules() {
             )}
           </Card>
         ),
-      }} />
+      })} />
 
       {/* Running one early, turning one off and deleting one all change what
           the fleet does without anybody watching, so each is asked first and
@@ -995,6 +1004,27 @@ function DayEntry({ entry, day }: { entry: CalendarEntry; day: string }) {
 }
 
 export const SCHEDULES_SCREEN = "next_schedules";
+
+/** The two readings of this screen, one at a time. */
+const SCHEDULE_TABS = ["schedules", "calendar"] as const;
+type ScheduleTab = typeof SCHEDULE_TABS[number];
+
+/**
+ * Only the container of the open tab is drawn; the figures above stay.
+ *
+ * What the schedules ARE and WHEN they fire are two readings of one
+ * thing, and on one screen the calendar - a month of seven columns -
+ * pushed the list of schedules a screen's height down. A container left
+ * out of the record is left out of the board, so nothing here is hidden
+ * by a style.
+ */
+function forTab(tab: ScheduleTab, record: Record<string, ReactNode>): Record<string, ReactNode> {
+  return {
+    ...record,
+    schedules: tab === "schedules" ? record.schedules : undefined,
+    calendar: tab === "calendar" ? record.calendar : undefined,
+  };
+}
 
 export const SCHEDULES: BoardEntry[] = [
   { key: "counts", title: "Schedules at a glance", width: 12, height: 2 },

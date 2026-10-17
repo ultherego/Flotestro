@@ -81,11 +81,14 @@ const base = (items: unknown[] = [schedule()], entries: CalendarEntry[] = []) =>
   "/api/v1/maintenance/calendar": { items: entries, count: entries.length },
 });
 
-function draw() {
+/** The screen is two tabs; the calendar is one a reader asks for by address. */
+function draw(tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter>
+      <MemoryRouter initialEntries={[tab ? `/campaigns/schedules?tab=${tab}` : "/campaigns/schedules"]}>
+        <ToastProvider>{children}</ToastProvider>
+      </MemoryRouter>
     </QueryClientProvider>
   );
   return render(<Schedules />, { wrapper });
@@ -377,7 +380,7 @@ describe("the maintenance calendar", () => {
       },
     ]));
     vi.setSystemTime(new Date("2026-10-16T09:00:00Z"));
-    draw();
+    draw("calendar");
     await waitFor(() => expect(screen.getByTestId("calendar")).toBeInTheDocument());
     const calendar = screen.getByTestId("calendar");
     expect(within(calendar).getAllByRole("columnheader").map((one) => one.textContent))
@@ -422,7 +425,7 @@ describe("the maintenance calendar", () => {
     // The month the screen opens on is the one the clock is in, so the
     // entries are placed in it rather than in a month of 2026.
     vi.setSystemTime(new Date("2026-10-16T09:00:00Z"));
-    draw();
+    draw("calendar");
     await waitFor(() => expect(screen.getAllByTestId("day-2026-10-05").length).toBeGreaterThan(0));
     const rows = screen.getAllByTestId("day-2026-10-05");
     expect(rows.some((row) => within(row).queryByText("maintenance"))).toBe(true);
@@ -444,7 +447,7 @@ describe("the maintenance calendar", () => {
   it("asks the server for the month on screen when the month is changed", async () => {
     Object.assign(answers, base([], []));
     vi.setSystemTime(new Date("2026-10-16T09:00:00Z"));
-    draw();
+    draw("calendar");
     await waitFor(() => expect(screen.getByTestId("calendar-month")).toHaveTextContent("2026-10"));
     asked.length = 0;
     fireEvent.click(screen.getByRole("button", { name: "Next month" }));
@@ -457,7 +460,7 @@ describe("the maintenance calendar", () => {
 
   it("says a month with nothing in it is empty rather than drawing nothing", async () => {
     Object.assign(answers, base([], []));
-    draw();
+    draw("calendar");
     await waitFor(() => expect(screen.getByText("Nothing is planned in this month.")).toBeInTheDocument());
   });
 });
