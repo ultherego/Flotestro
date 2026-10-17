@@ -1682,8 +1682,8 @@
 .fl-app .fl-tag {
   padding: 1px var(--s2);
   border-radius: var(--radius-sm);
-  background: var(--bg-sunken);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
   font-size: var(--t-label);
   color: var(--text-muted);
   font-family: var(--font-mono);
@@ -4498,4 +4498,26 @@
   font-size: var(--t-small);
   color: var(--text-muted);
   padding: 1px var(--s2);
+}
+
+/* Facts, finished: rows with a little room, a stripe every other row, and a
+   row that answers the pointer. */
+.fl-app .fl-fact {
+  padding: var(--s2) var(--s4);
+  border-bottom: 0;
+  border-radius: var(--radius-sm);
+}
+.fl-app .fl-fact:nth-child(odd) { background: color-mix(in srgb, var(--text) 3.5%, transparent); }
+.fl-app .fl-fact:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.fl-app .fl-facts { gap: 2px 0; }
+.fl-app .fl-fact dt { font-size: var(--t-label); letter-spacing: 0.07em; text-transform: uppercase; }
+.fl-app .fl-fact dd { font-size: 14.5px; font-weight: 450; }
+
+/* Any other inline code in a table is a light chip too, not a black well. */
+.fl-app .fl-table code {
+  padding: 1px var(--s2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  color: var(--text-muted);
 }

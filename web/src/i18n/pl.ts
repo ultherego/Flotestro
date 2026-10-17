@@ -1875,6 +1875,7 @@ export const pl: Record<string, string> = {
   "Go to the dashboard": "Przejdź do pulpitu",
   "No screen of this panel answers to that address.": "Żaden ekran tego panelu nie odpowiada pod tym adresem.",
   "Calendar": "Kalendarz",
+  "Capabilities": "Możliwości",
   "Seen": "Widziany",
   "copy the address": "skopiuj adres",
   "Components": "Komponenty",

@@ -117,7 +117,7 @@ describe("the platform of one host", () => {
       }),
       "/api/v1/hosts/h1/system/history": { items: [] },
     });
-    draw();
+    draw(host(), "hardware");
     await waitFor(() => expect(screen.getByTestId("not-read")).toBeInTheDocument());
     // The reason travels to the reader twice: on the fact itself and in
     // the list of everything that could not be read.
@@ -136,7 +136,7 @@ describe("the platform of one host", () => {
         { name: "systemd", version: 1, available: true, read_only: false },
         { name: "docker", version: 1, available: false, read_only: false, reason: "no docker socket" },
       ],
-    }));
+    }), "capabilities");
     await waitFor(() => expect(screen.getByTestId("adapters")).toBeInTheDocument());
     const table = screen.getByTestId("adapters");
     expect(within(table).getByRole("link", { name: "systemd" })).toHaveAttribute("href", "/hosts/h1/services");

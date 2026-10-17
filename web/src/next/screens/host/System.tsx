@@ -21,7 +21,7 @@ import {
  */
 
 /** The sub-tabs of this screen, in the order a reader wants them. */
-const SYSTEM_TABS = ["state", "history"] as const;
+const SYSTEM_TABS = ["state", "hardware", "capabilities", "history"] as const;
 
 /** How full the root filesystem is, and whether that is a condition. */
 export function rootPressure(total?: number, free?: number): { share?: number; tone?: Tone } {
@@ -143,14 +143,17 @@ export function System({ host }: { host: Host }) {
         value={tab}
         onChange={go}
         tabs={[
-          { value: "state", label: t("State") },
+          { value: "state", label: t("System") },
+          { value: "hardware", label: t("Hardware") },
+          { value: "capabilities", label: t("Capabilities") },
           { value: "history", label: t("History") },
         ]}
       />
 
-      {tab === "state" && (
+      {tab !== "history" && (
         <Grid>
-          <C span={12}>
+          {tab === "state" && (
+<C span={12}>
             <Card title={t("Operating system")} foot={freshness}>
               <Facts>
                 <Fact label={t("Distribution")}>{fact("distribution", snapshot.distribution?.pretty_name || snapshot.os?.pretty_name)}</Fact>
@@ -164,7 +167,9 @@ export function System({ host }: { host: Host }) {
               </Facts>
             </Card>
           </C>
-          <C span={12}>
+)}
+          {tab === "state" && (
+<C span={12}>
             <Card title={t("Kernel")}>
               <Facts>
                 <Fact label={t("Release")}>{fact("kernel", snapshot.kernel?.release || snapshot.os?.kernel)}</Fact>
@@ -181,7 +186,9 @@ export function System({ host }: { host: Host }) {
                   : <Facts><Fact label={t("Command line")}>—</Fact></Facts>}
             </Card>
           </C>
-          <C span={12}>
+)}
+          {tab === "hardware" && (
+<C span={12}>
             <Card
               title={t("Processor")}
               foot={snapshot.cpu?.flag_count !== undefined
@@ -206,7 +213,9 @@ export function System({ host }: { host: Host }) {
               </Facts>
             </Card>
           </C>
-          <C span={12}>
+)}
+          {tab === "hardware" && (
+<C span={12}>
             <Card title={t("Memory and root filesystem")}>
               <Facts>
                 <Fact label={t("Memory")}>
@@ -238,7 +247,9 @@ export function System({ host }: { host: Host }) {
               </Facts>
             </Card>
           </C>
-          <C span={12}>
+)}
+          {tab === "hardware" && (
+<C span={12}>
             <Card
               title={t("Machine")}
               note={t("The identity from the DMI tables. The serial numbers and the UUID are readable by root alone, so they come through the helper.")}
@@ -259,7 +270,9 @@ export function System({ host }: { host: Host }) {
               </Facts>
             </Card>
           </C>
-          <C span={12}>
+)}
+          {tab === "hardware" && (
+<C span={12}>
             <Card title={t("Firmware and boot")}>
               <Facts>
                 <Fact label={t("Boot mode")}>
@@ -291,7 +304,9 @@ export function System({ host }: { host: Host }) {
               </Facts>
             </Card>
           </C>
-          <C span={12}>
+)}
+          {tab === "capabilities" && (
+<C span={12}>
             <Card
               title={t("Detected capabilities")}
               note={t("The adapters the other modules stand on, and the reason where one is missing.")}
@@ -322,11 +337,12 @@ export function System({ host }: { host: Host }) {
               />
             </Card>
           </C>
+)}
           {/* The facts that could not be read, each with its reason. A
               container without DMI is not a machine with an empty serial,
               and this is the card that says which of the two this host is. */}
-          {notRead.length > 0 && (
-            <C span={12}>
+          {tab === "hardware" && notRead.length > 0 && (
+<C span={12}>
               <Card title={t("Not read")} note={t("What the host could not read, and why.")} flush>
                 <Table
                   rows={notRead}
