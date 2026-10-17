@@ -170,8 +170,8 @@ test.describe("HOST-UI: source and freshness", () => {
     await expect(header.locator(".fl-head-title")).toContainText(host.hostname);
     const lead = header.locator(".fl-head-lead");
     await expect(lead.locator(".fl-pill").first()).toHaveText(host.connection_state);
-    await expect(lead.locator("[title='site / environment']")).toHaveText(`${host.site} / ${host.environment}`);
-    await expect(lead.locator("[title='last seen']")).toContainText("seen");
+    await expect(lead.locator(".fl-stripitem", { hasText: "Site" })).toContainText(`${host.site} / ${host.environment}`);
+    await expect(lead.locator(".fl-stripitem", { hasText: "Seen" })).toContainText("ago");
     // The address chip names its origin (session, agent, manual) or says
     // the address is unknown; a bare address would hide how it was learnt.
     const source = lead.getByTestId("address-source");
