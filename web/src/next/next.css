@@ -2163,7 +2163,7 @@
      of detail stays readable; the rest of the card is left over, which
      is what leftover space is for. */
   max-width: 1120px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, max-content));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 260px));
   /* A fact that takes two tracks and does not fit in what is left of a
      row would otherwise leave the rest of that row blank, which is the
      scatter again by another route. The short facts behind it fill the
@@ -2183,6 +2183,8 @@
 .fl-app .fl-whole { grid-column: span 2; max-width: none; }
 
 .fl-app .fl-whole dd {
+  display: block;
+  line-height: 28px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2195,7 +2197,16 @@
   color: var(--text-faint);
 }
 
-.fl-app .fl-fact dd { margin: 2px 0 0; font-size: var(--t-body); overflow-wrap: anywhere; }
+.fl-app .fl-fact dd {
+  margin: 2px 0 0;
+  min-height: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s2);
+  font-size: var(--t-body);
+  overflow-wrap: anywhere;
+}
 
 .fl-app .fl-rows { display: inline-flex; align-items: center; gap: var(--s2); font-size: var(--t-small); color: var(--text-faint); }
 .fl-app .fl-rows select { width: auto; min-width: 70px; }
