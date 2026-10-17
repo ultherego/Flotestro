@@ -4,6 +4,7 @@ package integration
 
 import (
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/google/uuid"
@@ -46,10 +47,12 @@ func TestAGroupMappingKeepsItsOwnerAndTagThroughTheDatabase(t *testing.T) {
 	t.Cleanup(func() {
 		if created.ID != "" {
 			// With a reason: every change to who may get in carries one,
-			// and the route refuses the removal without it.
-			h.do(http.MethodDelete, "/api/v1/group-mappings/"+created.ID, map[string]any{
-				"reason": "the integration suite removes the mapping it created",
-			}, nil, http.StatusNoContent)
+			// and the route refuses the removal without it. This route
+			// takes it as a parameter - a DELETE carries no body here -
+			// so a reason sent in a body is a removal without one.
+			h.do(http.MethodDelete, "/api/v1/group-mappings/"+created.ID+
+				"?reason="+url.QueryEscape("the integration suite removes the mapping it created"),
+				nil, nil, http.StatusNoContent)
 		}
 	})
 
