@@ -1716,6 +1716,7 @@
   color: var(--text-faint);
 }
 .fl-app .fl-stripitem-value {
+  min-height: 28px;
   display: inline-flex;
   align-items: center;
   gap: var(--s2);
