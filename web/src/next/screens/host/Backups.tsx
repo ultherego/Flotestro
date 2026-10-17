@@ -7,11 +7,9 @@ import { absoluteTime, relativeTime } from "../../../lib/format";
 import type { Host, Job } from "../../../lib/types";
 import { useToast } from "../../../components/Toast";
 import { useT } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Band, Banner, Bars, Bones, Button, Card, Check, Empty, Field, Fields, HeadActions, Modal, Note,
-  Pill, Problem, Table, Tags, TwoLine, type Segment, type Tone,
+  Band, Banner, Bars, Bones, Button, C, Card, Check, Empty, Field, Fields, Form, Grid, HeadActions,
+  Modal, Note, Pill, Problem, Table, Tabs, Tags, TwoLine, useTab, type Segment, type Tone,
 } from "../../kit";
 
 /**
@@ -303,7 +301,7 @@ function JobNotice({ job }: { job: Job }) {
   return (
     <Banner tone="info">
       {before}
-      <Link to={`/next/jobs/${job.id}`}>{job.id.slice(0, 8)}</Link>
+      <Link to={`/jobs/${job.id}`}>{job.id.slice(0, 8)}</Link>
       {after}
     </Banner>
   );
@@ -346,12 +344,13 @@ export function DefinitionForm({ runbooks, existing, busy, onSave, onCancel }: {
   const ready = name !== "" && (byRunbook ? runbook !== "" : repository !== "" && paths !== "");
 
   return (
-    <Card
+    <Form
+      testId="definition-form"
       title={t("Backup definition")}
       note={existing
         ? t("What stands here is the definition as it is now. Saving writes all of it back, so a field cleared here is cleared on the host as well.")
         : t("The repository password is named, not pasted: the host fetches its value from the secret store once, while the backup runs, and passes it to the tool through the environment — never as a command-line argument, which every user on the host can read.")}
-      foot={
+      actions={
         <>
           <Button
             disabled={!ready || busy}
@@ -445,16 +444,27 @@ export function DefinitionForm({ runbooks, existing, busy, onSave, onCancel }: {
       <Check checked={prune} onChange={setPrune}>
         {t("Delete from the repository what the retention above no longer keeps")}
       </Check>
-    </Card>
+    </Form>
   );
 }
 
 /* ----------------------------------------------------------- the module */
 
+/**
+ * What this machine copies, and the records that say what to copy.
+ *
+ * Two containers of this module were both called "Backups": the band of
+ * how the last copies stand, and the table of the definitions. The band
+ * keeps the name, the table says what it holds, and the definition form
+ * is a decision - its own face in the sub-tab where the definitions are.
+ */
+const BACKUP_TABS = ["state", "definitions"] as const;
+
 export function Backups({ host }: { host: Host }) {
   const t = useT();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const [tab, goTab] = useTab(BACKUP_TABS);
 
   const [intent, setIntent] = useState<Intent | null>(null);
   const [notice, setNotice] = useState("");
@@ -527,7 +537,7 @@ export function Backups({ host }: { host: Host }) {
       setProblem("");
       // The notice is at the top of the module and the copy list may be far
       // below it; the toast names the job wherever the page is.
-      toast.success(text, { link: { to: `/next/hosts/${host.id}/jobs`, label: t("Jobs") } });
+      toast.success(text, { link: { to: `/hosts/${host.id}/jobs`, label: t("Jobs") } });
       if ((variables as { action?: string }).action === "backup.plan") {
         setPlanJob(job.id);
         const asked = (variables as { payload?: { backup?: { id?: string } } }).payload?.backup?.id;
@@ -613,26 +623,7 @@ export function Backups({ host }: { host: Host }) {
     });
   };
 
-  return (
-    <>
-      {/* Actions on the whole module stand in the heading beside the
-          machine's name, where every other screen puts its own. */}
-      <HeadActions>
-        <Button
-          kind="quiet"
-          testId="definition-open"
-          onClick={() => { setEditing(null); setForm((open) => !open); }}
-        >
-          {form ? t("Cancel") : t("Define a backup")}
-        </Button>
-      </HeadActions>
-
-      <ReadOnlyNotice hostID={host.id} actions={BACKUP_CHANGES} />
-      {problem && <Problem>{problem}</Problem>}
-      {notice && <Banner tone="info">{notice}</Banner>}
-      {ordered && <JobNotice job={ordered} />}
-
-      <Board screen="next_host_backups" catalogue={HOST_BACKUPS} drawn={{
+  const panels: Record<string, ReactNode> = {
         state: (
           <Card title={t("Backups")} note={t("By the state of the last copy.")}>
             <Band segments={state} testId="backup-state" />
@@ -691,12 +682,15 @@ export function Backups({ host }: { host: Host }) {
             onCancel={() => { setForm(false); setEditing(null); }}
           />
         ),
+        /* "Backups" was the name of this table and of the band above it.
+           What this one holds is the definitions - the records that say
+           what is copied, where to and how long it stays. */
         list: (
-          <Card title={t("Backups")} flush>
+          <Card title={t("Definitions")} flush>
             {!report.isLoading && definitions.length === 0 ? (
               <Empty
                 icon="backups"
-                action={<Button kind="quiet" onClick={() => { setEditing(null); setForm(true); }}>{t("Define a backup")}</Button>}
+                action={<Button kind="quiet" onClick={() => { setEditing(null); setForm(true); }} testId="definition-start">{t("Define a backup")}</Button>}
               >
                 {t("The panel does not back up anything on this host yet. A definition says what to copy, where to and how long it stays.")}
               </Empty>
@@ -973,7 +967,53 @@ export function Backups({ host }: { host: Host }) {
             />
           </Card>
         ),
-      }} />
+  };
+
+  return (
+    <>
+      {/* Actions on the whole module stand in the heading beside the
+          machine's name, where every other screen puts its own. */}
+      <HeadActions>
+        <Button
+          kind="quiet"
+          testId="definition-open"
+          onClick={() => { setEditing(null); setForm(true); goTab("definitions"); }}
+        >
+          {t("Define a backup")}
+        </Button>
+      </HeadActions>
+
+      <ReadOnlyNotice hostID={host.id} actions={BACKUP_CHANGES} />
+      {problem && <Problem>{problem}</Problem>}
+      {notice && <Banner tone="info">{notice}</Banner>}
+      {ordered && <JobNotice job={ordered} />}
+
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "state", label: t("State") },
+          { value: "definitions", label: t("Definitions") },
+        ]}
+      />
+
+      {tab === "state" && (
+        <Grid>
+          <C span={5}>{panels.state}</C>
+          <C span={4}>{panels.verification}</C>
+          <C span={3}>{panels.tools}</C>
+        </Grid>
+      )}
+      {tab === "definitions" && (
+        <>
+          {panels.form}
+          <Grid>
+            <C span={12}>{panels.list}</C>
+            {panels.copies && <C span={6}>{panels.copies}</C>}
+            {panels.history && <C span={6}>{panels.history}</C>}
+          </Grid>
+        </>
+      )}
 
       {intent && (
         <Confirm
@@ -1017,16 +1057,3 @@ export function Backups({ host }: { host: Host }) {
   );
 }
 
-/** The containers this module can draw, and the shape each ships with. */
-export const HOST_BACKUPS: BoardEntry[] = [
-  { key: "state", title: "Backups", width: 5, height: 2 },
-  { key: "verification", title: "Verification and tools", width: 4, height: 2 },
-  { key: "tools", title: "Tools on this host", width: 3, height: 2 },
-  { key: "form", title: "Backup definition", width: 12, height: 5 },
-  { key: "list", title: "Backups", width: 12, height: 4 },
-  { key: "copies", title: "Copies in the repository", width: 6, height: 3 },
-  { key: "history", title: "History", width: 6, height: 3 },
-];
-
-/** The name this module's arrangement is stored under. */
-export const HOST_BACKUPS_SCREEN = "next_host_backups";

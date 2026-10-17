@@ -8,10 +8,9 @@ import type {
   AccessReview, ApiToken, GroupMapping, Principal, ReviewedPrincipal, ReviewFlag, RoleBinding, Whoami,
 } from "../../lib/types";
 import { useT, type Translate } from "../../i18n";
-import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Bars, Bones, Card, Check, Download, Empty, Fact, Facts, Fig, Field, Fields, Figs, Find, HeadActions, Kpi, Modal, Note, Pager, Pill, Problem, Seg, stacked, Stack, Table, Tabs, Tags, Toolbar, TwoLine, type Column, type Tone,
+  Actions, Banner, Bars, Bones, C, Card, Check, Download, Empty, Fact, Facts, Fig, Field, Fields, Figs, Find, Form, Grid, HeadActions, Kpi, Kpis, Lead, Modal, Note, Pager, Pill, Problem, Seg, stacked, Stack, Table, Tabs, Tags, Toolbar, TwoLine, useTab, type Column, type Tone,
 } from "../kit";
 
 /**
@@ -512,7 +511,6 @@ export function Access() {
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(50);
   const [picked, setPicked] = useState<string[]>([]);
-  const [creating, setCreating] = useState(false);
   const [ask, setAsk] = useState<Ask | null>(null);
   const [issued, setIssued] = useState<IssuedToken | null>(null);
   const [copied, setCopied] = useState(false);
@@ -747,9 +745,26 @@ export function Access() {
     : [];
   const kindOptions = [...new Set(read.map((row) => row.kind))].sort();
 
+  /* Six readings and one form rather than thirteen containers on one
+     board. The review is a read the server guards with the right that
+     writes an identity, so somebody without it is not offered the
+     sub-tab at all rather than opening on a refusal. */
+  const tabs = [
+    { value: "people" as const, label: t("People") },
+    { value: "new" as const, label: t("New identity") },
+    { value: "roles" as const, label: t("Roles") },
+    { value: "mappings" as const, label: t("Group mappings") },
+    ...(manages ? [{ value: "review" as const, label: t("Review") }] : []),
+    { value: "permissions" as const, label: t("Permissions") },
+  ];
+  const [tab, go] = useTab(tabs.map((one) => one.value));
+
   return (
     <>
-      <HeadActions><button type="button" onClick={() => { setCreating(true); close(); }} data-testid="create-identity">
+      {/* The action of the screen. It opens the sub-tab that holds the
+          form and leaves whatever record was open; it does not grow a
+          form inside the container the reader was reading. */}
+      <HeadActions><button type="button" onClick={() => { close(); go("new"); }} data-testid="create-identity">
             {t("Create identity")}
           </button></HeadActions>
 
@@ -775,347 +790,350 @@ export function Access() {
         </Banner>
       )}
 
-      <Board
-        screen={ACCESS_SCREEN}
-        catalogue={ACCESS}
-        /* What the directory side of this answer is worth. A directory
-           that did not answer is not a directory with nobody in it, and
-           the screen says which of the two it is looking at - the panel
-           being replaced said so and this one had stopped. */
-        notices={stacked(
-          directory?.configured === true && directory.read === false && (
-            <Banner tone="warn" testId="directory-unread">
-              {t("The directory did not answer, so only the access this panel records itself is listed: {reason}", {
-                reason: directory.reason ?? t("no reason given"),
-              })}
-            </Banner>
-          ),
-          directory?.configured === false && (
-            <Note testId="directory-absent">
-              {t("No directory is configured, so this is the access the panel records itself.")}
-            </Note>
-          ),
-        )}
-        drawn={{
-        signin: (
-          <Kpi
-            hero
-            icon="access"
-            label={t("Who may sign in")}
-            value={holders.data?.items.length ?? null}
-            note={t("including the directory accounts the panel has never seen")}
-          />
+      {/* What the directory side of this answer is worth. A directory
+          that did not answer is not a directory with nobody in it, and
+          the screen says which of the two it is looking at. */}
+      {stacked(
+        directory?.configured === true && directory.read === false && (
+          <Banner tone="warn" testId="directory-unread">
+            {t("The directory did not answer, so only the access this panel records itself is listed: {reason}", {
+              reason: directory.reason ?? t("no reason given"),
+            })}
+          </Banner>
         ),
-        identities: (
-          <Kpi
-            icon="accounts"
-            label={t("Identities on record")}
-            value={principals.data?.total ?? null}
-            note={t("the records this panel keeps itself")}
-          />
+        directory?.configured === false && (
+          <Note testId="directory-absent">
+            {t("No directory is configured, so this is the access the panel records itself.")}
+          </Note>
         ),
-        norole: (
-          <Kpi
-            icon="identity"
-            label={t("Without a role of their own")}
-            value={principals.data?.without_bindings ?? null}
-            tone={principals.data?.without_bindings ? "warn" : "ok"}
-            note={t("their roles, if they have any, come from a group")}
-          />
-        ),
+      )}
 
-        filter: (
-          <Card
-            title={t("Find somebody")}
-            note={t("The subject and the name go to the server; the role and the kind narrow the page it returned.")}
-          >
-            <Stack>
-              <Fields>
-                <Field label={t("Subject")} hint={t("The name the trail records.")}>
-                  <input
-                    value={draft.subject}
-                    onChange={(event) => setDraft({ ...draft, subject: event.target.value })}
-                    data-testid="filter-subject"
-                  />
-                </Field>
-                <Field label={t("Name")}>
-                  <input
-                    value={draft.name}
-                    onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                    data-testid="filter-name"
-                  />
-                </Field>
-                <Field label={t("Role")}>
-                  <select
-                    value={draft.role}
-                    onChange={(event) => setDraft({ ...draft, role: event.target.value })}
-                    data-testid="filter-role"
-                  >
-                    <option value="">{t("any role")}</option>
-                    {roleNames.map((one) => <option key={one} value={one}>{one}</option>)}
-                  </select>
-                </Field>
-                <Field label={t("Kind")}>
-                  <select
-                    value={draft.kind}
-                    onChange={(event) => setDraft({ ...draft, kind: event.target.value })}
-                    data-testid="filter-kind"
-                  >
-                    <option value="">{t("any kind")}</option>
-                    {kindOptions.map((one) => <option key={one} value={one}>{one}</option>)}
-                  </select>
-                </Field>
-                <Field label={t("Status")}>
-                  <select
-                    value={draft.status}
-                    onChange={(event) => setDraft({ ...draft, status: event.target.value as Filter["status"] })}
-                    data-testid="filter-status"
-                  >
-                    <option value="enabled">{t("Enabled")}</option>
-                    <option value="disabled">{t("Disabled")}</option>
-                  </select>
-                </Field>
-              </Fields>
-              <Actions>
-                <button type="button" onClick={apply} data-testid="filter-apply">{t("Apply")}</button>
-                <button type="button" className="fl-quiet" onClick={reset} data-testid="filter-reset">
-                  {t("Reset")}
-                </button>
-              </Actions>
-            </Stack>
-          </Card>
-        ),
+      {/* The three measurements stay above the sub-tabs: they are one
+          shape, they are what a reader looks at first, and they are the
+          same whichever part of the screen is open. */}
+      <Kpis>
+        <Kpi
+          hero
+          icon="access"
+          label={t("Who may sign in")}
+          value={holders.data?.items.length ?? null}
+          note={t("including the directory accounts the panel has never seen")}
+        />
+        <Kpi
+          icon="accounts"
+          label={t("Identities on record")}
+          value={principals.data?.total ?? null}
+          note={t("the records this panel keeps itself")}
+        />
+        <Kpi
+          icon="identity"
+          label={t("Without a role of their own")}
+          value={principals.data?.without_bindings ?? null}
+          tone={principals.data?.without_bindings ? "warn" : "ok"}
+          note={t("their roles, if they have any, come from a group")}
+        />
+      </Kpis>
 
-        create: creating && (
-          <CreateIdentity
-            roles={roleNames}
-            onDone={(token) => { setCreating(false); if (token) { setIssued(token); setCopied(false); } refresh(); }}
-            onCancel={() => setCreating(false)}
-            onError={onError}
-          />
-        ),
+      <Tabs value={tab} onChange={go} tabs={tabs} />
 
-        list: (
-          <Card
-            title={scope === "signin" ? t("Who may sign in") : t("Identities on record")}
-            flush
-            tools={
-              <Seg
-                value={scope}
-                label={t("Whose access to show")}
-                onChange={(next) => { setScope(next); setPage(1); setPicked([]); }}
-                options={[
-                  { value: "signin", label: t("Who may sign in") },
-                  { value: "identities", label: t("Identities on record") },
-                ]}
-              />
-            }
-            foot={
-              <>
-                <Pager page={page} size={size} total={total} onPage={setPage} onSize={setSize} />
-                {/* The one count says what it counted. Where the panel
-                    narrowed the page further than the server did, it says so
-                    rather than letting the range above pass for the answer. */}
-                {serverPaged && narrowsHere(filter) && (
-                  <Note>
-                    {t("{shown} of the {listed} the server sent match the name, the role and the kind.", {
-                      shown: rows.length, listed: principals.data?.items.length ?? 0,
-                    })}
-                  </Note>
-                )}
-                {chosen.length > 0 && (
-                  <Banner
-                    tone="info"
-                    actions={
-                      <>
-                        {filter.status === "disabled"
-                          ? (
-                            <button type="button" onClick={() => setAsk({ kind: "enable", rows: chosen })}
-                                    data-testid="bulk-enable">
-                              {t("Enable")}
-                            </button>
-                          )
-                          : (
-                            <button type="button" className="fl-danger"
-                                    onClick={() => setAsk({ kind: "disable", rows: chosen })}
-                                    data-testid="bulk-disable">
-                              {t("Disable")}
-                            </button>
-                          )}
-                        <button type="button" className="fl-danger"
-                                onClick={() => setAsk({ kind: "revoke-tokens", rows: chosen })}
-                                data-testid="bulk-revoke">
-                          {t("Revoke their tokens")}
-                        </button>
-                        <button type="button" className="fl-quiet" onClick={() => setPicked([])}>
-                          {t("Clear the selection")}
-                        </button>
-                      </>
-                    }
-                  >
-                    <span data-testid="bulk-count">
-                      {t("{n} chosen; what follows acts on all of them.", { n: chosen.length })}
-                    </span>
-                  </Banner>
-                )}
-              </>
-            }
-          >
-            <Toolbar
-              end={
-                scope === "signin"
-                  ? <Note>{t("The directory answers with everybody at once, so this scope is narrowed here.")}</Note>
-                  : undefined
-              }
+      {tab === "people" && (
+        <>
+          {/* The filter stands above the table it narrows, on a face of
+              its own. It was a container headed "Find somebody" among the
+              readings, which is how a block of fields came to look like a
+              measurement. */}
+          <Grid>
+            <C span={12}>
+            <Form
+              title={t("Find somebody")}
+              note={t("The subject and the name go to the server; the role and the kind narrow the page it returned.")}
+              testId="find-somebody"
             >
-              <Note>
-                {filter.status === "disabled"
-                  ? t("The identities somebody disabled, who could be let back in.")
-                  : t("A row says what a subject is. What can be done to one is behind its name.")}
-              </Note>
-            </Toolbar>
-            <Table
-              rows={rows}
-              keyOf={(row) => row.subject}
-              rowTestId={(row) => `row-${row.subject}`}
-              testId="access-rows"
-              loading={loading} empty={t("Nobody matches this.")}
-              columns={[
-                {
-                  key: "pick",
-                  head: (
+              <Stack>
+                <Fields>
+                  <Field label={t("Subject")} hint={t("The name the trail records.")}>
                     <input
-                      type="checkbox"
-                      aria-label={t("Choose every row listed")}
-                      data-testid="pick-all"
-                      checked={chosen.length > 0 && chosen.length === rows.filter((row) => row.id).length}
-                      onChange={(event) => setPicked(
-                        event.target.checked ? rows.filter((row) => row.id).map((row) => row.subject) : [],
-                      )}
+                      value={draft.subject}
+                      onChange={(event) => setDraft({ ...draft, subject: event.target.value })}
+                      data-testid="filter-subject"
                     />
-                  ),
-                  cell: (row) => (
+                  </Field>
+                  <Field label={t("Name")}>
                     <input
-                      type="checkbox"
-                      aria-label={t("Choose {subject}", { subject: row.subject })}
-                      data-testid={`pick-${row.subject}`}
-                      // Somebody the panel has no record of cannot be
-                      // disabled: there is nothing yet to disable.
-                      disabled={!row.id}
-                      checked={picked.includes(row.subject)}
-                      onChange={(event) => setPicked(event.target.checked
-                        ? [...picked, row.subject]
-                        : picked.filter((one) => one !== row.subject))}
+                      value={draft.name}
+                      onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+                      data-testid="filter-name"
                     />
-                  ),
-                },
-                {
-                  key: "subject",
-                  head: t("Subject"),
-                  tight: true,
-                  cell: (row) => (
-                    <Link to={address(row.subject)} data-testid={`open-${row.subject}`} title={row.subject}>
-                      {row.subject}
-                    </Link>
-                  ),
-                },
-                {
-                  key: "name",
-                  head: t("Name"),
-                  cell: (row) => row.name
-                    ? row.name
-                    : <span className="fl-faint" title={t("unknown")}>—</span>,
-                },
-                { key: "kind", head: t("Kind"), minor: true, cell: (row) => <Pill dot={false}>{row.kind}</Pill> },
-                {
-                  key: "roles",
-                  head: t("Roles and scopes"),
-                  cell: (row) => <RoleCells t={t} row={row} teamName={teamName} />,
-                },
-                {
-                  key: "tokens",
-                  head: t("Tokens"),
-                  num: true,
-                  minor: true,
-                  cell: (row) => row.tokens === undefined
-                    // This scope was not asked about tokens, and a nought
-                    // here would say this service holds none.
-                    ? <span className="fl-faint" title={t("unknown in this scope")}>—</span>
-                    : row.tokens.length,
-                },
-                {
-                  key: "password",
-                  head: t("Password"),
-                  minor: true,
-                  cell: (row) => <PasswordCell t={t} row={row} />,
-                },
-                {
-                  key: "status",
-                  head: t("Status"),
-                  cell: (row) => {
-                    const state = statusOf(t, row);
-                    return <Pill tone={state.tone}>{state.label}</Pill>;
-                  },
-                },
-              ]}
-            />
-          </Card>
-        ),
-
-        record: openRow !== undefined && (
-          <Record
-            row={openRow}
-            roles={roleNames}
-            teams={teams.data?.items ?? []}
-            teamName={teamName}
-            busy={busy}
-            onClose={close}
-            onAsk={setAsk}
-            onError={onError}
-            onChanged={refresh}
-          />
-        ),
-
-        kinds: (
-          <Card
-            title={t("By kind and by role")}
-            note={serverPaged
-              // The fault the owner named by name: this card counted the
-              // fifty on screen and said it had counted the fleet.
-              ? t("Counted over all {n} that match, not only the {listed} listed.", {
-                  n: principals.data?.total ?? 0, listed: rows.length,
-                })
-              : t("Counted over the {n} listed.", { n: narrowed.length })}
-          >
-            {kinds.length === 0 && byRole.length === 0
-              ? (loading ? <Bones rows={3} /> : <Empty>{t("Nothing to count here.")}</Empty>)
-              : (
-                <Stack>
-                  <Bars items={kinds.map(([kind, n]) => ({ label: kind, value: n, tone: "info" as Tone }))} />
-                  {byRole.length > 0 && (
-                    <>
+                  </Field>
+                  <Field label={t("Role")}>
+                    <select
+                      value={draft.role}
+                      onChange={(event) => setDraft({ ...draft, role: event.target.value })}
+                      data-testid="filter-role"
+                    >
+                      <option value="">{t("any role")}</option>
+                      {roleNames.map((one) => <option key={one} value={one}>{one}</option>)}
+                    </select>
+                  </Field>
+                  <Field label={t("Kind")}>
+                    <select
+                      value={draft.kind}
+                      onChange={(event) => setDraft({ ...draft, kind: event.target.value })}
+                      data-testid="filter-kind"
+                    >
+                      <option value="">{t("any kind")}</option>
+                      {kindOptions.map((one) => <option key={one} value={one}>{one}</option>)}
+                    </select>
+                  </Field>
+                  <Field label={t("Status")}>
+                    <select
+                      value={draft.status}
+                      onChange={(event) => setDraft({ ...draft, status: event.target.value as Filter["status"] })}
+                      data-testid="filter-status"
+                    >
+                      <option value="enabled">{t("Enabled")}</option>
+                      <option value="disabled">{t("Disabled")}</option>
+                    </select>
+                  </Field>
+                </Fields>
+                <Actions>
+                  <button type="button" onClick={apply} data-testid="filter-apply">{t("Apply")}</button>
+                  <button type="button" className="fl-quiet" onClick={reset} data-testid="filter-reset">
+                    {t("Reset")}
+                  </button>
+                </Actions>
+              </Stack>
+            </Form>
+            </C>
+          </Grid>
+          <Grid>
+            <C span={12}>
+              <Card
+                title={scope === "signin" ? t("Who may sign in") : t("Identities on record")}
+                flush
+                tools={
+                  <Seg
+                    value={scope}
+                    label={t("Whose access to show")}
+                    onChange={(next) => { setScope(next); setPage(1); setPicked([]); }}
+                    options={[
+                      { value: "signin", label: t("Who may sign in") },
+                      { value: "identities", label: t("Identities on record") },
+                    ]}
+                  />
+                }
+                foot={
+                  <>
+                    <Pager page={page} size={size} total={total} onPage={setPage} onSize={setSize} />
+                    {/* The one count says what it counted. Where the panel
+                        narrowed the page further than the server did, it says so
+                        rather than letting the range above pass for the answer. */}
+                    {serverPaged && narrowsHere(filter) && (
+                      <Note>
+                        {t("{shown} of the {listed} the server sent match the name, the role and the kind.", {
+                          shown: rows.length, listed: principals.data?.items.length ?? 0,
+                        })}
+                      </Note>
+                    )}
+                    {chosen.length > 0 && (
+                      <Banner
+                        tone="info"
+                        actions={
+                          <>
+                            {filter.status === "disabled"
+                              ? (
+                                <button type="button" onClick={() => setAsk({ kind: "enable", rows: chosen })}
+                                        data-testid="bulk-enable">
+                                  {t("Enable")}
+                                </button>
+                              )
+                              : (
+                                <button type="button" className="fl-danger"
+                                        onClick={() => setAsk({ kind: "disable", rows: chosen })}
+                                        data-testid="bulk-disable">
+                                  {t("Disable")}
+                                </button>
+                              )}
+                            <button type="button" className="fl-danger"
+                                    onClick={() => setAsk({ kind: "revoke-tokens", rows: chosen })}
+                                    data-testid="bulk-revoke">
+                              {t("Revoke their tokens")}
+                            </button>
+                            <button type="button" className="fl-quiet" onClick={() => setPicked([])}>
+                              {t("Clear the selection")}
+                            </button>
+                          </>
+                        }
+                      >
+                        <span data-testid="bulk-count">
+                          {t("{n} chosen; what follows acts on all of them.", { n: chosen.length })}
+                        </span>
+                      </Banner>
+                    )}
+                  </>
+                }
+              >
+                <Lead><Stack>
+                  <Grid>
+                    <C span={6}>
+                      <h3 className="fl-subhead">{t("By kind")}</h3>
+                      {kinds.length === 0
+                        ? (loading ? <Bones rows={2} /> : <Empty>{t("Nothing to count here.")}</Empty>)
+                        : <Bars items={kinds.map(([kind, n]) => ({ label: kind, value: n, tone: "info" as Tone }))} />}
+                    </C>
+                    <C span={6}>
                       <h3 className="fl-subhead">{t("Direct roles")}</h3>
-                      <Bars items={byRole.map(([role, n]) => ({ label: role, value: n, tone: "ok" as Tone }))} />
-                    </>
-                  )}
+                      {byRole.length === 0
+                        ? <Note>{t("Nothing to count here.")}</Note>
+                        : <Bars items={byRole.map(([role, n]) => ({ label: role, value: n, tone: "ok" as Tone }))} />}
+                    </C>
+                  </Grid>
                   <Note>
+                    {(serverPaged
+                      ? t("Counted over all {n} that match, not only the {listed} listed.", {
+                          n: principals.data?.total ?? 0, listed: rows.length,
+                        })
+                      : t("Counted over the {n} listed.", { n: narrowed.length }))}
+                    {" "}
                     {principals.data?.without_bindings === undefined
                       ? t("How many hold no role of their own is unknown here.")
                       : t("{n} hold no role of their own.", { n: principals.data.without_bindings })}
                   </Note>
-                </Stack>
-              )}
-          </Card>
-        ),
+                </Stack></Lead>
+                <Toolbar
+                  end={
+                    scope === "signin"
+                      ? <Note>{t("The directory answers with everybody at once, so this scope is narrowed here.")}</Note>
+                      : undefined
+                  }
+                >
+                  <Note>
+                    {filter.status === "disabled"
+                      ? t("The identities somebody disabled, who could be let back in.")
+                      : t("A row says what a subject is. What can be done to one is behind its name.")}
+                  </Note>
+                </Toolbar>
+                <Table
+                  rows={rows}
+                  keyOf={(row) => row.subject}
+                  rowTestId={(row) => `row-${row.subject}`}
+                  testId="access-rows"
+                  loading={loading} empty={t("Nobody matches this.")}
+                  columns={[
+                    {
+                      key: "pick",
+                      head: (
+                        <input
+                          type="checkbox"
+                          aria-label={t("Choose every row listed")}
+                          data-testid="pick-all"
+                          checked={chosen.length > 0 && chosen.length === rows.filter((row) => row.id).length}
+                          onChange={(event) => setPicked(
+                            event.target.checked ? rows.filter((row) => row.id).map((row) => row.subject) : [],
+                          )}
+                        />
+                      ),
+                      cell: (row) => (
+                        <input
+                          type="checkbox"
+                          aria-label={t("Choose {subject}", { subject: row.subject })}
+                          data-testid={`pick-${row.subject}`}
+                          // Somebody the panel has no record of cannot be
+                          // disabled: there is nothing yet to disable.
+                          disabled={!row.id}
+                          checked={picked.includes(row.subject)}
+                          onChange={(event) => setPicked(event.target.checked
+                            ? [...picked, row.subject]
+                            : picked.filter((one) => one !== row.subject))}
+                        />
+                      ),
+                    },
+                    {
+                      key: "subject",
+                      head: t("Subject"),
+                      tight: true,
+                      cell: (row) => (
+                        <Link to={address(row.subject)} data-testid={`open-${row.subject}`} title={row.subject}>
+                          {row.subject}
+                        </Link>
+                      ),
+                    },
+                    {
+                      key: "name",
+                      head: t("Name"),
+                      cell: (row) => row.name
+                        ? row.name
+                        : <span className="fl-faint" title={t("unknown")}>—</span>,
+                    },
+                    { key: "kind", head: t("Kind"), minor: true, cell: (row) => <Pill dot={false}>{row.kind}</Pill> },
+                    {
+                      key: "roles",
+                      head: t("Roles and scopes"),
+                      cell: (row) => <RoleCells t={t} row={row} teamName={teamName} />,
+                    },
+                    {
+                      key: "tokens",
+                      head: t("Tokens"),
+                      num: true,
+                      minor: true,
+                      cell: (row) => row.tokens === undefined
+                        // This scope was not asked about tokens, and a nought
+                        // here would say this service holds none.
+                        ? <span className="fl-faint" title={t("unknown in this scope")}>—</span>
+                        : row.tokens.length,
+                    },
+                    {
+                      key: "password",
+                      head: t("Password"),
+                      minor: true,
+                      cell: (row) => <PasswordCell t={t} row={row} />,
+                    },
+                    {
+                      key: "status",
+                      head: t("Status"),
+                      cell: (row) => {
+                        const state = statusOf(t, row);
+                        return <Pill tone={state.tone}>{state.label}</Pill>;
+                      },
+                    },
+                  ]}
+                />
+              </Card>
+            </C>
+            {openRow !== undefined && (
+              <C span={12}>
+                <Record
+                  row={openRow}
+                  roles={roleNames}
+                  teams={teams.data?.items ?? []}
+                  teamName={teamName}
+                  busy={busy}
+                  onClose={close}
+                  onAsk={setAsk}
+                  onError={onError}
+                  onChanged={refresh}
+                />
+              </C>
+            )}
+          </Grid>
+        </>
+      )}
 
-        mappings: <Mappings roles={roleNames} onAsk={setAsk} onError={onError} />,
+      {/* "Create identity" is an action of the screen, and it opens its
+          own sub-tab. It used to open a form inside the container headed
+          "Who may sign in", which is the fault the owner named: a reader
+          pressing it had no idea what had happened. */}
+      {tab === "new" && (
+        <CreateIdentity
+          roles={roleNames}
+          onDone={(token) => { go("people"); if (token) { setIssued(token); setCopied(false); } refresh(); }}
+          onCancel={() => go("people")}
+          onError={onError}
+        />
+      )}
 
-        /* The review is a read the server guards with the same right that
-           writes an identity, so it is drawn for the people who hold it
-           and left off the screen for everybody else. */
-        review: manages && <Review teamName={teamName} />,
-
-        roles: (
+      {tab === "roles" && (
+        <>
           <RolesOfInstallation
             roles={catalogue.data?.items ?? []}
             loading={catalogue.isLoading}
@@ -1126,32 +1144,38 @@ export function Access() {
             onDefine={() => setEditingRole("new")}
             onRemove={(role) => setAsk({ kind: "remove-role", role })}
           />
-        ),
+        {editingRole !== null && (
+            <RoleEditor
+                key={editingRole === "new" ? "new" : editingRole.role}
+                role={editingRole === "new" ? null : editingRole}
+                vocabulary={vocabulary.data?.items}
+              onDone={() => {
+                setEditingRole(null);
+                void queryClient.invalidateQueries({ queryKey: ["roles"] });
+                void queryClient.invalidateQueries({ queryKey: ["whoami"] });
+              }}
+              onCancel={() => setEditingRole(null)}
+              onError={onError}
+            />
+        )}
+        </>
+      )}
 
-        roleeditor: editingRole !== null && (
-          <RoleEditor
-            key={editingRole === "new" ? "new" : editingRole.role}
-            role={editingRole === "new" ? null : editingRole}
-            vocabulary={vocabulary.data?.items}
-            onDone={() => {
-              setEditingRole(null);
-              void queryClient.invalidateQueries({ queryKey: ["roles"] });
-              void queryClient.invalidateQueries({ queryKey: ["whoami"] });
-            }}
-            onCancel={() => setEditingRole(null)}
-            onError={onError}
-          />
-        ),
+      {tab === "mappings" && <Mappings roles={roleNames} onAsk={setAsk} onError={onError} />}
 
-        permissions: (
-          <RoleCatalogue
-            roles={catalogue.data?.items ?? []}
-            vocabulary={vocabulary.data?.items}
-            loading={vocabulary.isLoading || catalogue.isLoading}
-            problem={vocabulary.error}
-          />
-        ),
-      }} />
+      {/* The review is a read the server guards with the same right that
+          writes an identity, so the sub-tab is not offered at all to
+          somebody who does not hold it. */}
+      {tab === "review" && manages && <Review teamName={teamName} />}
+
+      {tab === "permissions" && (
+      <RoleCatalogue
+        roles={catalogue.data?.items ?? []}
+        vocabulary={vocabulary.data?.items}
+        loading={vocabulary.isLoading || catalogue.isLoading}
+        problem={vocabulary.error}
+      />
+      )}
 
       {ask && (
         <AskFor
@@ -1814,7 +1838,23 @@ function CreateIdentity({ roles, onDone, onCancel, onError }: {
   });
 
   return (
-    <Card title={t("New identity")} note={t("A person signs in or holds a token; a service only holds tokens.")}>
+    <Form
+      title={t("New identity")}
+      note={t("A person signs in or holds a token; a service only holds tokens.")}
+      testId="new-identity"
+      actions={
+        <Actions>
+          <button type="button" data-testid="new-submit"
+                  disabled={!subject.trim() || !reasonGiven(reason) || !ttlValid || create.isPending}
+                  onClick={() => create.mutate()}>
+            {create.isPending ? t("Working…") : t("Create identity")}
+          </button>
+          <button type="button" className="fl-quiet" onClick={onCancel} disabled={create.isPending}>
+            {t("Cancel")}
+          </button>
+        </Actions>
+      }
+    >
       <Stack>
         <Fields>
           <Field label={t("Subject")} hint={t("The name the trail records; it cannot be changed later.")}>
@@ -1864,18 +1904,8 @@ function CreateIdentity({ roles, onDone, onCancel, onError }: {
           </Field>
         </Fields>
         <Check checked={withToken} onChange={setWithToken}>{t("Issue the first token now")}</Check>
-        <Actions>
-          <button type="button" data-testid="new-submit"
-                  disabled={!subject.trim() || !reasonGiven(reason) || !ttlValid || create.isPending}
-                  onClick={() => create.mutate()}>
-            {create.isPending ? t("Working…") : t("Create identity")}
-          </button>
-          <button type="button" className="fl-quiet" onClick={onCancel} disabled={create.isPending}>
-            {t("Cancel")}
-          </button>
-        </Actions>
       </Stack>
-    </Card>
+    </Form>
   );
 }
 
@@ -1928,6 +1958,7 @@ function Mappings({ roles, onAsk, onError }: {
   const mappings = list.data?.items ?? [];
 
   return (
+    <>
     <Card
       title={t("Group mappings")}
       note={t("Counted over the {n} listed; the provider's groups are read in full.", { n: mappings.length })}
@@ -1984,10 +2015,27 @@ function Mappings({ roles, onAsk, onError }: {
             },
           ]}
         />
+      </Stack>
+    </Card>
 
-        {form && (
-          <>
-            <h3 className="fl-subhead">{t("New mapping")}</h3>
+    {/* A new mapping is a decision about who gets access, so it stands on
+        a form of its own under the table rather than growing inside the
+        container headed "Group mappings". */}
+    {form && (
+      <Form
+        title={t("New mapping")}
+        note={t("A group of the identity provider, and the role everybody in it holds.")}
+        testId="new-mapping"
+        actions={
+          <Actions>
+            <button type="button" disabled={!group.trim() || !reasonGiven(reason) || add.isPending}
+                    onClick={() => add.mutate()} data-testid="mapping-submit">
+              {add.isPending ? t("Working…") : t("Add mapping")}
+            </button>
+            <button type="button" className="fl-quiet" onClick={() => setForm(false)}>{t("Cancel")}</button>
+          </Actions>
+        }
+      >
             <Fields>
               <Field label={t("Identity provider group")}>
                 <input value={group} onChange={(event) => setGroup(event.target.value)} data-testid="mapping-group" />
@@ -2015,17 +2063,9 @@ function Mappings({ roles, onAsk, onError }: {
                 <input value={reason} onChange={(event) => setReason(event.target.value)} data-testid="mapping-reason" />
               </Field>
             </Fields>
-            <Actions>
-              <button type="button" disabled={!group.trim() || !reasonGiven(reason) || add.isPending}
-                      onClick={() => add.mutate()} data-testid="mapping-submit">
-                {add.isPending ? t("Working…") : t("Add mapping")}
-              </button>
-              <button type="button" className="fl-quiet" onClick={() => setForm(false)}>{t("Cancel")}</button>
-            </Actions>
-          </>
-        )}
-      </Stack>
-    </Card>
+      </Form>
+    )}
+    </>
   );
 }
 
@@ -2453,13 +2493,27 @@ function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
   const nameValid = role !== null || ROLE_NAME.test(name.trim());
 
   return (
-    <Card
+    <Form
       title={role ? t("Edit the role {role}", { role: role.role }) : t("Define a role")}
       note={t("A role carries at least one permission, and every save writes the whole list.")}
-      tools={
-        <button type="button" className="fl-quiet fl-small" onClick={onCancel} data-testid="role-close">
-          {t("Close")}
-        </button>
+      testId="role-editor"
+      actions={
+        <Actions>
+          <button
+            type="button"
+            disabled={!nameValid || chosen.length === 0 || vocabulary === undefined || save.isPending}
+            onClick={() => { setReason(""); setAsking(true); }}
+            data-testid="role-save"
+          >
+            {role ? t("Save the role") : t("Define the role")}
+          </button>
+          <button type="button" className="fl-quiet" onClick={onCancel} disabled={save.isPending}
+                  data-testid="role-close">
+            {t("Cancel")}
+          </button>
+          {chosen.length === 0 && <Note>{t("A role carries at least one permission.")}</Note>}
+          {!nameValid && <Note>{t("A name of lower case letters, digits and underscores, starting with a letter.")}</Note>}
+        </Actions>
       }
     >
       <Stack>
@@ -2524,21 +2578,6 @@ function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
           </Banner>
         )}
 
-        <Actions>
-          <button
-            type="button"
-            disabled={!nameValid || chosen.length === 0 || vocabulary === undefined || save.isPending}
-            onClick={() => { setReason(""); setAsking(true); }}
-            data-testid="role-save"
-          >
-            {role ? t("Save the role") : t("Define the role")}
-          </button>
-          <button type="button" className="fl-quiet" onClick={onCancel} disabled={save.isPending}>
-            {t("Cancel")}
-          </button>
-          {chosen.length === 0 && <Note>{t("A role carries at least one permission.")}</Note>}
-          {!nameValid && <Note>{t("A name of lower case letters, digits and underscores, starting with a letter.")}</Note>}
-        </Actions>
       </Stack>
 
       {asking && (
@@ -2582,7 +2621,7 @@ function RoleEditor({ role, vocabulary, onDone, onCancel, onError }: {
           </Fields>
         </Modal>
       )}
-    </Card>
+    </Form>
   );
 }
 
@@ -2809,20 +2848,23 @@ function Refusal({ error, close }: { error: ApiError; close: () => void }) {
 
 /* ------------------------------------------------------------ the board */
 
+/* The containers this screen used to stand on a board with, kept as the
+   record of what an installation may have arranged, as the host overview
+   kept its own. The screen itself is sub-tabs since 17.10. */
 export const ACCESS_SCREEN = "next_access";
 
 export const ACCESS: BoardEntry[] = [
-  { key: "signin", title: "Who may sign in", width: 4, height: 1 },
-  { key: "identities", title: "Identities on record", width: 4, height: 1 },
-  { key: "norole", title: "Without a role of their own", width: 4, height: 1 },
-  { key: "filter", title: "Find somebody", width: 12, height: 1 },
-  { key: "create", title: "New identity", width: 12, height: 4 },
-  { key: "list", title: "The list", width: 12, height: 6 },
-  { key: "record", title: "The opened identity", width: 12, height: 5 },
-  { key: "kinds", title: "By kind and by role", width: 4, height: 2 },
-  { key: "mappings", title: "Group mappings", width: 8, height: 3 },
-  { key: "review", title: "Access review", width: 12, height: 5 },
-  { key: "roles", title: "Roles of this installation", width: 6, height: 3 },
-  { key: "roleeditor", title: "The role being written", width: 6, height: 5 },
-  { key: "permissions", title: "What a role may be given", width: 12, height: 5 },
+  { key: "signin", title: "Who may sign in", width: 4, height: 2 },
+  { key: "identities", title: "Identities on record", width: 4, height: 2 },
+  { key: "norole", title: "Without a role of their own", width: 4, height: 2 },
+  { key: "filter", title: "Find somebody", width: 12, height: 2 },
+  { key: "create", title: "New identity", width: 12, height: 7 },
+  { key: "list", title: "The list", width: 12, height: 11 },
+  { key: "record", title: "The opened identity", width: 12, height: 9 },
+  { key: "kinds", title: "By kind and by role", width: 4, height: 4 },
+  { key: "mappings", title: "Group mappings", width: 8, height: 5 },
+  { key: "review", title: "Access review", width: 12, height: 9 },
+  { key: "roles", title: "Roles of this installation", width: 6, height: 5 },
+  { key: "roleeditor", title: "The role being written", width: 6, height: 9 },
+  { key: "permissions", title: "What a role may be given", width: 12, height: 9 },
 ];

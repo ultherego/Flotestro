@@ -1,15 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../lib/api";
 import type { Budget, BudgetLimit, Whoami } from "../../lib/types";
 import { absoluteTime, relativeTime } from "../../lib/format";
 import { useToast } from "../../components/Toast";
 import { useT, type Translate } from "../../i18n";
-import { Board } from "../Board";
-import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Band, Bars, Bones, Button, Card, Empty, Fact, Facts, Field, Fields, HeadActions,
-  Kpi, Meter, Modal, Note, Pill, Problem, Stack, Table, Tag, Tags, TwoLine,
+  Band, Bars, Bones, Button, C, Card, Empty, Fact, Facts, Field, Fields, Form, Grid, HeadActions,
+  Kpi, Meter, Modal, Note, Pill, Problem, Stack, Table, Tabs, Tag, Tags, TwoLine, useTab,
   type Segment, type Tone,
 } from "../kit";
 
@@ -145,13 +143,13 @@ export function classTotals(budgets: Pick<BudgetState, "by_class">[]): { name: s
 /** Where a holder leads, inside the new panel. */
 export function holderLink(holder: Pick<BudgetHolder, "owner" | "claimant">): { to: string; label: string } | null {
   const campaign = holder.claimant.startsWith("campaign:") ? holder.claimant.slice("campaign:".length) : "";
-  if (campaign) return { to: `/next/campaigns/${encodeURIComponent(campaign)}`, label: "campaign" };
+  if (campaign) return { to: `/campaigns/${encodeURIComponent(campaign)}`, label: "campaign" };
   if (holder.owner.startsWith("job:")) {
     const author = holder.claimant.startsWith("jobs:") ? holder.claimant.slice("jobs:".length) : "";
-    return { to: author ? `/next/jobs?actor=${encodeURIComponent(author)}` : "/next/jobs", label: "job" };
+    return { to: author ? `/jobs?actor=${encodeURIComponent(author)}` : "/jobs", label: "job" };
   }
   if (holder.owner.startsWith("fanout:")) {
-    return { to: `/next/reads/${encodeURIComponent(holder.owner.slice("fanout:".length))}`, label: "read" };
+    return { to: `/reads/${encodeURIComponent(holder.owner.slice("fanout:".length))}`, label: "read" };
   }
   return null;
 }
@@ -192,10 +190,23 @@ const HOLDERS_SHOWN = 4;
 
 /* ------------------------------------------------------------- the screen */
 
+/**
+ * The sub-tabs of this screen.
+ *
+ * "The budget" stood on the board beside the list and was empty until
+ * somebody chose a key - the same fault as the policies, one container
+ * smaller. The detail is behind the choice now.
+ */
+const BUDGET_TABS = ["budgets", "budget"] as const;
+type BudgetTab = typeof BUDGET_TABS[number];
+
 export function Budgets() {
   const t = useT();
   const [creating, setCreating] = useState(false);
   const [picked, setPicked] = useState("");
+  // The sub-tab is in the address; choosing a key opens the key.
+  const [tab, goTab] = useTab<BudgetTab>(BUDGET_TABS);
+  const pick = (key: string) => { setPicked(key); goTab("budget"); };
   const [removing, setRemoving] = useState(false);
 
   const list = useQuery({
@@ -244,7 +255,7 @@ export function Budgets() {
       label: t("With work waiting"),
       value: loaded ? waited.length : undefined,
       tone: "warn",
-      to: waitingJobs ? "/next/jobs?state=queued" : waitingTargets ? "/next/campaigns" : undefined,
+      to: waitingJobs ? "/jobs?state=queued" : waitingTargets ? "/campaigns" : undefined,
     },
     { label: t("With room"), value: loaded ? free.length : undefined, tone: "ok" },
   ];
@@ -269,7 +280,7 @@ export function Budgets() {
         <NewBudget existing={budgets.map((budget) => budget.key)} onDone={() => setCreating(false)} />
       )}
 
-      <Board screen={BUDGETS_SCREEN} catalogue={BUDGETS} drawn={{
+      <Readings tab={tab} onTab={goTab} panels={{
         keys: (
           <Kpi
             hero
@@ -297,7 +308,7 @@ export function Budgets() {
             value={waitingJobs ?? null}
             tone={waitingJobs ? "warn" : "ok"}
             note={t("queued until a token frees up")}
-            to={waitingJobs ? "/next/jobs?state=queued" : undefined}
+            to={waitingJobs ? "/jobs?state=queued" : undefined}
             testId="kpi-waiting-jobs"
           />
         ),
@@ -308,7 +319,7 @@ export function Budgets() {
             value={waitingTargets ?? null}
             tone={waitingTargets ? "warn" : "ok"}
             note={t("campaign hosts held before they start")}
-            to={waitingTargets ? "/next/campaigns" : undefined}
+            to={waitingTargets ? "/campaigns" : undefined}
             testId="kpi-waiting-hosts"
           />
         ),
@@ -370,7 +381,7 @@ export function Budgets() {
                     const described = describeBudgetKey(one.key);
                     return (
                       <TwoLine sub={describeScope(described, t)}>
-                        <Button kind="word" onClick={() => setPicked(one.key)} testId={`pick-${one.key}`}>
+                        <Button kind="word" onClick={() => pick(one.key)} testId={`pick-${one.key}`}>
                           <code>{one.key}</code>
                         </Button>
                         {described.pattern && (
@@ -404,7 +415,7 @@ export function Budgets() {
                   // A number with nowhere to go only raises the question it
                   // could answer, so a count above nought leads to the queue.
                   cell: (one) => (one.waiting_jobs > 0
-                    ? <Tag to="/next/jobs?state=queued">{one.waiting_jobs}</Tag>
+                    ? <Tag to="/jobs?state=queued">{one.waiting_jobs}</Tag>
                     : one.waiting_jobs),
                 },
                 {
@@ -412,18 +423,25 @@ export function Budgets() {
                   head: t("Waiting hosts"),
                   num: true,
                   cell: (one) => ((one.waiting_targets ?? 0) > 0
-                    ? <Tag to="/next/campaigns">{one.waiting_targets}</Tag>
+                    ? <Tag to="/campaigns">{one.waiting_targets}</Tag>
                     : one.waiting_targets ?? 0),
                 },
               ]}
             />
           </Card>
         ),
-        budget: (
+        /* Until a key is chosen there is nothing to read about one, and
+           that is one sentence rather than an empty container. */
+        none: !chosen && (
+          <Empty icon="settings" testId="no-budget-open">
+            {t("Choose a key to read what holds it and to change its capacity.")}
+          </Empty>
+        ),
+        budget: chosen && (
           <Card
-            title={chosen ? <code>{chosen.key}</code> : t("The budget")}
-            note={chosen ? describeScope(describeBudgetKey(chosen.key), t) : undefined}
-            foot={chosen && canWrite
+            title={<code>{chosen.key}</code>}
+            note={describeScope(describeBudgetKey(chosen.key), t)}
+            foot={canWrite
               ? (
                 <Button kind="danger" onClick={() => setRemoving(true)} testId="budget-delete">
                   {t("Delete…")}
@@ -431,43 +449,93 @@ export function Budgets() {
               )
               : undefined}
           >
-            {!chosen
-              ? <Empty>{t("Choose a key to read what holds it and to change its capacity.")}</Empty>
-              : (
-                <Stack>
-                  <Facts>
-                    <Fact label={t("Family")}>{kindLabel(describeBudgetKey(chosen.key).kind, t)}</Fact>
-                    <Fact label={t("Scope")}>
-                      {describeBudgetKey(chosen.key).pattern
-                        ? <Pill tone="unknown" dot={false}>{t("every scope of the family")}</Pill>
-                        : describeBudgetKey(chosen.key).scope || <Pill tone="neutral" dot={false}>{t("the whole fleet")}</Pill>}
-                    </Fact>
-                    <Fact label={t("Resource")}>{describeBudgetKey(chosen.key).resource}</Fact>
-                    <Fact label={t("In use")}>
-                      <Meter
-                        share={chosen.capacity > 0 ? chosen.used / chosen.capacity : 0}
-                        tone={budgetTone(chosen)}
-                        text={`${chosen.used} / ${chosen.capacity}`}
-                      />
-                    </Fact>
-                    <Fact label={t("Claimants")}>{chosen.claimants}</Fact>
-                    <Fact label={t("Share per claimant")}>{fairShare(chosen.capacity, chosen.claimants)}</Fact>
-                    <Fact label={t("Waiting jobs")}>{chosen.waiting_jobs}</Fact>
-                    <Fact label={t("Waiting hosts")}>{chosen.waiting_targets ?? 0}</Fact>
-                    <Fact label={t("Held by")}><Holders holders={chosen.holders ?? []} /></Fact>
-                  </Facts>
-                  {canWrite
-                    ? <CapacityEditor budget={chosen} />
-                    : <Note>{t("You may not change this budget: a site budget needs the right in its site, the rest in the whole fleet.")}</Note>}
-                </Stack>
+            <Stack>
+              <Facts>
+                <Fact label={t("Family")}>{kindLabel(describeBudgetKey(chosen.key).kind, t)}</Fact>
+                <Fact label={t("Scope")}>
+                  {describeBudgetKey(chosen.key).pattern
+                    ? <Pill tone="unknown" dot={false}>{t("every scope of the family")}</Pill>
+                    : describeBudgetKey(chosen.key).scope || <Pill tone="neutral" dot={false}>{t("the whole fleet")}</Pill>}
+                </Fact>
+                <Fact label={t("Resource")}>{describeBudgetKey(chosen.key).resource}</Fact>
+                <Fact label={t("In use")}>
+                  <Meter
+                    share={chosen.capacity > 0 ? chosen.used / chosen.capacity : 0}
+                    tone={budgetTone(chosen)}
+                    text={`${chosen.used} / ${chosen.capacity}`}
+                  />
+                </Fact>
+                <Fact label={t("Claimants")}>{chosen.claimants}</Fact>
+                <Fact label={t("Share per claimant")}>{fairShare(chosen.capacity, chosen.claimants)}</Fact>
+                <Fact label={t("Waiting jobs")}>{chosen.waiting_jobs}</Fact>
+                <Fact label={t("Waiting hosts")}>{chosen.waiting_targets ?? 0}</Fact>
+                <Fact label={t("Held by")}><Holders holders={chosen.holders ?? []} /></Fact>
+              </Facts>
+              {!canWrite && (
+                <Note>{t("You may not change this budget: a site budget needs the right in its site, the rest in the whole fleet.")}</Note>
               )}
+            </Stack>
           </Card>
         ),
+        /* The capacity is a decision, so it stands on its own face under
+           what is read about the key rather than inside that container. */
+        capacity_form: chosen && canWrite && <CapacityEditor budget={chosen} />,
       }} />
 
       {/* Taking a capacity away is a decision: the key falls back to its
           family's default, or to no limit at all where none describes it. */}
       {removing && chosen && <DeleteBudget budget={chosen} onClose={() => setRemoving(false)} />}
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+/**
+ * The screen in two readings rather than nine containers.
+ *
+ * "The budget" was the ninth and it was empty until somebody chose a
+ * key, which is the smaller twin of the fault on the policies: a detail
+ * laid out beside the list it belongs under. Choosing a key opens it.
+ */
+function Readings({ tab, onTab, panels }: {
+  tab: BudgetTab;
+  onTab: (next: BudgetTab) => void;
+  panels: Record<string, ReactNode>;
+}) {
+  const t = useT();
+  return (
+    <>
+      <Grid>
+        <C span={3}>{panels.keys}</C>
+        <C span={3}>{panels.saturated}</C>
+        <C span={3}>{panels.waiting_jobs}</C>
+        <C span={3}>{panels.waiting_hosts}</C>
+      </Grid>
+
+      <Tabs
+        value={tab}
+        onChange={onTab}
+        tabs={[
+          { value: "budgets", label: t("Budgets") },
+          { value: "budget", label: t("Budget") },
+        ]}
+      />
+
+      {tab === "budgets" && (
+        <Grid>
+          <C span={6}>{panels.capacity}</C>
+          <C span={3}>{panels.by_family}</C>
+          <C span={3}>{panels.by_class}</C>
+          <C span={12}>{panels.list}</C>
+        </Grid>
+      )}
+      {tab === "budget" && (
+        <Grid>
+          <C span={12}>{panels.budget || panels.none}</C>
+          {panels.capacity_form ? <C span={12}>{panels.capacity_form}</C> : null}
+        </Grid>
+      )}
     </>
   );
 }
@@ -604,17 +672,18 @@ function NewBudget({ existing, onDone }: { existing: string[]; onDone: () => voi
   });
 
   return (
-    <Card
+    <Form
       title={t("New budget")}
       note={t("A capacity under a key the store reads: global:<resource> for the whole fleet, or site, domain, gateway or backend, a scope or an asterisk for the family's default, and the resource - mutations, reads, packages, reboot, units, backup.")}
-      foot={
-        <Actions>
+      testId="new-budget-form"
+      actions={
+        <>
           <Button onClick={() => { setMessage(""); create.mutate(); }} disabled={!ready || create.isPending} testId="new-budget-save">
             {create.isPending ? t("saving…") : t("Set the capacity")}
           </Button>
           <Button kind="quiet" onClick={onDone} disabled={create.isPending}>{t("Cancel")}</Button>
           {message && <Problem>{message}</Problem>}
-        </Actions>
+        </>
       }
     >
       <Fields>
@@ -650,7 +719,7 @@ function NewBudget({ existing, onDone }: { existing: string[]; onDone: () => voi
           <input value={note} onChange={(event) => setNote(event.target.value)} data-testid="new-budget-note" />
         </Field>
       </Fields>
-    </Card>
+    </Form>
   );
 }
 
@@ -713,7 +782,23 @@ function CapacityEditor({ budget }: { budget: BudgetState }) {
   const ready = valid && changed;
 
   return (
-    <Stack>
+    <Form
+      title={t("Change the capacity")}
+      note={t("How many tokens this key hands out at once, written on the version it was read at.")}
+      testId="capacity-form"
+      actions={
+        <>
+          <Button onClick={() => save.mutate()} disabled={!ready || save.isPending} testId="capacity-save">{t("Save")}</Button>
+          <Button
+            kind="quiet"
+            onClick={() => { setCapacity(String(budget.capacity)); setNote(record.data?.limit.note ?? ""); setMessage(""); }}
+            disabled={save.isPending}
+          >
+            {t("Discard changes")}
+          </Button>
+        </>
+      }
+    >
       <Fields>
         <Field label={t("Capacity")} hint={t("Tokens at once under this key; at least 1. To stop the work, pause the campaign instead.")}>
           <input
@@ -730,16 +815,6 @@ function CapacityEditor({ budget }: { budget: BudgetState }) {
           <input value={note} onChange={(event) => setNote(event.target.value)} aria-label={t("Note")} data-testid="capacity-note" />
         </Field>
       </Fields>
-      <Actions>
-        <Button onClick={() => save.mutate()} disabled={!ready || save.isPending} testId="capacity-save">{t("Save")}</Button>
-        <Button
-          kind="quiet"
-          onClick={() => { setCapacity(String(budget.capacity)); setNote(record.data?.limit.note ?? ""); setMessage(""); }}
-          disabled={save.isPending}
-        >
-          {t("Discard changes")}
-        </Button>
-      </Actions>
       {record.error && <Note>{record.error instanceof Error ? record.error.message : String(record.error)}</Note>}
       {record.data && (
         <Note>
@@ -747,7 +822,7 @@ function CapacityEditor({ budget }: { budget: BudgetState }) {
         </Note>
       )}
       {message && <Problem>{message}</Problem>}
-    </Stack>
+    </Form>
   );
 }
 
@@ -820,19 +895,3 @@ function DeleteBudget({ budget, onClose }: { budget: BudgetState; onClose: () =>
     </Modal>
   );
 }
-
-/* ------------------------------------------------------------- the board */
-
-export const BUDGETS_SCREEN = "next_budgets";
-
-export const BUDGETS: BoardEntry[] = [
-  { key: "keys", title: "How many keys", width: 3, height: 1 },
-  { key: "saturated", title: "Saturated", width: 3, height: 1 },
-  { key: "waiting_jobs", title: "Waiting jobs", width: 3, height: 1 },
-  { key: "waiting_hosts", title: "Waiting hosts", width: 3, height: 1 },
-  { key: "capacity", title: "Capacity", width: 6, height: 2 },
-  { key: "by_family", title: "By family", width: 3, height: 2 },
-  { key: "by_class", title: "By class", width: 3, height: 2 },
-  { key: "list", title: "Budgets", width: 12, height: 5 },
-  { key: "budget", title: "The budget", width: 12, height: 4 },
-];

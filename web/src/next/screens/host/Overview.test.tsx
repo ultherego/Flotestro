@@ -116,10 +116,18 @@ function base(over: Record<string, unknown> = {}) {
   });
 }
 
-function draw(one = host()) {
+/**
+ * The screen is five sub-tabs since 17.10, and the address names which
+ * one is open - so a test that reads the system facts or the lifecycle
+ * asks for that tab, the way a reader following a link would.
+ */
+function draw(one = host(), tab?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const where = tab ? `/hosts/${one.id}?tab=${tab}` : `/hosts/${one.id}`;
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[where]}>{children}</MemoryRouter>
+    </QueryClientProvider>
   );
   return render(<Overview host={one} />, { wrapper });
 }
@@ -169,7 +177,7 @@ describe("what the overview records about a host", () => {
 
   it("corrects the owner and the address the panel records", async () => {
     base({ "/api/v1/whoami": whoami("host.tag.write") });
-    draw();
+    draw(host(), "system");
     await waitFor(() => expect(screen.getByTestId("edit-owner")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("edit-owner"));
     fireEvent.change(screen.getByTestId("input-owner"), { target: { value: "platform team" } });
@@ -194,7 +202,7 @@ describe("what the overview records about a host", () => {
 
   it("moves the host to another site, and says what the move does not undo", async () => {
     base({ "/api/v1/whoami": whoami("host.tag.write") });
-    draw();
+    draw(host(), "system");
     await waitFor(() => expect(screen.getByTestId("edit-placement")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("edit-placement"));
     // The site it already stands in is not a move, so nothing can be sent.
@@ -212,14 +220,14 @@ describe("what the overview records about a host", () => {
       "/api/v1/whoami": whoami("host.tag.write"),
       "/api/v1/teams": { items: [{ id: "t1", name: "payments" }], count: 1 },
     });
-    draw();
+    draw(host(), "system");
     // Writing tags is not handing the machine to other people.
     await waitFor(() => expect(screen.getByTestId("fact-team")).toBeInTheDocument());
     expect(screen.queryByTestId("edit-team")).toBeNull();
 
     cleanup();
     answers["/api/v1/whoami"] = whoami("host.scope.write");
-    draw();
+    draw(host(), "system");
     await waitFor(() => expect(screen.getByTestId("edit-team")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("edit-team"));
     await waitFor(() => expect(screen.getByRole("option", { name: "payments" })).toBeInTheDocument());
@@ -276,7 +284,7 @@ describe("the lifecycle of a host", () => {
       "/api/v1/whoami": whoami("host.quarantine"),
       "POST /api/v1/hosts/h1/quarantine": { lifecycle_state: "quarantined", jobs_canceled: 2, certificates_revoked: 1 },
     });
-    draw();
+    draw(host(), "lifecycle");
     await waitFor(() => expect(screen.getByTestId("quarantine-open")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("quarantine-open"));
     fireEvent.click(screen.getByLabelText(/Revoke the certificates as well/));
@@ -306,7 +314,7 @@ describe("the lifecycle of a host", () => {
       "/api/v1/whoami": whoami("host.quarantine.release"),
       "POST /api/v1/hosts/h1/quarantine/release": { lifecycle_state: "active" },
     });
-    draw(host({ lifecycle_state: "quarantined", lifecycle_reason: "key theft suspected" }));
+    draw(host({ lifecycle_state: "quarantined", lifecycle_reason: "key theft suspected" }), "lifecycle");
     await waitFor(() => expect(screen.getByTestId("release")).toBeInTheDocument());
     // A quarantined host is not quarantined again from here.
     expect(screen.queryByTestId("quarantine-open")).toBeNull();
@@ -330,7 +338,7 @@ describe("the lifecycle of a host", () => {
     draw(host({
       connection_state: "offline",
       last_connection_refusal: { code: "certificate_expired", at: "2026-10-16T07:00:00Z" },
-    }));
+    }), "lifecycle");
     await waitFor(() => expect(screen.getByTestId("recovery-open")).toBeInTheDocument());
     // The gateway's own refusal is on the screen, with what to do about it.
     expect(screen.getByTestId("connection-refusal")).toHaveTextContent("certificate expired");
@@ -359,7 +367,7 @@ describe("the lifecycle of a host", () => {
         jobs_canceled: 3, certificates_revoked: 1, session_closed: false,
       },
     });
-    draw(host({ connection_state: "offline" }));
+    draw(host({ connection_state: "offline" }), "lifecycle");
     await waitFor(() => expect(screen.getByTestId("decommission-open")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("decommission-open"));
     expect(screen.getByText(/retired without its cooperation/)).toBeInTheDocument();
@@ -381,7 +389,7 @@ describe("the lifecycle of a host", () => {
 
   it("does not offer to end a host that has already ended", async () => {
     base();
-    draw(host({ lifecycle_state: "retired", lifecycle_changed_at: "2026-10-10T00:00:00Z", lifecycle_changed_by: "ulther" }));
+    draw(host({ lifecycle_state: "retired", lifecycle_changed_at: "2026-10-10T00:00:00Z", lifecycle_changed_by: "ulther" }), "lifecycle");
     await waitFor(() => expect(screen.getByText(/The trust in this host has ended/)).toBeInTheDocument());
     expect(screen.queryByTestId("decommission-open")).toBeNull();
     expect(screen.queryByTestId("recovery-open")).toBeNull();
@@ -391,7 +399,7 @@ describe("the lifecycle of a host", () => {
 describe("the operations the overview places", () => {
   it("renames the host as an order on the operation registry", async () => {
     base();
-    draw();
+    draw(host(), "system");
     await waitFor(() => expect(screen.getByTestId("rename-open")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("rename-open"));
     // The name it already carries is this screen's own refusal.
@@ -414,7 +422,7 @@ describe("the operations the overview places", () => {
 
   it("will not offer a rename of a host nothing can reach", async () => {
     base();
-    draw(host({ connection_state: "offline" }));
+    draw(host({ connection_state: "offline" }), "system");
     await waitFor(() => expect(screen.getByTestId("rename-open")).toBeInTheDocument());
     expect(screen.getByTestId("rename-open")).toBeDisabled();
   });
@@ -433,9 +441,9 @@ describe("what the overview reads", () => {
     expect(adapterSegment("packages.apt")).toBe("packages");
     expect(adapterSegment("nothing")).toBeUndefined();
     expect(timelineLink(host(), { kind: "job", ref: { type: "job", id: "j1" } } as never))
-      .toBe("/next/jobs/j1");
+      .toBe("/jobs/j1");
     expect(timelineLink(host(), { kind: "alert", ref: { type: "alert", id: "a1" } } as never))
-      .toBe("/next/hosts/h1/monitoring");
+      .toBe("/hosts/h1/monitoring");
   });
 
   it("lists the adapters with the reason each one is not there", async () => {
@@ -445,10 +453,10 @@ describe("what the overview reads", () => {
         { name: "systemd", version: 1, available: true, read_only: false },
         { name: "docker", version: 1, available: false, read_only: false, reason: "no docker daemon" },
       ],
-    }));
+    }), "adapters");
     await waitFor(() => expect(screen.getByTestId("adapter-registry")).toBeInTheDocument());
     const table = screen.getByTestId("adapter-registry");
-    expect(within(table).getByRole("link", { name: "systemd" })).toHaveAttribute("href", "/next/hosts/h1/services");
+    expect(within(table).getByRole("link", { name: "systemd" })).toHaveAttribute("href", "/hosts/h1/services");
     expect(within(table).getByText("no docker daemon")).toBeInTheDocument();
   });
 
@@ -463,10 +471,10 @@ describe("what the overview reads", () => {
         }],
       },
     });
-    draw();
+    draw(host(), "activity");
     await waitFor(() => expect(screen.getByTestId("host-timeline")).toBeInTheDocument());
     const table = screen.getByTestId("host-timeline");
-    expect(within(table).getByRole("link", { name: "quarantined" })).toHaveAttribute("href", "/next/hosts/h1/audit");
+    expect(within(table).getByRole("link", { name: "quarantined" })).toHaveAttribute("href", "/hosts/h1/audit");
     expect(screen.getByText(/Not shown, no permission: audit/)).toBeInTheDocument();
   });
 });

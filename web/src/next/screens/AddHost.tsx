@@ -12,8 +12,8 @@ import type {
 } from "../../lib/types";
 import { useT, type Translate } from "../../i18n";
 import {
-  Actions, Banner, Bones, Card, Download, Fact, Facts, Field, Fields,
-  Note, Pill, Problem, Screen, Seg, Table, type Tone,
+  Actions, Banner, Bones, Card, Download, Fact, Facts, Field, Fields, Form,
+  Note, Pill, Problem, Screen, Seg, Table, Tabs, type Tone,
 } from "../kit";
 
 /**
@@ -45,6 +45,23 @@ const FAMILIES = [
 
 /** How short a reason the audit trail will take. */
 export const ENROLLMENT_REASON_MIN_LENGTH = 8;
+
+/**
+ * The steps of the order, in the order the decisions are made.
+ *
+ * They were five cards on one page until 17.10, and the owner's reading
+ * of that was five blocks scattered round a room. They are one guided
+ * form now, with the wizard of `/bulk` as the pattern: a step at a time,
+ * numbered, with what was decided before it still in the address bar of
+ * the form rather than on the screen.
+ */
+const ORDER_STEPS = [
+  "What is being installed",
+  "Where the host belongs",
+  "How the host connects",
+  "Which system",
+  "Place the order",
+];
 
 /**
  * The installation step in the operator's language.
@@ -186,6 +203,9 @@ export function AddHost() {
   const [message, setMessage] = useState("");
   const [refusal, setRefusal] = useState<ApiError | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // Which step of the order is open. It is the screen's own state and not
+  // an address: half an order is not a place anybody is sent to.
+  const [step, setStep] = useState(0);
 
   const whoami = useQuery({
     queryKey: ["whoami"],
@@ -282,7 +302,7 @@ export function AddHost() {
   useEffect(() => {
     if (ready && state?.enrolled_host_id && state.kind === "agent") {
       const timer = window.setTimeout(
-        () => navigate(`/next/hosts/${state.enrolled_host_id}/overview`), 1500);
+        () => navigate(`/hosts/${state.enrolled_host_id}/overview`), 1500);
       return () => window.clearTimeout(timer);
     }
   }, [ready, state?.enrolled_host_id, state?.kind, navigate]);
@@ -466,7 +486,10 @@ export function AddHost() {
       actions={created && (
         <button
           type="button"
-          onClick={() => { setCreated(null); setMessage(""); setRefusal(null); setCopied(""); setUncopied(""); }}
+          onClick={() => {
+            setCreated(null); setMessage(""); setRefusal(null); setCopied(""); setUncopied("");
+            setStep(0);
+          }}
           data-testid="add-another"
         >
           {t("Add another host")}
@@ -478,9 +501,20 @@ export function AddHost() {
 
       {!created && (
         <>
-          <Card
-            title={t("1. What is being installed")}
+          <Tabs
+            value={String(step)}
+            onChange={(value) => setStep(Number(value))}
+            tabs={ORDER_STEPS.map((title, index) => ({
+              value: String(index),
+              label: `${index + 1}. ${t(title)}`,
+            }))}
+          />
+
+          {step === 0 && (
+          <Form
+            title={`1. ${t("What is being installed")}`}
             note={t("An agent manages one host. A relay carries the traffic of a site the panel cannot reach directly — it is a separate trust boundary with its own permission and its own certificate kind.")}
+            actions={<StepNav step={step} setStep={setStep} />}
           >
             <Seg
               label={t("What is being installed")}
@@ -491,11 +525,14 @@ export function AddHost() {
             {!canEnrollRelay && (
               <Note>{t("Registering a relay requires the relay.enroll.create permission.")}</Note>
             )}
-          </Card>
+          </Form>
+          )}
 
-          <Card
-            title={t("2. Where the host belongs")}
+          {step === 1 && (
+          <Form
+            title={`2. ${t("Where the host belongs")}`}
             note={t("The site and the environment decide who may manage the host and which policies apply to it. They come from the order, not from a file on the host.")}
+            actions={<StepNav step={step} setStep={setStep} />}
           >
             <Fields>
               <Field label={t("What this host is for")} wide>
@@ -605,13 +642,16 @@ export function AddHost() {
                 </Field>
               )}
             </Fields>
-          </Card>
+          </Form>
+          )}
 
-          <Card
-            title={t("3. How the host connects")}
+          {step === 2 && (
+          <Form
+            title={`3. ${t("How the host connects")}`}
             note={kind === "relay"
               ? t("A relay connects to the panel directly: it is the route for the hosts of its site, not a host behind another relay.")
               : t("A host in a site with a relay connects through it; the order is then bound to that relay and its token works nowhere else. Without a relay the host reaches the panel under its advertised addresses.")}
+            actions={<StepNav step={step} setStep={setStep} />}
           >
             {kind === "agent" && (
               <>
@@ -658,13 +698,16 @@ export function AddHost() {
               </Facts>
             )}
             {profile.error && <Problem>{String(profile.error)}</Problem>}
-          </Card>
+          </Form>
+          )}
 
-          <Card
-            title={t("4. Which system")}
+          {step === 3 && (
+          <Form
+            title={`4. ${t("Which system")}`}
             note={singleFamily
               ? t("This installation comes as a container image; only the architecture and the channel are left to pick. The channel is stable.")
               : t("The family picks the repository and the package manager; the architecture picks the artefact. The channel is stable.")}
+            actions={<StepNav step={step} setStep={setStep} />}
           >
             {/* The commands differ by package manager; the choice changes
                 nothing on the server. One family is not a choice, so it is named. */}
@@ -697,17 +740,28 @@ export function AddHost() {
               </Field>
             </Fields>
             {profile.data?.warnings?.map((warning) => <Note key={warning}>{warning}</Note>)}
-          </Card>
+          </Form>
+          )}
 
-          <Card
-            title={t("5. Place the order")}
+          {step === 4 && (
+          <Form
+            title={`5. ${t("Place the order")}`}
             note={t("The order creates the token for {kind} in site {site}, environment {environment}. The token is shown once, right after.", {
               kind: kind === "relay" ? t("a relay") : t("an agent"),
               site,
               environment,
             })}
-            foot={
+            onSubmit={() => { if (!order.isPending && !blocker) order.mutate(); }}
+            actions={
               <Actions>
+                <button
+                  type="button"
+                  className="fl-quiet"
+                  onClick={() => setStep(step - 1)}
+                  data-testid="step-back"
+                >
+                  {t("Back")}
+                </button>
                 <button
                   type="button"
                   onClick={() => order.mutate()}
@@ -720,6 +774,22 @@ export function AddHost() {
               </Actions>
             }
           >
+            {/* What the order will say, so the last step is a reading of
+                the four before it rather than a button on its own. */}
+            <Facts>
+              <Fact label={t("What is being installed")}>{kind === "relay" ? t("a relay") : t("an agent")}</Fact>
+              <Fact label={t("Site")}>{site || <span className="fl-unknown">{t("not named")}</span>}</Fact>
+              <Fact label={t("Environment")}>{environment || <span className="fl-unknown">{t("not named")}</span>}</Fact>
+              <Fact label={t("Route")}>
+                {kind === "relay" || route === "direct"
+                  ? t("Directly to the panel")
+                  : chosenRelay
+                    ? chosenRelay.name
+                    : <span className="fl-unknown">{t("no relay chosen")}</span>}
+              </Fact>
+              <Fact label={t("Uses")}>{maxUses}</Fact>
+              <Fact label={t("Token valid for (minutes, at most 24 h)")}>{minutes}</Fact>
+            </Facts>
             {refusal?.code === "reason_required" && !reasonRequired && (
               <Fields>
                 <Field label={t("Reason (kept in the audit trail)")} wide>
@@ -731,7 +801,8 @@ export function AddHost() {
                 </Field>
               </Fields>
             )}
-          </Card>
+          </Form>
+          )}
         </>
       )}
 
@@ -913,7 +984,7 @@ export function AddHost() {
             foot={
               <Actions>
                 {state?.enrolled_host_id && state.kind === "agent" && (
-                  <Link to={`/next/hosts/${state.enrolled_host_id}/overview`} data-testid="open-host">
+                  <Link to={`/hosts/${state.enrolled_host_id}/overview`} data-testid="open-host">
                     {t("Open host")}
                   </Link>
                 )}
@@ -1074,6 +1145,34 @@ export function AddHost() {
         )}
       </Card>
     </Screen>
+  );
+}
+
+/**
+ * The buttons at the end of a step: back, and on to the next by its name.
+ *
+ * A step is not shut behind the one before it here: the order is refused
+ * by the button that places it, with the reason beside it, and somebody
+ * who wants to read the fourth step before filling in the second may.
+ */
+function StepNav({ step, setStep }: { step: number; setStep: (step: number) => void }) {
+  const t = useT();
+  return (
+    <Actions>
+      <button
+        type="button"
+        className="fl-quiet"
+        onClick={() => setStep(step - 1)}
+        disabled={step === 0}
+        title={step === 0 ? t("This is the first step.") : undefined}
+        data-testid="step-back"
+      >
+        {t("Back")}
+      </button>
+      <button type="button" onClick={() => setStep(step + 1)} data-testid="step-next">
+        {t("Next: {step}", { step: t(ORDER_STEPS[step + 1]) })}
+      </button>
+    </Actions>
   );
 }
 

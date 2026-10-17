@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, loadedItems, type Collection } from "../../../lib/api";
 import { bytes, relativeTime, absoluteTime } from "../../../lib/format";
@@ -10,14 +10,12 @@ import {
   type HostTimelineItem, type HostTimelineKind, type HostTimelinePage,
   type InventoryFragment, type Job, type Whoami,
 } from "../../../lib/types";
-import { stateName } from "../../../components/ui";
+import { stateName } from "../../../lib/states";
 import { useT, type Translate } from "../../../i18n";
-import { Board } from "../../Board";
 import type { BoardEntry } from "../../../components/board";
 import {
-  Actions, Band, Banner, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Kpi, Meter, Needs,
-  Note, Pill, Readout, Table, Tag, Tags, type Segment, type Tone,
-} from "../../kit";
+  Actions, Band, Banner, Button, C, Card, Check, Empty, Fact, Facts, Field, Fields, Grid, Kpi,
+  Meter, Needs, Note, Pill, Readout, Reasons, Table, Tabs, Tag, Tags, type Segment, type Tone, Row} from "../../kit";
 import {
   Confirm, Guard, JobLine, ReadOnlyNotice, orderReady, refusalOf, registryOrder, useOrder,
   type Intent, type RegistryOrder,
@@ -150,6 +148,8 @@ export function Overview({ host }: { host: Host }) {
   const available = adapters?.filter((one) => one.available).length;
   const unavailable = adapters === undefined ? undefined : adapters.length - (available ?? 0);
   const readOnly = adapters?.filter((one) => one.available && one.read_only).length;
+  // The ones the panel cannot use here, in the order the host listed them.
+  const missing = adapters?.filter((one) => !one.available) ?? [];
   // The gateway's own refusal is only news while the host is away.
   const refusal = host.connection_state !== "online" ? host.last_connection_refusal : undefined;
 
@@ -161,11 +161,11 @@ export function Overview({ host }: { host: Host }) {
   /* What is wrong with this machine right now, counted apart from what it
      is made of: a reader asks "is it well" before "what is it". */
   const attention: { label: string; value?: number | boolean | null; tone: Tone; to?: string }[] = [
-    { label: t("Failed units"), value: host.failed_units, tone: "error", to: `/next/hosts/${host.id}/services` },
+    { label: t("Failed units"), value: host.failed_units, tone: "error", to: `/hosts/${host.id}/services` },
     { label: t("Reboot required"), value: host.reboot_required, tone: "warn" },
     { label: t("Package database broken"), value: host.package_database_broken, tone: "error" },
-    { label: t("Security updates"), value: host.pending_security_updates, tone: "warn", to: `/next/hosts/${host.id}/packages` },
-    { label: t("Updates waiting"), value: host.pending_updates, tone: "neutral", to: `/next/hosts/${host.id}/packages` },
+    { label: t("Security updates"), value: host.pending_security_updates, tone: "warn", to: `/hosts/${host.id}/packages` },
+    { label: t("Updates waiting"), value: host.pending_updates, tone: "neutral", to: `/hosts/${host.id}/packages` },
   ];
 
   return (
@@ -173,7 +173,7 @@ export function Overview({ host }: { host: Host }) {
       <ReadOnlyNotice host={host.id} actions={OVERVIEW_CHANGES} />
       {refusal && <ConnectionRefusal host={host} />}
 
-      <Board screen={HOST_OVERVIEW_SCREEN} catalogue={HOST_OVERVIEW} drawn={{
+      <Readings panels={{
       disk: (
         <Kpi
           icon="storage"
@@ -205,7 +205,27 @@ export function Overview({ host }: { host: Host }) {
         >
           {adapters === undefined
             ? <Empty>{t("This host has not reported its adapters yet.")}</Empty>
-            : <Band segments={registry} testId="adapters" />}
+            : (
+              <>
+                <Band segments={registry} testId="adapters" />
+                {/* Which of them are missing, and the host's own sentence
+                    for why. A reader who is told only that six are
+                    unavailable has to open the registry to learn whether
+                    any of them is one he wanted; the reason is also the
+                    remedy - "this host has no Docker socket" says what to
+                    install. */}
+                {missing.length > 0 && (
+                  <Reasons
+                    testId="adapters-missing"
+                    items={missing.map((one) => ({
+                      name: one.name,
+                      reason: one.reason,
+                      to: adapterSegment(one.name) ? `/hosts/${host.id}/${adapterSegment(one.name)}` : undefined,
+                    }))}
+                  />
+                )}
+              </>
+            )}
         </Card>
       ),
       attention: (
@@ -400,7 +420,7 @@ export function Overview({ host }: { host: Host }) {
       recent: (
         <Card
           title={t("Recent activity")}
-          tools={<Link to={`/next/hosts/${host.id}/jobs`}>{t("All jobs")}</Link>}
+          tools={<Link to={`/hosts/${host.id}/jobs`}>{t("All jobs")}</Link>}
           flush
         >
           <Table
@@ -409,7 +429,7 @@ export function Overview({ host }: { host: Host }) {
             loading={jobs.isLoading} empty={t("Nothing has been done to this host yet.")}
             columns={[
               { key: "when", head: t("Time"), cell: (one) => (
-                <Link to={`/next/jobs/${one.id}`} title={absoluteTime(one.created_at)}>
+                <Link to={`/jobs/${one.id}`} title={absoluteTime(one.created_at)}>
                   {relativeTime(one.finished_at ?? one.created_at)}
                 </Link>
               ) },
@@ -446,6 +466,94 @@ export function Overview({ host }: { host: Host }) {
           onConfirm={(reason, confirmation) => { setBusy(true); pending.send(reason, confirmation); }}
           onCancel={decide.close}
         />
+      )}
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+/** The sub-tabs of this screen, in the order a reader wants them. */
+const OVERVIEW_TABS = ["summary", "system", "adapters", "lifecycle", "activity"] as const;
+type OverviewTab = typeof OVERVIEW_TABS[number];
+
+/**
+ * One machine, in five readings rather than twelve containers.
+ *
+ * It was a board until 17.10, and the owner's words for the result were
+ * that the things on it looked like blocks somebody had scattered round a
+ * room. He was right, and the reason is worth keeping: a board arranges
+ * containers of one shape well - a dashboard of tiles, a wall of charts -
+ * and this screen has four shapes on it. A list of facts, a form, a band
+ * and a table have nothing in common to line up, so the grid lines up
+ * their corners and leaves the rest to chance.
+ *
+ * Sub-tabs instead. One reading at a time, the width of the page, each
+ * section as tall as what is in it - no cell to fill and none to overrun,
+ * which also ends the whole class of fault a fixed cell carries: measured
+ * at one window width, 65 of the panel's containers changed height by
+ * more than a line when the window changed.
+ *
+ * The three measurements stay above the tabs: they are one shape, they
+ * are what a reader looks at first, and they are the same on every tab.
+ */
+function Readings({ panels }: { panels: Record<string, ReactNode> }) {
+  const t = useT();
+  const [address, setAddress] = useSearchParams();
+  const asked = address.get("tab") ?? "";
+  const tab: OverviewTab = (OVERVIEW_TABS as readonly string[]).includes(asked)
+    ? asked as OverviewTab
+    : "summary";
+  const go = (next: OverviewTab) => {
+    const after = new URLSearchParams(address);
+    if (next === "summary") after.delete("tab"); else after.set("tab", next);
+    setAddress(after, { replace: true });
+  };
+  return (
+    <>
+      <Grid>
+        <C span={4}>{panels.disk}</C>
+        <C span={4}>{panels.memory}</C>
+        <C span={4}>{panels.cores}</C>
+      </Grid>
+
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "summary", label: t("Summary") },
+          { value: "system", label: t("System") },
+          { value: "adapters", label: t("Adapters") },
+          { value: "lifecycle", label: t("Lifecycle") },
+          { value: "activity", label: t("Activity") },
+        ]}
+      />
+
+      {tab === "summary" && (
+        <Grid>
+          <C span={7}>{panels.attention}</C>
+          <C span={5}>{panels.notes}</C>
+          <C span={12}>{panels.adapters}</C>
+        </Grid>
+      )}
+      {/* Both take the width rather than standing side by side. One holds
+          twelve facts and the other four, so a row would stretch the short
+          one to the tall one's height and leave a third of it empty - the
+          fault the owner kept pointing at. Full width, they flow into four
+          columns and three rows, and each ends where its facts end. */}
+      {tab === "system" && (
+        <Grid>
+          <C span={12}>{panels.system}</C>
+          <C span={12}>{panels.hardware}</C>
+        </Grid>
+      )}
+      {tab === "adapters" && <Grid><C span={12}>{panels.registry}</C></Grid>}
+      {tab === "lifecycle" && <Grid><C span={12}>{panels.lifecycle}</C></Grid>}
+      {tab === "activity" && (
+        <Grid>
+          <C span={12}>{panels.recent}</C>
+          <C span={12}>{panels.timeline}</C>
+        </Grid>
       )}
     </>
   );
@@ -1043,16 +1151,22 @@ function Lifecycle({ host, decide }: { host: Host; decide: Decide }) {
         )}
         <Fact label={t("Meaning")}>{lifecycleMeaning(t, host.lifecycle_state)}</Fact>
       </Facts>
-      {alive && <Quarantine host={host} decide={decide} />}
-      {alive && (
-        <IdentityRecovery
-          host={host}
-          prompted={Boolean(refusal) && RECOVERABLE_REFUSALS.includes(refusal?.code ?? "")}
-          decide={decide}
-        />
-      )}
+      {/* The three decisions stand side by side. Each used to be a block
+          of its own, so their buttons came out one under another with
+          half a 4K screen free beside them - a column of three buttons
+          reads as a list of steps, which these are not. */}
+      <Row>
+        {alive && <Quarantine host={host} decide={decide} />}
+        {alive && (
+          <IdentityRecovery
+            host={host}
+            prompted={Boolean(refusal) && RECOVERABLE_REFUSALS.includes(refusal?.code ?? "")}
+            decide={decide}
+          />
+        )}
+        {host.lifecycle_state !== "retired" && <Decommission host={host} decide={decide} onDone={setOutcome} />}
+      </Row>
       {outcome && <DecommissionResult outcome={outcome} />}
-      {host.lifecycle_state !== "retired" && <Decommission host={host} decide={decide} onDone={setOutcome} />}
     </>
   );
 }
@@ -1328,7 +1442,7 @@ function RecoveryResult({ host, order }: { host: Host; order: RecoveryOrder }) {
         <Fact label={t("Expires")}>
           <span title={absoluteTime(order.expires_at)}>{relativeTime(order.expires_at)}</span>
         </Fact>
-        <Fact label={t("Order")}><Link to="/next/hosts/new">{order.id.slice(0, 8)}</Link></Fact>
+        <Fact label={t("Order")}><Link to="/hosts/new">{order.id.slice(0, 8)}</Link></Fact>
       </Facts>
     </div>
   );
@@ -1488,7 +1602,7 @@ function Adapters({ host }: { host: Host }) {
         { key: "name", head: t("Adapter"), tight: true, cell: (one) => {
           const segment = adapterSegment(one.name);
           return segment
-            ? <Link to={`/next/hosts/${host.id}/${segment}`}>{one.name}</Link>
+            ? <Link to={`/hosts/${host.id}/${segment}`}>{one.name}</Link>
             : one.name;
         } },
         { key: "state", head: t("State"), cell: (one) => (
@@ -1523,12 +1637,12 @@ export function timelineLink(host: Host, item: HostTimelineItem): string | undef
   switch (item.kind) {
     // The task has a screen of its own with its attempts and its result.
     case "job": return item.ref.type === "job" && item.ref.id
-      ? `/next/jobs/${item.ref.id}`
-      : `/next/hosts/${host.id}/jobs`;
+      ? `/jobs/${item.ref.id}`
+      : `/hosts/${host.id}/jobs`;
     case "audit":
-    case "lifecycle": return `/next/hosts/${host.id}/audit`;
-    case "alert": return `/next/hosts/${host.id}/monitoring`;
-    case "campaign": return `/next/campaigns/${item.ref.id}`;
+    case "lifecycle": return `/hosts/${host.id}/audit`;
+    case "alert": return `/hosts/${host.id}/monitoring`;
+    case "campaign": return `/campaigns/${item.ref.id}`;
     default: return undefined;
   }
 }
@@ -1651,18 +1765,18 @@ function jobTone(state: string): Tone {
 
 /** The containers this screen can draw, and the shape each ships with. */
 export const HOST_OVERVIEW: BoardEntry[] = [
-  { key: "disk", title: "Disk used", width: 4, height: 1 },
-  { key: "memory", title: "Memory", width: 4, height: 1 },
-  { key: "cores", title: "CPU cores", width: 4, height: 1 },
-  { key: "adapters", title: "What the panel can do here", width: 7, height: 2 },
-  { key: "attention", title: "Needs attention", width: 5, height: 2 },
-  { key: "system", title: "System", width: 7, height: 4 },
-  { key: "hardware", title: "Hardware", width: 5, height: 2 },
-  { key: "notes", title: "Notes", width: 5, height: 2 },
-  { key: "lifecycle", title: "Lifecycle", width: 12, height: 4 },
-  { key: "registry", title: "Adapters", width: 12, height: 3 },
-  { key: "recent", title: "Recent activity", width: 7, height: 3 },
-  { key: "timeline", title: "History", width: 12, height: 4 },
+  { key: "disk", title: "Disk used", width: 4, height: 2 },
+  { key: "memory", title: "Memory", width: 4, height: 2 },
+  { key: "cores", title: "CPU cores", width: 4, height: 2 },
+  { key: "adapters", title: "What the panel can do here", width: 7, height: 4 },
+  { key: "attention", title: "Needs attention", width: 5, height: 4 },
+  { key: "system", title: "System", width: 7, height: 7 },
+  { key: "hardware", title: "Hardware", width: 5, height: 4 },
+  { key: "notes", title: "Notes", width: 5, height: 4 },
+  { key: "lifecycle", title: "Lifecycle", width: 12, height: 7 },
+  { key: "registry", title: "Adapters", width: 12, height: 5 },
+  { key: "recent", title: "Recent activity", width: 7, height: 5 },
+  { key: "timeline", title: "History", width: 12, height: 7 },
 ];
 
 /** The name this screen's arrangement is stored under. */

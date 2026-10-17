@@ -8,7 +8,7 @@ import { absent, expectHealthy, fleetHosts, jobState, onlineHostWith, openModule
 const SEGMENTS = [
   "overview", "system", "packages", "services", "processes", "schedules", "kernel", "time", "power", "policies",
   "network", "dns", "firewall", "ssh", "storage", "files", "backups", "containers", "compose", "security",
-  "certificates", "identity", "logs", "monitoring", "jobs", "audit",
+  "certificates", "accounts", "identity", "logs", "monitoring", "jobs", "audit",
 ];
 
 let hosts: Host[] = [];
@@ -49,9 +49,9 @@ async function viewerContext(browser: Browser, baseURL: string | undefined): Pro
   return viewer;
 }
 
-/** The section of the unit list on the Services page. */
-function unitList(page: Page) {
-  return page.locator(".ui-panel").filter({ has: page.locator(".ui-panel-head h3", { hasText: /^All units$/ }) });
+/** The unit listing of the Services module. */
+function units(page: Page) {
+  return page.getByTestId("units");
 }
 
 /** The job identifier of the next operation the page orders. */
@@ -89,47 +89,45 @@ test.describe("a viewer sees no mutating control", () => {
 
     // The administrator's session: the unit list is read once, and its
     // rows carry the restart button.
-    const missing = await openModule(page, target, "services", "Services");
+    // The list is the second tab of the module, and so is what the viewer
+    // is shown; both sessions open it by its address.
+    const missing = await openModule(page, target, "services", "Services", "units");
     test.skip(missing !== null, absent(missing ?? ""));
-    const list = unitList(page);
-    const filter = list.getByPlaceholder("Filter by name");
-    const unread = list.getByText("This host has not been read yet.");
-    await expect(filter.or(unread).first()).toBeVisible();
+    const unread = page.getByText("This host has not been read yet.");
+    await expect(units(page).or(unread).first()).toBeVisible();
     if (await unread.isVisible()) {
       const ordered = nextJob(page, target.id);
-      await page.locator(".ui-sectionhead").getByRole("button", { name: "Read from host" }).click();
+      await page.getByTestId("read-units").click();
       const job = await ordered;
       await expect.poll(() => jobState(request, job), { timeout: 60_000 }).toMatch(/^(succeeded|failed|timed_out|canceled|expired)$/);
       const state = await jobState(request, job);
       test.skip(state !== "succeeded", absent(`${target.hostname} did not answer the unit listing: ${state}`));
-      await expect(filter).toBeVisible({ timeout: 60_000 });
+      await expect(units(page)).toBeVisible({ timeout: 60_000 });
     }
-    await expect(list.locator("tbody tr").first()).toBeVisible();
-    await expect(list.getByRole("button", { name: "Restart" }).first()).toBeVisible();
-    await expect(page.getByTestId("module-read-only")).toHaveCount(0);
+    await expect(units(page).locator("tbody tr").first()).toBeVisible();
+    await expect(units(page).getByRole("button", { name: "Restart" }).first()).toBeVisible();
+    await expect(page.getByText("You can read this module; changing it")).toHaveCount(0);
 
     // The viewer's session on the same page: the same rows, no button
     // that would order anything, and the line that says why.
     const context = await viewerContext(browser, baseURL);
     const other = await context.newPage();
     const { errors } = watchErrors(other);
-    await other.goto(`/hosts/${target.id}/services`);
-    await expect(other.locator(".ui-sectionhead").getByRole("heading", { name: "Services", exact: true })).toBeVisible();
-    const viewerList = unitList(other);
-    await expect(viewerList.locator("tbody tr").first()).toBeVisible();
-    const notice = other.getByTestId("module-read-only");
+    await other.goto(`/hosts/${target.id}/services?tab=units`);
+    await expect(other.locator(".fl-head-title").first()).toContainText(target.hostname);
+    await expect(units(other).locator("tbody tr").first()).toBeVisible();
+
+    /* The panel being replaced held a refused control on the screen,
+       greyed, with the reason on hover. This one takes it away and says
+       once, above the module, what may and may not be done here - which
+       is the same claim in one place instead of on every button. */
+    const notice = other.locator(".fl-banner").filter({ hasText: "You can read this module" });
     await expect(notice).toBeVisible();
-    await expect(notice).toContainText("changing it needs the permission");
+    await expect(notice).toContainText("changing it");
     await expect(notice).toContainText("unit.restart");
     await expect(other.getByRole("button", { name: "Restart" })).toHaveCount(0);
     await expect(other.getByRole("button", { name: "Stop" })).toHaveCount(0);
     await expect(other.getByRole("button", { name: "Mask" })).toHaveCount(0);
-    // The one read of the page stays on the screen for the viewer, held
-    // back and explained: a page whose only button is gone reads as broken.
-    const read = other.locator(".ui-sectionhead").getByRole("button", { name: "Read from host" });
-    await expect(read).toBeVisible();
-    await expect(read).toBeDisabled();
-    await expect(other.locator(".ui-sectionhead .ui-guard-denied")).toHaveAttribute("title", /permission/);
     await expectHealthy(other, errors);
     await other.close();
   });
@@ -167,10 +165,10 @@ test.describe("a viewer sees no mutating control", () => {
     const { errors } = watchErrors(other);
     for (const segment of SEGMENTS) {
       await other.goto(`/hosts/${host.id}/${segment}`);
-      // A module header, the notice of a module the host does not back, or
-      // the refusal of a record the viewer may not read: any of them is a
-      // page that settled rather than crashed.
-      const settled = other.locator(".ui-sectionhead .ui-sectionhead-title").or(other.locator(".ui-empty")).or(other.getByText(/is not available on/));
+      // A container of the module, an honest empty state, or the banner
+      // that says what the viewer may not do: any of them is a page that
+      // settled rather than crashed.
+      const settled = other.locator(".fl-card, .fl-form, .fl-empty, .fl-kpi, .fl-banner");
       await expect(settled.first(), `${segment} did not settle`).toBeVisible();
       await expectHealthy(other, errors);
     }

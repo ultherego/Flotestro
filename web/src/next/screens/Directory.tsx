@@ -11,9 +11,9 @@ import type {
 import { useT } from "../../i18n";
 import type { Translate } from "../../i18n";
 import {
-  Actions, Banner, Bones, Card, Check, Empty, Fact, Facts, Field, Fields, Fig, Figs, Find, Grid,
+  Actions, Banner, C, Form, Bones, Card, Check, Empty, Fact, Facts, Field, Fields, Fig, Figs, Find, Grid,
   Kpi, Kpis, Modal, Note, Pie, Pill, Problem, Ring, Screen, Stack, Table, Tabs, Tag, Tags, type Tone,
-  TwoLine,
+  TwoLine, useTab,
 } from "../kit";
 
 /**
@@ -99,7 +99,7 @@ export function actionName(type: string): string {
 
 export function Directory() {
   const t = useT();
-  const [tab, setTab] = useState<Tab>("users");
+  const [tab, setTab] = useTab(TABS);
 
   const status = useQuery({
     queryKey: ["identity-status"],
@@ -456,93 +456,6 @@ function UsersTab() {
           </Note>
         </Card>
 
-        {form && (
-          <Card
-            span={12}
-            title={t("New account")}
-            foot={
-              <Actions>
-                <button
-                  type="button"
-                  disabled={!form.uid || !form.last_name || reason.trim().length < REASON_MINIMUM || mutation.isPending}
-                  data-testid="plan-account"
-                  onClick={() => order("identity.user.create", {
-                    user: {
-                      uid: form.uid.trim(), first_name: form.first_name.trim(), last_name: form.last_name.trim(),
-                      email: form.email.trim(), shell: form.shell.trim(),
-                      groups: names(form.groups), ssh_keys: lines(form.ssh_keys),
-                    },
-                  }, reason)}
-                >
-                  {t("Plan account")}
-                </button>
-                <button type="button" className="fl-quiet" onClick={() => setForm(null)}>{t("Close")}</button>
-              </Actions>
-            }
-          >
-            <Stack>
-              {message && <Problem>{message}</Problem>}
-              <Fields>
-                <Field label={t("Account")}>
-                  <input value={form.uid} onChange={(e) => set("uid", e.target.value)} placeholder="jsmith" data-testid="new-uid" />
-                </Field>
-                <Field label={t("First name")}>
-                  <input value={form.first_name} onChange={(e) => set("first_name", e.target.value)} />
-                </Field>
-                <Field label={t("Surname")}>
-                  <input value={form.last_name} onChange={(e) => set("last_name", e.target.value)} data-testid="new-surname" />
-                </Field>
-                <Field label={t("E-mail")}>
-                  <input value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="jsmith@example.test" />
-                </Field>
-                <Field label={t("Shell")}>
-                  <input value={form.shell} onChange={(e) => set("shell", e.target.value)} placeholder="/bin/bash" />
-                </Field>
-                <ListField label={t("Groups")} value={form.groups} onChange={(v) => set("groups", v)} placeholder="ops, developers" />
-                <Field
-                  label={t("SSH public keys, one per line")}
-                  wide
-                  hint={t("A private key never reaches the system; only the public half is accepted.")}
-                >
-                  <textarea rows={3} value={form.ssh_keys} onChange={(e) => set("ssh_keys", e.target.value)}
-                            placeholder="ssh-ed25519 AAAA… user@host" />
-                </Field>
-                <Reason value={reason} onChange={setReason} />
-              </Fields>
-            </Stack>
-          </Card>
-        )}
-
-        {intent === "expire" && chosen && (
-          <ExpireCard
-            user={chosen}
-            busy={mutation.isPending}
-            message={message}
-            onSubmit={(payload, why) => order("identity.user.expire", payload, why)}
-            onClose={() => setIntent(null)}
-          />
-        )}
-
-        {intent === "posix" && chosen && (
-          <PosixCard
-            user={chosen}
-            busy={mutation.isPending}
-            message={message}
-            onSubmit={(payload, why) => order("identity.user.posix", payload, why)}
-            onClose={() => setIntent(null)}
-          />
-        )}
-
-        {change && <PlanImpact change={change} />}
-        {change && change.action_type === "identity.user.password.reset" && (
-          <Card span={12}>
-            <Note>
-              {t("The reset waits for a second person's approval. Once it is carried out, the one-time password appears under recent changes for the person who ordered it.")}
-            </Note>
-          </Card>
-        )}
-        {message && !form && !intent && <Card span={12}><Problem>{message}</Problem></Card>}
-
         <Card
           span={8}
           title={t("Accounts")}
@@ -659,6 +572,94 @@ function UsersTab() {
               </Stack>
             )}
         </Card>
+
+        {form && (
+          <C span={12}>
+            <Form
+            title={t("New account")}
+            actions={
+              <Actions>
+                <button
+                  type="button"
+                  disabled={!form.uid || !form.last_name || reason.trim().length < REASON_MINIMUM || mutation.isPending}
+                  data-testid="plan-account"
+                  onClick={() => order("identity.user.create", {
+                    user: {
+                      uid: form.uid.trim(), first_name: form.first_name.trim(), last_name: form.last_name.trim(),
+                      email: form.email.trim(), shell: form.shell.trim(),
+                      groups: names(form.groups), ssh_keys: lines(form.ssh_keys),
+                    },
+                  }, reason)}
+                >
+                  {t("Plan account")}
+                </button>
+                <button type="button" className="fl-quiet" onClick={() => setForm(null)}>{t("Close")}</button>
+              </Actions>
+            }
+          >
+            <Stack>
+              {message && <Problem>{message}</Problem>}
+              <Fields>
+                <Field label={t("Account")}>
+                  <input value={form.uid} onChange={(e) => set("uid", e.target.value)} placeholder="jsmith" data-testid="new-uid" />
+                </Field>
+                <Field label={t("First name")}>
+                  <input value={form.first_name} onChange={(e) => set("first_name", e.target.value)} />
+                </Field>
+                <Field label={t("Surname")}>
+                  <input value={form.last_name} onChange={(e) => set("last_name", e.target.value)} data-testid="new-surname" />
+                </Field>
+                <Field label={t("E-mail")}>
+                  <input value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="jsmith@example.test" />
+                </Field>
+                <Field label={t("Shell")}>
+                  <input value={form.shell} onChange={(e) => set("shell", e.target.value)} placeholder="/bin/bash" />
+                </Field>
+                <ListField label={t("Groups")} value={form.groups} onChange={(v) => set("groups", v)} placeholder="ops, developers" />
+                <Field
+                  label={t("SSH public keys, one per line")}
+                  wide
+                  hint={t("A private key never reaches the system; only the public half is accepted.")}
+                >
+                  <textarea rows={3} value={form.ssh_keys} onChange={(e) => set("ssh_keys", e.target.value)}
+                            placeholder="ssh-ed25519 AAAA… user@host" />
+                </Field>
+                <Reason value={reason} onChange={setReason} />
+              </Fields>
+            </Stack>
+          </Form>
+          </C>
+        )}
+
+        {intent === "expire" && chosen && (
+          <ExpireCard
+            user={chosen}
+            busy={mutation.isPending}
+            message={message}
+            onSubmit={(payload, why) => order("identity.user.expire", payload, why)}
+            onClose={() => setIntent(null)}
+          />
+        )}
+
+        {intent === "posix" && chosen && (
+          <PosixCard
+            user={chosen}
+            busy={mutation.isPending}
+            message={message}
+            onSubmit={(payload, why) => order("identity.user.posix", payload, why)}
+            onClose={() => setIntent(null)}
+          />
+        )}
+
+        {change && <PlanImpact change={change} />}
+        {change && change.action_type === "identity.user.password.reset" && (
+          <Card span={12}>
+            <Note>
+              {t("The reset waits for a second person's approval. Once it is carried out, the one-time password appears under recent changes for the person who ordered it.")}
+            </Note>
+          </Card>
+        )}
+        {message && !form && !intent && <Card span={12}><Problem>{message}</Problem></Card>}
 
         <Card
           span={12}
@@ -784,11 +785,11 @@ function ExpireCard({ user, busy, message, onSubmit, onClose }: {
   const touched = "principal_expires_at" in expiry || "password_expires_at" in expiry;
 
   return (
-    <Card
-      span={12}
+    <C span={12}>
+      <Form
       title={t("Expiry of the account {uid}", { uid: user.uid })}
       note={t("The account expiry ends every Kerberos login after the date; the password expiry forces a change at the next login. A field left empty stays as it is.")}
-      foot={
+      actions={
         <Actions>
           <button type="button" disabled={!touched || reason.trim().length < REASON_MINIMUM || busy}
                   data-testid="plan-expiry" onClick={() => onSubmit({ expiry }, reason)}>
@@ -814,7 +815,8 @@ function ExpireCard({ user, busy, message, onSubmit, onClose }: {
         <Check checked={clearPassword} onChange={setClearPassword}>{t("Clear the password expiry")}</Check>
         <Fields><Reason value={reason} onChange={setReason} testId="expiry-reason" /></Fields>
       </Stack>
-    </Card>
+    </Form>
+    </C>
   );
 }
 
@@ -841,11 +843,11 @@ function PosixCard({ user, busy, message, onSubmit, onClose }: {
   const changed = Object.keys(posix).length > 1;
 
   return (
-    <Card
-      span={12}
+    <C span={12}>
+      <Form
       title={t("POSIX data of the account {uid}", { uid: user.uid })}
       note={t("A changed UID or GID leaves the files on every host owned by the old number; the plan says so before anybody approves.")}
-      foot={
+      actions={
         <Actions>
           <button type="button" disabled={!changed || reason.trim().length < REASON_MINIMUM || busy}
                   data-testid="plan-posix" onClick={() => onSubmit({ posix }, reason)}>
@@ -867,7 +869,8 @@ function PosixCard({ user, busy, message, onSubmit, onClose }: {
           <Reason value={reason} onChange={setReason} testId="posix-reason" />
         </Fields>
       </Stack>
-    </Card>
+    </Form>
+    </C>
   );
 }
 
@@ -1197,70 +1200,6 @@ function HBACTab() {
           </Note>
         </Card>
 
-        {form && (
-          <Card
-            span={12}
-            title={editing ? t("Edit rule {name}", { name: form.name }) : t("New HBAC rule")}
-            foot={
-              <Actions>
-                <button type="button" data-testid="plan-hbac"
-                        disabled={!form.name || reason.trim().length < REASON_MINIMUM || mutation.isPending}
-                        onClick={() => mutation.mutate({ action: "identity.hbac.rule.ensure", reason, payload: payload(form) })}>
-                  {t("Plan rule")}
-                </button>
-                {editing && (
-                  <button type="button" className="fl-danger" data-testid="plan-hbac-removal"
-                          disabled={reason.trim().length < REASON_MINIMUM || mutation.isPending}
-                          onClick={() => mutation.mutate({ action: "identity.hbac.rule.remove", reason, payload: { hbac_rule: { name: form.name } } })}>
-                    {t("Plan removal")}
-                  </button>
-                )}
-                <button type="button" className="fl-quiet" onClick={() => setForm(null)}>{t("Close")}</button>
-              </Actions>
-            }
-          >
-            <Stack>
-              {message && <Problem>{message}</Problem>}
-              <Fields>
-                <Field label={t("Name")}>
-                  <input value={form.name} onChange={(e) => set("name", e.target.value)} disabled={editing}
-                         placeholder="ops-ssh" data-testid="hbac-name" />
-                </Field>
-                <Field label={t("Description")} wide>
-                  <input value={form.description} onChange={(e) => set("description", e.target.value)} />
-                </Field>
-                <ListField label={t("Users")} value={form.users} onChange={(v) => set("users", v)}
-                           placeholder="alice, bob" disabled={form.all_users} />
-                <ListField label={t("User groups")} value={form.user_groups} onChange={(v) => set("user_groups", v)}
-                           placeholder="ops" disabled={form.all_users} />
-                <ListField label={t("Hosts")} value={form.hosts} onChange={(v) => set("hosts", v)}
-                           placeholder="web1.example.test" disabled={form.all_hosts} />
-                <ListField label={t("Host groups")} value={form.host_groups} onChange={(v) => set("host_groups", v)}
-                           placeholder="web" disabled={form.all_hosts} />
-                <ListField label={t("Services")} value={form.services} onChange={(v) => set("services", v)}
-                           placeholder="sshd, sudo" disabled={form.all_services} />
-                <ListField label={t("Service groups")} value={form.service_groups} onChange={(v) => set("service_groups", v)}
-                           placeholder="Sudo" disabled={form.all_services} />
-              </Fields>
-              <Check checked={form.enabled} onChange={(v) => set("enabled", v)}>
-                {t("Enabled — a disabled rule is a draft and may be incomplete")}
-              </Check>
-              <Check checked={form.all_users} onChange={(v) => set("all_users", v)}>
-                {t("Every user, instead of the listed users and groups")}
-              </Check>
-              <Check checked={form.all_hosts} onChange={(v) => set("all_hosts", v)}>
-                {t("Every host, instead of the listed hosts and host groups")}
-              </Check>
-              <Check checked={form.all_services} onChange={(v) => set("all_services", v)}>
-                {t("Every service, instead of the listed services")}
-              </Check>
-              <Fields><Reason value={reason} onChange={setReason} placeholder={t("why this rule changes")} testId="hbac-reason" /></Fields>
-            </Stack>
-          </Card>
-        )}
-
-        {change && <PlanImpact change={change} />}
-
         <Card
           span={12}
           title={t("HBAC rules")}
@@ -1330,6 +1269,71 @@ function HBACTab() {
           />
         </Card>
 
+        {form && (
+          <C span={12}>
+            <Form
+            title={editing ? t("Edit rule {name}", { name: form.name }) : t("New HBAC rule")}
+            actions={
+              <Actions>
+                <button type="button" data-testid="plan-hbac"
+                        disabled={!form.name || reason.trim().length < REASON_MINIMUM || mutation.isPending}
+                        onClick={() => mutation.mutate({ action: "identity.hbac.rule.ensure", reason, payload: payload(form) })}>
+                  {t("Plan rule")}
+                </button>
+                {editing && (
+                  <button type="button" className="fl-danger" data-testid="plan-hbac-removal"
+                          disabled={reason.trim().length < REASON_MINIMUM || mutation.isPending}
+                          onClick={() => mutation.mutate({ action: "identity.hbac.rule.remove", reason, payload: { hbac_rule: { name: form.name } } })}>
+                    {t("Plan removal")}
+                  </button>
+                )}
+                <button type="button" className="fl-quiet" onClick={() => setForm(null)}>{t("Close")}</button>
+              </Actions>
+            }
+          >
+            <Stack>
+              {message && <Problem>{message}</Problem>}
+              <Fields>
+                <Field label={t("Name")}>
+                  <input value={form.name} onChange={(e) => set("name", e.target.value)} disabled={editing}
+                         placeholder="ops-ssh" data-testid="hbac-name" />
+                </Field>
+                <Field label={t("Description")} wide>
+                  <input value={form.description} onChange={(e) => set("description", e.target.value)} />
+                </Field>
+                <ListField label={t("Users")} value={form.users} onChange={(v) => set("users", v)}
+                           placeholder="alice, bob" disabled={form.all_users} />
+                <ListField label={t("User groups")} value={form.user_groups} onChange={(v) => set("user_groups", v)}
+                           placeholder="ops" disabled={form.all_users} />
+                <ListField label={t("Hosts")} value={form.hosts} onChange={(v) => set("hosts", v)}
+                           placeholder="web1.example.test" disabled={form.all_hosts} />
+                <ListField label={t("Host groups")} value={form.host_groups} onChange={(v) => set("host_groups", v)}
+                           placeholder="web" disabled={form.all_hosts} />
+                <ListField label={t("Services")} value={form.services} onChange={(v) => set("services", v)}
+                           placeholder="sshd, sudo" disabled={form.all_services} />
+                <ListField label={t("Service groups")} value={form.service_groups} onChange={(v) => set("service_groups", v)}
+                           placeholder="Sudo" disabled={form.all_services} />
+              </Fields>
+              <Check checked={form.enabled} onChange={(v) => set("enabled", v)}>
+                {t("Enabled — a disabled rule is a draft and may be incomplete")}
+              </Check>
+              <Check checked={form.all_users} onChange={(v) => set("all_users", v)}>
+                {t("Every user, instead of the listed users and groups")}
+              </Check>
+              <Check checked={form.all_hosts} onChange={(v) => set("all_hosts", v)}>
+                {t("Every host, instead of the listed hosts and host groups")}
+              </Check>
+              <Check checked={form.all_services} onChange={(v) => set("all_services", v)}>
+                {t("Every service, instead of the listed services")}
+              </Check>
+              <Fields><Reason value={reason} onChange={setReason} placeholder={t("why this rule changes")} testId="hbac-reason" /></Fields>
+            </Stack>
+          </Form>
+          </C>
+        )}
+
+        {change && <PlanImpact change={change} />}
+
         <SimulateAccess />
       </Grid>
     </>
@@ -1351,11 +1355,11 @@ function SimulateAccess() {
   const result = simulate.data;
 
   return (
-    <Card
-      span={12}
+    <C span={12}>
+      <Form
       title={t("Simulate access")}
       note={t("Ask the directory whether a user may use a service on a host. The answer is the directory's verdict, not a guess of the panel.")}
-      foot={
+      actions={
         <Actions>
           <button type="button" disabled={!user || !host || simulate.isPending}
                   data-testid="simulate" onClick={() => simulate.mutate()}>
@@ -1393,7 +1397,8 @@ function SimulateAccess() {
           </Facts>
         )}
       </Stack>
-    </Card>
+    </Form>
+    </C>
   );
 }
 
@@ -1472,79 +1477,6 @@ function SudoTab() {
           </Note>
         </Card>
 
-        {form && (
-          <Card
-            span={12}
-            title={editing ? t("Edit rule {name}", { name: form.name }) : t("New sudo rule")}
-            foot={
-              <Actions>
-                <button type="button" data-testid="plan-sudo"
-                        disabled={!form.name || reason.trim().length < REASON_MINIMUM || mutation.isPending}
-                        onClick={() => mutation.mutate({ action: "identity.sudo.rule.ensure", reason, payload: payload(form) })}>
-                  {t("Plan rule")}
-                </button>
-                {editing && (
-                  <button type="button" className="fl-danger" data-testid="plan-sudo-removal"
-                          disabled={reason.trim().length < REASON_MINIMUM || mutation.isPending}
-                          onClick={() => mutation.mutate({ action: "identity.sudo.rule.remove", reason, payload: { sudo_rule: { name: form.name } } })}>
-                    {t("Plan removal")}
-                  </button>
-                )}
-                <button type="button" className="fl-quiet" onClick={() => setForm(null)}>{t("Close")}</button>
-              </Actions>
-            }
-          >
-            <Stack>
-              {message && <Problem>{message}</Problem>}
-              <Fields>
-                <Field label={t("Name")}>
-                  <input value={form.name} onChange={(e) => set("name", e.target.value)} disabled={editing}
-                         placeholder="ops-restart" data-testid="sudo-name" />
-                </Field>
-                <Field label={t("Description")} wide>
-                  <input value={form.description} onChange={(e) => set("description", e.target.value)} />
-                </Field>
-                <ListField label={t("Users")} value={form.users} onChange={(v) => set("users", v)}
-                           placeholder="alice, bob" disabled={form.all_users} />
-                <ListField label={t("User groups")} value={form.user_groups} onChange={(v) => set("user_groups", v)}
-                           placeholder="ops" disabled={form.all_users} />
-                <ListField label={t("Hosts")} value={form.hosts} onChange={(v) => set("hosts", v)}
-                           placeholder="web1.example.test" disabled={form.all_hosts} />
-                <ListField label={t("Host groups")} value={form.host_groups} onChange={(v) => set("host_groups", v)}
-                           placeholder="web" disabled={form.all_hosts} />
-                <ListField label={t("Commands")} value={form.commands} onChange={(v) => set("commands", v)}
-                           placeholder="/usr/bin/systemctl, /usr/bin/journalctl" disabled={form.all_commands} />
-                <ListField label={t("Command groups")} value={form.command_groups} onChange={(v) => set("command_groups", v)}
-                           placeholder="services" disabled={form.all_commands} />
-                <ListField label={t("Run as users")} value={form.run_as_users} onChange={(v) => set("run_as_users", v)}
-                           placeholder="root" disabled={form.run_as_any_user} />
-                <ListField label={t("Run as groups")} value={form.run_as_groups} onChange={(v) => set("run_as_groups", v)}
-                           placeholder="wheel" />
-                <ListField label={t("Options")} value={form.options} onChange={(v) => set("options", v)}
-                           placeholder="!authenticate, !requiretty" />
-              </Fields>
-              <Check checked={form.enabled} onChange={(v) => set("enabled", v)}>
-                {t("Enabled — a disabled rule is a draft and may be incomplete")}
-              </Check>
-              <Check checked={form.all_users} onChange={(v) => set("all_users", v)}>
-                {t("Every user, instead of the listed users and groups")}
-              </Check>
-              <Check checked={form.all_hosts} onChange={(v) => set("all_hosts", v)}>
-                {t("Every host, instead of the listed hosts and host groups")}
-              </Check>
-              <Check checked={form.all_commands} onChange={(v) => set("all_commands", v)}>
-                {t("Every command — together with root this is full root access")}
-              </Check>
-              <Check checked={form.run_as_any_user} onChange={(v) => set("run_as_any_user", v)}>
-                {t("Run as any user, instead of the listed run-as users")}
-              </Check>
-              <Fields><Reason value={reason} onChange={setReason} placeholder={t("why this rule changes")} testId="sudo-reason" /></Fields>
-            </Stack>
-          </Card>
-        )}
-
-        {change && <PlanImpact change={change} />}
-
         <Card
           span={12}
           title={t("sudo rules")}
@@ -1613,6 +1545,80 @@ function SudoTab() {
             ]}
           />
         </Card>
+
+        {form && (
+          <C span={12}>
+            <Form
+            title={editing ? t("Edit rule {name}", { name: form.name }) : t("New sudo rule")}
+            actions={
+              <Actions>
+                <button type="button" data-testid="plan-sudo"
+                        disabled={!form.name || reason.trim().length < REASON_MINIMUM || mutation.isPending}
+                        onClick={() => mutation.mutate({ action: "identity.sudo.rule.ensure", reason, payload: payload(form) })}>
+                  {t("Plan rule")}
+                </button>
+                {editing && (
+                  <button type="button" className="fl-danger" data-testid="plan-sudo-removal"
+                          disabled={reason.trim().length < REASON_MINIMUM || mutation.isPending}
+                          onClick={() => mutation.mutate({ action: "identity.sudo.rule.remove", reason, payload: { sudo_rule: { name: form.name } } })}>
+                    {t("Plan removal")}
+                  </button>
+                )}
+                <button type="button" className="fl-quiet" onClick={() => setForm(null)}>{t("Close")}</button>
+              </Actions>
+            }
+          >
+            <Stack>
+              {message && <Problem>{message}</Problem>}
+              <Fields>
+                <Field label={t("Name")}>
+                  <input value={form.name} onChange={(e) => set("name", e.target.value)} disabled={editing}
+                         placeholder="ops-restart" data-testid="sudo-name" />
+                </Field>
+                <Field label={t("Description")} wide>
+                  <input value={form.description} onChange={(e) => set("description", e.target.value)} />
+                </Field>
+                <ListField label={t("Users")} value={form.users} onChange={(v) => set("users", v)}
+                           placeholder="alice, bob" disabled={form.all_users} />
+                <ListField label={t("User groups")} value={form.user_groups} onChange={(v) => set("user_groups", v)}
+                           placeholder="ops" disabled={form.all_users} />
+                <ListField label={t("Hosts")} value={form.hosts} onChange={(v) => set("hosts", v)}
+                           placeholder="web1.example.test" disabled={form.all_hosts} />
+                <ListField label={t("Host groups")} value={form.host_groups} onChange={(v) => set("host_groups", v)}
+                           placeholder="web" disabled={form.all_hosts} />
+                <ListField label={t("Commands")} value={form.commands} onChange={(v) => set("commands", v)}
+                           placeholder="/usr/bin/systemctl, /usr/bin/journalctl" disabled={form.all_commands} />
+                <ListField label={t("Command groups")} value={form.command_groups} onChange={(v) => set("command_groups", v)}
+                           placeholder="services" disabled={form.all_commands} />
+                <ListField label={t("Run as users")} value={form.run_as_users} onChange={(v) => set("run_as_users", v)}
+                           placeholder="root" disabled={form.run_as_any_user} />
+                <ListField label={t("Run as groups")} value={form.run_as_groups} onChange={(v) => set("run_as_groups", v)}
+                           placeholder="wheel" />
+                <ListField label={t("Options")} value={form.options} onChange={(v) => set("options", v)}
+                           placeholder="!authenticate, !requiretty" />
+              </Fields>
+              <Check checked={form.enabled} onChange={(v) => set("enabled", v)}>
+                {t("Enabled — a disabled rule is a draft and may be incomplete")}
+              </Check>
+              <Check checked={form.all_users} onChange={(v) => set("all_users", v)}>
+                {t("Every user, instead of the listed users and groups")}
+              </Check>
+              <Check checked={form.all_hosts} onChange={(v) => set("all_hosts", v)}>
+                {t("Every host, instead of the listed hosts and host groups")}
+              </Check>
+              <Check checked={form.all_commands} onChange={(v) => set("all_commands", v)}>
+                {t("Every command — together with root this is full root access")}
+              </Check>
+              <Check checked={form.run_as_any_user} onChange={(v) => set("run_as_any_user", v)}>
+                {t("Run as any user, instead of the listed run-as users")}
+              </Check>
+              <Fields><Reason value={reason} onChange={setReason} placeholder={t("why this rule changes")} testId="sudo-reason" /></Fields>
+            </Stack>
+          </Form>
+          </C>
+        )}
+
+        {change && <PlanImpact change={change} />}
       </Grid>
     </>
   );
@@ -1710,7 +1716,7 @@ function HostsTab() {
                 head: t("Fleet host"),
                 cell: (one) => {
                   const panelHost = linked(one.fqdn);
-                  if (panelHost) return <Link to={`/next/hosts/${panelHost.id}`}>{panelHost.hostname}</Link>;
+                  if (panelHost) return <Link to={`/hosts/${panelHost.id}`}>{panelHost.hostname}</Link>;
                   // A fleet still being read has not answered "no".
                   return fleet.isPending ? <Pill tone="unknown">{t("still reading the fleet")}</Pill> : <>{t("not in the fleet")}</>;
                 },
@@ -1722,7 +1728,7 @@ function HostsTab() {
                 cell: (one) => {
                   const panelHost = linked(one.fqdn);
                   return panelHost
-                    ? <Link className="fl-quiet fl-small" to={`/next/hosts/${panelHost.id}/identity`}>{t("Join")}</Link>
+                    ? <Link className="fl-quiet fl-small" to={`/hosts/${panelHost.id}/identity`}>{t("Join")}</Link>
                     : null;
                 },
               },
@@ -2186,11 +2192,11 @@ function DNSTab() {
         </Note>
       </Card>
 
-      <Card
-        span={12}
+      <C span={12}>
+        <Form
         title={t("A record")}
         note={t("The zone chosen here is the zone of the form and of the list below it.")}
-        foot={
+        actions={
           <Actions>
             <button type="button" disabled={!selected || !name || !value} data-testid="plan-record"
                     onClick={() => request.mutate(record(true))}>
@@ -2238,7 +2244,8 @@ function DNSTab() {
             </Check>
           )}
         </Stack>
-      </Card>
+      </Form>
+      </C>
 
       <Card
         span={12}
@@ -2434,7 +2441,7 @@ function HealthTab() {
             {
               key: "host",
               head: t("Host"),
-              cell: (one) => <Link to={`/next/hosts/${one.id}/identity`}>{one.hostname}</Link>,
+              cell: (one) => <Link to={`/hosts/${one.id}/identity`}>{one.hostname}</Link>,
             },
             {
               key: "where",

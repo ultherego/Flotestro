@@ -92,11 +92,20 @@ describe("a screen of the new panel", () => {
    * Nine of them were found by hand; this finds the tenth. A deliberate
    * way out is an <a href>, which says it is leaving.
    */
-  it("keeps its links inside the panel it belongs to", () => {
+  /**
+   * While the rewrite stood at /next this read "no link leaves /next",
+   * and it caught a screen sending the reader back into the panel being
+   * replaced every few days. The panel took the root on 16.10 and there
+   * is no second panel to fall into, so what is left to guard is the way
+   * out of the panel altogether: a bare <a href> to one of its own
+   * addresses reloads the whole application where a router link would
+   * not, and that is a page flash nobody asked for.
+   */
+  it("goes to its own addresses through the router, not through the browser", () => {
     const places = "hosts|jobs|campaigns|policies|groups|relays|secrets|vulnerabilities"
       + "|reads|bulk|audit|tags|teams|access|settings|security|backups|certificates"
       + "|monitoring|notifications|directory|status|support|reports|budgets|readiness|unresolved";
-    const out = new RegExp(`to=\\{?\`?/(?:${places})(?:[/?\`"]|$)`);
+    const out = new RegExp(`<a[^>]*href=\\{?["\`]/(?:${places})(?:[/?"\`]|$)`);
     const offenders: string[] = [];
     for (const screen of screens()) {
       for (const [index, line] of screen.text.split("\n").entries()) {
@@ -140,7 +149,7 @@ describe("a screen of the new panel", () => {
     const panel = readFileSync(join(__dirname, "Panel.tsx"), "utf8");
     const about = readFileSync(join(SCREENS, "about.tsx"), "utf8");
     const places = new Set(
-      [...panel.matchAll(/path="\/next\/?([a-z-]*)/g)]
+      [...panel.matchAll(/path="\/?([a-z-]*)/g)]
         .map((found) => (found[1] === "" ? "dashboard" : found[1])),
     );
     const files = new Map(screens().map((one) => [one.name, one.text]));
@@ -148,7 +157,7 @@ describe("a screen of the new panel", () => {
       if (new RegExp(`\\b${place}:`).test(about)) return true;
       // Or the screen carries its own frame, with both a name and the
       // paragraph behind the question mark.
-      const route = new RegExp(`path="/next/${place === "dashboard" ? "" : place}[^"]*" element=\\{<(\\w+)`);
+      const route = new RegExp(`path="/${place === "dashboard" ? "" : place}[^"]*" element=\\{<(\\w+)`);
       const found = panel.match(route);
       const text = found ? files.get(`${found[1]}.tsx`) : undefined;
       return text !== undefined && /<Screen\b/.test(text) && /\bhelp=/.test(text) && /\btitle=/.test(text);
@@ -176,5 +185,80 @@ describe("what is never a container", () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+/**
+ * A form is never a container of the board.
+ *
+ * This is the fault the owner named on 17.10, in his own words: pressing
+ * "Create identity" opened a form inside a container headed "Who may sign
+ * in", and from there nobody knows what is going on. It was on nineteen
+ * screens - a filter, a wizard step, a twenty-seven-field declaration -
+ * because the board treats a form and a reading as the same rectangle.
+ *
+ * A reading goes in a `Card` on the board. A decision goes in a `Form`,
+ * which is not a board container and never carries somebody else's title.
+ */
+describe("what may stand on a board", () => {
+  /**
+   * The twenty places where it is still true, on 17.10, and a ratchet.
+   *
+   * The list may only shrink. A screen converted to the pattern takes its
+   * line out; a screen that puts a new form on a board fails here the day
+   * it is written. Leaving the test simply red while the panel is
+   * converted would have meant a red suite for everybody for days, and a
+   * red suite nobody can fix is a suite people learn to ignore.
+   *
+   * What this cannot see: a container whose form is inside a component it
+   * calls - `set: <SetSettings host={host} />`. Those are on the list in
+   * DESIGN-UI.md, found by walking the running panel, and they are the
+   * reason this number is not the whole of the work.
+   */
+  /**
+   * How many such cards each screen still has. The number may only fall:
+   * a screen that gains one fails here, and a screen that loses its last
+   * comes off the list. Counted rather than named, because several of
+   * these titles are expressions and a name would be the fragile part.
+   */
+  const stillWrong: Record<string, number> = {
+  };
+
+  /** Each `<Card …>` of a file, from its opening tag to its own close. */
+  function cards(text: string): string[] {
+    const out: string[] = [];
+    for (const open of text.matchAll(/<Card\b/g)) {
+      let depth = 0;
+      let i = open.index ?? 0;
+      const from = i;
+      while (i < text.length) {
+        if (text.startsWith("<Card", i)) { depth += 1; i += 5; continue; }
+        if (text.startsWith("</Card>", i)) {
+          depth -= 1; i += 7;
+          if (depth === 0) { out.push(text.slice(from, i)); break; }
+          continue;
+        }
+        if (text.startsWith("/>", i) && depth === 1) { out.push(text.slice(from, i + 2)); break; }
+        i += 1;
+      }
+    }
+    return out;
+  }
+
+  it("holds nothing somebody has to fill in", () => {
+    const tally: Record<string, number> = {};
+    for (const { name, text } of screens()) {
+      const n = cards(text).filter((card) => /<(input|textarea|Field\b|Fields\b)/.test(card)).length;
+      if (n > 0) tally[name] = n;
+    }
+    const worse = Object.entries(tally)
+      .filter(([name, n]) => n > (stillWrong[name] ?? 0))
+      .map(([name, n]) => `${name}: ${n} (was ${stillWrong[name] ?? 0})`);
+    expect(worse).toEqual([]);
+    // And the ratchet: a screen that no longer has any comes off the list.
+    const stale = Object.entries(stillWrong)
+      .filter(([name, n]) => (tally[name] ?? 0) < n)
+      .map(([name, n]) => `${name}: now ${tally[name] ?? 0}, listed as ${n}`);
+    expect(stale).toEqual([]);
   });
 });

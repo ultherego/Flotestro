@@ -7,13 +7,13 @@ import { useCapabilities } from "../../lib/capabilities";
 import type { GroupMapping, InstallationProfile, Whoami } from "../../lib/types";
 import {
   firstUndone, mayAct, pageName, readableDetail, setupChecklistQuery, stateLabels, stepGuide,
-  stepTone, tokensAlone, type ConnectionTest, type SetupStep,
+  stepTone, tokensAlone, type ConnectionTest,
 } from "../../lib/setup";
 import { useToast } from "../../components/Toast";
 import { useT } from "../../i18n";
 import {
-  Actions, Banner, Bones, Button, Card, Fact, Facts, Field, Fields, Meter, Note, Pill,
-  Problem, Readout, Screen, Stack,
+  Actions, Banner, Bones, Button, Card, Fact, Facts, Field, Fields, Form, Meter, Note, Pill,
+  Problem, Readout, Screen, Stack, Table, Tabs, useTab,
 } from "../kit";
 import {
   candidateNote, chosenAddress, confirmable, sourceTone, OWN_ADDRESS,
@@ -49,11 +49,15 @@ export const SETUP_REASON_MIN_LENGTH = 8;
  * screen, so the prefix is put on here rather than asked of the server.
  */
 export function stepLink(path: string): string {
-  return `/next${path}`;
+  return path;
 }
+
+/** The sub-tabs: the checklist, and the steps finished on this screen. */
+const SETUP_TABS = ["steps", "actions"] as const;
 
 export function Setup() {
   const t = useT();
+  const [tab, goTab] = useTab(SETUP_TABS);
   const capabilities = useCapabilities();
   const checklist = useQuery(setupChecklistQuery);
   const whoami = useQuery({
@@ -98,8 +102,70 @@ export function Setup() {
     </Banner>
   ) : undefined;
 
+  /*
+   * What can be done from this screen, under its own heading.
+   *
+   * Four of the steps are finished here rather than elsewhere - two
+   * connection tests, the address the fleet dials and the first mapping -
+   * and each is a decision, so each stands on a face of its own with the
+   * step's own meaning over it. The rest of the list is a reading, and a
+   * reading is a row.
+   */
+  const decisions = list.steps.flatMap((step) => {
+    const words = guide[step.key] ?? { title: step.key, meaning: "" };
+    if (step.key === "identity_provider" && capabilities.identity_provider && mayAct(permissions, step.key)) {
+      return [(
+        <Form key={step.key} title={words.title} note={t("Ask the provider now; what it answers is what this step reports.")}>
+          <ConnectionTester
+            path="/api/v1/setup/test-oidc"
+            label={t("Test the identity provider")}
+            testId="test-oidc"
+          />
+        </Form>
+      )];
+    }
+    if (step.key === "directory" && capabilities.directory && mayAct(permissions, step.key)) {
+      return [(
+        <Form key={step.key} title={words.title} note={t("Ask the directory now; what it answers is what this step reports.")}>
+          <ConnectionTester
+            path="/api/v1/setup/test-directory"
+            label={t("Test the directory")}
+            testId="test-directory"
+          />
+        </Form>
+      )];
+    }
+    if (step.key === "advertised_address") {
+      return [(
+        <Form key={step.key} title={words.title} note={words.meaning}>
+          <AdvertisedAddressStep mayConfirm={permissions.has("settings.advertise.write")} />
+        </Form>
+      )];
+    }
+    if (step.key === "group_mapping") {
+      return [(
+        <Form key={step.key} title={words.title} note={words.meaning}>
+          {mayAct(permissions, step.key)
+            ? <MappingForm open={step.state === "undone"} />
+            : <Note>{t("Only whoever manages access can add a mapping; ask an administrator.")}</Note>}
+        </Form>
+      )];
+    }
+    return [];
+  });
+
   return frame(
     <>
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "steps", label: t("Steps") },
+          { value: "actions", label: t("Actions"), count: decisions.length || undefined },
+        ]}
+      />
+
+      {tab === "steps" && (<>
       <Card
         title={list.complete
           ? t("Every required step is done")
@@ -115,81 +181,65 @@ export function Setup() {
         />
       </Card>
 
-      {list.steps.map((step, index) => (
-        <StepCard
-          key={step.key}
-          step={step}
-          index={index}
-          words={guide[step.key] ?? { title: step.key, meaning: "" }}
-          stateWord={stateLabel[step.state]}
-          next={step.key === current}
-          permissions={permissions}
-          capabilities={capabilities}
+      {/* Twelve steps were twelve cards until 17.10, and the list could
+          not be read in one glance: a step is a row, its state is a word
+          in it, and what the panel found is the line beside it. */}
+      <Card
+        title={t("The steps")}
+        note={t("In the order the work is done. What each step is for is under its name; the ones finished on this screen are under Actions.")}
+        flush
+      >
+        <Table
+          rows={list.steps.map((step, index) => ({ step, index }))}
+          keyOf={(one) => one.step.key}
+          rowTestId={(one) => `step-${one.step.key}`}
+          testId="setup-steps"
+          empty={t("This installation reports no steps.")}
+          columns={[
+            {
+              key: "step",
+              head: t("Step"),
+              cell: ({ step, index }) => {
+                const words = guide[step.key] ?? { title: step.key, meaning: "" };
+                return (
+                  <span title={words.meaning}>
+                    {`${index + 1}. ${words.title}`}
+                    {step.key === current && <> <Pill tone="warn">{t("do this next")}</Pill></>}
+                  </span>
+                );
+              },
+            },
+            {
+              key: "state",
+              head: t("State"),
+              cell: ({ step }) => <Pill tone={stepTone(step.state)}>{stateLabel[step.state]}</Pill>,
+            },
+            {
+              key: "found",
+              head: t("What the panel found"),
+              cell: ({ step }) => <span data-testid={`found-${step.key}`}>{readableDetail(step.detail)}</span>,
+            },
+            {
+              key: "where",
+              head: t("Where"),
+              tight: true,
+              actions: true,
+              cell: ({ step }) => (
+                step.path !== "/setup"
+                  ? <Link to={stepLink(step.path)} data-testid={`go-${step.key}`}>{t(pageName(step.path))}</Link>
+                  : <span className="fl-faint">{t("here")}</span>
+              ),
+            },
+          ]}
         />
-      ))}
+      </Card>
+      </>)}
+
+      {tab === "actions" && (decisions.length > 0
+        ? <Stack wide>{decisions}</Stack>
+        : <Note>{t("No step is finished on this screen with what you may do here.")}</Note>)}
     </>,
     banner,
-  );
-}
-
-/** One step: what it is for, what the panel found, and what can be done here. */
-function StepCard({ step, index, words, stateWord, next, permissions, capabilities }: {
-  step: SetupStep;
-  index: number;
-  words: { title: string; meaning: string };
-  stateWord: string;
-  next: boolean;
-  permissions: Set<string>;
-  capabilities: ReturnType<typeof useCapabilities>;
-}) {
-  const t = useT();
-  return (
-    <Card
-      title={
-        <>
-          {`${index + 1}. ${words.title}`}{" "}
-          <Pill tone={stepTone(step.state)}>{stateWord}</Pill>
-          {/* The kit colours a state, never a card, so the step to do now
-              says so in a word rather than in a border nobody can name. */}
-          {next && <> <Pill tone="warn">{t("do this next")}</Pill></>}
-        </>
-      }
-      note={words.meaning}
-      tools={step.path !== "/setup" && (
-        <Link to={stepLink(step.path)} data-testid={`go-${step.key}`}>{t(pageName(step.path))}</Link>
-      )}
-    >
-      <Stack>
-        <Facts>
-          <Fact label={t("Found")}>
-            <span data-testid={`found-${step.key}`}>{readableDetail(step.detail)}</span>
-          </Fact>
-        </Facts>
-
-        {step.key === "identity_provider" && capabilities.identity_provider && mayAct(permissions, step.key) && (
-          <ConnectionTester
-            path="/api/v1/setup/test-oidc"
-            label={t("Test the identity provider")}
-            testId="test-oidc"
-          />
-        )}
-        {step.key === "directory" && capabilities.directory && mayAct(permissions, step.key) && (
-          <ConnectionTester
-            path="/api/v1/setup/test-directory"
-            label={t("Test the directory")}
-            testId="test-directory"
-          />
-        )}
-        {step.key === "advertised_address" && (
-          <AdvertisedAddressStep mayConfirm={permissions.has("settings.advertise.write")} />
-        )}
-        {step.key === "group_mapping" && (
-          mayAct(permissions, step.key)
-            ? <MappingForm open={step.state === "undone"} />
-            : <Note>{t("Only whoever manages access can add a mapping; ask an administrator.")}</Note>
-        )}
-      </Stack>
-    </Card>
   );
 }
 
@@ -254,7 +304,7 @@ function MappingForm({ open: initiallyOpen }: { open: boolean }) {
     onSuccess: (mapping) => {
       setGroup(""); setReason(""); setWarning(null); setOpen(false);
       toast.success(t("The group {group} now grants {role}.", { group: mapping.group_name, role: mapping.role }), {
-        link: { to: "/next/access?tab=mappings", label: t("Group mappings") },
+        link: { to: "/access?tab=mappings", label: t("Group mappings") },
       });
       void queryClient.invalidateQueries({ queryKey: ["setup"] });
       void queryClient.invalidateQueries({ queryKey: ["group-mappings"] });

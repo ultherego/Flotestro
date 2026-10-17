@@ -87,13 +87,13 @@ function Where() {
 /* The screen sits on its own address, as it does in the panel: a list that
    takes the reader somewhere else is gone by the time they arrive, and one
    left mounted would go on writing its filters into the new address. */
-function draw(at = "/next/hosts") {
+function draw(at = "/hosts") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[at]}>
         <Routes>
-          <Route path="/next/hosts" element={children} />
+          <Route path="/hosts" element={children} />
           <Route path="*" element={null} />
         </Routes>
         <Where />
@@ -137,7 +137,7 @@ describe("the host list", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("host-agent-arch")).toBeInTheDocument());
     const row = screen.getByTestId("host-agent-arch");
-    expect(within(row).getByRole("link", { name: "agent-arch" })).toHaveAttribute("href", "/next/hosts/h1");
+    expect(within(row).getByRole("link", { name: "agent-arch" })).toHaveAttribute("href", "/hosts/h1");
     expect(row).toHaveTextContent("192.168.56.70");
     expect(row).toHaveTextContent("arch");
     expect(within(row).getByText("online")).toBeInTheDocument();
@@ -232,7 +232,7 @@ describe("what the list can do to the hosts on it", () => {
     // workspace the selection is for.
     expect(screen.queryByTestId("set-metadata")).toBeNull();
     fireEvent.click(screen.getByTestId("open-bulk"));
-    expect(screen.getByTestId("where")).toHaveTextContent("/next/bulk?host_id=h1");
+    expect(screen.getByTestId("where")).toHaveTextContent("/bulk?host_id=h1");
   });
 
   it("ticks every loaded host, and only the loaded ones", async () => {
@@ -338,7 +338,7 @@ describe("what the list can do to the hosts on it", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("host-agent-arch")).toBeInTheDocument());
     const tag = within(screen.getByTestId("host-agent-arch")).getByRole("link", { name: "role=db" });
-    expect(tag).toHaveAttribute("href", "/next/hosts?tag=role%3Ddb");
+    expect(tag).toHaveAttribute("href", "/hosts?tag=role%3Ddb");
     asked.length = 0;
     fireEvent.click(tag);
     // Every listed tag has to be on the host, and the database decides
@@ -358,7 +358,7 @@ describe("what the list can do to the hosts on it", () => {
     });
     draw();
     await waitFor(() => expect(screen.getByRole("link", { name: "Add host" })).toBeInTheDocument());
-    expect(screen.getByRole("link", { name: "Add host" })).toHaveAttribute("href", "/next/hosts/new");
+    expect(screen.getByRole("link", { name: "Add host" })).toHaveAttribute("href", "/hosts/new");
     openMoreFilters();
     expect(screen.getByTestId("filter-relay")).toBeInTheDocument();
     // The relays themselves arrive after the list: a route cannot be
@@ -470,7 +470,7 @@ describe("the chrome of the list", () => {
 
   it("carries a refusal handed to it in the address through to the server", async () => {
     Object.assign(answers, fleet());
-    draw("/next/hosts?connection_refusal=certificate_expired");
+    draw("/hosts?connection_refusal=certificate_expired");
     await waitFor(() => expect(asked.some((one) => one.includes("connection_refusal=certificate_expired"))).toBe(true));
     // And says in words what the list is narrowed by.
     await waitFor(() => expect(screen.getByTestId("active-filters")).toHaveTextContent("certificate expired"));
@@ -526,7 +526,7 @@ describe("the chrome of the list", () => {
 
   it("leaves out an order naming a column the server has not got", async () => {
     Object.assign(answers, fleet());
-    draw("/next/hosts?sort=whatever");
+    draw("/hosts?sort=whatever");
     await waitFor(() => expect(screen.getByTestId("host-agent-arch")).toBeInTheDocument());
     expect(asked.some((one) => one.includes("sort="))).toBe(false);
   });
@@ -588,7 +588,7 @@ describe("the chrome of the list", () => {
 
   it("clears every filter at once, and leaves the order alone", async () => {
     Object.assign(answers, fleet());
-    draw("/next/hosts?site=krk&sort=last_seen_at");
+    draw("/hosts?site=krk&sort=last_seen_at");
     await waitFor(() => expect(screen.getByTestId("active-filters")).toHaveTextContent("krk"));
     fireEvent.click(screen.getByTestId("clear-filters"));
     await waitFor(() => expect(screen.queryByTestId("active-filters")).toBeNull());
@@ -598,8 +598,8 @@ describe("the chrome of the list", () => {
 
   it("takes a count in the composition to the hosts it counted", async () => {
     Object.assign(answers, fleet());
-    draw();
-    await waitFor(() => expect(screen.getByTestId("host-agent-arch")).toBeInTheDocument());
+    draw("/hosts?tab=composition");
+    await waitFor(() => expect(screen.getByRole("button", { name: "lab" })).toBeInTheDocument());
     // The composition carries every dimension the old one did; "lab" is a
     // site, and pressing it asks the server for that site alone.
     asked.length = 0;
@@ -611,6 +611,6 @@ describe("the chrome of the list", () => {
     Object.assign(answers, { ...fleet(), "/api/v1/hosts": { items: [] }, "/api/v1/whoami": whoami("host.enroll.create") });
     draw();
     await waitFor(() => expect(screen.getByText("No host matches the filters.")).toBeInTheDocument());
-    expect(screen.getAllByRole("link", { name: "Add host" })[0]).toHaveAttribute("href", "/next/hosts/new");
+    expect(screen.getAllByRole("link", { name: "Add host" })[0]).toHaveAttribute("href", "/hosts/new");
   });
 });

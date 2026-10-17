@@ -5,7 +5,7 @@ import { api, type Collection } from "../../lib/api";
 import { absoluteTime, bytes, relativeTime } from "../../lib/format";
 import { useErrorGuides } from "../../lib/errors";
 import { OPERATIONS_INTERVAL, useProgress } from "../../lib/stream";
-import { stateName } from "../../components/ui";
+import { stateName } from "../../lib/states";
 import {
   ACTION_WORDS, changeAction, isHostPlan, isPackageChange, planWords,
   type HostPlan, type PackageChange, type PackagePlanFacts,
@@ -14,7 +14,7 @@ import type { Attempt, Job as JobRecord } from "../../lib/types";
 import { useT } from "../../i18n";
 import {
   Banner, Bones, Card, Empty, Fact, Facts, Field, Fields, Grid, Kpi, Kpis, Modal, Note, Pill,
-  Problem, Ring, Screen, Stack, Table, Tag, Tags, type Tone,
+  Problem, Ring, Screen, Stack, Table, Tabs, Tag, Tags, useTab, type Tone,
 } from "../kit";
 import { jobTone, orderAgainAddress, prettyJSON, reasonAccepted, waitedBudget } from "./Jobs";
 
@@ -172,10 +172,14 @@ export function hasContent(value: unknown): boolean {
   return text !== "" && text !== "{}" && text !== "[]" && text !== "null";
 }
 
+/** The sub-tabs of one job, in the order a reader wants them. */
+const JOB_TABS = ["order", "result", "attempts", "approvals"] as const;
+
 export function Job() {
   const t = useT();
   const { id = "" } = useParams();
   const queryClient = useQueryClient();
+  const [tab, go] = useTab(JOB_TABS);
 
   const job = useQuery({
     queryKey: ["jobs", "detail", id],
@@ -298,7 +302,7 @@ export function Job() {
             </>
           )}
           {data.wait_reason && !budget && <><Tag>{data.wait_reason}</Tag>{" "}</>}
-          <Tag to={`/next/hosts/${data.host_id}`}>{host}</Tag>{" "}
+          <Tag to={`/hosts/${data.host_id}`}>{host}</Tag>{" "}
           <Tag>{t("requested by {who}", { who: data.created_by })}</Tag>
         </>
       }
@@ -352,19 +356,34 @@ export function Job() {
         </Card>
       )}
 
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "order", label: t("Order") },
+          { value: "result", label: t("Result") },
+          { value: "attempts", label: t("Attempts"), count: attempts.data?.items.length },
+          { value: "approvals", label: t("Approvals"), count: data.approvals?.length },
+        ]}
+      />
+
+      {/* One job was six containers on one board until 17.10. The order,
+          what came of it, what was tried and who consented are four
+          readings, and a reader wants one of them at a time. */}
+      {tab === "order" && (
       <Grid>
-        <Card span={6} title={t("The order")}>
+        <Card span={12} title={t("The order")}>
           <Facts>
             <Fact label={t("Identifier")}><span className="fl-mono">{data.id}</span></Fact>
-            <Fact label={t("Host")}><Link to={`/next/hosts/${data.host_id}`}>{host}</Link></Fact>
+            <Fact label={t("Host")}><Link to={`/hosts/${data.host_id}`}>{host}</Link></Fact>
             <Fact label={t("Campaign")}>
               {data.campaign_id
-                ? <Link className="fl-mono" to={`/next/campaigns/${data.campaign_id}`}>{data.campaign_id}</Link>
+                ? <Link className="fl-mono" to={`/campaigns/${data.campaign_id}`}>{data.campaign_id}</Link>
                 : "—"}
             </Fact>
             <Fact label={t("Read fan-out")}>
               {data.fanout_id
-                ? <Link className="fl-mono" to={`/next/reads/${data.fanout_id}`}>{data.fanout_id}</Link>
+                ? <Link className="fl-mono" to={`/reads/${data.fanout_id}`}>{data.fanout_id}</Link>
                 : "—"}
             </Fact>
             <Fact label={t("Requested by")}>{data.created_by}</Fact>
@@ -386,7 +405,12 @@ export function Job() {
           </Facts>
         </Card>
 
-        <Card span={6} title={t("Decision and result")}>
+      </Grid>
+      )}
+
+      {tab === "result" && (
+      <Grid>
+        <Card span={12} title={t("Decision and result")}>
           <Facts>
             <Fact label={t("Approvals")}>
               {data.required_approvals > 1
@@ -446,7 +470,11 @@ export function Job() {
             <Fact label={t("Payload hash")}><span className="fl-mono">{data.payload_hash}</span></Fact>
           </Facts>
         </Card>
+      </Grid>
+      )}
 
+      {tab === "approvals" && (
+      <Grid>
         <Card
           span={12}
           title={t("Approval history")}
@@ -472,7 +500,11 @@ export function Job() {
             />
           )}
         </Card>
+      </Grid>
+      )}
 
+      {tab === "order" && (
+      <Grid>
         <Card
           span={6}
           title={t("Payload")}
@@ -526,19 +558,24 @@ export function Job() {
           )}
         </Card>
       </Grid>
+      )}
 
-      {attempts.error ? (
-        <Card title={t("Attempts")}><Problem>{String(attempts.error)}</Problem></Card>
-      ) : !attempts.data ? (
-        <Card title={t("Attempts")}><Bones rows={3} /></Card>
-      ) : attempts.data.items.length === 0 ? (
-        <Card title={t("Attempts")} note={t("Every attempt at carrying out the job, with its output in full.")}>
-          <Empty>{t("No execution attempts.")}</Empty>
-        </Card>
-      ) : (
-        attempts.data.items.map((attempt) => (
-          <AttemptCard key={attempt.id} jobID={data.id} attempt={attempt as AttemptDetail} />
-        ))
+      {tab === "attempts" && (
+        attempts.error ? (
+          <Card title={t("Attempts")}><Problem>{String(attempts.error)}</Problem></Card>
+        ) : !attempts.data ? (
+          <Card title={t("Attempts")}><Bones rows={3} /></Card>
+        ) : attempts.data.items.length === 0 ? (
+          <Card title={t("Attempts")} note={t("Every attempt at carrying out the job, with its output in full.")}>
+            <Empty>{t("No execution attempts.")}</Empty>
+          </Card>
+        ) : (
+          <Stack wide>
+            {attempts.data.items.map((attempt) => (
+              <AttemptCard key={attempt.id} jobID={data.id} attempt={attempt as AttemptDetail} />
+            ))}
+          </Stack>
+        )
       )}
 
       {asking === "approve" && awaiting && (

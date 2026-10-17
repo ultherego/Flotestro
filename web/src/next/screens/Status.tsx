@@ -4,13 +4,12 @@ import { api } from "../../lib/api";
 import { copyToClipboard } from "../../lib/clipboard";
 import { absoluteTime, bytes, duration, goDuration, relativeTime } from "../../lib/format";
 import { useT } from "../../i18n";
+import { Configuration } from "./Settings";
 import type { Translate } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Band, Banner, Bars, Bones, Card, Chart, Empty, Fact, Facts, Feed, FeedRow, Kpi,
-  Note, Pie, Pill, Problem, Ring, Screen, type Segment, type Series, Squares, Stack, Table,
-  type Tone,
+  Band, Banner, Bars, Bones, Card, Chart, Empty, Fact, Facts, Feed, FeedRow, Kpi, Note, Pie, Pill, Problem, Ring, Screen, Squares, Stack, Table, Tabs, useTab, type Segment, type Series, type Tone,
 } from "../kit";
 
 /**
@@ -229,8 +228,30 @@ export function numberFact(facts: Record<string, unknown> | undefined, key: stri
   return typeof value === "number" ? value : undefined;
 }
 
+/** The three readings of this screen, one at a time. */
+const STATUS_TABS = ["overview", "components", "configuration"] as const;
+type StatusTab = typeof STATUS_TABS[number];
+
+/** The containers that say how the panel is as a whole; every other is a part. */
+const OVERVIEW_KEYS = [
+  "judged", "fine", "wanting", "not_judged", "latency",
+  "division", "squares", "pool", "attention", "since",
+];
+
+/**
+ * Only the containers of the open tab. What is not drawn is left out of the
+ * record, so it keeps no cell either: nothing is hidden by a style.
+ */
+function forStatusTab(tab: StatusTab, record: Record<string, ReactNode>): Record<string, ReactNode> {
+  const wanted = tab === "overview";
+  return Object.fromEntries(
+    Object.entries(record).filter(([key]) => OVERVIEW_KEYS.includes(key) === wanted),
+  );
+}
+
 export function Status() {
   const t = useT();
+  const [tab, goTab] = useTab(STATUS_TABS);
   const { data, error, dataUpdatedAt } = useQuery({
     queryKey: ["status"],
     queryFn: () => api.get<StatusView>("/api/v1/status"),
@@ -320,10 +341,24 @@ export function Status() {
       {!error && !data && <Bones rows={6} />}
 
       {data && (
+        <Tabs
+          value={tab}
+          onChange={goTab}
+          tabs={[
+            { value: "overview", label: t("Overview") },
+            { value: "components", label: t("Components") },
+            { value: "configuration", label: t("Configuration") },
+          ]}
+        />
+      )}
+
+      {data && tab === "configuration" && <Configuration />}
+
+      {data && tab !== "configuration" && (
         <Board
           screen={STATUS_SCREEN}
           catalogue={statusCatalogue(blocks, Boolean(data.blocks.build))}
-          drawn={{
+          drawn={forStatusTab(tab, {
             judged: (
               <Kpi
                 hero
@@ -495,7 +530,7 @@ export function Status() {
               key, <Block key={key} name={key} block={data.blocks[key]} />,
             ])),
             ...(data.blocks.build ? { build: <About block={data.blocks.build} /> } : {}),
-          }}
+          })}
         />
       )}
     </Screen>
@@ -602,29 +637,29 @@ function BlockDrawing({ name, facts }: { name: string; facts: Record<string, unk
   switch (name) {
     case "scheduler": {
       const segments: Segment[] = [
-        { label: t("for approval"), value: count("awaiting_approval"), tone: "info", to: "/next/jobs?state=awaiting_approval" },
-        { label: t("queued"), value: count("queued"), tone: "neutral", to: "/next/jobs?state=queued" },
+        { label: t("for approval"), value: count("awaiting_approval"), tone: "info", to: "/jobs?state=awaiting_approval" },
+        { label: t("queued"), value: count("queued"), tone: "neutral", to: "/jobs?state=queued" },
         { label: t("leased"), value: count("leased"), tone: "info" },
         { label: t("dispatched"), value: count("dispatched"), tone: "info" },
-        { label: t("running"), value: count("running"), tone: "ok", to: "/next/jobs?state=running" },
+        { label: t("running"), value: count("running"), tone: "ok", to: "/jobs?state=running" },
       ];
       return <Band segments={segments} testId="scheduler-band" />;
     }
     case "sessions": {
       const segments: Segment[] = [
         { label: t("agents on this gateway"), value: count("agents_on_this_gateway"), tone: "ok" },
-        { label: t("hosts online"), value: count("hosts_online"), tone: "ok", to: "/next/hosts?connection_state=online" },
-        { label: t("hosts stale"), value: count("hosts_stale"), tone: "warn", to: "/next/hosts?connection_state=stale" },
+        { label: t("hosts online"), value: count("hosts_online"), tone: "ok", to: "/hosts?connection_state=online" },
+        { label: t("hosts stale"), value: count("hosts_stale"), tone: "warn", to: "/hosts?connection_state=stale" },
         { label: t("browser sessions"), value: count("web_sessions"), tone: "info" },
       ];
       return <Band segments={segments} testId="sessions-band" />;
     }
     case "relays": {
       const segments: Segment[] = [
-        { label: t("active"), value: count("active"), tone: "ok", to: "/next/relays" },
-        { label: t("silent"), value: count("silent"), tone: "error", to: "/next/relays" },
-        { label: t("never seen"), value: count("never_seen"), tone: "unknown", to: "/next/relays" },
-        { label: t("revoked"), value: count("revoked"), tone: "neutral", to: "/next/relays" },
+        { label: t("active"), value: count("active"), tone: "ok", to: "/relays" },
+        { label: t("silent"), value: count("silent"), tone: "error", to: "/relays" },
+        { label: t("never seen"), value: count("never_seen"), tone: "unknown", to: "/relays" },
+        { label: t("revoked"), value: count("revoked"), tone: "neutral", to: "/relays" },
       ];
       return <Band segments={segments} testId="relays-band" />;
     }
@@ -892,20 +927,20 @@ export const STATUS_SCREEN = "next_status";
  * server's answer, so they are added to the catalogue as they arrive.
  */
 export const STATUS: BoardEntry[] = [
-  { key: "judged", title: "Parts judged", width: 4, height: 1 },
-  { key: "fine", title: "Fine", width: 2, height: 1 },
-  { key: "wanting", title: "Need a look", width: 2, height: 1 },
-  { key: "not_judged", title: "Not judged", width: 2, height: 1 },
-  { key: "latency", title: "Database round trip", width: 2, height: 1 },
+  { key: "judged", title: "Parts judged", width: 4, height: 2 },
+  { key: "fine", title: "Fine", width: 2, height: 2 },
+  { key: "wanting", title: "Need a look", width: 2, height: 2 },
+  { key: "not_judged", title: "Not judged", width: 2, height: 2 },
+  { key: "latency", title: "Database round trip", width: 2, height: 2 },
   // A pie over four outcomes, a square per part and one arc: each is a
   // drawing of a fixed size with a short legend under it.
-  { key: "division", title: "How the parts divide", width: 4, height: 2 },
-  { key: "squares", title: "Every part at a glance", width: 4, height: 2 },
-  { key: "pool", title: "The database pool", width: 4, height: 2 },
+  { key: "division", title: "How the parts divide", width: 4, height: 4 },
+  { key: "squares", title: "Every part at a glance", width: 4, height: 4 },
+  { key: "pool", title: "The database pool", width: 4, height: 4 },
   // A row per part that is not fine: at worst every part of the panel.
-  { key: "attention", title: "Parts that need a look", width: 12, height: 3 },
+  { key: "attention", title: "Parts that need a look", width: 12, height: 5 },
   // Two charts of 120 pixels each, with their labels.
-  { key: "since", title: "Since this screen was opened", width: 12, height: 3 },
+  { key: "since", title: "Since this screen was opened", width: 12, height: 5 },
 ];
 
 /**

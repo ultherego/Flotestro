@@ -78,13 +78,18 @@ const attempt = (over: Record<string, unknown>) => ({
   ...over,
 });
 
-function draw() {
+/**
+ * One job is read in four sub-tabs since 17.10 - the order, the result,
+ * the attempts and the approvals - so a test reads the one it is about,
+ * by the address a link to it would carry.
+ */
+function draw(tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/next/jobs/j1"]}>
+      <MemoryRouter initialEntries={[tab ? `/jobs/j1?tab=${tab}` : "/jobs/j1"]}>
         <ToastProvider>
-          <Routes><Route path="/next/jobs/:id" element={children} /></Routes>
+          <Routes><Route path="/jobs/:id" element={children} /></Routes>
         </ToastProvider>
       </MemoryRouter>
     </QueryClientProvider>
@@ -109,7 +114,7 @@ describe("one job", () => {
     });
     draw();
     await waitFor(() => expect(screen.getByRole("heading", { name: /unit\.restart/ })).toBeInTheDocument());
-    expect(screen.getAllByRole("link", { name: "agent-arch" })[0]).toHaveAttribute("href", "/next/hosts/h1");
+    expect(screen.getAllByRole("link", { name: "agent-arch" })[0]).toHaveAttribute("href", "/hosts/h1");
     expect(screen.getAllByText("succeeded").length).toBeGreaterThan(0);
     // The payload is the text the hash covers, so it stands verbatim.
     expect(screen.getByTestId("payload")).toHaveTextContent("sshd.service");
@@ -203,7 +208,7 @@ describe("one job", () => {
       "/api/v1/jobs/j1/attempts": { items: [attempt({ stdout: long })], count: 1 },
       "/api/v1/errors": { items: [] },
     });
-    draw();
+    draw("attempts");
     await waitFor(() => expect(screen.getByTestId("output-stdout")).toBeInTheDocument());
     expect(screen.getByTestId("output-stdout").textContent?.length).toBeLessThan(long.length);
     fireEvent.click(screen.getByTestId("more-stdout"));
@@ -221,7 +226,7 @@ describe("one job", () => {
       },
       "/api/v1/errors": { items: [] },
     });
-    draw();
+    draw("result");
     await waitFor(() => expect(screen.getAllByText("not observed").length).toBeGreaterThan(0));
     expect(screen.getAllByText(/expected active, observed failed/)[0]).toBeInTheDocument();
     // A change made and not observed is said before anything else.
@@ -242,8 +247,8 @@ describe("one job", () => {
     });
     draw();
     await waitFor(() => expect(screen.getByRole("link", { name: "c9" })).toBeInTheDocument());
-    expect(screen.getByRole("link", { name: "c9" })).toHaveAttribute("href", "/next/campaigns/c9");
-    expect(screen.getByRole("link", { name: "f7" })).toHaveAttribute("href", "/next/reads/f7");
+    expect(screen.getByRole("link", { name: "c9" })).toHaveAttribute("href", "/campaigns/c9");
+    expect(screen.getByRole("link", { name: "f7" })).toHaveAttribute("href", "/reads/f7");
   });
 
   it("draws the plan the host computed, with the packages it names", async () => {

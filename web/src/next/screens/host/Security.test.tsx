@@ -94,10 +94,20 @@ const allowed = {
     .map((action) => ({ action, permission: "security.write", mutating: true, risk: "critical", allowed: true })),
 };
 
-function draw(one: Host = host()) {
+/**
+ * The module is two sub-tabs since 17.10 - what the checks found, and
+ * what is being done about it - and the address names which one is
+ * open. The findings are ticked under State and the fix is ordered
+ * under Remediation, because the order is a decision and the table is a
+ * reading; a test follows the same two steps a reader does.
+ */
+function draw(one: Host = host(), tab?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const where = tab ? `/hosts/${one.id}/security?tab=${tab}` : `/hosts/${one.id}/security`;
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[where]}>{children}</MemoryRouter>
+    </QueryClientProvider>
   );
   return render(<Security host={one} />, { wrapper });
 }
@@ -156,6 +166,10 @@ describe("a host's security", () => {
     draw();
     const row = await screen.findByTestId("finding-selinux.enforcing");
     fireEvent.click(within(row).getByRole("checkbox"));
+    // The tick is a reading's; the order is placed where the decisions
+    // of this module are, and the tick travels there with the module.
+    fireEvent.click(screen.getByRole("tab", { name: "Remediation" }));
+    expect(screen.getByText("selinux.enforcing")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("fix-selected"));
     const confirm = screen.getByTestId("confirm-remediate");
     expect(confirm).toBeDisabled();
@@ -288,7 +302,7 @@ describe("a host's security", () => {
       },
       "/api/v1/hosts/h1/actions": allowed,
     });
-    draw();
+    draw(host(), "remediation");
     fireEvent.click(await screen.findByTestId("stop-plan-0123456789"));
     await waitFor(() => expect(posted).toHaveLength(1));
     expect(posted[0].path).toBe("/api/v1/hosts/h1/security/remediation/plan-0123456789/stop");

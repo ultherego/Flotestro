@@ -69,10 +69,13 @@ const view = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-function draw() {
+/** The screen is three tabs; the parts of the panel are the second. */
+function draw(tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[tab ? `/status?tab=${tab}` : "/status"]}>{children}</MemoryRouter>
+    </QueryClientProvider>
   );
   return render(<Status />, { wrapper });
 }
@@ -108,7 +111,7 @@ describe("the condition of the installation", () => {
 
   it("says a kind the sweep did not report, rather than removing nought from it", async () => {
     Object.assign(answers, { "/api/v1/status": view() });
-    draw();
+    draw("components");
     await waitFor(() => expect(screen.getByTestId("kind-audit_events")).toBeInTheDocument());
     const swept = screen.getByTestId("kind-jobs");
     expect(swept).toHaveTextContent("5");
@@ -119,7 +122,7 @@ describe("the condition of the installation", () => {
 
   it("puts a count the server never sent under the band as not counted", async () => {
     Object.assign(answers, { "/api/v1/status": view() });
-    draw();
+    draw("components");
     await waitFor(() => expect(screen.getByTestId("scheduler-band")).toBeInTheDocument());
     const band = screen.getByTestId("scheduler-band");
     // Two were counted and drawn, one is a real nought, and two never
@@ -149,12 +152,12 @@ describe("the condition of the installation", () => {
 
   it("leads to the relays and the jobs of the new panel, not of the old one", async () => {
     Object.assign(answers, { "/api/v1/status": view() });
-    draw();
+    draw("components");
     await waitFor(() => expect(screen.getByTestId("relays-band")).toBeInTheDocument());
     const relays = within(screen.getByTestId("relays-band")).getByRole("listitem");
-    expect(relays).toHaveAttribute("href", "/next/relays");
+    expect(relays).toHaveAttribute("href", "/relays");
     const queued = within(screen.getByTestId("scheduler-band")).getAllByRole("listitem");
-    expect(queued.some((one) => one.getAttribute("href") === "/next/jobs?state=queued")).toBe(true);
+    expect(queued.some((one) => one.getAttribute("href") === "/jobs?state=queued")).toBe(true);
   });
 
   it("waits for a second reading before it draws a line over time", async () => {

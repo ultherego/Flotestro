@@ -4,12 +4,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection, type Page } from "../../lib/api";
 import { useDebounced } from "../../lib/debounce";
 import type { Host, Whoami } from "../../lib/types";
+import type { Team } from "../../lib/teams";
 import { absoluteTime, relativeTime } from "../../lib/format";
 import { t, useT } from "../../i18n";
-import { Board } from "../Board";
-import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Bones, Card, Empty, Field, Fields, Kpi, Modal, Note, Pill, Problem, Table, TwoLine,
+  Actions, Banner, Bones, C, Card, Empty, Field, Fields, Form, Grid, Kpi, Kpis, Modal, Note, Pill,
+  Problem, Table, Tabs, TwoLine, useTab,
 } from "../kit";
 
 /**
@@ -22,17 +22,10 @@ import {
  * it is recorded with the reason it was made.
  */
 
-/** One team as the register lists it, with the hosts placed in it counted. */
-export type Team = {
-  id: string;
-  name: string;
-  description?: string;
-  created_by?: string;
-  /** The hosts placed in the team; a deletion says how many it releases. */
-  hosts: number;
-  created_at: string;
-  updated_at: string;
-};
+/* The team record is shared with every screen that reads the register -
+   the host list's filter, the placement on a host page, the binding form -
+   so it lives in lib/teams beside the read they all make. */
+export type { Team };
 
 /**
  * The team a host carries. The host listing does not declare it, because
@@ -102,11 +95,15 @@ export function refusalText(code: string, message: string): string {
 /** What the register is doing beside the list; one thing at a time. */
 type Aside = { kind: "create" } | { kind: "rename" } | { kind: "delete" } | { kind: "place" };
 
+/** The sub-tabs: the register, and the form that writes to it. */
+const TEAM_TABS = ["teams", "new"] as const;
+
 export function Teams() {
   const t = useT();
   const queryClient = useQueryClient();
   const [warning, setWarning] = useState<ApiError | null>(null);
   const [aside, setAside] = useState<Aside | null>(null);
+  const [tab, go] = useTab(TEAM_TABS);
 
   const whoami = useQuery({
     queryKey: ["whoami"],
@@ -132,6 +129,7 @@ export function Teams() {
 
   const settled = () => {
     setAside(null);
+    go("teams");
     setWarning(null);
     void queryClient.invalidateQueries({ queryKey: ["teams"] });
     void queryClient.invalidateQueries({ queryKey: ["hosts"] });
@@ -166,124 +164,140 @@ export function Teams() {
       {/* A refusal is not a container: an arrangement that took it off the
           screen would hide the one thing the operator has to read. */}
       {warning !== null && <Refusal error={warning} close={() => setWarning(null)} />}
-      <Board screen={TEAMS_SCREEN} catalogue={TEAMS} drawn={{
-        count: (
-          <Kpi
-            hero
-            icon="access"
-            label={t("Teams")}
-            value={list.data ? teams.length : null}
-            note={t("each one a boundary a role binding can name")}
-          />
-        ),
-        placed: (
-          <Kpi
-            icon="hosts"
-            label={t("Hosts in a team")}
-            value={list.data ? placed : null}
-            note={t("reachable through their team as well as their site")}
-          />
-        ),
-        unplaced: (
-          <Kpi
-            icon="server"
-            label={t("Hosts in no team")}
-            value={unplacedCount}
-            to={UNPLACED_HOSTS_ADDRESS}
-            note={t("reachable through their site alone; a placement nobody has made, not a fault")}
-          />
-        ),
-        doctrine: (
-          <Card title={t("A team is not a tag")}>
-            <Note>
-              {t("An operator writes tags, so a tag may never decide who may touch what: somebody who can widen their own scope has no scope. A team is a row with an identifier, and placing a host in one is an operation of its own, with its own permission and its own line in the trail.")}
-            </Note>
-            <Note>
-              {t("A team renamed is the same team: every binding and every host stay where they were. Tags are for choosing hosts inside what you may already touch.")}
-            </Note>
-          </Card>
-        ),
-        form: (aside?.kind === "create" || aside?.kind === "rename") && (
+      <Kpis>
+        <Kpi
+          hero
+          icon="access"
+          label={t("Teams")}
+          value={list.data ? teams.length : null}
+          note={t("each one a boundary a role binding can name")}
+        />
+        <Kpi
+          icon="hosts"
+          label={t("Hosts in a team")}
+          value={list.data ? placed : null}
+          note={t("reachable through their team as well as their site")}
+        />
+        <Kpi
+          icon="server"
+          label={t("Hosts in no team")}
+          value={unplacedCount}
+          to={UNPLACED_HOSTS_ADDRESS}
+          note={t("reachable through their site alone; a placement nobody has made, not a fault")}
+        />
+      </Kpis>
+
+      <Tabs
+        value={tab}
+        onChange={(next) => { if (next === "teams") setAside(null); go(next); }}
+        tabs={[
+          { value: "teams", label: t("Teams") },
+          { value: "new", label: t("New team") },
+        ]}
+      />
+
+      {tab === "teams" && (
+        <Grid>
+          <C span={8}>
+            <Card
+              title={t("Teams")}
+              note={list.data ? t("{n} teams", { n: teams.length }) : undefined}
+              tools={
+                <>
+                  <button type="button" onClick={() => { setAside({ kind: "create" }); go("new"); }} disabled={!canManage}
+                          title={canManage ? undefined : denied} data-testid="new-team">
+                    {t("New team")}
+                  </button>
+                  <button type="button" className="fl-quiet" onClick={() => { setAside({ kind: "rename" }); go("new"); }}
+                          disabled={!canManage || teams.length === 0}
+                          title={canManage ? undefined : denied} data-testid="rename-a-team">
+                    {t("Rename a team…")}
+                  </button>
+                  {/* Placing a machine is not the register's write: it hands
+                      the machine to other people, and it has a permission and
+                      a line in the trail of its own. */}
+                  <button type="button" className="fl-quiet" onClick={() => setAside({ kind: "place" })}
+                          disabled={!canPlace || aside !== null}
+                          title={canPlace ? undefined : deniedPlacement} data-testid="place-a-host">
+                    {t("Place a host…")}
+                  </button>
+                  <button type="button" className="fl-danger" onClick={() => setAside({ kind: "delete" })}
+                          disabled={!canManage || teams.length === 0}
+                          title={canManage ? undefined : denied} data-testid="delete-a-team">
+                    {t("Delete a team…")}
+                  </button>
+                </>
+              }
+              foot={canManage && canPlace ? undefined : (
+                <>
+                  {!canManage && <Note>{denied}</Note>}
+                  {!canPlace && <Note>{deniedPlacement}</Note>}
+                </>
+              )}
+              flush
+            >
+              <Table
+                rows={teams}
+                keyOf={(one) => one.id}
+                rowTestId={(one) => `team-${one.name}`}
+                empty={list.data
+                  ? t("No teams. Every host is reachable through its site, and every role binding names a site and an environment. Draw a team where the division of the work is not the geography of the machines.")
+                  : t("Reading the register…")}
+                columns={[
+                  // The identifier under the name is what a binding names and
+                  // what the trail and the address bar speak; a rename moves
+                  // nobody, so both are worth reading.
+                  { key: "name", head: t("Team"), cell: (one) => (
+                    <TwoLine sub={one.id}>
+                      <Link to={teamHostsAddress(one.id)} title={t("the hosts of this team")}>{one.name}</Link>
+                    </TwoLine>
+                  ) },
+                  { key: "description", head: t("What belongs here"), cell: (one) => (
+                    one.description
+                      ? one.description
+                      : <Pill tone="unknown">{t("nobody wrote one")}</Pill>
+                  ) },
+                  { key: "hosts", head: t("Hosts"), num: true, cell: (one) => one.hosts },
+                  { key: "by", head: t("Created by"), minor: true, tight: true, cell: (one) => (
+                    one.created_by ? <span title={one.created_by}>{one.created_by}</span> : <span className="fl-faint">—</span>
+                  ) },
+                  { key: "created", head: t("When"), minor: true, cell: (one) => (
+                    <span title={absoluteTime(one.created_at)}>{relativeTime(one.created_at)}</span>
+                  ) },
+                ]}
+              />
+            </Card>
+          </C>
+          <C span={4}>
+            <Card title={t("A team is not a tag")}>
+              <Note>
+                {t("An operator writes tags, so a tag may never decide who may touch what: somebody who can widen their own scope has no scope. A team is a row with an identifier, and placing a host in one is an operation of its own, with its own permission and its own line in the trail.")}
+              </Note>
+              <Note>
+                {t("A team renamed is the same team: every binding and every host stay where they were. Tags are for choosing hosts inside what you may already touch.")}
+              </Note>
+            </Card>
+          </C>
+        </Grid>
+      )}
+
+      {/* The form stands on its own face and under its own heading. It was
+          a container of the board until 17.10, which is the fault the owner
+          named: a form opening inside somebody else's title. */}
+      {tab === "new" && (
+        canManage ? (
           <TeamForm
-            key={aside.kind}
-            renaming={aside.kind === "rename"}
+            key={aside?.kind === "rename" ? "rename" : "create"}
+            renaming={aside?.kind === "rename"}
             teams={teams}
             onDone={settled}
             onRefused={refused}
-            onCancel={() => setAside(null)}
+            onCancel={() => { setAside(null); go("teams"); }}
           />
-        ),
-        list: (
-          <Card
-            title={t("Teams")}
-            note={list.data ? t("{n} teams", { n: teams.length }) : undefined}
-            tools={
-              <>
-                <button type="button" onClick={() => setAside({ kind: "create" })} disabled={!canManage || aside !== null}
-                        title={canManage ? undefined : denied} data-testid="new-team">
-                  {t("New team")}
-                </button>
-                <button type="button" className="fl-quiet" onClick={() => setAside({ kind: "rename" })}
-                        disabled={!canManage || aside !== null || teams.length === 0}
-                        title={canManage ? undefined : denied} data-testid="rename-a-team">
-                  {t("Rename a team…")}
-                </button>
-                {/* Placing a machine is not the register's write: it hands
-                    the machine to other people, and it has a permission and
-                    a line in the trail of its own. */}
-                <button type="button" className="fl-quiet" onClick={() => setAside({ kind: "place" })}
-                        disabled={!canPlace || aside !== null}
-                        title={canPlace ? undefined : deniedPlacement} data-testid="place-a-host">
-                  {t("Place a host…")}
-                </button>
-                <button type="button" className="fl-danger" onClick={() => setAside({ kind: "delete" })}
-                        disabled={!canManage || teams.length === 0}
-                        title={canManage ? undefined : denied} data-testid="delete-a-team">
-                  {t("Delete a team…")}
-                </button>
-              </>
-            }
-            foot={canManage && canPlace ? undefined : (
-              <>
-                {!canManage && <Note>{denied}</Note>}
-                {!canPlace && <Note>{deniedPlacement}</Note>}
-              </>
-            )}
-            flush
-          >
-            <Table
-              rows={teams}
-              keyOf={(one) => one.id}
-              rowTestId={(one) => `team-${one.name}`}
-              empty={list.data
-                ? t("No teams. Every host is reachable through its site, and every role binding names a site and an environment. Draw a team where the division of the work is not the geography of the machines.")
-                : t("Reading the register…")}
-              columns={[
-                // The identifier under the name is what a binding names and
-                // what the trail and the address bar speak; a rename moves
-                // nobody, so both are worth reading.
-                { key: "name", head: t("Team"), cell: (one) => (
-                  <TwoLine sub={one.id}>
-                    <Link to={teamHostsAddress(one.id)} title={t("the hosts of this team")}>{one.name}</Link>
-                  </TwoLine>
-                ) },
-                { key: "description", head: t("What belongs here"), cell: (one) => (
-                  one.description
-                    ? one.description
-                    : <Pill tone="unknown">{t("nobody wrote one")}</Pill>
-                ) },
-                { key: "hosts", head: t("Hosts"), num: true, cell: (one) => one.hosts },
-                { key: "by", head: t("Created by"), minor: true, tight: true, cell: (one) => (
-                  one.created_by ? <span title={one.created_by}>{one.created_by}</span> : <span className="fl-faint">—</span>
-                ) },
-                { key: "created", head: t("When"), minor: true, cell: (one) => (
-                  <span title={absoluteTime(one.created_at)}>{relativeTime(one.created_at)}</span>
-                ) },
-              ]}
-            />
-          </Card>
-        ),
-      }} />
+        ) : (
+          <Card title={t("New team")}><Empty icon="access">{denied}</Empty></Card>
+        )
+      )}
     </>
   );
 }
@@ -366,12 +380,13 @@ function TeamForm({ renaming, teams, onDone, onRefused, onCancel }: {
   const ready = name.trim() !== "" && reasonGiven(reason) && (!renaming || id !== "") && !save.isPending;
 
   return (
-    <Card
+    <Form
       title={renaming ? t("Rename a team") : t("New team")}
       note={renaming
         ? t("The name is what people call it; the identifier is the boundary, so a rename keeps every binding and every host.")
         : t("A new team holds nobody and grants nothing until a host is placed in it and a role is granted over it. Both are decisions of their own.")}
-      foot={
+      onSubmit={() => { if (ready) save.mutate(); }}
+      actions={
         <Actions>
           <button type="button" disabled={!ready} onClick={() => save.mutate()} data-testid="team-save">
             {save.isPending ? t("Working…") : renaming ? t("Save team") : t("Create team")}
@@ -412,7 +427,7 @@ function TeamForm({ renaming, teams, onDone, onRefused, onCancel }: {
                  placeholder={t("e.g. the payments group took over the database hosts")} data-testid="team-reason" />
         </Field>
       </Fields>
-    </Card>
+    </Form>
   );
 }
 
@@ -615,14 +630,3 @@ function PlaceHost({ teams, onDone, onRefused, onClose }: {
     </Modal>
   );
 }
-
-export const TEAMS_SCREEN = "next_teams";
-
-export const TEAMS: BoardEntry[] = [
-  { key: "count", title: "Teams", width: 4, height: 1 },
-  { key: "placed", title: "Hosts in a team", width: 4, height: 1 },
-  { key: "unplaced", title: "Hosts in no team", width: 4, height: 1 },
-  { key: "doctrine", title: "A team is not a tag", width: 4, height: 2 },
-  { key: "form", title: "New team", width: 8, height: 3 },
-  { key: "list", title: "Teams", width: 12, height: 4 },
-];

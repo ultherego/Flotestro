@@ -125,8 +125,8 @@ describe("the managed files of a host", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("file-/etc/unreadable.conf")).toBeInTheDocument());
     const band = screen.getByTestId("file-states");
-    expect(within(band).getByTitle("unknown")).toHaveTextContent("1");
-    expect(within(band).getByTitle("as expected")).toHaveTextContent("1");
+    expect(within(band).getByLabelText("unknown")).toHaveTextContent("1");
+    expect(within(band).getByLabelText("as expected")).toHaveTextContent("1");
   });
 
   it("asks the host to read a file back without any confirmation", async () => {

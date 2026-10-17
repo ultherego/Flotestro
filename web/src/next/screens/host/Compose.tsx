@@ -4,14 +4,12 @@ import { Link } from "react-router-dom";
 import { api, type Collection } from "../../../lib/api";
 import { useModuleAccess, useAllowed } from "../../../lib/actions";
 import { absoluteTime, relativeTime } from "../../../lib/format";
-import { stateName } from "../../../components/ui";
+import { stateName } from "../../../lib/states";
 import type { Host, Job } from "../../../lib/types";
 import { useT } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Actions, Band, Banner, Bars, Button, Card, Empty, Field, Fields, Note, Pill, Problem,
-  Readout, Stack, Table, type Segment, type Tone,
+  Band, Banner, Bars, Button, C, Card, Empty, Field, Fields, Form, Grid, Note, Pill, Problem,
+  Readout, Table, Tabs, useTab, type Segment, type Tone,
   stacked,
 } from "../../kit";
 
@@ -103,8 +101,21 @@ function countWhere<T>(items: T[] | undefined, test: (item: T) => boolean): numb
   return items === undefined ? undefined : items.filter(test).length;
 }
 
+/**
+ * The three parts of this module: the manifest, what deploying it would
+ * do, and what has been deployed before.
+ *
+ * Both the project and the deployment were containers on a board until
+ * 17.10, which put a text somebody types and a count somebody reads in
+ * the same kind of rectangle. The readings keep their containers; the
+ * two decisions stand on their own face, each in the sub-tab where it is
+ * made, and the sub-tab is in the address.
+ */
+const COMPOSE_TABS = ["project", "plan", "history"] as const;
+
 export function Compose({ host }: { host: Host }) {
   const t = useT();
+  const [tab, goTab] = useTab(COMPOSE_TABS);
   const queryClient = useQueryClient();
   const [project, setProject] = useState("");
   const [manifest, setManifest] = useState("");
@@ -215,10 +226,8 @@ export function Compose({ host }: { host: Host }) {
   const reasonReady = reason.trim().length >= MIN_REASON;
 
   return (
-    <Board
-      screen={HOST_COMPOSE_SCREEN}
-      catalogue={HOST_COMPOSE}
-      notices={stacked(
+    <>
+      {stacked(
         readOnly && <Banner tone="info">{readOnly}</Banner>,
         message && <Problem>{message}</Problem>,
         ordered && (
@@ -227,64 +236,30 @@ export function Compose({ host }: { host: Host }) {
               ? t("The deployment is waiting for approval.")
               : t("The deployment has been queued.")}
             {" "}
-            <Link to={`/next/jobs/${ordered.id}`}>{t("job {id}", { id: ordered.id.slice(0, 8) })}</Link>
+            <Link to={`/jobs/${ordered.id}`}>{t("job {id}", { id: ordered.id.slice(0, 8) })}</Link>
             {" · "}
-            <Link to={`/next/hosts/${host.id}/jobs`}>{t("See all jobs")}</Link>
+            <Link to={`/hosts/${host.id}/jobs`}>{t("See all jobs")}</Link>
           </Banner>
         ),
       )}
-      drawn={{
-      deployments: (
-        <Card
-          title={t("Deployments")}
-          note={project
-            ? t("Every deployment of {project} from the panel.", { project })
-            : t("Name a project to see its deployment history.")}
-        >
-          <Band segments={outcomes} testId="deployments" />
-        </Card>
-      ),
-      changes_by_kind: (
-        <Card title={t("What the plan would change")} note={t("By kind of change.")}>
-          {!plan
-            ? <Empty icon="compose">{t("No plan yet.")}</Empty>
-            : changes.length === 0
-              ? <Empty>{t("Nothing would change on this host.")}</Empty>
-              : (
-                <Bars items={changes.map(([action, count]) => ({
-                  label: t(action), value: count, tone: changeTone(action),
-                }))} />
-              )}
-        </Card>
-      ),
-      project: (
-        <Card
+
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "project", label: t("Project") },
+          { value: "plan", label: t("Plan") },
+          { value: "history", label: t("History") },
+        ]}
+      />
+
+      {tab === "project" && (
+        <Form
           title={t("Project")}
-          note={t("Docker Compose projects deployed from the panel: plan first, then deploy exactly that plan.")}
-          foot={t("The manifest is stored with the operation and stays in the panel's history. Keep credentials out of it.")}
-        >
-          <Stack>
-            <Fields>
-              <Field label={t("Project name")}>
-                <input
-                  value={project}
-                  onChange={(event) => setProject(event.target.value)}
-                  placeholder="shop"
-                  data-testid="project"
-                />
-              </Field>
-              <Field label={t("Manifest (docker-compose.yml)")} wide>
-                <textarea
-                  rows={12}
-                  value={manifest}
-                  onChange={(event) => { setManifest(event.target.value); setPlan(null); }}
-                  placeholder={"services:\n  web:\n    image: nginx@sha256:…"}
-                  data-testid="manifest"
-                />
-              </Field>
-            </Fields>
-            <Actions>
-              {/* The plan is the one button of this card: refused, it stays
+          note={t("Docker Compose projects deployed from the panel: plan first, then deploy exactly that plan. The manifest is stored with the operation and stays in the panel's history, so keep credentials out of it.")}
+          actions={
+            <>
+              {/* The plan is the one order of this form: refused, it stays
                   on the screen disabled with the reason beside it. */}
               {(mayPlan.allowed || mayPlan.known) && (
                 <Button
@@ -299,123 +274,145 @@ export function Compose({ host }: { host: Host }) {
               {!mayPlan.allowed && !mayPlan.pending && mayPlan.known && (
                 <Note>{mayPlan.reason || t("This action is not available.")}</Note>
               )}
-            </Actions>
-          </Stack>
-        </Card>
-      ),
-      history: (
-        <Card title={t("History")} flush note={project ? undefined : t("Name a project to see its deployment history.")}>
-          <Table
-            rows={project ? versions.data?.items ?? [] : []}
-            keyOf={(one) => one.job_id}
-            rowTestId={(one) => `version-${one.job_id}`}
-            testId="history"
-            loading={project.length > 0 && versions.isLoading}
-            empty={project
-              ? t("This project has not been deployed from the panel yet.")
-              : t("Name a project to see its deployment history.")}
-            columns={[
-              { key: "when", head: t("When"), cell: (one) => (
-                <span title={absoluteTime(one.created_at)}>{relativeTime(one.created_at)}</span>
-              ) },
-              { key: "by", head: t("By"), minor: true, tight: true, cell: (one) => one.created_by },
-              { key: "state", head: t("State"), cell: (one) => (
-                <Pill tone={one.applied ? "ok" : one.state === "failed" ? "error" : "unknown"}>
-                  {t(stateName(one.state))}
-                </Pill>
-              ) },
-              { key: "digest", head: t("Plan"), tight: true, cell: (one) => (
-                one.plan_digest
-                  ? <code title={one.plan_digest}>{one.plan_digest.slice(0, 12)}</code>
-                  : <span className="fl-faint">—</span>
-              ) },
-              { key: "load", actions: true, cell: (one) => (
-                // Rolling a change back is deploying an earlier version. It
-                // is loaded into the editor so that it goes through a plan:
-                // the host's state may have moved since then.
-                <Button
-                  kind="quiet"
-                  onClick={() => { setManifest(one.manifest); setPlan(null); }}
-                  testId={`load-${one.job_id}`}
-                >
-                  {t("Load into editor")}
-                </Button>
-              ) },
-            ]}
-          />
-        </Card>
-      ),
-      plan: (
-        <Card
-          title={t("Plan")}
-          flush
-          note={plan
-            ? t("Digest {digest} · deploying uses exactly this plan; if the manifest or the images change, the deployment is refused.", {
-                digest: plan.digest.slice(0, 16),
-              })
-            : undefined}
-        >
-          {!plan ? <Empty icon="compose">{t("No plan yet.")}</Empty> : (
-            <>
-              {(plan.warnings ?? []).map((warning) => (
-                <Banner key={warning} tone="warn">{warning}</Banner>
-              ))}
-              <Table
-                rows={plan.changes ?? []}
-                keyOf={(one) => `${one.kind}/${one.name}`}
-                testId="plan-changes"
-                empty={t("Nothing would change on this host.")}
-                columns={[
-                  { key: "kind", head: t("Object"), cell: (one) => one.kind },
-                  { key: "name", head: t("Name"), tight: true, cell: (one) => <code title={one.name}>{one.name}</code> },
-                  { key: "action", head: t("Change"), cell: (one) => (
-                    <Pill tone={changeTone(one.action)}>{t(one.action)}</Pill>
-                  ) },
-                ]}
-              />
             </>
-          )}
-        </Card>
-      ),
-      services: (
-        <Card
-          title={t("Services after deployment")}
-          flush
-          note={t("Each service runs the digest shown here; a tag that points at another digest by the time of deployment makes the plan stale.")}
+          }
         >
-          <Table
-            rows={plan?.services ?? []}
-            keyOf={(one) => one.name}
-            testId="plan-services"
-            empty={plan ? t("The plan names no service.") : t("No plan yet.")}
-            columns={[
-              { key: "name", head: t("Service"), tight: true, cell: (one) => <code title={one.name}>{one.name}</code> },
-              { key: "image", head: t("Image"), tight: true, cell: (one) => <code title={one.image}>{one.image}</code> },
-              // The digest is the identity of what runs; the tag is what the
-              // operator wrote. Both are here so a moved tag can be read off
-              // the plan rather than discovered by the refusal.
-              { key: "digest", head: t("Digest that will run"), tight: true, cell: (one) => (
-                one.image_digest
-                  ? (
-                    <span title={one.pinned_image}>
-                      <code>{`${one.image_digest.replace(/^sha256:/, "").slice(0, 16)}…`}</code>
-                      {one.digest_source && <Pill dot={false}>{t(digestSourceWords(one.digest_source))}</Pill>}
-                    </span>
-                  )
-                  : <Pill tone="unknown">{t("unresolved")}</Pill>
-              ) },
-              { key: "replicas", head: t("Replicas"), num: true, cell: (one) => one.replicas ?? 1 },
-            ]}
-          />
-        </Card>
-      ),
-      deploy: (
-        <Card
-          title={t("Deploy this plan")}
-          note={t("A deployment is kept in the trail with the reason it was given.")}
-        >
-          {!plan ? <Empty icon="compose">{t("Plan first; a deployment is of a plan, never of a manifest.")}</Empty> : (
-            <Stack>
+          <Fields>
+            <Field label={t("Project name")}>
+              <input
+                value={project}
+                onChange={(event) => setProject(event.target.value)}
+                placeholder="shop"
+                data-testid="project"
+              />
+            </Field>
+            <Field label={t("Manifest (docker-compose.yml)")} wide>
+              <textarea
+                rows={12}
+                value={manifest}
+                onChange={(event) => { setManifest(event.target.value); setPlan(null); }}
+                placeholder={"services:\n  web:\n    image: nginx@sha256:…"}
+                data-testid="manifest"
+              />
+            </Field>
+          </Fields>
+        </Form>
+      )}
+
+      {tab === "plan" && (
+        <>
+          <Grid>
+            <C span={8}>
+              <Card
+                title={t("Plan")}
+                flush
+                note={plan
+                  ? t("Digest {digest} · deploying uses exactly this plan; if the manifest or the images change, the deployment is refused.", {
+                      digest: plan.digest.slice(0, 16),
+                    })
+                  : undefined}
+              >
+                {!plan ? <Empty icon="compose">{t("No plan yet.")}</Empty> : (
+                  <>
+                    {(plan.warnings ?? []).map((warning) => (
+                      <Banner key={warning} tone="warn">{warning}</Banner>
+                    ))}
+                    <Table
+                      rows={plan.changes ?? []}
+                      keyOf={(one) => `${one.kind}/${one.name}`}
+                      testId="plan-changes"
+                      empty={t("Nothing would change on this host.")}
+                      columns={[
+                        { key: "kind", head: t("Object"), cell: (one) => one.kind },
+                        { key: "name", head: t("Name"), tight: true, cell: (one) => <code title={one.name}>{one.name}</code> },
+                        { key: "action", head: t("Change"), cell: (one) => (
+                          <Pill tone={changeTone(one.action)}>{t(one.action)}</Pill>
+                        ) },
+                      ]}
+                    />
+                  </>
+                )}
+              </Card>
+            </C>
+            <C span={4}>
+              <Card title={t("What the plan would change")} note={t("By kind of change.")}>
+                {!plan
+                  ? <Empty icon="compose">{t("No plan yet.")}</Empty>
+                  : changes.length === 0
+                    ? <Empty>{t("Nothing would change on this host.")}</Empty>
+                    : (
+                      <Bars items={changes.map(([action, count]) => ({
+                        label: t(action), value: count, tone: changeTone(action),
+                      }))} />
+                    )}
+              </Card>
+            </C>
+            <C span={12}>
+              <Card
+                title={t("Services after deployment")}
+                flush
+                note={t("Each service runs the digest shown here; a tag that points at another digest by the time of deployment makes the plan stale.")}
+              >
+                <Table
+                  rows={plan?.services ?? []}
+                  keyOf={(one) => one.name}
+                  testId="plan-services"
+                  empty={plan ? t("The plan names no service.") : t("No plan yet.")}
+                  columns={[
+                    { key: "name", head: t("Service"), tight: true, cell: (one) => <code title={one.name}>{one.name}</code> },
+                    { key: "image", head: t("Image"), tight: true, cell: (one) => <code title={one.image}>{one.image}</code> },
+                    // The digest is the identity of what runs; the tag is what the
+                    // operator wrote. Both are here so a moved tag can be read off
+                    // the plan rather than discovered by the refusal.
+                    { key: "digest", head: t("Digest that will run"), tight: true, cell: (one) => (
+                      one.image_digest
+                        ? (
+                          <span title={one.pinned_image}>
+                            <code>{`${one.image_digest.replace(/^sha256:/, "").slice(0, 16)}…`}</code>
+                            {one.digest_source && <Pill dot={false}>{t(digestSourceWords(one.digest_source))}</Pill>}
+                          </span>
+                        )
+                        : <Pill tone="unknown">{t("unresolved")}</Pill>
+                    ) },
+                    { key: "replicas", head: t("Replicas"), num: true, cell: (one) => one.replicas ?? 1 },
+                  ]}
+                />
+              </Card>
+            </C>
+          </Grid>
+
+          {/* The deployment is the decision this screen exists for, so it
+              stands on its own face under what it would do - and only
+              once there is a plan for it to bind. */}
+          {!plan ? (
+            <Note>{t("Plan first; a deployment is of a plan, never of a manifest.")}</Note>
+          ) : (
+            <Form
+              title={t("Deploy this plan")}
+              note={t("A deployment is kept in the trail with the reason it was given.")}
+              actions={
+                <>
+                  {(mayDeploy.allowed || mayDeploy.known) && (
+                    <Button
+                      kind="danger"
+                      disabled={!mayDeploy.allowed || deploy.isPending || !reasonReady}
+                      title={mayDeploy.allowed
+                        ? reasonReady ? undefined : t("The deployment is recorded with a reason of at least 8 characters.")
+                        : mayDeploy.reason || t("This action is not available.")}
+                      onClick={() => deploy.mutate({
+                        manifest, digest: plan.digest, imageDigests: planImageDigests(plan), reason,
+                      })}
+                      testId="deploy"
+                    >
+                      {deploy.isPending ? t("Requesting…") : t("Deploy this plan")}
+                    </Button>
+                  )}
+                  {!mayDeploy.allowed && !mayDeploy.pending && mayDeploy.known && (
+                    <Note>{mayDeploy.reason || t("This action is not available.")}</Note>
+                  )}
+                </>
+              }
+            >
               <Readout
                 label={t("The plan this consent binds")}
                 value={plan.digest}
@@ -426,44 +423,71 @@ export function Compose({ host }: { host: Host }) {
                   <input value={reason} onChange={(event) => setReason(event.target.value)} data-testid="reason" />
                 </Field>
               </Fields>
-              <Actions>
-                {(mayDeploy.allowed || mayDeploy.known) && (
-                  <Button
-                    kind="danger"
-                    disabled={!mayDeploy.allowed || deploy.isPending || !reasonReady}
-                    title={mayDeploy.allowed
-                      ? reasonReady ? undefined : t("The deployment is recorded with a reason of at least 8 characters.")
-                      : mayDeploy.reason || t("This action is not available.")}
-                    onClick={() => deploy.mutate({
-                      manifest, digest: plan.digest, imageDigests: planImageDigests(plan), reason,
-                    })}
-                    testId="deploy"
-                  >
-                    {deploy.isPending ? t("Requesting…") : t("Deploy this plan")}
-                  </Button>
-                )}
-              </Actions>
-              {!mayDeploy.allowed && !mayDeploy.pending && mayDeploy.known && (
-                <Note>{mayDeploy.reason || t("This action is not available.")}</Note>
-              )}
-            </Stack>
+            </Form>
           )}
-        </Card>
-      ),
-    }} />
+        </>
+      )}
+
+      {tab === "history" && (
+        <Grid>
+          <C span={12}>
+            <Card
+              title={t("Deployments")}
+              note={project
+                ? t("Every deployment of {project} from the panel.", { project })
+                : t("Name a project to see its deployment history.")}
+            >
+              <Band segments={outcomes} testId="deployments" />
+            </Card>
+          </C>
+          <C span={12}>
+            <Card
+              title={t("Every deployment, newest first")}
+              flush
+              note={project ? undefined : t("Name a project to see its deployment history.")}
+            >
+              <Table
+                rows={project ? versions.data?.items ?? [] : []}
+                keyOf={(one) => one.job_id}
+                rowTestId={(one) => `version-${one.job_id}`}
+                testId="history"
+                loading={project.length > 0 && versions.isLoading}
+                empty={project
+                  ? t("This project has not been deployed from the panel yet.")
+                  : t("Name a project to see its deployment history.")}
+                columns={[
+                  { key: "when", head: t("When"), cell: (one) => (
+                    <span title={absoluteTime(one.created_at)}>{relativeTime(one.created_at)}</span>
+                  ) },
+                  { key: "by", head: t("By"), minor: true, tight: true, cell: (one) => one.created_by },
+                  { key: "state", head: t("State"), cell: (one) => (
+                    <Pill tone={one.applied ? "ok" : one.state === "failed" ? "error" : "unknown"}>
+                      {t(stateName(one.state))}
+                    </Pill>
+                  ) },
+                  { key: "digest", head: t("Plan"), tight: true, cell: (one) => (
+                    one.plan_digest
+                      ? <code title={one.plan_digest}>{one.plan_digest.slice(0, 12)}</code>
+                      : <span className="fl-faint">—</span>
+                  ) },
+                  { key: "load", actions: true, cell: (one) => (
+                    // Rolling a change back is deploying an earlier version. It
+                    // is loaded into the editor so that it goes through a plan:
+                    // the host's state may have moved since then.
+                    <Button
+                      kind="quiet"
+                      onClick={() => { setManifest(one.manifest); setPlan(null); goTab("project"); }}
+                      testId={`load-${one.job_id}`}
+                    >
+                      {t("Load into editor")}
+                    </Button>
+                  ) },
+                ]}
+              />
+            </Card>
+          </C>
+        </Grid>
+      )}
+    </>
   );
 }
-
-/** The name this screen's arrangement is stored under. */
-export const HOST_COMPOSE_SCREEN = "next_host_compose";
-
-/** The containers this screen can draw, and the shape each ships with. */
-export const HOST_COMPOSE: BoardEntry[] = [
-  { key: "deployments", title: "Deployments", width: 8, height: 2 },
-  { key: "changes_by_kind", title: "What the plan would change", width: 4, height: 2 },
-  { key: "project", title: "Project", width: 7, height: 4 },
-  { key: "history", title: "History", width: 5, height: 4 },
-  { key: "plan", title: "Plan", width: 6, height: 3 },
-  { key: "services", title: "Services after deployment", width: 6, height: 3 },
-  { key: "deploy", title: "Deploy this plan", width: 12, height: 2 },
-];

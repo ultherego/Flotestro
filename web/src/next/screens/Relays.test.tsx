@@ -83,15 +83,15 @@ function Where() {
  * relay are the same component, so both routes lead to it and the
  * parameter is what decides which the reader gets.
  */
-function draw(at = "/next/relays") {
+function draw(at = "/relays") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[at]}>
         <ToastProvider>
           <Routes>
-            <Route path="/next/relays" element={<Relays />} />
-            <Route path="/next/relays/:id" element={<Relays />} />
+            <Route path="/relays" element={<Relays />} />
+            <Route path="/relays/:id" element={<Relays />} />
           </Routes>
           <Where />
         </ToastProvider>
@@ -169,7 +169,10 @@ describe("the relays of the sites", () => {
     expect(screen.getByTestId("relay-relay-warsaw")).toHaveClass("fl-row-marked");
     expect(screen.getByTestId("relay-relay-krakow")).not.toHaveClass("fl-row-marked");
 
-    fireEvent.click(screen.getByTestId("pick-relay-krakow"));
+    // The relay is read on its own sub-tab since 17.10, so the mark moves
+    // with the address rather than with a card under the table.
+    cleanup();
+    draw("/relays/r2?tab=relays");
     await waitFor(() => expect(screen.getByTestId("relay-relay-krakow")).toHaveClass("fl-row-marked"));
     expect(screen.getByTestId("relay-relay-warsaw")).not.toHaveClass("fl-row-marked");
   });
@@ -216,7 +219,7 @@ describe("the relays of the sites", () => {
     // list the shorter path would have answered with.
     await waitFor(() => expect(screen.getByTestId("attested-agent-arch")).toBeInTheDocument());
     expect(within(screen.getByTestId("attested-agent-arch")).getByRole("link", { name: "agent-arch" }))
-      .toHaveAttribute("href", "/next/hosts/h1");
+      .toHaveAttribute("href", "/hosts/h1");
   });
 
   it("revokes a relay only with a reason, and sends the reason that was typed", async () => {
@@ -225,7 +228,8 @@ describe("the relays of the sites", () => {
       "/api/v1/relays/r1": { relay: relay({}), hosts: [] },
       "/api/v1/whoami": { subject: "tszymanski", kind: "user", roles: [], bindings: [], permissions: ["relay.manage"] },
     });
-    draw();
+    // The relay itself is the second sub-tab; the revocation lives with it.
+    draw("/relays?tab=relay");
     await waitFor(() => expect(screen.getByTestId("revoke")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("revoke"));
     const confirm = screen.getByTestId("revoke-confirm");
@@ -270,7 +274,7 @@ describe("one relay from the address", () => {
         points: [], latest: null, alerts: [], raw_retention_hours: 48, rollup_retention_days: 30,
       },
     });
-    draw("/next/relays/r2");
+    draw("/relays/r2");
     await waitFor(() => expect(screen.getByTestId("attested-agent-arch")).toBeInTheDocument());
     // The card is the relay the address named and not the first of the list.
     expect(screen.getByText("relay-krakow")).toBeInTheDocument();
@@ -283,11 +287,11 @@ describe("one relay from the address", () => {
       "/api/v1/relays": { items: [relay({})], count: 1 },
       "/api/v1/relays/nope": new ApiError(404, "not_found", "no such relay"),
     });
-    draw("/next/relays/nope");
+    draw("/relays/nope");
     await waitFor(() => expect(screen.getByText(/No relay with the identifier nope/)).toBeInTheDocument());
     // No card of a relay that is not there, and a way back to the list.
     expect(screen.queryByTestId("relay-relay-warsaw")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "All relays" })).toHaveAttribute("href", "/next/relays");
+    expect(screen.getByRole("link", { name: "All relays" })).toHaveAttribute("href", "/relays");
   });
 
   it("puts the relay picked from a row in the address, without reloading the panel", async () => {
@@ -298,12 +302,15 @@ describe("one relay from the address", () => {
     });
     draw();
     await waitFor(() => expect(screen.getByTestId("pick-relay-krakow")).toBeInTheDocument());
-    expect(screen.getByTestId("where")).toHaveTextContent("/next/relays");
+    expect(screen.getByTestId("where")).toHaveTextContent("/relays");
     fireEvent.click(screen.getByTestId("pick-relay-krakow"));
     // The address is the one thing that changed: the list is still drawn
     // under it, so nothing was reloaded.
-    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/next/relays/r2"));
-    expect(screen.getByTestId("relay-relay-warsaw")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/relays/r2"));
+    // And the panel is the same one: the row opened the relay's own
+    // sub-tab, and the list is still there to go back to.
+    fireEvent.click(screen.getByRole("tab", { name: "Relays" }));
+    await waitFor(() => expect(screen.getByTestId("relay-relay-warsaw")).toBeInTheDocument());
   });
 });
 

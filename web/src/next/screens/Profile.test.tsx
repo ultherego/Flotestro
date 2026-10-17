@@ -71,7 +71,14 @@ const token = (over: Record<string, unknown> = {}) => ({
 /** Every path this render asked for or wrote to, reads and writes alike. */
 const everyPath = () => [...asked, ...sent.map((one) => one.path)];
 
-function draw(at = "/next/profile") {
+/**
+ * The screen, opened at an address.
+ *
+ * It was eight containers on one board until 17.10 and is five sub-tabs
+ * now, with the open one in `?tab=`, so a test that reads the password,
+ * the permissions or the tokens says which sub-tab it is on.
+ */
+function draw(at = "/profile") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
@@ -115,7 +122,7 @@ describe("who the panel takes you for", () => {
     expect(screen.getByText("service")).toBeInTheDocument();
     expect(screen.getByText("p1")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Manage every identity/ }))
-      .toHaveAttribute("href", "/next/access");
+      .toHaveAttribute("href", "/access");
   });
 
   it("says a binding that narrows nothing is any, and one that narrows to nothing is nothing", async () => {
@@ -142,7 +149,7 @@ describe("who the panel takes you for", () => {
       "/api/v1/me/sessions": { items: [], count: 0 },
       "/api/v1/me/tokens": { items: [], count: 0 },
     });
-    draw();
+    draw("/profile?tab=permissions");
     await waitFor(() => expect(screen.getByText("Jobs")).toBeInTheDocument());
     expect(screen.getByText("Audit trail")).toBeInTheDocument();
     expect(screen.getByTitle("job.create")).toBeInTheDocument();
@@ -160,7 +167,7 @@ describe("your own password", () => {
 
   it("holds the button shut until the one in force and a new one that is typed twice are there", async () => {
     ready();
-    draw();
+    draw("/profile?tab=password");
     await waitFor(() => expect(screen.getByTestId("change-password")).toBeInTheDocument());
     expect(screen.getByTestId("change-password")).toBeDisabled();
 
@@ -178,7 +185,7 @@ describe("your own password", () => {
 
   it("posts both passwords in the body of the one request that changes them", async () => {
     ready();
-    draw();
+    draw("/profile?tab=password");
     await waitFor(() => expect(screen.getByTestId("change-password")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("current-password"), { target: { value: "the-old-one-9" } });
     fireEvent.change(screen.getByTestId("new-password"), { target: { value: "a-longer-new-one-7" } });
@@ -197,7 +204,7 @@ describe("your own password", () => {
 
   it("leaves neither password on the screen, in a path or in the console once it is sent", async () => {
     ready();
-    draw();
+    draw("/profile?tab=password");
     await waitFor(() => expect(screen.getByTestId("change-password")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("current-password"), { target: { value: "the-old-one-9" } });
     fireEvent.change(screen.getByTestId("new-password"), { target: { value: "a-longer-new-one-7" } });
@@ -220,7 +227,7 @@ describe("your own password", () => {
     const api = await import("../../lib/api");
     const post = vi.spyOn(api.api, "post").mockRejectedValueOnce(
       new api.ApiError(400, "weak_password", "the password is on every list there is"));
-    draw();
+    draw("/profile?tab=password");
     await waitFor(() => expect(screen.getByTestId("change-password")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("current-password"), { target: { value: "the-old-one-9" } });
     fireEvent.change(screen.getByTestId("new-password"), { target: { value: "password1234" } });
@@ -233,7 +240,7 @@ describe("your own password", () => {
 
   it("says so when the sign-in sent the person here because somebody else chose the password", async () => {
     ready();
-    draw("/next/profile?change_password=1");
+    draw("/profile?change_password=1");
     await waitFor(() => expect(screen.getByTestId("must-change-password")).toBeInTheDocument());
     // The card itself says it too, so the person who scrolls past the
     // banner still reads why they are being asked.
@@ -243,7 +250,7 @@ describe("your own password", () => {
 
   it("does not say the password must be replaced on an ordinary visit", async () => {
     ready();
-    draw();
+    draw("/profile?tab=password");
     await waitFor(() => expect(screen.getByTestId("change-password")).toBeInTheDocument());
     expect(screen.queryByTestId("must-change-password")).not.toBeInTheDocument();
   });
@@ -261,7 +268,7 @@ describe("the tokens that act for you", () => {
 
   it("lists a token by its identifier and what it is for, and never by a value", async () => {
     holder();
-    draw();
+    draw("/profile?tab=sessions");
     await waitFor(() => expect(screen.getByTestId(`token-${token().id}`)).toBeInTheDocument());
     const row = screen.getByTestId(`token-${token().id}`);
     expect(within(row).getByTitle(token().id)).toHaveTextContent("4b0c2f18-3a1");
@@ -270,7 +277,7 @@ describe("the tokens that act for you", () => {
 
   it("says a token nobody has used yet has never been used, rather than drawing a nought", async () => {
     holder({ "/api/v1/me/tokens": { items: [token({ last_used_at: undefined, expires_at: undefined })], count: 1 } });
-    draw();
+    draw("/profile?tab=sessions");
     await waitFor(() => expect(screen.getByTestId(`token-${token().id}`)).toBeInTheDocument());
     const row = screen.getByTestId(`token-${token().id}`);
     expect(within(row).getByText("never used")).toBeInTheDocument();
@@ -280,7 +287,7 @@ describe("the tokens that act for you", () => {
   it("asks for a reason before it mints one, and sends the description and the lifetime with it", async () => {
     holder();
     minted = { subject: "tszymanski", token: "flt_9XQ2vmS1aZ", token_expires_at: "2026-11-15T08:00:00Z" };
-    draw();
+    draw("/profile?tab=sessions");
     await waitFor(() => expect(screen.getByTestId("issue-token")).toBeEnabled());
     fireEvent.click(screen.getByTestId("issue-token"));
     expect(sent).toHaveLength(0);
@@ -309,7 +316,7 @@ describe("the tokens that act for you", () => {
 
   it("refuses a lifetime longer than the year the server gives", async () => {
     holder();
-    draw();
+    draw("/profile?tab=sessions");
     await waitFor(() => expect(screen.getByTestId("issue-token")).toBeEnabled());
     fireEvent.click(screen.getByTestId("issue-token"));
     fireEvent.change(screen.getByTestId("token-reason"), { target: { value: "the inventory job needs one" } });
@@ -322,7 +329,7 @@ describe("the tokens that act for you", () => {
   it("shows the value once, warns that it is the only showing, and lets it go", async () => {
     holder();
     minted = { subject: "tszymanski", token: "flt_9XQ2vmS1aZ", token_expires_at: "2026-11-15T08:00:00Z" };
-    draw();
+    draw("/profile?tab=sessions");
     await waitFor(() => expect(screen.getByTestId("issue-token")).toBeEnabled());
     fireEvent.click(screen.getByTestId("issue-token"));
     fireEvent.change(screen.getByTestId("token-reason"), { target: { value: "the inventory job needs one" } });
@@ -343,7 +350,7 @@ describe("the tokens that act for you", () => {
   it("never puts the value of a token in a path or in the console", async () => {
     holder();
     minted = { subject: "tszymanski", token: "flt_9XQ2vmS1aZ" };
-    draw();
+    draw("/profile?tab=sessions");
     await waitFor(() => expect(screen.getByTestId("issue-token")).toBeEnabled());
     fireEvent.click(screen.getByTestId("issue-token"));
     fireEvent.change(screen.getByTestId("token-reason"), { target: { value: "the inventory job needs one" } });
@@ -358,7 +365,7 @@ describe("the tokens that act for you", () => {
 
   it("asks before it ends one, and ends it by its identifier with the reason in the trail", async () => {
     holder();
-    draw();
+    draw("/profile?tab=sessions");
     await waitFor(() => expect(screen.getByTestId(`revoke-token-${token().id}`)).toBeEnabled());
     fireEvent.click(screen.getByTestId(`revoke-token-${token().id}`));
     expect(sent).toHaveLength(0);
@@ -377,7 +384,7 @@ describe("the tokens that act for you", () => {
     const api = await import("../../lib/api");
     const del = vi.spyOn(api.api, "del").mockRejectedValueOnce(
       new api.ApiError(404, "token_not_found", "no such live token of this identity"));
-    draw();
+    draw("/profile?tab=sessions");
     await waitFor(() => expect(screen.getByTestId(`revoke-token-${token().id}`)).toBeEnabled());
     fireEvent.click(screen.getByTestId(`revoke-token-${token().id}`));
     fireEvent.change(screen.getByTestId("token-reason"), { target: { value: "the pipeline it ran was retired" } });
@@ -393,7 +400,7 @@ describe("the tokens that act for you", () => {
       "/api/v1/me/sessions": { items: [], count: 0 },
       "/api/v1/me/tokens": { items: [token()], count: 1 },
     });
-    draw();
+    draw("/profile?tab=sessions");
     await waitFor(() => expect(screen.getByTestId(`token-${token().id}`)).toBeInTheDocument());
     expect(screen.getByTestId("issue-token")).toBeDisabled();
     expect(screen.getByTestId(`revoke-token-${token().id}`)).toBeDisabled();
@@ -407,7 +414,7 @@ describe("the tokens that act for you", () => {
       "/api/v1/me/sessions": { items: [], count: 0 },
       "/api/v1/me/tokens": { items: [], count: 0 },
     });
-    draw();
+    draw("/profile?tab=sessions");
     await waitFor(() => expect(screen.getByText(/No live token/)).toBeInTheDocument());
   });
 });
@@ -431,7 +438,7 @@ describe("the sessions this identity holds", () => {
         count: 1,
       },
     });
-    draw();
+    draw("/profile?tab=sessions");
     await waitFor(() => expect(screen.getByText("10.10.10.1")).toBeInTheDocument());
     expect(screen.getByText("mfa")).toBeInTheDocument();
     expect(screen.getByText("this one")).toBeInTheDocument();

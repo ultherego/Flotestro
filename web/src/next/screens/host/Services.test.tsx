@@ -79,7 +79,12 @@ const unit = (over: Record<string, unknown> = {}) => ({
   unit_file_state: "enabled", ...over,
 });
 
-function draw(one: Host = host(), at = "/next/hosts/h1/services") {
+/**
+ * The screen is two sub-tabs since 17.10 - the readings and the list of
+ * units - and the address names which one is open, so a test that reads
+ * the list asks for `?tab=units` the way a reader following a link would.
+ */
+function draw(one: Host = host(), at = "/hosts/h1/services") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
@@ -136,7 +141,7 @@ describe("the units of one host", () => {
       "/api/v1/hosts/h1/inventory/services": fragment("services", { failed_units: [], failed_units_known: true }),
       "/api/v1/hosts/h1/inventory/services.full": fragment("services.full", { units: [unit()] }),
     });
-    draw();
+    draw(host(), "/hosts/h1/services?tab=units");
     await waitFor(() => expect(screen.getByTestId("mask-nginx.service")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("mask-nginx.service"));
     // Nothing is sent by opening the question.
@@ -223,7 +228,7 @@ describe("the units of one host", () => {
         units: [unit(), unit({ name: "sshd.service" })],
       }),
     });
-    draw(host(), "/next/hosts/h1/services?unit=sshd.service");
+    draw(host(), "/hosts/h1/services?tab=units&unit=sshd.service");
     // The address narrows the list to that unit and asks the host for its
     // detail; the order that goes out is the detail read.
     await waitFor(() => expect(sent).toHaveLength(1));
@@ -265,7 +270,7 @@ describe("what the unit list kept from the panel being replaced", () => {
 
   it("opens a unit's detail under its own row, not in a card somewhere else", async () => {
     listed();
-    draw();
+    draw(host(), "/hosts/h1/services?tab=units");
     await waitFor(() => expect(screen.getByTestId("unit-nginx.service")).toBeInTheDocument());
     fireEvent.click(within(screen.getByTestId("unit-nginx.service")).getByRole("button", { name: "nginx.service" }));
     await waitFor(() =>
@@ -280,7 +285,7 @@ describe("what the unit list kept from the panel being replaced", () => {
 
   it("folds a column away and keeps the choice in this browser", async () => {
     listed();
-    draw();
+    draw(host(), "/hosts/h1/services?tab=units");
     await waitFor(() => expect(screen.getByTestId("units")).toBeInTheDocument());
     expect(within(screen.getByTestId("units")).getByText("Sub-state")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("units-columns"));

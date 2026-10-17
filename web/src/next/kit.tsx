@@ -4,13 +4,14 @@ import {
   type PointerEvent as ReactPointerEvent, type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Icon, type IconName } from "../components/icons";
 import { exportAddress, exportFileName } from "../components/ExportButton";
 import { fetchWithCredentials } from "../lib/api";
 import { isStringList, useStoredState } from "../lib/storage";
 import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
+import type { Tone } from "../lib/tone";
 
 /**
  * The pieces the new panel is drawn from, and the only ones it may use.
@@ -27,7 +28,9 @@ import { useT } from "../i18n";
  * last screen is written.
  */
 
-export type Tone = "ok" | "warn" | "error" | "info" | "unknown" | "neutral" | "accent";
+/* The tone vocabulary is shared with the helpers that work a state out,
+   so it is declared once, in lib/tone, and re-exported here. */
+export type { Tone };
 export type Span = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
 
 const join = (...parts: (string | false | undefined | null)[]) => parts.filter(Boolean).join(" ");
@@ -219,6 +222,15 @@ export function C({ span = 12, children }: { span?: Span; children: ReactNode })
   return <div className={`fl-c${span}`}>{children}</div>;
 }
 
+/**
+ * A reading that stands above a table inside a card with no padding of its
+ * own: the card is flush so the table can run edge to edge, and what is
+ * drawn over it needs the room the card's body would have given it.
+ */
+export function Lead({ children }: { children: ReactNode }) {
+  return <div className="fl-lead">{children}</div>;
+}
+
 export function Stack({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   return <div className={wide ? "fl-stack-l" : "fl-stack"}>{children}</div>;
 }
@@ -275,7 +287,26 @@ export function Card({ title, note, tools, bar, children, foot, flush = false, s
      and the first rows showed through the gap. */
   const kids = Children.toArray(children);
   const steering = kids.filter((one) => isValidElement(one) && one.type === Toolbar);
-  const rest = kids.filter((one) => !(isValidElement(one) && one.type === Toolbar));
+  /* And the card's last word, where that is an action, is lifted the
+     other way - to its foot. Left in the body, a button under a list of
+     facts floats two lines below the last of them with the rest of the
+     card empty under it, which is how the owner found "Rename host" on
+     the host overview. The foot is where the kit already keeps what a
+     card says last, and a button there stays put while the facts above
+     it scroll.
+
+     Only the trailing run is taken. An action in the middle of a card
+     belongs to what it stands under - the save of a form, the cancel of
+     an editor - and moving that to the foot would part it from the
+     field it answers for. */
+  let end = kids.length;
+  while (end > 0) {
+    const last = kids[end - 1];
+    if (!isValidElement(last) || last.type !== Actions) break;
+    end -= 1;
+  }
+  const acting = kids.slice(end);
+  const rest = kids.slice(0, end).filter((one) => !(isValidElement(one) && one.type === Toolbar));
   const steer = bar ?? (steering.length > 0 ? steering : undefined);
   const body = bar ? children : rest;
 
@@ -292,6 +323,7 @@ export function Card({ title, note, tools, bar, children, foot, flush = false, s
       {body !== undefined && body !== null && body !== false && (
         <div className="fl-card-body">{body}</div>
       )}
+      {!bar && acting.length > 0 && <div className="fl-card-acts">{acting}</div>}
       {foot && <div className="fl-card-foot">{foot}</div>}
     </section>
   );
@@ -406,6 +438,34 @@ export function Tag({ children, to, title }: { children: ReactNode; to?: string;
     : <span className="fl-tag" title={title}>{children}</span>;
 }
 
+/**
+ * A strip of facts under a heading: each a small label over its value,
+ * side by side and wrapping, instead of a row of boxed words.
+ */
+export function Strip({ children }: { children: ReactNode }) {
+  return <div className="fl-strip">{children}</div>;
+}
+
+export function StripItem({ label, children, copy, copyTitle, copyTestId, title }: {
+  label: ReactNode;
+  children: ReactNode;
+  /** What the little copy button beside the value takes. */
+  copy?: string;
+  copyTitle?: string;
+  copyTestId?: string;
+  title?: string;
+}) {
+  return (
+    <div className="fl-stripitem" title={title}>
+      <span className="fl-stripitem-label">{label}</span>
+      <span className="fl-stripitem-value">
+        {children}
+        {copy !== undefined && <Copy compact value={copy} title={copyTitle} testId={copyTestId} />}
+      </span>
+    </div>
+  );
+}
+
 export function Tags({ children }: { children: ReactNode }) {
   return <div className="fl-tags">{children}</div>;
 }
@@ -453,6 +513,97 @@ export function Empty({ children, action, icon = "check", testId }: {
 /** What went wrong, in the reader's words rather than the server's. */
 export function Problem({ children }: { children: ReactNode }) {
   return <div className="fl-problem" role="alert">{children}</div>;
+}
+
+/* ------------------------------------------------- the sub-tabs of a screen */
+
+/**
+ * Which sub-tab is open, kept in the address.
+ *
+ * A screen with sub-tabs has to be linkable into one of them: a colleague
+ * is sent to the firewall rules, not to the firewall. The first name is
+ * the one a bare address lands on, and a name nobody serves lands there
+ * too rather than drawing nothing.
+ */
+export function useTab<T extends string>(names: readonly T[], param = "tab"): [T, (next: T) => void] {
+  const [address, setAddress] = useSearchParams();
+  const asked = address.get(param) ?? "";
+  const open = (names as readonly string[]).includes(asked) ? asked as T : names[0];
+  const go = (next: T) => {
+    const after = new URLSearchParams(address);
+    if (next === names[0]) after.delete(param); else after.set(param, next);
+    // Another area has other tabs: the inner choice does not carry over.
+    if (param !== "tab") after.delete("tab");
+    setAddress(after, { replace: true });
+  };
+  return [open, go];
+}
+
+/* ------------------------------------------------------------ the form */
+
+/**
+ * A thing somebody fills in and submits.
+ *
+ * It is **not** a card, and that is the whole point. A card is for what is
+ * read; a form is for what is done, and the panel spent a month drawing
+ * forms as cards on a board - the owner's words were that pressing a button
+ * opened a form inside a container with somebody else's title on it, and
+ * that the reader then has no idea what is going on.
+ *
+ * So a form carries its own name, stands on a face of its own, and is as
+ * tall as what it holds. It never goes into a `BoardEntry`; there is a test
+ * that fails the build if one does.
+ */
+export function Form({ title, note, children, actions, tools, onSubmit, testId }: {
+  title: ReactNode;
+  /** One line on what this decides. Not a second copy of the title. */
+  note?: ReactNode;
+  children: ReactNode;
+  /** The buttons that commit it, at the foot where a form's buttons live. */
+  actions?: ReactNode;
+  /** A control that belongs to the whole form - a search over its choices. */
+  tools?: ReactNode;
+  onSubmit?: () => void;
+  testId?: string;
+}) {
+  return (
+    <form
+      className="fl-form"
+      data-testid={testId}
+      onSubmit={(event) => { event.preventDefault(); onSubmit?.(); }}
+    >
+      <div className="fl-form-head">
+        <div className="fl-form-naming">
+          <h3 className="fl-form-title">{title}</h3>
+          {note && <p className="fl-form-note">{note}</p>}
+        </div>
+        {tools && <div className="fl-form-tools">{tools}</div>}
+      </div>
+      <div className="fl-form-body">{children}</div>
+      {actions && <div className="fl-form-foot">{actions}</div>}
+    </form>
+  );
+}
+
+/**
+ * A named block inside a sub-tab that is neither a card nor a form - a
+ * table with a heading over it, a group of readings that needs a name.
+ */
+export function Section({ title, note, children, testId }: {
+  title: ReactNode;
+  note?: ReactNode;
+  children: ReactNode;
+  testId?: string;
+}) {
+  return (
+    <section className="fl-section" data-testid={testId}>
+      <div className="fl-form-head">
+        <h3 className="fl-form-title">{title}</h3>
+        {note && <p className="fl-form-note">{note}</p>}
+      </div>
+      {children}
+    </section>
+  );
 }
 
 /* --------------------------------------------------------------- table */
@@ -734,21 +885,55 @@ export function Meter({ share, text, tone }: { share: number; text: ReactNode; t
  * sat on the colour - and it is the reason this is a component rather than
  * a layout each screen arranges for itself.
  */
+/**
+ * A reading that follows the pointer over a drawing.
+ *
+ * Every chart answers "what is this one?" the same way: a small card at
+ * the pointer with the name and the figure. `bind(text)` goes on whatever
+ * is pointed at, `node` is drawn once beside it.
+ */
+function useTip() {
+  const [at, setAt] = useState<{ x: number; y: number; text: ReactNode } | null>(null);
+  const bind = (text: ReactNode) => ({
+    onPointerMove: (event: { clientX: number; clientY: number }) => setAt({ x: event.clientX, y: event.clientY, text }),
+    onPointerLeave: () => setAt(null),
+  });
+  const node = at && (
+    <div
+      className="fl-tip"
+      role="tooltip"
+      style={{ left: Math.min(at.x + 14, (typeof window === "undefined" ? 9999 : window.innerWidth) - 240), top: at.y + 16 }}
+    >
+      {at.text}
+    </div>
+  );
+  return { bind, node };
+}
+
 export function Bars({ items }: {
   /** A value nobody took is undefined: no bar at all, and a dash for it. */
   items: { label: ReactNode; value?: number; tone?: Tone | string }[];
 }) {
   const counted = items.map((item) => item.value).filter((one): one is number => one !== undefined);
   const top = Math.max(1, ...counted);
+  const sum = counted.reduce((into, one) => into + one, 0);
+  const { bind, node } = useTip();
   return (
     <dl className="fl-bars">
       {items.map((item, index) => (
-        <div className={join("fl-bars-row", item.value === undefined && toneClass("unknown"))} key={index}>
+        <div
+          className={join("fl-bars-row", item.value === undefined && toneClass("unknown"))}
+          key={index}
+          {...(item.value === undefined ? {} : bind(
+            <><b>{item.label}</b> {item.value}{sum > 0 ? <span className="fl-faint"> · {share100(item.value / sum)}</span> : null}</>,
+          ))}
+        >
           <dt>{item.label}</dt>
           <dd>{item.value === undefined ? <span className="fl-bar-track" /> : <Bar share={item.value / top} tone={item.tone ?? "accent"} />}</dd>
           <dd className="fl-bars-count">{item.value === undefined ? "—" : item.value}</dd>
         </div>
       ))}
+      {node}
     </dl>
   );
 }
@@ -768,6 +953,7 @@ export function Band({ segments, testId }: { segments: Segment[]; testId?: strin
   const zero = segments.filter((one) => one.value === 0);
   const unknown = segments.filter((one) => one.value === undefined);
   const total = counted.reduce((sum, one) => sum + (one.value ?? 0), 0);
+  const { bind, node } = useTip();
   return (
     <div data-testid={testId}>
       {counted.length > 0 && (
@@ -782,8 +968,8 @@ export function Band({ segments, testId }: { segments: Segment[]; testId?: strin
             const className = join("fl-band-seg", toneClass(one.tone));
             const style = { "--fl-share": (one.value ?? 0) / total } as CSSProperties;
             return one.to
-              ? <Link key={one.label} role="listitem" className={className} style={style} to={one.to} title={one.label}>{body}</Link>
-              : <div key={one.label} role="listitem" className={className} style={style} title={one.label}>{body}</div>;
+              ? <Link key={one.label} role="listitem" className={className} style={style} to={one.to} aria-label={one.label} {...bind(<><b>{one.label}</b> {one.value} <span className="fl-faint">· {share100((one.value ?? 0) / total)}</span></>)}>{body}</Link>
+              : <div key={one.label} role="listitem" className={className} style={style} aria-label={one.label} {...bind(<><b>{one.label}</b> {one.value} <span className="fl-faint">· {share100((one.value ?? 0) / total)}</span></>)}>{body}</div>;
           })}
         </div>
       )}
@@ -799,6 +985,7 @@ export function Band({ segments, testId }: { segments: Segment[]; testId?: strin
           ))}
         </div>
       )}
+      {node}
     </div>
   );
 }
@@ -820,11 +1007,24 @@ export function Fact({ label, children, mono = false }: {
   /** A serial, a uuid, a boot id, a path: read as one word, not as prose. */
   mono?: boolean;
 }) {
-  const unknown = children === null || children === undefined || children === "";
+  /* The kit's own dash counts as unknown however it arrived: a screen
+     that wrote the dash by hand still meant "nobody reported this", and
+     a dash set in the face of a serial number reads as a value. */
+  const unknown = children === null || children === undefined || children === "" || children === "—";
+  /* A value read as one word is never cut in half. Broken across two
+     lines a machine id reads as two things - the owner saw
+     "1c0cc8cf0b1a4171a51dbc7acba" over "3c6ef" and asked which of them
+     it was - so such a fact takes two columns of the block and, where
+     even that is too narrow, ends in an ellipsis with the whole of it
+     on the value itself. */
+  const whole = Boolean(mono) && !unknown;
   return (
-    <div className="fl-fact">
+    <div className={join("fl-fact", whole && "fl-whole")}>
       <dt>{label}</dt>
-      <dd className={join(mono && !unknown && "fl-mono", unknown && "fl-faint")}>
+      <dd
+        className={join(whole && "fl-mono", unknown && "fl-faint")}
+        title={whole && typeof children === "string" ? children : undefined}
+      >
         {unknown ? "—" : children}
       </dd>
     </div>
@@ -1166,6 +1366,7 @@ export function Chart({ labels, series, everyLabel = 3, height = 160, shape = "b
  */
 export function Spark({ values, tone }: { values: number[]; tone?: Tone }) {
   const mine = useId().replace(/:/g, "");
+  const { bind, node } = useTip();
   if (values.length < 2) return null;
   const W = 120;
   const H = 32;
@@ -1175,9 +1376,13 @@ export function Spark({ values, tone }: { values: number[]; tone?: Tone }) {
   const at = (value: number, i: number) =>
     `${(i / (values.length - 1)) * W},${H - ((value - low) / span) * (H - 3) - 1.5}`;
   const line = values.map(at).join(" ");
+  const reading = (
+    <>last <b>{values[values.length - 1]}</b> <span className="fl-faint">· low {Math.min(...values)} · high {Math.max(...values)}</span></>
+  );
   return (
+    <>
     <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className={toneClass(tone)}
-         style={{ color: "var(--tone, var(--accent))" }} aria-hidden="true">
+         style={{ color: "var(--tone, var(--accent))" }} aria-hidden="true" {...bind(reading)}>
       <defs>
         <linearGradient id={mine} x1="0" x2="0" y1="0" y2="1">
           <stop offset="0%" stopColor="currentColor" stopOpacity="0.3" />
@@ -1187,6 +1392,8 @@ export function Spark({ values, tone }: { values: number[]; tone?: Tone }) {
       <polygon className="fl-chart-area" points={`0,${H} ${line} ${W},${H}`} fill={`url(#${mine})`} />
       <polyline className="fl-chart-line" points={line} vectorEffect="non-scaling-stroke" />
     </svg>
+    {node}
+    </>
   );
 }
 
@@ -1227,9 +1434,10 @@ export function Ring({ share, label, tone = "accent", legend }: {
   const radius = (size - stroke) / 2;
   const round = 2 * Math.PI * radius;
   const filled = known ? Math.min(1, Math.max(0, share)) : 0;
+  const { bind, node } = useTip();
   return (
     <div className="fl-ring">
-      <div className={join("fl-ring-plot", toneClass(tone))}>
+      <div className={join("fl-ring-plot", toneClass(tone))} {...bind(<><b>{label}</b> {known ? share100(filled) : "—"}</>)}>
         <svg viewBox={`0 0 ${size} ${size}`} role="img" aria-hidden="true">
           <circle className="fl-ring-track" cx={size / 2} cy={size / 2} r={radius} strokeWidth={stroke} />
           {known && (
@@ -1247,6 +1455,7 @@ export function Ring({ share, label, tone = "accent", legend }: {
           <span className="fl-ring-value">{known ? share100(filled) : "—"}</span>
           <span className="fl-ring-label">{label}</span>
         </div>
+        {node}
       </div>
       {legend && legend.length > 0 && (
         <dl className="fl-ring-legend">
@@ -1466,6 +1675,7 @@ export function Arcs({ items, label }: {
   const stroke = 11;
   const gap = 5;
   const shown = items.slice(0, 6);
+  const { bind, node } = useTip();
   return (
     <div className="fl-arcs">
       <div className="fl-arcs-plot">
@@ -1476,7 +1686,7 @@ export function Arcs({ items, label }: {
             const round = 2 * Math.PI * radius;
             const filled = Math.min(1, Math.max(0, one.share));
             return (
-              <g key={index} className={toneClass(one.tone ?? "accent")}>
+              <g key={index} className={join("fl-arcs-one", toneClass(one.tone ?? "accent"))} {...bind(<><b>{one.label}</b> {share100(filled)}</>)}>
                 <circle className="fl-arcs-track" cx={size / 2} cy={size / 2} r={radius} strokeWidth={stroke} />
                 <circle
                   className="fl-arcs-arc"
@@ -1501,6 +1711,7 @@ export function Arcs({ items, label }: {
           </div>
         ))}
       </dl>
+      {node}
     </div>
   );
 }
@@ -1634,6 +1845,38 @@ export function FeedRow({ icon, tone, what, who, when, to }: {
   return to ? <Link to={to} className="fl-feed-row">{body}</Link> : <div className="fl-feed-row">{body}</div>;
 }
 
+/* --------------------------------------------------------- the reasons */
+
+/**
+ * What is not here, each with the words of whatever said so.
+ *
+ * A count of what is missing tells a reader there is something to do and
+ * nothing about what: "six unavailable" is a number, "this host has no
+ * Docker socket" is an instruction. The sentence is the host's own, never
+ * composed in the browser, and a thing that gave no reason says that
+ * rather than borrowing its neighbour's.
+ */
+export function Reasons({ items, testId }: {
+  items: { name: ReactNode; reason?: string; to?: string }[];
+  testId?: string;
+}) {
+  const t = useT();
+  return (
+    <div className="fl-reasons" data-testid={testId}>
+      {items.map((one, index) => (
+        <div className="fl-reason" key={index}>
+          <span className="fl-reason-name">
+            {one.to ? <Link to={one.to}>{one.name}</Link> : one.name}
+          </span>
+          <span className={join("fl-reason-why", !one.reason && "fl-faint")}>
+            {one.reason || t("it gave no reason")}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ----------------------------------------------------------- the needs */
 
 /**
@@ -1660,11 +1903,18 @@ export function Needs({ items }: {
       {items.map((one, index) => {
         const unknown = one.value === undefined || one.value === null;
         const shown = typeof one.value === "boolean" ? (one.value ? t("yes") : t("no")) : one.value;
+        /* The count stands next to the label it answers, and the counts
+           line up in a column of their own. Spread to the two edges of a
+           wide row - which is what a flex row with a growing label did -
+           the pair reads as two lists: four hundred pixels of nothing
+           between "Updates waiting" and the 18 that is its answer. The
+           word for a count nobody could take comes after the dash, so
+           the dash keeps the column. */
         const body = (
           <>
             <span className="fl-needs-label">{one.label}</span>
-            {unknown && <span className="fl-faint fl-small">{t("not counted")}</span>}
             <span className="fl-needs-count">{unknown ? "—" : shown}</span>
+            {unknown && <span className="fl-needs-why">{t("not counted")}</span>}
           </>
         );
         const className = join(
@@ -1732,9 +1982,11 @@ export function Pie({ slices, total, label, hole = 0.62, testId }: {
   const width = radius - inner;
   const round = 2 * Math.PI * middle;
 
+  const { bind, node } = useTip();
+  const [active, setActive] = useState<number | null>(null);
   let before = 0;
   return (
-    <div className="fl-pie" data-testid={testId}>
+    <div className={join("fl-pie", active !== null && "fl-pie-live")} data-testid={testId}>
       <div className="fl-pie-plot">
         <svg viewBox={`0 0 ${size} ${size}`} role="img" aria-hidden="true">
           <circle className="fl-pie-track" cx={size / 2} cy={size / 2} r={middle} strokeWidth={width} />
@@ -1749,7 +2001,12 @@ export function Pie({ slices, total, label, hole = 0.62, testId }: {
             return (
               <circle
                 key={index}
-                className={join("fl-pie-slice", toneClass(one.tone))}
+                className={join("fl-pie-slice", toneClass(one.tone), active === index && "fl-pie-on")}
+                onPointerEnter={() => setActive(index)}
+                {...(() => {
+                  const mine = bind(<><b>{one.label}</b> {one.value} <span className="fl-faint">· {share100(share)}</span></>);
+                  return { onPointerMove: mine.onPointerMove, onPointerLeave: () => { setActive(null); mine.onPointerLeave(); } };
+                })()}
                 cx={size / 2}
                 cy={size / 2}
                 r={middle}
@@ -1757,7 +2014,6 @@ export function Pie({ slices, total, label, hole = 0.62, testId }: {
                 strokeDasharray={`${Math.max(0, round * share - 2)} ${round}`}
                 transform={`rotate(${turn} ${size / 2} ${size / 2})`}
               >
-                <title>{`${one.value}`}</title>
               </circle>
             );
           })}
@@ -1777,11 +2033,13 @@ export function Pie({ slices, total, label, hole = 0.62, testId }: {
             </>
           );
           const className = join("fl-ring-legend-row", toneClass(one.tone));
+          const live = { onPointerEnter: () => setActive(drawn.indexOf(one)), onPointerLeave: () => setActive(null) };
           return one.to
-            ? <Link key={index} to={one.to} className={className}>{body}</Link>
-            : <div key={index} className={className}>{body}</div>;
+            ? <Link key={index} to={one.to} className={className} {...live}>{body}</Link>
+            : <div key={index} className={className} {...live}>{body}</div>;
         })}
       </dl>
+      {node}
     </div>
   );
 }
@@ -1968,8 +2226,10 @@ export function MenuItem({ to, onClick, disabled, title, icon, children, testId 
  * reader a value is somewhere it is not - so a refusal says so and
  * leaves the whole value selectable under the pointer instead.
  */
-export function Copy({ value, title, testId }: {
+export function Copy({ value, title, testId, compact = false }: {
   value: string;
+  /** An icon only, for beside a value it copies. */
+  compact?: boolean;
   /** What the button offers to take, for the pointer. */
   title?: string;
   testId?: string;
@@ -1983,13 +2243,14 @@ export function Copy({ value, title, testId }: {
   return (
     <button
       type="button"
-      className="fl-plain"
+      className={compact ? "fl-plain fl-copy fl-copy-icon" : "fl-plain fl-copy"}
       onClick={() => { void take(); }}
-      title={title ?? value}
+      title={state === "copied" ? t("Copied") : state === "failed" ? t("Copy by hand") : (title ?? value)}
+      aria-label={title ?? t("Copy")}
       data-testid={testId}
     >
-      <Icon name="copy" />
-      {state === "copied" ? t("Copied") : state === "failed" ? t("Copy by hand") : t("Copy")}
+      <Icon name={state === "copied" ? "check" : "copy"} />
+      {compact ? null : state === "copied" ? t("Copied") : state === "failed" ? t("Copy by hand") : t("Copy")}
     </button>
   );
 }

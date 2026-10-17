@@ -74,8 +74,8 @@ function draw(at: string) {
   );
   return render(
     <Routes>
-      <Route path="/next/hosts/:id" element={<HostWorkspace />} />
-      <Route path="/next/hosts/:id/:module" element={<HostWorkspace />} />
+      <Route path="/hosts/:id" element={<HostWorkspace />} />
+      <Route path="/hosts/:id/:module" element={<HostWorkspace />} />
     </Routes>,
     { wrapper },
   );
@@ -97,29 +97,29 @@ describe("the host workspace", () => {
       "/api/v1/hosts/h1/timeline": { items: [], count: 0, sources: [] },
       "/api/v1/settings/layout": { widgets: [], present: false, revision: 0 },
     });
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     await waitFor(() => expect(screen.getByRole("heading", { name: "agent-arch" })).toBeInTheDocument());
     expect(screen.getByText("online")).toBeInTheDocument();
     const head = screen.getByRole("heading", { name: "agent-arch" }).closest(".fl-head") as HTMLElement;
     expect(within(head).getByText("192.168.56.70")).toBeInTheDocument();
     expect(within(head).getByText("lab / test")).toBeInTheDocument();
     // A tag leads to the hosts that carry it; that is what a tag is for.
-    expect(screen.getByRole("link", { name: "role=db" })).toHaveAttribute("href", "/next/hosts?tag=role%3Ddb");
+    expect(screen.getByRole("link", { name: "role=db" })).toHaveAttribute("href", "/hosts?tag=role%3Ddb");
   });
 
   it("turns the rail into this host's modules, with the way back", async () => {
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     const overview = await screen.findByRole("link", { name: "Overview" });
     const rail = screen.getByRole("navigation", { name: "Main navigation" });
-    expect(within(rail).getByRole("link", { name: "All hosts" })).toHaveAttribute("href", "/next/hosts");
-    expect(overview).toHaveAttribute("href", "/next/hosts/h1/overview");
+    expect(within(rail).getByRole("link", { name: "All hosts" })).toHaveAttribute("href", "/hosts");
+    expect(overview).toHaveAttribute("href", "/hosts/h1/overview");
     // The fleet's own places are not in the rail of a host: two rails side
     // by side would be two answers to "where am I".
     expect(within(rail).queryByRole("link", { name: "Campaigns" })).toBeNull();
   });
 
   it("lists a module this host has no backing for, dimmed, and says why", async () => {
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     // The host reported no container runtime, so the module cannot be
     // opened - but it is on the rail, or nobody would know it exists.
     await screen.findByRole("link", { name: "Overview" });
@@ -153,7 +153,7 @@ describe("the host workspace", () => {
 describe("the overview of a host", () => {
   it("draws a figure the host never reported as a dash, never as a nought", async () => {
     Object.assign(answers, { "/api/v1/hosts/h1/inventory/system": new Error("never reported") });
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     await waitFor(() => expect(screen.getByTestId("kpi-Disk used")).toBeInTheDocument());
     // A nought on a disk reads as "plenty of room" about a machine nobody
     // has asked, which is the one place this matters most.
@@ -168,13 +168,13 @@ describe("the overview of a host", () => {
         payload: { hardware: { cpu_cores: 2, memory_bytes: 3113851289, root_fs_bytes: 130000000000, root_fs_free_bytes: 120000000000 } },
       },
     });
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     await waitFor(() => expect(screen.getByTestId("kpi-CPU cores")).toHaveTextContent("2"));
     expect(screen.getByTestId("kpi-Disk used")).toHaveTextContent("8");
   });
 
   it("counts the adapters it has, and says so when it has none to count", async () => {
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     await waitFor(() => expect(screen.getByTestId("adapters")).toBeInTheDocument());
     const band = screen.getByTestId("adapters");
     expect(band).toHaveTextContent("available");
@@ -214,7 +214,7 @@ describe("the head above every module of a host", () => {
   });
 
   it("writes the tags in place, and offers that to nobody without the permission", async () => {
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     await screen.findByRole("link", { name: "role=db" });
     // A reader sees the tags and no way to change them: the gate is the
     // permission, not a refusal the server gives after the typing.
@@ -222,7 +222,7 @@ describe("the head above every module of a host", () => {
     cleanup();
 
     answers["/api/v1/whoami"] = { subject: "tester", permissions: ["host.read", "host.tag.write"] };
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     fireEvent.click(await screen.findByTestId("edit-tags"));
     const field = screen.getByTestId("tags-input");
     // What it opens with is what the host carries, so a correction is an
@@ -239,7 +239,7 @@ describe("the head above every module of a host", () => {
 
   it("takes Escape as leaving the tags as they were", async () => {
     answers["/api/v1/whoami"] = { subject: "tester", permissions: ["host.tag.write"] };
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     fireEvent.click(await screen.findByTestId("edit-tags"));
     fireEvent.change(screen.getByTestId("tags-input"), { target: { value: "role=web" } });
     fireEvent.keyDown(screen.getByTestId("tags-input"), { key: "Escape" });
@@ -249,7 +249,7 @@ describe("the head above every module of a host", () => {
 
   it("reads the open module's inventory again and says how the job came out", async () => {
     answers["/api/v1/jobs/j1"] = { id: "j1", state: "succeeded", result_message: "inventory refreshed" };
-    draw("/next/hosts/h1/system");
+    draw("/hosts/h1/system");
     fireEvent.click(await screen.findByTestId("refresh-module"));
     await waitFor(() => expect(posted).toHaveLength(1));
     // The scope is the registry's: the module that is open lives off the
@@ -265,20 +265,20 @@ describe("the head above every module of a host", () => {
 
   it("says a refused refresh was refused, rather than reporting nothing", async () => {
     answers["/api/v1/jobs/j1"] = { id: "j1", state: "failed", result_error_code: "helper_unavailable" };
-    draw("/next/hosts/h1/system");
+    draw("/hosts/h1/system");
     fireEvent.click(await screen.findByTestId("refresh-module"));
     await waitFor(() => expect(screen.getByText("helper_unavailable")).toBeInTheDocument());
   });
 
   it("reads the whole inventory again from the actions, and leads where a module is not", async () => {
     answers["/api/v1/jobs/j1"] = { id: "j1", state: "succeeded", result_message: "inventory refreshed" };
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     fireEvent.click(await screen.findByTestId("host-actions"));
-    expect(screen.getByRole("menuitem", { name: "Open the logs" })).toHaveAttribute("href", "/next/hosts/h1/logs");
-    expect(screen.getByRole("menuitem", { name: "Jobs of this host" })).toHaveAttribute("href", "/next/hosts/h1/jobs");
+    expect(screen.getByRole("menuitem", { name: "Open the logs" })).toHaveAttribute("href", "/hosts/h1/logs");
+    expect(screen.getByRole("menuitem", { name: "Jobs of this host" })).toHaveAttribute("href", "/hosts/h1/jobs");
     // Deliberately a way to the power module and not a button that
     // reboots from a menu: the order is confirmed where it is placed.
-    expect(screen.getByRole("menuitem", { name: "Reboot (power module)" })).toHaveAttribute("href", "/next/hosts/h1/power");
+    expect(screen.getByRole("menuitem", { name: "Reboot (power module)" })).toHaveAttribute("href", "/hosts/h1/power");
     fireEvent.click(screen.getByTestId("refresh-inventory"));
     await waitFor(() => expect(posted).toHaveLength(1));
     expect(posted[0]).toEqual({
@@ -289,7 +289,7 @@ describe("the head above every module of a host", () => {
 
   it("offers no refresh of a host that is not connected", async () => {
     answers["/api/v1/hosts/h1"] = { ...host, connection_state: "offline" };
-    draw("/next/hosts/h1/system");
+    draw("/hosts/h1/system");
     await waitFor(() => expect(screen.getByTestId("refresh-module")).toBeDisabled());
     fireEvent.click(screen.getByTestId("host-actions"));
     expect(screen.getByTestId("refresh-inventory")).toBeDisabled();
@@ -301,18 +301,18 @@ describe("the head above every module of a host", () => {
     // says "copied" there tells the reader a value is somewhere it is not.
     const refusing = vi.fn().mockRejectedValue(new Error("not a secure context"));
     Object.defineProperty(navigator, "clipboard", { value: { writeText: refusing }, configurable: true });
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     expect(await screen.findByTestId("host-id")).toHaveTextContent("01234567");
     fireEvent.click(screen.getByTestId("copy-host-id"));
-    await waitFor(() => expect(screen.getByTestId("copy-host-id")).toHaveTextContent("Copy by hand"));
+    await waitFor(() => expect(screen.getByTestId("copy-host-id")).toHaveAttribute("title", "Copy by hand"));
     expect(refusing).toHaveBeenCalledWith("0123456789abcdef");
     cleanup();
 
     const taking = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText: taking }, configurable: true });
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     fireEvent.click(await screen.findByTestId("copy-host-id"));
-    await waitFor(() => expect(screen.getByTestId("copy-host-id")).toHaveTextContent("Copied"));
+    await waitFor(() => expect(screen.getByTestId("copy-host-id")).toHaveAttribute("title", "Copied"));
     // The whole of it goes, not the eight characters that are read.
     expect(taking).toHaveBeenCalledWith("0123456789abcdef");
   });
@@ -327,7 +327,7 @@ describe("the head above every module of a host", () => {
         detail: "serial 7 expired on 2026-10-15",
       },
     };
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     const badge = await screen.findByText(/connection refused: certificate expired/);
     expect(badge).toHaveAttribute("title", "serial 7 expired on 2026-10-15");
     cleanup();
@@ -339,7 +339,7 @@ describe("the head above every module of a host", () => {
       connection_state: "online",
       last_connection_refusal: { code: "certificate_expired", at: new Date().toISOString() },
     };
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     await screen.findByRole("heading", { name: "agent-arch" });
     expect(screen.queryByText(/connection refused/)).toBeNull();
   });
@@ -353,7 +353,7 @@ describe("the head above every module of a host", () => {
         set_by: "ula",
       },
     };
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     const badge = await screen.findByText(/maintenance until/);
     expect(badge).toHaveAttribute("title", "disk replacement · set by ula");
     cleanup();
@@ -362,33 +362,33 @@ describe("the head above every module of a host", () => {
       ...host,
       maintenance: { until: new Date(Date.now() - 60_000).toISOString(), reason: "disk replacement" },
     };
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     await screen.findByRole("heading", { name: "agent-arch" });
     expect(screen.queryByText(/maintenance until/)).toBeNull();
   });
 
   it("says where the management address came from, and that none has been seen", async () => {
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     // The address the control plane saw at its own end and one the host
     // reported about itself are two different facts.
     expect(await screen.findByTestId("address-source")).toHaveTextContent("session");
-    expect(screen.getByTestId("address-source").closest(".fl-tag"))
+    expect(screen.getByTestId("address-source").closest(".fl-stripitem"))
       .toHaveAttribute("title", "address seen by the control plane on its end of the connection");
     cleanup();
 
     answers["/api/v1/hosts/h1"] = { ...host, management_address: "", management_address_source: undefined };
-    draw("/next/hosts/h1");
+    draw("/hosts/h1");
     const head = (await screen.findByRole("heading", { name: "agent-arch" })).closest(".fl-head") as HTMLElement;
     expect(within(head).getByText("address unknown")).toBeInTheDocument();
   });
 
   it("keeps the way back to the campaign an operator came from", async () => {
-    draw("/next/hosts/h1/overview?campaign=c-42");
+    draw("/hosts/h1/overview?campaign=c-42");
     expect(await screen.findByRole("link", { name: "Back to the campaign" }))
-      .toHaveAttribute("href", "/next/campaigns/c-42");
+      .toHaveAttribute("href", "/campaigns/c-42");
     cleanup();
 
-    draw("/next/hosts/h1/overview");
+    draw("/hosts/h1/overview");
     await screen.findByRole("heading", { name: "agent-arch" });
     expect(screen.queryByRole("link", { name: "Back to the campaign" })).toBeNull();
   });

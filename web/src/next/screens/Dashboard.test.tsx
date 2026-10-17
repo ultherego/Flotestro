@@ -143,7 +143,7 @@ describe("the fleet dashboard", () => {
     const tile = await screen.findByTestId("fleet-tile-h1");
     expect(tile).toHaveTextContent("agent-arch");
     expect(tile).toHaveTextContent("18");
-    expect(tile).toHaveAttribute("href", "/next/hosts/h1");
+    expect(tile).toHaveAttribute("href", "/hosts/h1");
 
     // A machine that has gone quiet says so on itself, and what it never
     // reported is a dash - not a nought.

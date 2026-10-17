@@ -116,7 +116,7 @@ const complianceReport = (over: Record<string, unknown> = {}) => ({
 const reader = { subject: "u", kind: "user", roles: [], bindings: [], permissions: ["host.read", "campaign.read"] };
 const noCampaigns = { subject: "u", kind: "user", roles: [], bindings: [], permissions: ["host.read"] };
 
-function draw(address = "/next/reports") {
+function draw(address = "/reports") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
@@ -124,6 +124,16 @@ function draw(address = "/next/reports") {
     </QueryClientProvider>
   );
   return render(<Reports />, { wrapper });
+}
+
+/**
+ * The sub-tab the reader is on.
+ *
+ * The screen held the three reports on one board until 17.10; they are
+ * one sub-tab each now, so a test that reads one says which.
+ */
+function onTab(name: string) {
+  fireEvent.click(screen.getByRole("tab", { name }));
 }
 
 afterEach(() => {
@@ -140,15 +150,18 @@ describe("the reports", () => {
       "/api/v1/reports/campaigns": campaignsReport(),
       "/api/v1/reports/compliance": complianceReport(),
     });
-    draw();
+    draw("/reports?tab=patching");
     await waitFor(() => expect(screen.getByTestId("patch-hosts")).toBeInTheDocument());
     // The three reports are asked with the same bounds, so the page is one
-    // answer about one window rather than three about "now".
+    // answer about one window rather than three about "now" - and all three
+    // are asked whichever sub-tab is open.
     const bounds = asked.filter((one) => one.startsWith("/api/v1/reports/"))
       .map((one) => new URLSearchParams(one.split("?")[1]).get("from"));
     expect(new Set(bounds).size).toBe(1);
+    onTab("Campaigns");
     await waitFor(() => expect(screen.getByTestId("report-campaigns")).toBeInTheDocument());
-    expect(screen.getByTestId("report-policies")).toBeInTheDocument();
+    onTab("Compliance");
+    await waitFor(() => expect(screen.getByTestId("report-policies")).toBeInTheDocument());
     expect(screen.getByTestId("report-security")).toBeInTheDocument();
   });
 
@@ -162,7 +175,7 @@ describe("the reports", () => {
         })],
       }),
     });
-    draw();
+    draw("/reports?tab=patching");
     await waitFor(() => expect(screen.getByTestId("patch-silent")).toBeInTheDocument());
     const row = screen.getByTestId("patch-silent");
     expect(within(row).queryByText("0")).toBeNull();
@@ -175,7 +188,10 @@ describe("the reports", () => {
       "/api/v1/reports/patch-status": patchStatus(),
     });
     draw();
-    await waitFor(() => expect(screen.getByTestId("patch-hosts")).toBeInTheDocument());
+    // The scope is the sub-tab a bare address opens on.
+    await waitFor(() => expect(
+      asked.some((one) => one.startsWith("/api/v1/reports/patch-status")),
+    ).toBe(true));
     asked.length = 0;
     fireEvent.change(screen.getByTestId("report-site"), { target: { value: "lab" } });
     await waitFor(() => expect(
@@ -185,7 +201,7 @@ describe("the reports", () => {
 
   it("asks for nothing until both ends of a custom period are set", async () => {
     Object.assign(answers, { "/api/v1/whoami": reader, "/api/v1/reports/patch-status": patchStatus() });
-    draw("/next/reports?preset=custom");
+    draw("/reports?preset=custom&tab=patching");
     await waitFor(() => expect(screen.getAllByText("Waiting for the period.").length).toBeGreaterThan(0));
     // Nothing is read with half a period: the server refuses it anyway.
     expect(asked.some((one) => one.startsWith("/api/v1/reports/"))).toBe(false);
@@ -198,7 +214,7 @@ describe("the reports", () => {
       "/api/v1/reports/patch-status": patchStatus(),
       "/api/v1/reports/compliance": new ApiError(403, "forbidden", "you may not read the policies"),
     });
-    draw();
+    draw("/reports?tab=compliance");
     await waitFor(() => expect(screen.getByText(/you may not read the policies/)).toBeInTheDocument());
   });
 
@@ -208,8 +224,10 @@ describe("the reports", () => {
       "/api/v1/reports/patch-status": patchStatus(),
       "/api/v1/reports/compliance": complianceReport(),
     });
-    draw();
+    draw("/reports?tab=patching");
     await waitFor(() => expect(screen.getByTestId("patch-hosts")).toBeInTheDocument());
+    // The sub-tab is not offered at all, so there is nothing to open on.
+    expect(screen.queryByRole("tab", { name: "Campaigns" })).toBeNull();
     expect(screen.queryByTestId("report-campaigns")).toBeNull();
     // And nothing was asked of an endpoint the reader has no right to.
     expect(asked.some((one) => one.startsWith("/api/v1/reports/campaigns"))).toBe(false);
@@ -231,7 +249,7 @@ describe("the reports", () => {
       "/api/v1/reports/patch-status": patchStatus(),
       "/api/v1/reports/campaigns": campaignsReport(many),
     });
-    draw();
+    draw("/reports?tab=campaigns");
     await waitFor(() => expect(screen.getByTestId("report-campaigns")).toBeInTheDocument());
     // The last of the thirty is in the document without anybody asking:
     // that is what a printed copy and a search of the page both need.
@@ -262,7 +280,7 @@ describe("the reports", () => {
       "/api/v1/whoami": { ...reader, display_name: "Tomasz" },
       "/api/v1/reports/patch-status": patchStatus(),
     });
-    draw("/next/reports?preset=30d&site=lab");
+    draw("/reports?preset=30d&site=lab&tab=patching");
     await waitFor(() => expect(screen.getByTestId("patch-hosts")).toBeInTheDocument());
     const head = screen.getByText("This document").closest(".fl-card") as HTMLElement;
     expect(within(head).getByText("site lab")).toBeInTheDocument();
@@ -281,7 +299,7 @@ describe("the reports", () => {
       "/api/v1/reports/patch-status": patchStatus(),
       "/api/v1/reports/compliance": complianceReport(),
     });
-    draw();
+    draw("/reports?tab=compliance");
     await waitFor(() => expect(screen.getByTestId("fleet-coverage")).toBeInTheDocument());
     const coverage = screen.getByTestId("fleet-coverage");
     expect(coverage).toHaveTextContent("8 of 10 hosts evaluated");
@@ -296,7 +314,7 @@ describe("the reports", () => {
       "/api/v1/reports/patch-status": patchStatus(),
       "/api/v1/reports/compliance": complianceReport({ policies: null }),
     });
-    draw();
+    draw("/reports?tab=compliance");
     await waitFor(() => expect(
       screen.getByText("The policy section needs the right to read policies."),
     ).toBeInTheDocument());
@@ -310,15 +328,18 @@ describe("the reports", () => {
       "/api/v1/reports/campaigns": campaignsReport(),
       "/api/v1/reports/compliance": complianceReport(),
     });
-    draw();
+    draw("/reports?tab=patching");
     await waitFor(() => expect(screen.getByTestId("patch-agent-arch")).toBeInTheDocument());
     expect(within(screen.getByTestId("patch-agent-arch")).getByRole("link", { name: "agent-arch" }))
-      .toHaveAttribute("href", "/next/hosts/h1");
+      .toHaveAttribute("href", "/hosts/h1");
+    onTab("Campaigns");
     await waitFor(() => expect(screen.getByTestId("campaign-c1")).toBeInTheDocument());
     expect(within(screen.getByTestId("campaign-c1")).getByRole("link", { name: "September patches" }))
-      .toHaveAttribute("href", "/next/campaigns/c1");
+      .toHaveAttribute("href", "/campaigns/c1");
+    onTab("Compliance");
+    await waitFor(() => expect(screen.getByTestId("drift-agent-arch")).toBeInTheDocument());
     expect(within(screen.getByTestId("drift-agent-arch")).getByRole("link", { name: "agent-arch" }))
-      .toHaveAttribute("href", "/next/hosts/h1/policies");
+      .toHaveAttribute("href", "/hosts/h1/policies");
   });
 });
 

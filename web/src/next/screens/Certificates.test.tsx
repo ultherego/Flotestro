@@ -69,10 +69,15 @@ const trust = (over: Record<string, unknown> = {}) => ({
 /** The arrangement the board reads before it draws anything. */
 const layout = { widgets: [], present: false, revision: 0 };
 
-function draw() {
+/**
+ * The screen opens on the certificates; the authorities are the second
+ * sub-tab, asked for by address the way a link to them would arrive.
+ */
+function draw(tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const where = tab ? `/certificates?tab=${tab}` : "/certificates";
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}><MemoryRouter initialEntries={[where]}><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
   );
   return render(<Certificates />, { wrapper });
 }
@@ -96,7 +101,7 @@ describe("the fleet's certificates", () => {
     const row = screen.getByTestId(id);
     expect(within(row).getByText("7 d")).toBeInTheDocument();
     expect(within(row).getByRole("link", { name: "panel" }))
-      .toHaveAttribute("href", "/next/hosts/h1/certificates");
+      .toHaveAttribute("href", "/hosts/h1/certificates");
     expect(row).toHaveTextContent("/etc/pki/tls/certs/panel.crt");
     expect(row).toHaveTextContent("CN=Fleet CA 2026");
     // certmonger renews it: a finding, and not the same thing as nobody
@@ -232,7 +237,7 @@ describe("the fleet's certificates", () => {
         hosts_unknown: 0,
       }),
     });
-    draw();
+    draw("authorities");
     await waitFor(() => expect(screen.getByTestId("authority-fleet-ca-2026")).toBeInTheDocument());
     // The loaded certificate is signed by the 2026 authority, so nothing
     // may be withdrawn and the row says so rather than offering it.

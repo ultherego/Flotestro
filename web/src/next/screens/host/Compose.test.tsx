@@ -75,14 +75,29 @@ const allowed = (over: Record<string, boolean> = {}) => ({
   ],
 });
 
-function draw() {
+/**
+ * The module is three sub-tabs since 17.10 - the manifest, the plan, the
+ * history - and the address names which one is open. A test that reads
+ * the plan or the deployments asks for that tab the way a reader
+ * following a link would; the manifest it typed on the first tab is
+ * still there, because the module holds it and not the tab.
+ */
+function draw(tab?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const where = tab ? `/hosts/h1/compose?tab=${tab}` : "/hosts/h1/compose";
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter>
+      <MemoryRouter initialEntries={[where]}>
+        <ToastProvider>{children}</ToastProvider>
+      </MemoryRouter>
     </QueryClientProvider>
   );
   return render(<Compose host={host} />, { wrapper });
+}
+
+/** Open one of the module's sub-tabs, as a reader clicking it would. */
+function open(name: string) {
+  fireEvent.click(screen.getByRole("tab", { name }));
 }
 
 afterEach(() => {
@@ -130,18 +145,21 @@ describe("the compose module of a host", () => {
         ],
       },
     });
-    draw();
+    draw("history");
     // Nobody has named a project, so nothing has been counted: the band
     // says so with dashes rather than claiming there were no deployments.
     const band = await screen.findByTestId("deployments");
     expect(band).toHaveTextContent("—");
     expect(band.querySelector(".fl-band")).toBeNull();
 
+    open("Project");
     fireEvent.change(screen.getByTestId("project"), { target: { value: "shop" } });
+    open("History");
     await waitFor(() => expect(screen.getByTestId("version-v1")).toBeInTheDocument());
     expect(screen.getByTestId("deployments").querySelector(".fl-band")).not.toBeNull();
     // A version loads back into the editor rather than being redeployed on
-    // the spot: the host's state may have moved since it was written.
+    // the spot: the host's state may have moved since it was written. It
+    // opens the manifest where the manifest is edited.
     fireEvent.click(screen.getByTestId("load-v1"));
     expect(screen.getByTestId("manifest")).toHaveValue("services: {}");
   });
@@ -173,6 +191,9 @@ describe("the compose module of a host", () => {
     await vi.advanceTimersByTimeAsync(2500);
     vi.useRealTimers();
 
+    // What the plan says, and the consent that binds it, are read on the
+    // plan tab: the manifest is written on one tab and judged on another.
+    open("Plan");
     await waitFor(() => expect(screen.getByTestId("plan-digest")).toHaveTextContent("sha256:planplanplanplan"));
     const services = screen.getByTestId("plan-services");
     expect(services).toHaveTextContent("from registry");
@@ -240,6 +261,7 @@ describe("the compose module of a host", () => {
     await vi.advanceTimersByTimeAsync(2500);
     vi.useRealTimers();
 
+    open("Plan");
     await waitFor(() => expect(screen.getByTestId("plan-changes")).toBeInTheDocument());
     const changes = screen.getByTestId("plan-changes");
     expect(within(changes).getByText("old")).toBeInTheDocument();

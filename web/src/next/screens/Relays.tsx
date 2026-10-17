@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../lib/api";
@@ -7,10 +7,8 @@ import { absoluteTime, bytes, relativeTime } from "../../lib/format";
 import type { Relay, RelayDetail, RelayHost, RelayState, Whoami } from "../../lib/types";
 import { useToast } from "../../components/Toast";
 import { useT } from "../../i18n";
-import { Board } from "../Board";
-import type { BoardEntry } from "../../components/board";
 import {
-  Band, Bars, Bones, Button, Card, Chart, Empty, Fact, Facts, Field, Fields, Fig, Figs, Find, Kpi, Meter, Modal, Note, Pill, Problem, Screen, Seg, type Segment, type Series, Stack, Table, type Tone, TwoLine,
+  Band, Bars, Bones, Button, C, Card, Chart, Empty, Fact, Facts, Field, Fields, Fig, Figs, Find, Grid, Kpi, Kpis, Meter, Modal, Note, Pill, Problem, Screen, Seg, type Segment, type Series, Stack, Table, Tabs, type Tone, TwoLine, useTab,
 } from "../kit";
 
 /**
@@ -93,8 +91,8 @@ function RelayHelp() {
 /**
  * The relays, with one of them open.
  *
- * The address says which: `/next/relays/<id>` opens that relay and
- * `/next/relays` opens on the first of the list, so the screen somebody
+ * The address says which: `/relays/<id>` opens that relay and
+ * `/relays` opens on the first of the list, so the screen somebody
  * is reading is a link they can send. Picking a row walks the address
  * rather than reloading the panel.
  */
@@ -181,7 +179,7 @@ export function Relays() {
     return (
       <Screen title={t("Relay")} icon="relays" help={<RelayHelp />}>
         <Card>
-          <Empty icon="relays" action={<Link to="/next/relays">{t("All relays")}</Link>}>
+          <Empty icon="relays" action={<Link to="/relays">{t("All relays")}</Link>}>
             {t("No relay with the identifier {id} is registered in this installation.", { id: fromAddress })}
           </Empty>
         </Card>
@@ -228,9 +226,7 @@ export function Relays() {
 
   return (
     <>
-      
-
-      <Board screen={RELAYS_SCREEN} catalogue={RELAYS} drawn={{
+      <Readings named={fromAddress !== ""} panels={{
         count: (
           <Kpi hero icon="relays" label={t("Relays")} value={loaded ? relays.length : null}
                note={settledSite ? t("in site {site}", { site: settledSite }) : t("of every site")} />
@@ -286,7 +282,7 @@ export function Relays() {
                   <TwoLine sub={one.advertised_names && one.advertised_names.length > 0
                     ? <code>{one.advertised_names.join(", ")}</code>
                     : undefined}>
-                    <Button kind="word" onClick={() => navigate(`/next/relays/${one.id}`)}
+                    <Button kind="word" onClick={() => navigate(`/relays/${one.id}`)}
                             testId={`pick-${one.name}`}>{one.name}</Button>
                   </TwoLine>
                 ) },
@@ -391,7 +387,7 @@ export function Relays() {
               columns={[
                 { key: "host", head: t("Host"), cell: (one) => (
                   <TwoLine sub={one.environment ? `${one.site} / ${one.environment}` : one.site}>
-                    <Link to={`/next/hosts/${one.host_id}`}>{one.hostname}</Link>
+                    <Link to={`/hosts/${one.host_id}`}>{one.hostname}</Link>
                   </TwoLine>
                 ) },
                 { key: "lifecycle", head: t("Lifecycle"), minor: true, cell: (one) => one.lifecycle_state },
@@ -512,6 +508,64 @@ export function Relays() {
   );
 }
 
+/** The sub-tabs: the relays of the fleet, and the one being read. */
+const RELAY_TABS = ["relays", "relay"] as const;
+type RelayTab = (typeof RELAY_TABS)[number];
+
+/**
+ * The list and the one relay, apart.
+ *
+ * They stood side by side until 17.10, and four of the containers on the
+ * screen were empty until somebody picked a row - the detail of a thing
+ * nobody has chosen yet. A row now opens the second tab, and the address
+ * carries both the relay and the tab, so a link to a relay opens on it.
+ */
+function Readings({ named, panels }: {
+  /** Whether the address names one relay; then that relay is what is open. */
+  named: boolean;
+  panels: Record<string, ReactNode>;
+}) {
+  const t = useT();
+  // The first name is the one a bare address lands on, so an address that
+  // names a relay opens on the relay and `/relays` opens on the list.
+  const order: readonly RelayTab[] = named ? ["relay", "relays"] : RELAY_TABS;
+  const [tab, go] = useTab(order);
+  return (
+    <>
+      <Kpis>
+        {panels.count}
+        {panels.attested}
+        {panels.waiting}
+        {panels.dropped}
+      </Kpis>
+
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "relays", label: t("Relays") },
+          { value: "relay", label: t("Relay") },
+        ]}
+      />
+
+      {tab === "relays" && (
+        <Grid>
+          <C span={7}>{panels.state}</C>
+          <C span={5}>{panels.sites}</C>
+          <C span={12}>{panels.list}</C>
+        </Grid>
+      )}
+      {tab === "relay" && (
+        <Grid>
+          <C span={12}>{panels.relay}</C>
+          <C span={12}>{panels.hosts}</C>
+          <C span={12}>{panels.buffer}</C>
+        </Grid>
+      )}
+    </>
+  );
+}
+
 /** The fill of the spool as the relay last reported it, or an em dash where it never did. */
 function BufferCell({ relay }: { relay: Relay }) {
   const t = useT();
@@ -583,17 +637,3 @@ export function bufferSummary(points: RelayBufferPoint[], stepSeconds: number) {
   return { dropped, restarts, peakPercent, offlineMinutes: Math.round((offlineSteps * stepSeconds) / 60) };
 }
 
-export const RELAYS_SCREEN = "next_relays";
-
-export const RELAYS: BoardEntry[] = [
-  { key: "count", title: "How many relays", width: 3, height: 1 },
-  { key: "attested", title: "Hosts attested", width: 3, height: 1 },
-  { key: "waiting", title: "Items waiting", width: 3, height: 1 },
-  { key: "dropped", title: "Results dropped", width: 3, height: 1 },
-  { key: "state", title: "State", width: 8, height: 2 },
-  { key: "sites", title: "By site", width: 4, height: 2 },
-  { key: "list", title: "Relays", width: 12, height: 4 },
-  { key: "relay", title: "The relay", width: 6, height: 3 },
-  { key: "hosts", title: "Hosts behind the relay", width: 6, height: 3 },
-  { key: "buffer", title: "The spool over time", width: 12, height: 4 },
-];

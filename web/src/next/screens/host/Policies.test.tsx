@@ -63,10 +63,10 @@ const result = (over: Partial<PolicyResult> = {}): PolicyResult => ({
   ...over,
 } as PolicyResult);
 
-function draw() {
+function draw(tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}><MemoryRouter initialEntries={[tab ? `/?tab=${tab}` : "/"]}>{children}</MemoryRouter></QueryClientProvider>
   );
   return render(<Policies host={host} />, { wrapper });
 }
@@ -113,7 +113,7 @@ describe("the policies of a host", () => {
         count: 1,
       },
     });
-    draw();
+    draw("rules");
     const row = await screen.findByTestId("rule-p1-0");
     expect(row).toHaveTextContent("package chrony installed");
     expect(within(row).getByText("drift")).toBeInTheDocument();
@@ -130,7 +130,7 @@ describe("the policies of a host", () => {
     Object.assign(answers, {
       "/api/v1/hosts/h1/policies": { items: [result({ rule: undefined, rule_index: 4 })], count: 1 },
     });
-    draw();
+    draw("rules");
     const row = await screen.findByTestId("rule-p1-4");
     expect(row).toHaveTextContent("#4");
   });
@@ -142,7 +142,7 @@ describe("the policies of a host", () => {
         count: 1,
       },
     });
-    draw();
+    draw("rules");
     const row = await screen.findByTestId("rule-p1-0");
     expect(row).toHaveTextContent("—");
   });
@@ -154,7 +154,7 @@ describe("the policies of a host", () => {
         count: 2,
       },
     });
-    draw();
+    draw("policies");
     const row = await screen.findByTestId("policy-Baseline");
     expect(within(row).getByText("error")).toBeInTheDocument();
     expect(within(row).getByRole("link", { name: "Baseline" })).toHaveAttribute("href", "/policies/p1");
@@ -188,7 +188,7 @@ describe("the policies of a host", () => {
 
   it("offers the policies themselves where no policy selects this host", async () => {
     Object.assign(answers, { "/api/v1/hosts/h1/policies": { items: [], count: 0 } });
-    draw();
+    draw("rules");
     await waitFor(() => expect(screen.getByText(/No policy selects this host, or none has been evaluated yet/))
       .toBeInTheDocument());
     expect(screen.getByRole("link", { name: "Open the policies" })).toHaveAttribute("href", "/policies");

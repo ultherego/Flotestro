@@ -85,7 +85,7 @@ const campaign = (over: Record<string, unknown> = {}) => ({
 });
 
 /** The address a half-written order arrives on, as another screen hands it over. */
-const ORDER = "/next/bulk?action=unit.restart&name=Restart+nginx"
+const ORDER = "/bulk?action=unit.restart&name=Restart+nginx"
   + `&payload=${encodeURIComponent(JSON.stringify({ unit: { unit: "nginx.service" } }))}`;
 
 function base() {
@@ -101,7 +101,7 @@ function base() {
   });
 }
 
-function draw(address = "/next/bulk") {
+function draw(address = "/bulk") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
@@ -206,7 +206,7 @@ describe("the bulk workspace", () => {
 
   it("reads the catalogue's refusal of an operation in bulk before the form is filled in", async () => {
     base();
-    draw("/next/bulk?action=agent.upgrade&name=Upgrade");
+    draw("/bulk?action=agent.upgrade&name=Upgrade");
     await waitFor(() => expect(
       screen.getAllByText(/the agent upgrades itself through its channel/).length,
     ).toBeGreaterThan(0));

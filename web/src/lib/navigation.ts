@@ -137,6 +137,7 @@ export function fleetNavigation(permissions: Set<string>, capabilities: Capabili
         // the rest, so it stands after the campaigns it orders.
         // The capacity the jobs and the campaigns draw on: the gauge stands
         // last in the group, after the work it meters.
+        ...(v.seesBudgets ? [{ to: "/budgets", label: "Budgets", icon: "overview" as const }] : []),
       ],
     },
     {
@@ -146,6 +147,7 @@ export function fleetNavigation(permissions: Set<string>, capabilities: Capabili
       items: [
         ...(v.seesSecurity ? [{ to: "/security", label: "Security", icon: "security" as const }] : []),
         ...(v.seesVulnerabilities ? [{ to: "/vulnerabilities", label: "Vulnerabilities", icon: "vulnerabilities" as const }] : []),
+        ...(v.seesPolicies ? [{ to: "/policies", label: "Policies", icon: "security" as const }] : []),
         ...(v.seesCertificates ? [{ to: "/certificates", label: "Certificates", icon: "certificates" as const }] : []),
         ...(v.seesSecrets ? [{ to: "/secrets", label: "Secrets", icon: "secrets" as const }] : []),
       ],
@@ -170,7 +172,6 @@ export function fleetNavigation(permissions: Set<string>, capabilities: Capabili
         // A team is a boundary of authority rather than a label, so it
         // stands with the access rules and not with the groups and the tags,
         // which only choose hosts inside what somebody may touch.
-        { to: "/teams", label: "Teams", icon: "accounts" as const },
       ],
     },
     {

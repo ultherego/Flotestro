@@ -66,11 +66,18 @@ const event = (over: Record<string, unknown> = {}) => ({
 
 const layout = { widgets: [], present: false, revision: 0 };
 
-function draw() {
+/**
+ * The module is two sub-tabs since 17.10 and the address says which one
+ * is open: the counts and the breakdown on the first, the trail itself
+ * on the second. A test asks for the tab whose content it reads.
+ */
+function draw(tab = "events") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter>
+      <MemoryRouter initialEntries={[`/hosts/h1/audit?tab=${tab}`]}>
+        <ToastProvider>{children}</ToastProvider>
+      </MemoryRouter>
     </QueryClientProvider>
   );
   return render(<Audit host={host} />, { wrapper });
@@ -101,7 +108,7 @@ describe("the audit module of a host", () => {
 
   it("counts nothing before the trail is read, and never a nought", async () => {
     Object.assign(answers, { "/api/v1/settings/layout": layout });
-    draw();
+    draw("state");
     const band = await screen.findByTestId("outcomes");
     // A trail nobody has read is not a trail with nothing in it.
     expect(band).toHaveTextContent("—");
@@ -120,8 +127,10 @@ describe("the audit module of a host", () => {
         ],
       },
     });
-    draw();
-    await waitFor(() => expect(screen.getByTestId("event-3")).toBeInTheDocument());
+    draw("state");
+    // The band counts what the list holds; it is read on the first tab
+    // while the events themselves are listed on the second.
+    await waitFor(() => expect(screen.getByTestId("outcomes")).toHaveTextContent("denied"));
     const band = screen.getByTestId("outcomes");
     expect(band).toHaveTextContent("success");
     expect(band).toHaveTextContent("denied");
@@ -188,7 +197,7 @@ describe("the audit module of a host", () => {
         ],
       },
     });
-    draw();
+    draw("state");
     await waitFor(() => expect(screen.getByText("By actor")).toBeInTheDocument());
     const breakdown = screen.getByText("By actor").closest(".fl-card") as HTMLElement;
     await waitFor(() => expect(within(breakdown).getByText("Tomasz")).toBeInTheDocument());
@@ -217,7 +226,7 @@ describe("what the audit module knows on its own", () => {
       text.replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? ""))) as never;
     const who = actorLabel({ actor_type: "system", actor_id: "campaign:abcdef0123456789" }, host, t);
     expect(who.text).toBe("campaign abcdef01");
-    expect(who.to).toBe("/next/campaigns/abcdef0123456789");
+    expect(who.to).toBe("/campaigns/abcdef0123456789");
   });
 
   it("puts the keys an incident is read by first, and nothing where there are none", () => {

@@ -11,7 +11,7 @@ import { refusalName, type Host, type Job, type Whoami } from "../../../lib/type
 import { useT, type Translate } from "../../../i18n";
 import { Shell, type Face } from "../../Shell";
 import {
-  Bones, Button, Copy, Empty, Head, HeadSlot, Menu, MenuItem, Pill, Problem, Tag, Tags, type Tone,
+  Bones, Button, Empty, Head, HeadSlot, Menu, MenuItem, Pill, Problem, Strip, StripItem, Tag, Tags, type Tone,
 } from "../../kit";
 import { module as findModule } from "../../../lib/modules";
 import { addressSourceMeaning } from "./Overview";
@@ -52,13 +52,13 @@ export function HostWorkspace() {
   const data = host.data;
   const entry = moduleOf(module);
   const face: Face = {
-    back: { to: "/next/hosts", label: "All hosts" },
+    back: { to: "/hosts", label: "All hosts" },
     groups: data
       ? groupedModules(modules(data, installation)).map((group) => ({
           key: group.key,
           label: group.title,
           items: group.items.map((one) => ({
-            to: `/next/hosts/${id}/${one.segment}`,
+            to: `/hosts/${id}/${one.segment}`,
             label: one.name,
             icon: one.icon,
             unavailable: one.available ? undefined : one.missingReason,
@@ -71,7 +71,7 @@ export function HostWorkspace() {
     <Shell
       trail={{
         section: "Hosts",
-        to: "/next/hosts",
+        to: "/hosts",
         host: data,
         module: data ? findModule(module)?.name : undefined,
       }}
@@ -86,8 +86,11 @@ export function HostWorkspace() {
                 title={t(entry?.name ?? module)}
                 lead={t("This module is still being rewritten.")}
               />
-              <Empty action={<a className="fl-btn fl-quiet" href={`/hosts/${id}/${module}`}>{t("Open it in the panel as it is")}</a>}>
-                {t("The new panel is being written screen by screen; this one has not been reached yet.")}
+              {/* Until 16.10 this offered the panel being replaced, because
+                  a module not yet rewritten was still there. There is no
+                  second panel now: an unknown module is an unknown module. */}
+              <Empty icon="search">
+                {t("This host reports no module of that name.")}
               </Empty>
             </>
           )}
@@ -130,10 +133,11 @@ function HostHead({ host, segment, campaign }: {
   return (
     <Head
       crumb={campaign
-        ? <Link to={`/next/campaigns/${encodeURIComponent(campaign)}`}>{t("Back to the campaign")}</Link>
+        ? <Link to={`/campaigns/${encodeURIComponent(campaign)}`}>{t("Back to the campaign")}</Link>
         : undefined}
       title={host.hostname}
       lead={
+        <>
         <Tags>
           <Pill tone={tone} title={host.last_seen_at ? absoluteTime(host.last_seen_at) : undefined}>
             {t(host.connection_state)}
@@ -158,24 +162,31 @@ function HostHead({ host, segment, campaign }: {
               {t("maintenance until {time} UTC", { time: maintenance.toISOString().slice(0, 16).replace("T", " ") })}
             </Pill>
           )}
-          <HostIdentifier host={host} />
-          <ManagementAddress host={host} />
-          <Tag title={t("site / environment")}>{host.site} / {host.environment}</Tag>
-          <Tag title={t("operating system")}>
-            {host.os_distribution || host.os_family || t("unknown")}
-            {host.os_version ? ` ${host.os_version}` : ""}
-          </Tag>
-          <Tag title={t("architecture and agent version")}>
-            {host.architecture || t("unknown arch")} · {t("agent {version}", { version: host.agent_version || t("unknown") })}
-          </Tag>
-          {host.last_seen_at && (
-            <Tag title={t("last seen")}>{t("seen")} {relativeTime(host.last_seen_at)}</Tag>
-          )}
-          <HostTags host={host} />
           {refresh.message && (
             <Pill tone={refresh.tone} title={refresh.message}>{refresh.message}</Pill>
           )}
         </Tags>
+        <Strip>
+          <StripItem label={t("id")} title={host.id} copy={host.id} copyTitle={t("copy the full identifier")} copyTestId="copy-host-id">
+            <span className="fl-mono" data-testid="host-id">{host.id.slice(0, 8)}</span>
+          </StripItem>
+          <ManagementAddress host={host} />
+          <StripItem label={t("Site")}>{host.site} / {host.environment}</StripItem>
+          <StripItem label={t("System")}>
+            {host.os_distribution || host.os_family || t("unknown")}
+            {host.os_version ? ` ${host.os_version}` : ""}
+          </StripItem>
+          <StripItem label={t("Agent")}>
+            {host.architecture || t("unknown arch")} · {t("agent {version}", { version: host.agent_version || t("unknown") })}
+          </StripItem>
+          {host.last_seen_at && (
+            <StripItem label={t("Seen")} title={absoluteTime(host.last_seen_at)}>{relativeTime(host.last_seen_at)}</StripItem>
+          )}
+        </Strip>
+        <Tags>
+          <HostTags host={host} />
+        </Tags>
+        </>
       }
       actions={
         <>
@@ -210,13 +221,12 @@ function HostHead({ host, segment, campaign }: {
             >
               {t("Refresh the whole inventory")}
             </MenuItem>
-            <MenuItem to={`/next/hosts/${host.id}/logs`} icon="logs">{t("Open the logs")}</MenuItem>
-            <MenuItem to={`/next/hosts/${host.id}/jobs`} icon="jobs">{t("Jobs of this host")}</MenuItem>
+            <MenuItem to={`/hosts/${host.id}/logs`} icon="logs">{t("Open the logs")}</MenuItem>
+            <MenuItem to={`/hosts/${host.id}/jobs`} icon="jobs">{t("Jobs of this host")}</MenuItem>
             {/* A way to the power module and not a button that reboots
                 from a menu: the order is confirmed where it is placed. */}
-            <MenuItem to={`/next/hosts/${host.id}/power`} icon="power">{t("Reboot (power module)")}</MenuItem>
+            <MenuItem to={`/hosts/${host.id}/power`} icon="power">{t("Reboot (power module)")}</MenuItem>
           </Menu>
-          <a className="fl-btn fl-quiet" href={`/hosts/${host.id}`}>{t("Open in the panel as it is")}</a>
         </>
       }
     />
@@ -240,24 +250,6 @@ function maintenanceReason(t: Translate, host: Host): string {
 }
 
 /**
- * The identifier of the host, short, with a copy of the whole.
- *
- * Eight characters are what a person reads; the whole of it is what a
- * ticket, a log search or a support request needs.
- */
-function HostIdentifier({ host }: { host: Host }) {
-  const t = useT();
-  return (
-    <>
-      <Tag title={host.id}>
-        {t("id")} <span className="fl-mono" data-testid="host-id">{host.id.slice(0, 8)}</span>
-      </Tag>
-      <Copy value={host.id} title={t("copy the full identifier")} testId="copy-host-id" />
-    </>
-  );
-}
-
-/**
  * The management address, and where it came from.
  *
  * An address the host reported about itself and one the control plane
@@ -269,17 +261,24 @@ function ManagementAddress({ host }: { host: Host }) {
   const t = useT();
   if (!host.management_address) {
     return (
-      <Tag title={t("no address has been observed for this host yet")}>{t("address unknown")}</Tag>
+      <StripItem label={t("Address")} title={t("no address has been observed for this host yet")}>
+        <span className="fl-faint">{t("address unknown")}</span>
+      </StripItem>
     );
   }
   return (
-    <Tag title={t(addressSourceMeaning(host.management_address_source))}>
+    <StripItem
+      label={t("Address")}
+      title={t(addressSourceMeaning(host.management_address_source))}
+      copy={host.management_address}
+      copyTitle={t("copy the address")}
+      copyTestId="copy-host-address"
+    >
       <span className="fl-mono">{host.management_address}</span>
-      {" "}
       <span className="fl-faint" data-testid="address-source">
         {host.management_address_source ?? t("unknown")}
       </span>
-    </Tag>
+    </StripItem>
   );
 }
 
@@ -341,7 +340,7 @@ function HostTags({ host }: { host: Host }) {
         ? host.tags.map((tag) => (
             <Tag
               key={tag}
-              to={`/next/hosts?tag=${encodeURIComponent(tag)}`}
+              to={`/hosts?tag=${encodeURIComponent(tag)}`}
               title={t("show every host tagged {tag}", { tag })}
             >
               {tag}

@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import { Readiness, verdictTone } from "./Readiness";
-import { readinessVerdict } from "../../pages/Readiness";
+import { readinessVerdict } from "../../lib/readiness";
 import { ToastProvider } from "../../components/Toast";
 
 /**
@@ -142,7 +142,7 @@ describe("the readiness screen", () => {
     expect(screen.getByRole("status")).toHaveTextContent("1 requirements are not met everywhere");
     const row = screen.getByTestId("gap-docker.compose");
     expect(within(row).getByText("docker.compose")).toBeInTheDocument();
-    expect(within(row).getByRole("link", { name: "web-1" })).toHaveAttribute("href", "/next/hosts/h1");
+    expect(within(row).getByRole("link", { name: "web-1" })).toHaveAttribute("href", "/hosts/h1");
     // Both hosts gave the same sentence, so it is a cause and is written
     // once rather than once per machine.
     expect(within(row).getAllByText("this host has no Docker Compose plugin")).toHaveLength(1);

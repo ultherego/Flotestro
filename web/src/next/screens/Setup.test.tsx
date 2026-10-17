@@ -98,11 +98,11 @@ const base = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-function draw() {
+function draw(tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/next/setup"]}><ToastProvider>{children}</ToastProvider></MemoryRouter>
+      <MemoryRouter initialEntries={[tab ? `/setup?tab=${tab}` : "/setup"]}><ToastProvider>{children}</ToastProvider></MemoryRouter>
     </QueryClientProvider>
   );
   return render(<Setup />, { wrapper });
@@ -118,8 +118,8 @@ afterEach(() => {
 
 describe("where a step leads", () => {
   it("sends the reader into the new panel, never back into the one it replaces", () => {
-    expect(stepLink("/hosts/new")).toBe("/next/hosts/new");
-    expect(stepLink("/access?tab=mappings")).toBe("/next/access?tab=mappings");
+    expect(stepLink("/hosts/new")).toBe("/hosts/new");
+    expect(stepLink("/access?tab=mappings")).toBe("/access?tab=mappings");
   });
 });
 
@@ -140,11 +140,12 @@ describe("the first run", () => {
     expect(screen.getByTestId("found-identity_provider"))
       .toHaveTextContent("Issuer https://id.example.org.");
     expect(screen.getByText("1 of 4 required steps done")).toBeInTheDocument();
-    // The first undone step is the one to do now, said in a word.
-    const mapping = screen.getByText("2. First group mapping").closest(".fl-card");
-    expect(within(mapping as HTMLElement).getByText("do this next")).toBeInTheDocument();
-    const provider = screen.getByText("1. Identity provider").closest(".fl-card");
-    expect(within(provider as HTMLElement).queryByText("do this next")).toBeNull();
+    // The first undone step is the one to do now, said in a word. A step
+    // is a row of the list since 17.10, not a card of its own.
+    const mapping = screen.getByTestId("step-group_mapping");
+    expect(within(mapping).getByText("do this next")).toBeInTheDocument();
+    const provider = screen.getByTestId("step-identity_provider");
+    expect(within(provider).queryByText("do this next")).toBeNull();
   });
 
   it("names the bootstrap token as live and never shows anything that signs anybody in", async () => {
@@ -181,8 +182,8 @@ describe("the first run", () => {
     Object.assign(answers, base());
     draw();
     await waitFor(() => expect(screen.getByTestId("go-hosts")).toBeInTheDocument());
-    expect(screen.getByTestId("go-hosts")).toHaveAttribute("href", "/next/hosts/new");
-    expect(screen.getByTestId("go-group_mapping")).toHaveAttribute("href", "/next/access?tab=mappings");
+    expect(screen.getByTestId("go-hosts")).toHaveAttribute("href", "/hosts/new");
+    expect(screen.getByTestId("go-group_mapping")).toHaveAttribute("href", "/access?tab=mappings");
     // The step whose work is done here leads nowhere else.
     expect(screen.queryByTestId("go-advertised_address")).toBeNull();
   });
@@ -195,7 +196,7 @@ describe("the first run", () => {
         provider: { issuer: "https://id.example.org", jwks_url: "https://id.example.org/jwks", keys: 2, at: "" },
       },
     });
-    draw();
+    draw("actions");
     await waitFor(() => expect(screen.getByTestId("test-oidc")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("test-oidc"));
     await waitFor(() => expect(screen.getByTestId("test-oidc-verdict")).toHaveTextContent("Answered in 42 ms"));
@@ -206,8 +207,9 @@ describe("the first run", () => {
 
   it("offers no test and no form to somebody who may not act", async () => {
     Object.assign(answers, base({ "/api/v1/whoami": reader }));
-    draw();
-    await waitFor(() => expect(screen.getByTestId("found-group_mapping")).toBeInTheDocument());
+    draw("actions");
+    await waitFor(() => expect(screen.getByText("Only whoever manages access can add a mapping; ask an administrator."))
+      .toBeInTheDocument());
     expect(screen.queryByTestId("test-oidc")).toBeNull();
     expect(screen.queryByTestId("test-directory")).toBeNull();
     expect(screen.queryByTestId("mapping-add")).toBeNull();
@@ -223,7 +225,7 @@ describe("the first run", () => {
     Object.assign(writes, {
       "/api/v1/group-mappings": { group_name: "flotestro-admins", role: "platform_admin" },
     });
-    draw();
+    draw("actions");
     // An undone mapping step opens its form without being asked.
     await waitFor(() => expect(screen.getByTestId("mapping-add")).toBeInTheDocument());
     expect(screen.getByTestId("mapping-add")).toBeDisabled();
@@ -257,7 +259,7 @@ describe("the first run", () => {
     Object.assign(writes, {
       "/api/v1/group-mappings": new ApiError(401, "reauthentication_required", "Sign in again to change access."),
     });
-    draw();
+    draw("actions");
     await waitFor(() => expect(screen.getByTestId("mapping-add")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("mapping-group"), { target: { value: "flotestro-admins" } });
     fireEvent.change(screen.getByTestId("mapping-reason"), { target: { value: "first run: the platform team" } });
@@ -271,7 +273,7 @@ describe("the first run", () => {
     Object.assign(writes, {
       "/api/v1/settings/advertised": { ...advertised, in_force: ["192.168.56.10"], source: "confirmed", loopback_only: false },
     });
-    draw();
+    draw("actions");
     await waitFor(() => expect(screen.getByTestId("advertised-address")).toBeInTheDocument());
     // A proposal is not a setting: nothing is picked and nothing can be sent.
     expect(screen.getByTestId("advertised-confirm")).toBeDisabled();
@@ -295,8 +297,8 @@ describe("the first run", () => {
     await waitFor(() => expect(screen.getByText("Every required step is done")).toBeInTheDocument());
     expect(screen.getByText("The warnings and the optional steps below are advice, not blockers."))
       .toBeInTheDocument();
-    const directory = screen.getByText("5. Directory connector").closest(".fl-card");
-    expect(within(directory as HTMLElement).getByText("Optional")).toBeInTheDocument();
+    const directory = screen.getByTestId("step-directory");
+    expect(within(directory).getByText("Optional")).toBeInTheDocument();
     // With no bootstrap token live there is nothing to take account of first.
     expect(screen.queryByText(/bootstrap token/)).toBeNull();
   });

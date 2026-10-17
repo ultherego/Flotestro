@@ -3,17 +3,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../../lib/api";
 import { useAllowed, useModuleAccess } from "../../../lib/actions";
 import { absoluteTime, relativeTime } from "../../../lib/format";
-import {
-  emptyForm, operationForm, type FormProblem, type FormValue,
-} from "../../../lib/operations";
 import type { Host, Job, LocalAccount } from "../../../lib/types";
 import { useT } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Actions, Band, Banner, Bars, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields,
-  Modal, Note, Pill, Problem, Stack, Table, Tabs, Toolbar, TwoLine, type Segment, type Tone,
+  Actions, Band, Banner, Bars, Bones, Button, C, Card, Check, Empty, Fact, Facts, Field, Fields,
+  Form, Grid, Modal, Note, Pill, Problem, Stack, Table, Tabs, Toolbar, TwoLine, useTab,
+  type Segment, type Tone,
 } from "../../kit";
+import {
+  orderReady, refusalOf, registryOrder, type RegistryOrder,
+} from "../../../lib/host/module";
 
 /**
  * Who can get into this machine, and how.
@@ -44,6 +43,19 @@ const ACCOUNT_CHANGES = [
 /** The shortest reason the API takes for a change of access. */
 const MIN_REASON = 8;
 
+/**
+ * The two readings of this module, in the address so a link leads to the
+ * one that was meant.
+ *
+ * `state` answers "how does anybody get into this machine"; `accounts` is
+ * the register itself. Creating an account is the one decision composed
+ * here, and it opens as a form of its own above the register it adds to -
+ * until 17.10 its button sat in the tool bar of a container headed
+ * "Access", which is the fault the owner named in as many words: a
+ * decision opening under a reading's title.
+ */
+const ACCOUNT_TABS = ["state", "accounts"] as const;
+
 /** One key of an account, as the inventory reports it. */
 type AccountKey = LocalAccount["ssh_keys"][number];
 
@@ -73,21 +85,10 @@ function countWhere<T>(items: T[] | undefined, test: (item: T) => boolean): numb
 
 /* ------------------------------------------------------------- the order */
 
-/** One order as the registry composes it: what would be sent, and what is wrong with it. */
-export type RegistryOrder = { action: string; payload: Record<string, unknown>; problems: FormProblem[] };
-
-/**
- * Puts an order through the registry entry of its action, so this module and
- * the Bulk workspace send one payload and refuse one set of values.
- */
-export function registryOrder(action: string, seed: FormValue): RegistryOrder {
-  const entry = operationForm(action);
-  if (!entry) {
-    return { action, payload: {}, problems: [{ message: "The registry has no form for {action} yet.", params: { action } }] };
-  }
-  const form = { ...emptyForm(entry), ...seed };
-  return { action, payload: entry.toPayload(form), problems: entry.validate(form) };
-}
+/* The registry's order model is lib/host/module's: every module of a host
+   page composes its order the same way, through the registry entry, so
+   there is one copy of what "ready" and "refused" mean. */
+export { orderReady, refusalOf, registryOrder, type RegistryOrder };
 
 export type Order = {
   action: string;
@@ -143,20 +144,6 @@ export function accountOrder(order: Order): RegistryOrder {
   const section = { ...(composed.payload.local_user as Record<string, unknown>) };
   section.keys = keys.map((key) => (key.comment ? { ...key } : { public_key: key.public_key }));
   return { ...composed, payload: { local_user: section } };
-}
-
-/** Whether the registry would take this order as it stands. */
-export function orderReady(order: RegistryOrder): boolean {
-  return order.problems.length === 0;
-}
-
-/** The first refusal of an order as a sentence, or an empty string. */
-export function refusalOf(
-  t: (text: string, params?: Record<string, string | number>) => string,
-  order: RegistryOrder,
-): string {
-  const problem = order.problems[0];
-  return problem ? t(problem.message, problem.params) : "";
 }
 
 export type Request = { mutate: (order: Order) => void; message: string; error: boolean; busy: boolean };
@@ -254,6 +241,7 @@ type Ask =
 
 export function Accounts({ host }: { host: Host }) {
   const t = useT();
+  const [tab, go] = useTab(ACCOUNT_TABS);
   const [showSystem, setShowSystem] = useState(false);
   const [creating, setCreating] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
@@ -298,149 +286,168 @@ export function Accounts({ host }: { host: Host }) {
         <Banner tone={request.error ? "error" : "info"}>{request.message}</Banner>
       )}
 
-      <Board screen="next_host_accounts" catalogue={HOST_ACCOUNTS} drawn={{
-        access: (
-          <Card
-            title={t("Access")}
-            note={t("How each account can be entered, as the host reports it.")}
-            tools={
-              <Guard action="localuser.create" host={host.id}>
-                <Button kind="quiet" onClick={() => setCreating(true)} disabled={creating} testId="new-account">
-                  {t("Create local account")}
-                </Button>
-              </Guard>
-            }
-          >
-            {known === undefined
-              ? <Bones rows={2} height={18} />
-              : <Band segments={access} testId="account-access" />}
-          </Card>
-        ),
-        sources: (
-          <Card title={t("By source")} note={t("Where each account is defined.")}>
-            {known === undefined ? <Bones rows={4} /> : (
-              <Bars items={sources.map((source) => ({
-                label: sourceName(t, source),
-                value: countWhere(known, (a) => a.source === source) ?? 0,
-                tone: (source === "unknown" ? "unknown" : "accent") as Tone,
-              }))} />
-            )}
-          </Card>
-        ),
-        create: creating && (
-          <NewAccount host={host} request={request} onClose={() => setCreating(false)} />
-        ),
-        accounts: (
-          <Card
-            title={t("Accounts")}
-            note={known === undefined ? undefined : t("{n} on this host", { n: accounts.length })}
-            foot={accounts.length > 0
-              ? <span title={absoluteTime(accounts[0].observed_at)}>
-                  {t("Source: the agent's report, observed {when}", { when: relativeTime(accounts[0].observed_at) })}
-                </span>
-              : undefined}
-            flush
-          >
-            <Toolbar>
-              <Check checked={showSystem} onChange={setShowSystem}>{t("Show system accounts")}</Check>
-            </Toolbar>
-            <Table
-              rows={accounts}
-              keyOf={(one) => one.name}
-              loading={query.isLoading}
-              rowTestId={(one) => `account-${one.name}`}
-              /* Keys, groups and expiry open under the account they belong
-                 to, as the panel being replaced opened them: a card
-                 elsewhere on the board makes the reader hunt for it. */
-              opened={(one) => one.name === open}
-              detail={(one) => (
-                <AccountDetail
-                  host={host}
-                  account={one}
-                  request={request}
-                  onAsk={setAsk}
-                  onClose={() => setOpen(null)}
-                />
-              )}
-              empty={showSystem
-                ? t("The host reported no system accounts.")
-                : t("The host has not reported user accounts yet.")}
-              columns={[
-                {
-                  key: "name",
-                  head: t("Account"),
-                  cell: (one) => <TwoLine sub={one.gecos || undefined}>{one.name}</TwoLine>,
-                },
-                { key: "uid", head: "UID", num: true, cell: (one) => one.uid },
-                { key: "source", head: t("Source"), minor: true, cell: (one) => sourceName(t, one.source) },
-                { key: "access", head: t("Access"), cell: (one) => <AccessPill account={one} /> },
-                {
-                  key: "keys",
-                  head: t("SSH keys"),
-                  cell: (one) => one.ssh_keys.length === 0
-                    ? <Note>{t("none")}</Note>
-                    : <>{one.ssh_keys.map((key) => (
-                        <TwoLine key={`${fileOf(key)}:${key.fingerprint}`} sub={key.comment || undefined}>
-                          <span title={`${t("fingerprint")} ${key.fingerprint}`}>
-                            {key.type || "?"} · {shortFingerprint(key.fingerprint)}
-                          </span>
-                        </TwoLine>
-                      ))}</>,
-                },
-                { key: "groups", head: t("Groups"), minor: true, cell: (one) => <AccountGroups groups={one.groups} /> },
-                { key: "expires", head: t("Expires"), cell: (one) => <Expiry account={one} /> },
-                {
-                  key: "do",
-                  head: t("Actions"),
-                  actions: true,
-                  cell: (one) => one.source === "directory"
-                    // Changing a directory account belongs to the directory.
-                    ? <Note>{t("managed by directory")}</Note>
-                    : (
-                      <Actions>
-                        {one.locked === true ? (
-                          <Guard action="localuser.unlock" host={host.id}>
-                            <Button
-                              kind="quiet"
-                              title={t("Lets the account log in again; the reason is kept in the audit trail.")}
-                              onClick={() => setAsk({ kind: "unlock", account: one })}
-                            >
-                              {t("Unlock")}
-                            </Button>
-                          </Guard>
-                        ) : (
-                          <Guard action="localuser.lock" host={host.id}>
-                            <Button
-                              kind="quiet"
-                              title={t("Locks the account so nobody can log in as it; the order goes out at once and can be undone with Unlock.")}
-                              onClick={() => request.mutate({ action: "localuser.lock", name: one.name })}
-                              testId={`lock-${one.name}`}
-                            >
-                              {t("Lock")}
-                            </Button>
-                          </Guard>
-                        )}
-                        <Button
-                          kind="quiet"
-                          onClick={() => setOpen(open === one.name ? null : one.name)}
-                          testId={`manage-${one.name}`}
-                        >
-                          {t("Manage")}
-                        </Button>
-                        <Guard action="localuser.delete" host={host.id}>
-                          <Button kind="danger" onClick={() => setAsk({ kind: "delete", account: one })} testId={`delete-${one.name}`}>
-                            {t("Delete")}
-                          </Button>
-                        </Guard>
-                      </Actions>
-                    ),
-                },
-              ]}
-            />
-          </Card>
-        ),
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "state", label: t("State") },
+          { value: "accounts", label: t("Accounts"), count: known === undefined ? undefined : accounts.length },
+        ]}
+      />
 
-      }} />
+      {tab === "state" && (
+        <Grid>
+          <C span={8}>
+            <Card
+              title={t("Access")}
+              note={t("How each account can be entered, as the host reports it.")}
+            >
+              {known === undefined
+                ? <Bones rows={2} height={18} />
+                : <Band segments={access} testId="account-access" />}
+            </Card>
+          </C>
+          <C span={4}>
+            <Card title={t("By source")} note={t("Where each account is defined.")}>
+              {known === undefined ? <Bones rows={4} /> : (
+                <Bars items={sources.map((source) => ({
+                  label: sourceName(t, source),
+                  value: countWhere(known, (a) => a.source === source) ?? 0,
+                  tone: (source === "unknown" ? "unknown" : "accent") as Tone,
+                }))} />
+              )}
+            </Card>
+          </C>
+        </Grid>
+      )}
+
+      {tab === "accounts" && (
+        <Grid>
+          {/* The form stands on its own face, above the register it adds
+              to, and never inside a container that measures something. */}
+          {creating && (
+            <C span={12}>
+              <NewAccount host={host} request={request} onClose={() => setCreating(false)} />
+            </C>
+          )}
+          <C span={12}>
+            <Card
+              title={t("Accounts")}
+              note={known === undefined ? undefined : t("{n} on this host", { n: accounts.length })}
+              tools={
+                <Guard action="localuser.create" host={host.id}>
+                  <Button kind="quiet" onClick={() => setCreating(true)} disabled={creating} testId="new-account">
+                    {t("Create local account")}
+                  </Button>
+                </Guard>
+              }
+              foot={accounts.length > 0
+                ? <span title={absoluteTime(accounts[0].observed_at)}>
+                    {t("Source: the agent's report, observed {when}", { when: relativeTime(accounts[0].observed_at) })}
+                  </span>
+                : undefined}
+              flush
+            >
+              <Toolbar>
+                <Check checked={showSystem} onChange={setShowSystem}>{t("Show system accounts")}</Check>
+              </Toolbar>
+              <Table
+                rows={accounts}
+                keyOf={(one) => one.name}
+                loading={query.isLoading}
+                rowTestId={(one) => `account-${one.name}`}
+                /* Keys, groups and expiry open under the account they belong
+                   to, as the panel being replaced opened them: a card
+                   elsewhere on the board makes the reader hunt for it. */
+                opened={(one) => one.name === open}
+                detail={(one) => (
+                  <AccountDetail
+                    host={host}
+                    account={one}
+                    request={request}
+                    onAsk={setAsk}
+                    onClose={() => setOpen(null)}
+                  />
+                )}
+                empty={showSystem
+                  ? t("The host reported no system accounts.")
+                  : t("The host has not reported user accounts yet.")}
+                columns={[
+                  {
+                    key: "name",
+                    head: t("Account"),
+                    cell: (one) => <TwoLine sub={one.gecos || undefined}>{one.name}</TwoLine>,
+                  },
+                  { key: "uid", head: "UID", num: true, cell: (one) => one.uid },
+                  { key: "source", head: t("Source"), minor: true, cell: (one) => sourceName(t, one.source) },
+                  { key: "access", head: t("Access"), cell: (one) => <AccessPill account={one} /> },
+                  {
+                    key: "keys",
+                    head: t("SSH keys"),
+                    cell: (one) => one.ssh_keys.length === 0
+                      ? <Note>{t("none")}</Note>
+                      : <>{one.ssh_keys.map((key) => (
+                          <TwoLine key={`${fileOf(key)}:${key.fingerprint}`} sub={key.comment || undefined}>
+                            <span title={`${t("fingerprint")} ${key.fingerprint}`}>
+                              {key.type || "?"} · {shortFingerprint(key.fingerprint)}
+                            </span>
+                          </TwoLine>
+                        ))}</>,
+                  },
+                  { key: "groups", head: t("Groups"), minor: true, cell: (one) => <AccountGroups groups={one.groups} /> },
+                  { key: "expires", head: t("Expires"), cell: (one) => <Expiry account={one} /> },
+                  {
+                    key: "do",
+                    head: t("Actions"),
+                    actions: true,
+                    cell: (one) => one.source === "directory"
+                      // Changing a directory account belongs to the directory.
+                      ? <Note>{t("managed by directory")}</Note>
+                      : (
+                        <Actions>
+                          {one.locked === true ? (
+                            <Guard action="localuser.unlock" host={host.id}>
+                              <Button
+                                kind="quiet"
+                                title={t("Lets the account log in again; the reason is kept in the audit trail.")}
+                                onClick={() => setAsk({ kind: "unlock", account: one })}
+                              >
+                                {t("Unlock")}
+                              </Button>
+                            </Guard>
+                          ) : (
+                            <Guard action="localuser.lock" host={host.id}>
+                              <Button
+                                kind="quiet"
+                                title={t("Locks the account so nobody can log in as it; the order goes out at once and can be undone with Unlock.")}
+                                onClick={() => request.mutate({ action: "localuser.lock", name: one.name })}
+                                testId={`lock-${one.name}`}
+                              >
+                                {t("Lock")}
+                              </Button>
+                            </Guard>
+                          )}
+                          <Button
+                            kind="quiet"
+                            onClick={() => setOpen(open === one.name ? null : one.name)}
+                            testId={`manage-${one.name}`}
+                          >
+                            {t("Manage")}
+                          </Button>
+                          <Guard action="localuser.delete" host={host.id}>
+                            <Button kind="danger" onClick={() => setAsk({ kind: "delete", account: one })} testId={`delete-${one.name}`}>
+                              {t("Delete")}
+                            </Button>
+                          </Guard>
+                        </Actions>
+                      ),
+                  },
+                ]}
+              />
+            </Card>
+          </C>
+        </Grid>
+      )}
 
       {ask?.kind === "unlock" && (
         <UnlockAsk host={host} account={ask.account} request={request} onClose={() => setAsk(null)} />
@@ -881,9 +888,34 @@ function NewAccount({ host, request, onClose }: { host: Host; request: Request; 
   const ready = orderReady(createOrder) && (privileged.length === 0 || reason.trim().length >= MIN_REASON);
 
   return (
-    <Card
+    <Form
       title={t("New local account")}
       note={t("The account is created without a password; access is by SSH key only. The panel never stores or transmits passwords.")}
+      testId="new-account-form"
+      actions={
+        <>
+          <Guard action="localuser.create" host={host.id}>
+            <Button
+              disabled={!ready || request.busy}
+              title={refusalOf(t, createOrder)}
+              testId="create-account"
+              onClick={() => request.mutate({
+                action: "localuser.create",
+                name: name.trim(),
+                gecos: description.trim(),
+                groups: groupList,
+                ssh_keys: keyList,
+                create_home: true,
+                inactive: inactive || undefined,
+                reason: privileged.length > 0 ? reason.trim() : undefined,
+              })}
+            >
+              {t("Request account creation")}
+            </Button>
+          </Guard>
+          <Button kind="quiet" onClick={onClose}>{t("Cancel")}</Button>
+        </>
+      }
     >
       <Fields>
         <Field label={t("Name")}>
@@ -919,29 +951,7 @@ function NewAccount({ host, request, onClose }: { host: Host; request: Request; 
         </Problem>
       )}
       {name.trim() !== "" && !orderReady(createOrder) && <Problem>{refusalOf(t, createOrder)}</Problem>}
-      <Actions>
-        <Guard action="localuser.create" host={host.id}>
-          <Button
-            disabled={!ready || request.busy}
-            title={refusalOf(t, createOrder)}
-            testId="create-account"
-            onClick={() => request.mutate({
-              action: "localuser.create",
-              name: name.trim(),
-              gecos: description.trim(),
-              groups: groupList,
-              ssh_keys: keyList,
-              create_home: true,
-              inactive: inactive || undefined,
-              reason: privileged.length > 0 ? reason.trim() : undefined,
-            })}
-          >
-            {t("Request account creation")}
-          </Button>
-        </Guard>
-        <Button kind="quiet" onClick={onClose}>{t("Cancel")}</Button>
-      </Actions>
-    </Card>
+    </Form>
   );
 }
 
@@ -1219,13 +1229,3 @@ function sourceName(t: (text: string) => string, source: LocalAccount["source"])
   }
 }
 
-/** The containers this module can draw, and the shape each ships with. */
-export const HOST_ACCOUNTS: BoardEntry[] = [
-  { key: "access", title: "Access", width: 8, height: 2 },
-  { key: "sources", title: "By source", width: 4, height: 2 },
-  { key: "create", title: "New local account", width: 12, height: 3 },
-  { key: "accounts", title: "Accounts", width: 12, height: 4 },
-];
-
-/** The name this module's arrangement is stored under. */
-export const HOST_ACCOUNTS_SCREEN = "next_host_accounts";

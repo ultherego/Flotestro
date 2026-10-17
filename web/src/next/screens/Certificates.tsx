@@ -1,13 +1,12 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { absoluteTime, relativeTime } from "../../lib/format";
 import { useT, type Translate } from "../../i18n";
-import { Board } from "../Board";
-import type { BoardEntry } from "../../components/board";
 import {
-  Band, Bars, Card, Empty, Kpi, Pill, Problem, Seg, Table, TwoLine, type Segment, type Tone,
+  Band, Bars, C, Card, Empty, Form, Grid, Kpi, Kpis, Note, Pill, Problem, Seg, Table, Tabs,
+  TwoLine, useTab, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -155,7 +154,7 @@ export function Certificates() {
   const thresholds = head?.thresholds;
 
   return (
-    <Board screen={CERTIFICATES_SCREEN} catalogue={CERTIFICATES} drawn={{
+    <Readings panels={{
       expired: (
         <Kpi
           icon="certificates"
@@ -305,7 +304,7 @@ export function Certificates() {
               {
                 key: "host",
                 head: t("Host"),
-                cell: (one) => <Link to={`/next/hosts/${one.host_id}/certificates`}>{one.hostname}</Link>,
+                cell: (one) => <Link to={`/hosts/${one.host_id}/certificates`}>{one.hostname}</Link>,
               },
               {
                 key: "path",
@@ -353,18 +352,9 @@ export function Certificates() {
           title={t("Trusted authorities")}
           flush
           note={t("During a rotation a host trusts both the old authority and the new one; the old may only be withdrawn once nothing signs with it any more.")}
-          tools={
-            <Link className="fl-btn fl-quiet fl-small" to={bulk(
-              "certificate.trust.ensure",
-              t("Distribute a new authority"),
-              { certificate: { anchor_id: `fleet-ca-${new Date().getFullYear()}`, certificate: NEW_AUTHORITY } },
-            )}>{t("Distribute a new authority")}</Link>
-          }
           foot={
             trust.data ? (
               <>
-                {t("Rotation in four stages, each an ordinary campaign: distribute the new authority, verify it reached every host, rotate the leaves, withdraw the old one. A withdrawal is refused while any host is unverified or still holds a certificate issued by it.")}
-                {" "}
                 {t("{n} hosts have not reported a trust store yet", { n: trust.data.hosts_unknown })}
                 {(trust.data.hosts_without_trust_store ?? []).map((group) => `; ${group.count}: ${t(group.reason)}`).join("")}
               </>
@@ -446,7 +436,75 @@ export function Certificates() {
           )}
         </Card>
       ),
+      distribute: (
+        <Form
+          title={t("Distribute a new authority")}
+          note={t("Rotation in four stages, each an ordinary campaign: distribute the new authority, verify it reached every host, rotate the leaves, withdraw the old one.")}
+          actions={
+            <Link className="fl-btn" to={bulk(
+              "certificate.trust.ensure",
+              t("Distribute a new authority"),
+              { certificate: { anchor_id: `fleet-ca-${new Date().getFullYear()}`, certificate: NEW_AUTHORITY } },
+            )} data-testid="distribute-authority">{t("Open the campaign")}</Link>
+          }
+        >
+          <Note>
+            {t("The campaign opens with the order filled in; the authority certificate itself is pasted into it. A withdrawal is refused while any host is unverified or still holds a certificate issued by the old authority.")}
+          </Note>
+        </Form>
+      ),
     }} />
+  );
+}
+
+/** The sub-tabs: the leaves of the fleet, and what signed them. */
+const CERTIFICATE_TABS = ["certificates", "authorities"] as const;
+
+/**
+ * The deadlines and the authorities, apart.
+ *
+ * They are read for different questions - "what expires this week" and
+ * "what signs the fleet" - and the one decision on this screen, handing
+ * the fleet a new authority, stands on its own face under the second
+ * rather than as a link in the corner of a table nobody reads first.
+ */
+function Readings({ panels }: { panels: Record<string, ReactNode> }) {
+  const t = useT();
+  const [tab, go] = useTab(CERTIFICATE_TABS);
+  return (
+    <>
+      <Kpis>
+        {panels.expired}
+        {panels.soon}
+        {panels.unreadable}
+        {panels.silent}
+      </Kpis>
+
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "certificates", label: t("Certificates") },
+          { value: "authorities", label: t("Authorities") },
+        ]}
+      />
+
+      {tab === "certificates" && (
+        <Grid>
+          <C span={7}>{panels.expiry}</C>
+          <C span={5}>{panels.hosts}</C>
+          <C span={6}>{panels.timeline}</C>
+          <C span={6}>{panels.renewal}</C>
+          <C span={12}>{panels.list}</C>
+        </Grid>
+      )}
+      {tab === "authorities" && (
+        <Grid>
+          <C span={12}>{panels.distribute}</C>
+          <C span={12}>{panels.trust}</C>
+        </Grid>
+      )}
+    </>
   );
 }
 
@@ -518,18 +576,3 @@ function caption(t: Translate, one: Item): string {
   if (one.status === "unknown" || one.days_to_expiry === undefined) return t("unknown");
   return t("{n} d", { n: one.days_to_expiry });
 }
-
-export const CERTIFICATES_SCREEN = "next_certificates";
-
-export const CERTIFICATES: BoardEntry[] = [
-  { key: "expired", title: "Past due", width: 3, height: 1 },
-  { key: "soon", title: "Due soon", width: 3, height: 1 },
-  { key: "unreadable", title: "Unreadable", width: 3, height: 1 },
-  { key: "silent", title: "Hosts reporting none", width: 3, height: 1 },
-  { key: "expiry", title: "Expiry", width: 7, height: 2 },
-  { key: "hosts", title: "Hosts", width: 5, height: 2 },
-  { key: "timeline", title: "When the deadlines come", width: 6, height: 2 },
-  { key: "renewal", title: "Renewal", width: 6, height: 2 },
-  { key: "list", title: "Certificates", width: 12, height: 5 },
-  { key: "trust", title: "Trusted authorities", width: 12, height: 4 },
-];

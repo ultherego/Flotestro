@@ -72,10 +72,10 @@ const job = (over: Record<string, unknown>) => ({
 const layout = { widgets: [], present: false, revision: 0 };
 const noActivity = { hours: [], succeeded: [], failed: [], other: [] };
 
-function draw() {
+function draw(where = "/") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}><MemoryRouter initialEntries={[where]}><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
   );
   return render(<Jobs />, { wrapper });
 }
@@ -97,8 +97,8 @@ describe("the job list", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("job-j1")).toBeInTheDocument());
     const row = screen.getByTestId("job-j1");
-    expect(within(row).getByText("unit.restart").closest("a")).toHaveAttribute("href", "/next/jobs/j1");
-    expect(within(row).getByRole("link", { name: "agent-arch" })).toHaveAttribute("href", "/next/hosts/h1");
+    expect(within(row).getByText("unit.restart").closest("a")).toHaveAttribute("href", "/jobs/j1");
+    expect(within(row).getByRole("link", { name: "agent-arch" })).toHaveAttribute("href", "/hosts/h1");
     expect(within(row).getByText("succeeded")).toBeInTheDocument();
   });
 
@@ -128,8 +128,8 @@ describe("the job list", () => {
       },
       "/api/v1/settings/layout": layout,
     });
-    draw();
-    await waitFor(() => expect(screen.getByTestId("job-j3")).toBeInTheDocument());
+    draw("/?tab=statistics");
+    await waitFor(() => expect(screen.getAllByText("among the 2 listed").length).toBeGreaterThan(0));
     const band = screen.getByTestId("job-states");
     expect(band).toHaveTextContent("Awaiting approval");
     expect(band).toHaveTextContent("Succeeded");
@@ -330,7 +330,7 @@ describe("the attempts of a job, read on the list", () => {
     // And the list is still there: the attempts are read without leaving it.
     expect(screen.getByTestId("job-j1")).toBeInTheDocument();
     // The whole of it is one link away.
-    expect(screen.getByRole("link", { name: /Open the job/ })).toHaveAttribute("href", "/next/jobs/j1");
+    expect(screen.getByRole("link", { name: /Open the job/ })).toHaveAttribute("href", "/jobs/j1");
   });
 
   it("closes again, and reads nothing it was not asked to", async () => {

@@ -4,19 +4,20 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { api, ApiError, LIST_PAGE, loadedItems, type Page } from "../../lib/api";
 import { OPERATIONS_INTERVAL } from "../../lib/stream";
 import { absoluteTime, bytes, relativeTime } from "../../lib/format";
-import { stateName } from "../../components/ui";
+import { stateName } from "../../lib/states";
 import { useToast } from "../../components/Toast";
 import type {
   Host, ReadFanOut, ReadFanOutCounts, ReadFanOutHost, ReadFanOutView, Whoami,
 } from "../../lib/types";
-import { buildExpression, describeExpression, RULE_FIELDS, type Rule, type RuleField } from "../../pages/Groups";
-import { FacetList, payloadSkeleton, useFleetFacets, useOperations, type Operation } from "../../pages/Bulk";
-import { parsePayload, payloadHint } from "../../pages/Reads";
+import { buildExpression, describeExpression, RULE_FIELDS, type Rule, type RuleField } from "../../lib/selectors";
+import { payloadSkeleton, useFleetFacets, useOperations, type Operation } from "../../lib/orders";
+import { FacetList } from "../../components/FacetList";
+import { parsePayload, payloadHint } from "../../lib/payload";
 import { useT, type Translate } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Band, Bars, Bones, Card, Check, Dot, Empty, Field, Fields, Find, Grid, HeadActions, Modal, Note, Pill, Problem, Seg, Stack, Table, Tabs, Tag, Tags, Toolbar, TwoLine, type Segment, type Tone,
+  Actions, Band, Bars, Bones, Card, Check, Dot, Empty, Field, Fields, Find, Form, Grid, HeadActions, Modal, Note, Pill, Problem, Seg, Stack, Table, Tabs, Tag, Tags, Toolbar, TwoLine, useTab, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -29,6 +30,9 @@ import {
  * one host's typed result at a time for a read that answers in a shape.
  */
 
+/** The sub-tabs: the reads, and the form that orders one. */
+const READ_TABS = ["reads", "new"] as const;
+
 export function Reads() {
   const { id } = useParams();
   return id ? <OneRead id={id} /> : <ReadList />;
@@ -39,7 +43,7 @@ type FanOutOperation = Operation & { fanout_limit?: number; fanout_refusal?: str
 
 /** The address of the form with a read already filled in, for a host page. */
 export function readsPrefill(action: string, payload: unknown): string {
-  return `/next/reads?action=${encodeURIComponent(action)}&payload=${encodeURIComponent(JSON.stringify(payload, null, 2))}`;
+  return `/reads?action=${encodeURIComponent(action)}&payload=${encodeURIComponent(JSON.stringify(payload, null, 2))}`;
 }
 
 /**
@@ -63,7 +67,9 @@ function ReadList() {
   const [prefill] = useSearchParams();
   // A link from a host page opens the form already filled in; the plain
   // address opens on the list.
-  const [building, setBuilding] = useState(prefill.has("action"));
+  const [tab, go] = useTab(READ_TABS);
+  const building = tab === "new";
+  useEffect(() => { if (prefill.has("action")) go("new"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The list grows page by page from the newest read, so an operator who
   // reads a lot keeps the old fan-outs one click away rather than losing
@@ -106,15 +112,21 @@ function ReadList() {
       <HeadActions><button
             type="button"
             className={building ? "fl-quiet" : undefined}
-            onClick={() => setBuilding(!building)}
+            onClick={() => go(building ? "reads" : "new")}
             data-testid="new-read"
           >
             {building ? t("Hide the form") : t("New read")}
           </button></HeadActions>
-      <Board screen={READS_SCREEN} catalogue={READS} drawn={{
-        // A container with nothing to draw is left off the grid, so the
-        // form takes its place only while it is open.
-        form: building && <NewRead onDone={() => setBuilding(false)} />,
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "reads", label: t("Reads") },
+          { value: "new", label: t("New read") },
+        ]}
+      />
+      {building && <NewRead onDone={() => go("reads")} />}
+      {!building && <Board screen={READS_SCREEN} catalogue={READS} drawn={{
         states: (
           <Card
             title={t("Hosts by state")}
@@ -151,7 +163,7 @@ function ReadList() {
                   tight: true,
                   cell: (one) => (
                     <TwoLine sub={one.created_by}>
-                      <Link to={`/next/reads/${one.id}`}><code>{one.action}</code></Link>
+                      <Link to={`/reads/${one.id}`}><code>{one.action}</code></Link>
                     </TwoLine>
                   ),
                 },
@@ -182,7 +194,7 @@ function ReadList() {
                 : <Bars items={byOperation.map(([action, n]) => ({ label: <code>{action}</code>, value: n }))} />}
           </Card>
         ),
-      }} />
+      }} />}
     </>
   );
 }
@@ -312,7 +324,7 @@ function NewRead({ onDone }: { onDone: () => void }) {
     onSuccess: (view) => {
       void queryClient.invalidateQueries({ queryKey: ["reads"] });
       onDone();
-      navigate(`/next/reads/${view.id}`);
+      navigate(`/reads/${view.id}`);
     },
     onError: (error) => setErrorMessage(refusalMessage(error, t)),
   });
@@ -326,10 +338,10 @@ function NewRead({ onDone }: { onDone: () => void }) {
   const ready = Boolean(chosen) && payload.value !== undefined && named && !tooMany;
 
   return (
-    <Card
+    <Form
       title={t("New read")}
       note={t("Every host gets an ordinary job with this payload; the results are merged here. A read needs no approval.")}
-      foot={
+      actions={
         <Actions>
           <button type="button" onClick={() => create.mutate()} disabled={!ready || create.isPending} data-testid="order-read">
             {create.isPending ? t("Ordering…") : t("Read")}
@@ -436,7 +448,7 @@ function NewRead({ onDone }: { onDone: () => void }) {
           )}
         </Stack>
       )}
-    </Card>
+    </Form>
   );
 }
 
@@ -665,7 +677,7 @@ function OneRead({ id }: { id: string }) {
                 key: "host",
                 head: t("Host"),
                 cell: (row) => (
-                  <Link to={`/next/hosts/${row.host.host_id}`}>{row.host.hostname || row.host.host_id}</Link>
+                  <Link to={`/hosts/${row.host.host_id}`}>{row.host.hostname || row.host.host_id}</Link>
                 ),
               },
               {
@@ -708,7 +720,7 @@ function OneRead({ id }: { id: string }) {
                 minor: true,
                 tight: true,
                 cell: (row) => (row.kind === "job"
-                  ? <Link to={`/next/jobs?fanout_id=${view.id}`}><code>{row.host.job_id.slice(0, 8)}</code></Link>
+                  ? <Link to={`/jobs?fanout_id=${view.id}`}><code>{row.host.job_id.slice(0, 8)}</code></Link>
                   : <span className="fl-faint">—</span>),
               },
             ]}
@@ -950,8 +962,7 @@ function Result({ action, host }: { action: string; host: ReadFanOutHost }) {
 export const READS_SCREEN = "next_reads";
 
 export const READS: BoardEntry[] = [
-  { key: "form", title: "New read", width: 12, height: 6 },
-  { key: "states", title: "Hosts by state", width: 12, height: 1 },
-  { key: "list", title: "Your reads", width: 9, height: 4 },
-  { key: "operations", title: "By operation", width: 3, height: 3 },
+  { key: "states", title: "Hosts by state", width: 12, height: 2 },
+  { key: "list", title: "Your reads", width: 9, height: 7 },
+  { key: "operations", title: "By operation", width: 3, height: 5 },
 ];

@@ -81,11 +81,14 @@ const base = (items: unknown[] = [schedule()], entries: CalendarEntry[] = []) =>
   "/api/v1/maintenance/calendar": { items: entries, count: entries.length },
 });
 
-function draw() {
+/** The screen is two tabs; the calendar is one a reader asks for by address. */
+function draw(tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter>
+      <MemoryRouter initialEntries={[tab ? `/campaigns/schedules?tab=${tab}` : "/campaigns/schedules"]}>
+        <ToastProvider>{children}</ToastProvider>
+      </MemoryRouter>
     </QueryClientProvider>
   );
   return render(<Schedules />, { wrapper });
@@ -196,7 +199,7 @@ describe("the schedules the fleet runs on a clock", () => {
     // The campaign the last moment placed is reachable from the row, in
     // the new panel rather than the one this replaces.
     expect(within(row).getByRole("link", { name: "campaign" }))
-      .toHaveAttribute("href", "/next/campaigns/c1");
+      .toHaveAttribute("href", "/campaigns/c1");
   });
 
   it("counts nothing before the list has arrived, and never a nought", () => {
@@ -232,7 +235,7 @@ describe("the schedules the fleet runs on a clock", () => {
     draw();
     await waitFor(() => expect(screen.getByText("No campaign runs on a clock here yet.")).toBeInTheDocument());
     expect(screen.getByRole("link", { name: "Schedule one from the Bulk workspace" }))
-      .toHaveAttribute("href", "/next/bulk");
+      .toHaveAttribute("href", "/bulk");
   });
 
   it("will not create a schedule the server would refuse, and says why", async () => {
@@ -353,7 +356,7 @@ describe("the schedules the fleet runs on a clock", () => {
     });
     await waitFor(() =>
       expect(screen.getByRole("link", { name: "nightly-restart" }))
-        .toHaveAttribute("href", "/next/campaigns/c9"));
+        .toHaveAttribute("href", "/campaigns/c9"));
   });
 });
 
@@ -377,7 +380,7 @@ describe("the maintenance calendar", () => {
       },
     ]));
     vi.setSystemTime(new Date("2026-10-16T09:00:00Z"));
-    draw();
+    draw("calendar");
     await waitFor(() => expect(screen.getByTestId("calendar")).toBeInTheDocument());
     const calendar = screen.getByTestId("calendar");
     expect(within(calendar).getAllByRole("columnheader").map((one) => one.textContent))
@@ -402,7 +405,7 @@ describe("the maintenance calendar", () => {
     const fifth = screen.getByTestId("day-2026-10-05");
     expect(within(fifth).getByText("maintenance")).toBeInTheDocument();
     expect(within(fifth).getByRole("link", { name: "agent-arch" }))
-      .toHaveAttribute("href", "/next/hosts/h1");
+      .toHaveAttribute("href", "/hosts/h1");
     expect(fifth).toHaveTextContent("kernel · tszymanski");
     vi.useRealTimers();
   });
@@ -422,7 +425,7 @@ describe("the maintenance calendar", () => {
     // The month the screen opens on is the one the clock is in, so the
     // entries are placed in it rather than in a month of 2026.
     vi.setSystemTime(new Date("2026-10-16T09:00:00Z"));
-    draw();
+    draw("calendar");
     await waitFor(() => expect(screen.getAllByTestId("day-2026-10-05").length).toBeGreaterThan(0));
     const rows = screen.getAllByTestId("day-2026-10-05");
     expect(rows.some((row) => within(row).queryByText("maintenance"))).toBe(true);
@@ -430,9 +433,9 @@ describe("the maintenance calendar", () => {
     // The window covers two days, so it is a row on each of them.
     expect(screen.getAllByRole("link", { name: "agent-arch" })).toHaveLength(2);
     expect(screen.getAllByRole("link", { name: "agent-arch" })[0])
-      .toHaveAttribute("href", "/next/hosts/h1");
+      .toHaveAttribute("href", "/hosts/h1");
     expect(screen.getAllByRole("link", { name: "october patching" })[0])
-      .toHaveAttribute("href", "/next/campaigns/c1");
+      .toHaveAttribute("href", "/campaigns/c1");
     // The window runs into the next day, and says so there rather than
     // repeating an hour that belongs to the day it opened on.
     const second = screen.getAllByTestId("day-2026-10-06");
@@ -444,7 +447,7 @@ describe("the maintenance calendar", () => {
   it("asks the server for the month on screen when the month is changed", async () => {
     Object.assign(answers, base([], []));
     vi.setSystemTime(new Date("2026-10-16T09:00:00Z"));
-    draw();
+    draw("calendar");
     await waitFor(() => expect(screen.getByTestId("calendar-month")).toHaveTextContent("2026-10"));
     asked.length = 0;
     fireEvent.click(screen.getByRole("button", { name: "Next month" }));
@@ -457,7 +460,7 @@ describe("the maintenance calendar", () => {
 
   it("says a month with nothing in it is empty rather than drawing nothing", async () => {
     Object.assign(answers, base([], []));
-    draw();
+    draw("calendar");
     await waitFor(() => expect(screen.getByText("Nothing is planned in this month.")).toBeInTheDocument());
   });
 });

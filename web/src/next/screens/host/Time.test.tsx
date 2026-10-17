@@ -71,10 +71,18 @@ function base(payload: unknown) {
   });
 }
 
-function draw() {
+/**
+ * The module is two sub-tabs since 17.10 and the address names the open
+ * one, so a test of a decision asks for the tab a reader would follow a
+ * link to.
+ */
+function draw(tab?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const where = tab ? `/hosts/h1/time?tab=${tab}` : "/hosts/h1/time";
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[where]}>{children}</MemoryRouter>
+    </QueryClientProvider>
   );
   return render(<Time host={host} />, { wrapper });
 }
@@ -122,7 +130,7 @@ describe("the clock of a host", () => {
 
   it("asks the host to test the servers typed in, and not the panel", async () => {
     base({ sources: [] });
-    draw();
+    draw("change");
     await waitFor(() => expect(screen.getByTestId("time-test")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("time-servers"), { target: { value: "ntp1.example.com, ntp2.example.com" } });
     fireEvent.click(screen.getByTestId("time-test"));
@@ -135,7 +143,7 @@ describe("the clock of a host", () => {
 
   it("sets the sources only after the reason and the hostname", async () => {
     base({ sources: [] });
-    draw();
+    draw("change");
     await waitFor(() => expect(screen.getByTestId("time-apply")).toBeInTheDocument());
     // An empty list is not a way of clearing the sources, so the registry
     // refuses the order until a server is named.
@@ -159,7 +167,7 @@ describe("the clock of a host", () => {
       write_reason: "chrony.conf includes no directory the panel may write in",
       can_add_source_dir: false,
     });
-    draw();
+    draw("change");
     await waitFor(() => expect(screen.getByText(/includes no directory/)).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("time-servers"), { target: { value: "ntp1.example.com" } });
     // The host's own refusal comes first, whatever the servers say.
@@ -173,7 +181,7 @@ describe("the clock of a host", () => {
       can_add_source_dir: true,
       config_path: "/etc/chrony/chrony.conf",
     });
-    draw();
+    draw("change");
     await waitFor(() => expect(screen.getByText(/append one line to/)).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("time-servers"), { target: { value: "ntp1.example.com" } });
     expect(screen.getByTestId("time-apply")).toBeDisabled();
@@ -183,7 +191,7 @@ describe("the clock of a host", () => {
 
   it("sets a timezone the tz database knows, and refuses one it does not", async () => {
     base({ sources: [], timezone: "UTC" });
-    draw();
+    draw("change");
     await waitFor(() => expect(screen.getByTestId("zone-set")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("time-zone"), { target: { value: "Europe/Warsaw" } });
     fireEvent.click(screen.getByTestId("zone-set"));

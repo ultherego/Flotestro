@@ -10,11 +10,9 @@ import {
 import { relativeTime, absoluteTime } from "../../../lib/format";
 import type { Host, InventoryFragment, Job } from "../../../lib/types";
 import { useT, type Translate } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Banner, Bars, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Kpi, Modal, Note,
-  Pill, Stack, Table,
+  Banner, Bars, Bones, Button, C, Card, Check, Empty, Fact, Facts, Field, Fields, Form, Grid, Kpi,
+  Modal, Note, Pill, Section, Stack, Table, Tabs, useTab,
 } from "../../kit";
 
 /**
@@ -155,8 +153,15 @@ function Allowed({ host, action, children }: { host: string; action: string; chi
 
 /* -------------------------------------------------------- the screen */
 
+/**
+ * The sub-tabs of this module: what the host resolves with, and what to
+ * change about it. The address carries the open one.
+ */
+const RESOLVER_TABS = ["state", "change"] as const;
+
 export function Resolver({ host }: { host: Host }) {
   const t = useT();
+  const [tab, go] = useTab(RESOLVER_TABS);
   const queryClient = useQueryClient();
   const access = useModuleAccess(host.id, RESOLVER_CHANGES);
 
@@ -169,7 +174,6 @@ export function Resolver({ host }: { host: Host }) {
   const [names, setNames] = useState("ipa.flotestro.test");
   const [intent, setIntent] = useState<{ description: string; payload: Record<string, unknown> } | null>(null);
   const [message, setMessage] = useState("");
-  const [form, setForm] = useState(false);
   // The test result belongs to the job, so we wait for that specific job
   // instead of refreshing the whole list.
   const [testJob, setTestJob] = useState("");
@@ -203,7 +207,6 @@ export function Resolver({ host }: { host: Host }) {
       );
       if (!job.requires_approval) setTestJob(job.id);
       setIntent(null);
-      setForm(false);
       void queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
@@ -263,8 +266,10 @@ export function Resolver({ host }: { host: Host }) {
           onCancel={() => setIntent(null)}
         />
       )}
-      <Board screen={RESOLVER_SCREEN} catalogue={RESOLVER_BOARD} notices={notices.length > 0 ? <Stack>{notices}</Stack> : undefined} drawn={{
-        servers: (
+      {notices.length > 0 && <Stack>{notices}</Stack>}
+
+      <Grid>
+        <C span={3}>
           <Kpi
             hero
             icon="dns"
@@ -272,23 +277,23 @@ export function Resolver({ host }: { host: Host }) {
             value={known ? (known.servers ?? []).length : null}
             note={t("what this host resolves with")}
           />
-        ),
-        domains: (
+        </C>
+        <C span={3}>
           <Kpi
             icon="dns"
             label={t("Search domains")}
             value={known ? (known.search_domains ?? []).length : null}
           />
-        ),
-        encrypted: (
+        </C>
+        <C span={3}>
           <Kpi
             icon="security"
             label={t("Links with DoT")}
             value={countWhere(links, (link) => link.dns_over_tls === "yes") ?? null}
             note={t("DNS over TLS, as the daemon reports it")}
           />
-        ),
-        owner: (
+        </C>
+        <C span={3}>
           <Kpi
             icon="settings"
             label={t("Owner of resolv.conf")}
@@ -296,99 +301,176 @@ export function Resolver({ host }: { host: Host }) {
             note={snapshot?.writable ? t("the panel may change it") : t("read only")}
             tone={snapshot?.writable ? "ok" : "warn"}
           />
-        ),
-        resolution: (
-          <Card
-            title={t("Resolution")}
-            note={t("The servers, the search domains, and the links that carry servers or encrypt their queries.")}
-          >
-            <Bars items={[
-              { label: t("Servers"), value: known ? (known.servers ?? []).length : 0, tone: known ? "info" : "unknown" },
-              { label: t("Search domains"), value: known ? (known.search_domains ?? []).length : 0, tone: known ? "info" : "unknown" },
-              { label: t("Links with servers"), value: countWhere(links, (link) => (link.servers ?? []).length > 0) ?? 0, tone: links ? "neutral" : "unknown" },
-              { label: t("Links with DoT"), value: countWhere(links, (link) => link.dns_over_tls === "yes") ?? 0, tone: links ? "ok" : "unknown" },
-            ]} />
-            {known === undefined && <Note>{t("Nothing was counted: the snapshot could not be read.")}</Note>}
-          </Card>
-        ),
-        ownership: (
-          <Card
-            title={t("Ownership")}
-            tools={
-              <Allowed host={host.id} action="dns.host.apply">
+        </C>
+      </Grid>
+
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "state", label: t("State") },
+          { value: "change", label: t("Change") },
+        ]}
+      />
+
+      {tab === "state" && (
+        <Grid>
+          <C span={8}>
+            <Card
+              title={t("Resolution")}
+              note={t("The servers, the search domains, and the links that carry servers or encrypt their queries.")}
+            >
+              <Bars items={[
+                { label: t("Servers"), value: known ? (known.servers ?? []).length : 0, tone: known ? "info" : "unknown" },
+                { label: t("Search domains"), value: known ? (known.search_domains ?? []).length : 0, tone: known ? "info" : "unknown" },
+                { label: t("Links with servers"), value: countWhere(links, (link) => (link.servers ?? []).length > 0) ?? 0, tone: links ? "neutral" : "unknown" },
+                { label: t("Links with DoT"), value: countWhere(links, (link) => link.dns_over_tls === "yes") ?? 0, tone: links ? "ok" : "unknown" },
+              ]} />
+              {known === undefined && <Note>{t("Nothing was counted: the snapshot could not be read.")}</Note>}
+            </Card>
+          </C>
+          <C span={4}>
+            <Card
+              title={t("Ownership")}
+              tools={
+                <Allowed host={host.id} action="dns.host.apply">
+                  <Button
+                    kind="quiet"
+                    testId="change-resolver"
+                    onClick={() => go("change")}
+                    disabled={!snapshot?.writable}
+                    title={snapshot?.writable ? undefined : snapshot?.read_only_reason}
+                  >
+                    {t("Change resolver")}
+                  </Button>
+                </Allowed>
+              }
+            >
+              <Facts>
+                {/* The owner and the mode are the daemon's words; the hover
+                    says what each means for a change written here. */}
+                <Fact label={t("Owner")}>
+                  {snapshot?.owner
+                    ? <span title={t(ownerMeaning(snapshot.owner)) || undefined}>{snapshot.owner}</span>
+                    : unknownPill}
+                  {snapshot?.mode && (
+                    <span className="fl-faint" title={t(modeMeaning(snapshot.mode)) || undefined}> · {snapshot.mode}</span>
+                  )}
+                </Fact>
+                <Fact label={t("Write adapter")}>
+                  {snapshot?.writable
+                    ? <Pill tone="ok">{snapshot.write_adapter || t("yes")}</Pill>
+                    : <Pill tone="unknown">{t("read only")}</Pill>}
+                </Fact>
+                {/* "unsupported" and "disabled" are two different answers, so
+                    we show what the host said, not yes/no. */}
+                <Fact label="DNSSEC">{snapshot?.dnssec || unknownPill}</Fact>
+                <Fact label="DNS over TLS">{snapshot?.dns_over_tls || unknownPill}</Fact>
+                {/* What the owner means for a change made here, in a sentence
+                    rather than on hover alone: it is the answer to "why can I
+                    not change this". */}
+                {snapshot?.owner && ownerMeaning(snapshot.owner) && (
+                  <Fact label={t("Meaning")}>{t(ownerMeaning(snapshot.owner))}</Fact>
+                )}
+              </Facts>
+            </Card>
+          </C>
+          <C span={12}>
+            <Card title={t("Configuration")}>
+              <Facts>
+                <Fact label={t("Mode")}>
+                  {snapshot?.mode
+                    ? <span title={t(modeMeaning(snapshot.mode)) || undefined}>{snapshot.mode}</span>
+                    : <span className="fl-faint">—</span>}
+                  {snapshot?.mode && modeMeaning(snapshot.mode) && (
+                    <span className="fl-faint"> · {t(modeMeaning(snapshot.mode))}</span>
+                  )}
+                </Fact>
+                <Fact label="resolv.conf">
+                  <span className="fl-mono">
+                    {snapshot?.resolv_conf || "—"}
+                    {snapshot?.resolv_conf_target ? ` → ${snapshot.resolv_conf_target}` : ""}
+                  </span>
+                </Fact>
+                <Fact label={t("Servers")}>
+                  <span className="fl-mono">{(snapshot?.servers ?? []).join(", ") || "—"}</span>
+                </Fact>
+                <Fact label={t("Search domains")}>
+                  <span className="fl-mono">{(snapshot?.search_domains ?? []).join(", ") || "—"}</span>
+                </Fact>
+              </Facts>
+            </Card>
+          </C>
+          <C span={12}>
+            <Card title={t("Per-link resolvers")} flush>
+              <Table
+                testId="links"
+                rows={snapshot?.links ?? []}
+                keyOf={(one) => one.name}
+                rowTestId={(one) => `link-${one.name}`}
+                empty={t("This host does not report per-link resolvers; it has one global list.")}
+                columns={[
+                  { key: "name", head: t("Link"), tight: true, cell: (one) => <span className="fl-mono">{one.name}</span> },
+                  { key: "servers", head: t("Servers"), cell: (one) => (
+                    <span className="fl-mono">{(one.servers ?? []).join(", ") || "—"}</span>
+                  ) },
+                  { key: "domains", head: t("Domains"), cell: (one) => (
+                    <span className="fl-mono">{(one.domains ?? []).join(", ") || "—"}</span>
+                  ) },
+                  // The default route decides which link answers a name
+                  // outside its domains - and that is the operator's question.
+                  { key: "route", head: t("Answers other names"), cell: (one) => (
+                    one.default_route === undefined ? unknownPill : one.default_route ? t("yes") : t("no")
+                  ) },
+                  { key: "dnssec", head: "DNSSEC", minor: true, cell: (one) => one.dnssec || <span className="fl-faint">—</span> },
+                  // The heading is the abbreviation the daemon prints; what it
+                  // stands for was on the old panel's heading and stays here.
+                  { key: "dot", head: <span title={t("DNS over TLS")}>DoT</span>, label: "DoT", minor: true,
+                    cell: (one) => one.dns_over_tls || <span className="fl-faint">—</span> },
+                ]}
+              />
+            </Card>
+          </C>
+          <C span={12}>
+            <Card title={t("Where this came from")}>
+              <Facts>
+                <Fact label={t("Source")}>{module.data.source}</Fact>
+                <Fact label={t("Revision")}><span className="fl-mono">{module.data.revision.slice(0, 12)}</span></Fact>
+                <Fact label={t("Observed")}>
+                  <span title={absoluteTime(module.data.observed_at)}>{relativeTime(module.data.observed_at)}</span>
+                </Fact>
+                {snapshot?.observed_at && (
+                  <Fact label={t("Resolver read")}>
+                    <span title={absoluteTime(snapshot.observed_at)}>{relativeTime(snapshot.observed_at)}</span>
+                  </Fact>
+                )}
+                {module.data.unavailable_reason && (
+                  <Fact label={t("Could not be read")}>{module.data.unavailable_reason}</Fact>
+                )}
+              </Facts>
+            </Card>
+          </C>
+        </Grid>
+      )}
+
+      {tab === "change" && (
+        <Grid>
+          <C span={12}>
+            <Form
+              title={t("Test resolution from the host")}
+              note={t("The panel sits in a different network, so its own answer says nothing about what this host sees. The query runs on the host.")}
+              actions={mayTest.allowed ? (
                 <Button
-                  kind="quiet"
-                  testId="change-resolver"
-                  onClick={() => setForm((open) => !open)}
-                  disabled={!snapshot?.writable}
-                  title={snapshot?.writable ? undefined : snapshot?.read_only_reason}
+                  testId="resolve"
+                  onClick={() => request.mutate({ action: "dns.resolve.test", payload: { dns: { names: nameList } } })}
+                  disabled={!nameList.length || request.isPending}
                 >
-                  {form ? t("Cancel") : t("Change resolver")}
+                  {t("Resolve")}
                 </Button>
-              </Allowed>
-            }
-          >
-            <Facts>
-              {/* The owner and the mode are the daemon's words; the hover
-                  says what each means for a change written here. */}
-              <Fact label={t("Owner")}>
-                {snapshot?.owner
-                  ? <span title={t(ownerMeaning(snapshot.owner)) || undefined}>{snapshot.owner}</span>
-                  : unknownPill}
-                {snapshot?.mode && (
-                  <span className="fl-faint" title={t(modeMeaning(snapshot.mode)) || undefined}> · {snapshot.mode}</span>
-                )}
-              </Fact>
-              <Fact label={t("Write adapter")}>
-                {snapshot?.writable
-                  ? <Pill tone="ok">{snapshot.write_adapter || t("yes")}</Pill>
-                  : <Pill tone="unknown">{t("read only")}</Pill>}
-              </Fact>
-              {/* "unsupported" and "disabled" are two different answers, so
-                  we show what the host said, not yes/no. */}
-              <Fact label="DNSSEC">{snapshot?.dnssec || unknownPill}</Fact>
-              <Fact label="DNS over TLS">{snapshot?.dns_over_tls || unknownPill}</Fact>
-              {/* What the owner means for a change made here, in a sentence
-                  rather than on hover alone: it is the answer to "why can I
-                  not change this". */}
-              {snapshot?.owner && ownerMeaning(snapshot.owner) && (
-                <Fact label={t("Meaning")}>{t(ownerMeaning(snapshot.owner))}</Fact>
-              )}
-            </Facts>
-          </Card>
-        ),
-        configuration: (
-          <Card title={t("Configuration")}>
-            <Facts>
-              <Fact label={t("Mode")}>
-                {snapshot?.mode
-                  ? <span title={t(modeMeaning(snapshot.mode)) || undefined}>{snapshot.mode}</span>
-                  : <span className="fl-faint">—</span>}
-                {snapshot?.mode && modeMeaning(snapshot.mode) && (
-                  <span className="fl-faint"> · {t(modeMeaning(snapshot.mode))}</span>
-                )}
-              </Fact>
-              <Fact label="resolv.conf">
-                <span className="fl-mono">
-                  {snapshot?.resolv_conf || "—"}
-                  {snapshot?.resolv_conf_target ? ` → ${snapshot.resolv_conf_target}` : ""}
-                </span>
-              </Fact>
-              <Fact label={t("Servers")}>
-                <span className="fl-mono">{(snapshot?.servers ?? []).join(", ") || "—"}</span>
-              </Fact>
-              <Fact label={t("Search domains")}>
-                <span className="fl-mono">{(snapshot?.search_domains ?? []).join(", ") || "—"}</span>
-              </Fact>
-            </Facts>
-          </Card>
-        ),
-        test: (
-          <Card
-            title={t("Test resolution from the host")}
-            note={t("The panel sits in a different network, so its own answer says nothing about what this host sees. The query runs on the host.")}
-          >
-            <Stack>
+              ) : mayTest.known ? (
+                <Note>{mayTest.reason || t("This action is not available.")}</Note>
+              ) : undefined}
+            >
               <Fields>
                 <Field label={t("Names, comma separated")} wide>
                   <input
@@ -399,21 +481,11 @@ export function Resolver({ host }: { host: Host }) {
                   />
                 </Field>
               </Fields>
-              {mayTest.allowed ? (
-                <Button
-                  testId="resolve"
-                  onClick={() => request.mutate({ action: "dns.resolve.test", payload: { dns: { names: nameList } } })}
-                  disabled={!nameList.length || request.isPending}
-                >
-                  {t("Resolve")}
-                </Button>
-              ) : mayTest.known ? (
-                <Note>{mayTest.reason || t("This action is not available.")}</Note>
-              ) : null}
-
-              {/* The answers arrive with the job result: a fact from the
-                  host at a specific moment, not a state to be refreshed. */}
-              {testJob && (
+            </Form>
+            {/* The answers arrive with the job result: a fact from the
+                host at a specific moment, not a state to be refreshed. */}
+            {testJob && (
+              <Section title={t("Answers")} note={t("What this host resolved, at the moment it was asked.")}>
                 <Table
                   testId="answers"
                   rows={answers}
@@ -434,77 +506,32 @@ export function Resolver({ host }: { host: Host }) {
                     { key: "took", head: t("Took"), num: true, cell: (one) => `${one.took_millis} ms` },
                   ]}
                 />
-              )}
-            </Stack>
-          </Card>
-        ),
-        change: form ? (
-          <Allowed host={host.id} action="dns.host.apply">
-            <ResolverChange
-              seed={{
-                interface: managementLink?.name ?? "",
-                servers: (snapshot?.servers ?? []).join("\n"),
-                // A domain the host reports with a leading tilde is routed,
-                // not searched; the name under it is what a search domain is.
-                search_domains: (snapshot?.search_domains ?? []).map((one) => one.replace(/^~/, "")).join("\n"),
-                ignore_auto_dns: true,
-                rollback_seconds: 120,
-              }}
-              suggestions={{ interface: (snapshot?.links ?? []).map((link) => link.name) }}
-              onIntent={setIntent}
-            />
-          </Allowed>
-        ) : undefined,
-        links: (
-          <Card title={t("Per-link resolvers")} flush>
-            <Table
-              testId="links"
-              rows={snapshot?.links ?? []}
-              keyOf={(one) => one.name}
-              rowTestId={(one) => `link-${one.name}`}
-              empty={t("This host does not report per-link resolvers; it has one global list.")}
-              columns={[
-                { key: "name", head: t("Link"), tight: true, cell: (one) => <span className="fl-mono">{one.name}</span> },
-                { key: "servers", head: t("Servers"), cell: (one) => (
-                  <span className="fl-mono">{(one.servers ?? []).join(", ") || "—"}</span>
-                ) },
-                { key: "domains", head: t("Domains"), cell: (one) => (
-                  <span className="fl-mono">{(one.domains ?? []).join(", ") || "—"}</span>
-                ) },
-                // The default route decides which link answers a name
-                // outside its domains - and that is the operator's question.
-                { key: "route", head: t("Answers other names"), cell: (one) => (
-                  one.default_route === undefined ? unknownPill : one.default_route ? t("yes") : t("no")
-                ) },
-                { key: "dnssec", head: "DNSSEC", minor: true, cell: (one) => one.dnssec || <span className="fl-faint">—</span> },
-                // The heading is the abbreviation the daemon prints; what it
-                // stands for was on the old panel's heading and stays here.
-                { key: "dot", head: <span title={t("DNS over TLS")}>DoT</span>, label: "DoT", minor: true,
-                  cell: (one) => one.dns_over_tls || <span className="fl-faint">—</span> },
-              ]}
-            />
-          </Card>
-        ),
-        source: (
-          <Card title={t("Where this came from")}>
-            <Facts>
-              <Fact label={t("Source")}>{module.data.source}</Fact>
-              <Fact label={t("Revision")}><span className="fl-mono">{module.data.revision.slice(0, 12)}</span></Fact>
-              <Fact label={t("Observed")}>
-                <span title={absoluteTime(module.data.observed_at)}>{relativeTime(module.data.observed_at)}</span>
-              </Fact>
-              {snapshot?.observed_at && (
-                <Fact label={t("Resolver read")}>
-                  <span title={absoluteTime(snapshot.observed_at)}>{relativeTime(snapshot.observed_at)}</span>
-                </Fact>
-              )}
-              {module.data.unavailable_reason && (
-                <Fact label={t("Could not be read")}>{module.data.unavailable_reason}</Fact>
-              )}
-            </Facts>
-          </Card>
-        ),
-      }} />
+              </Section>
+            )}
+          </C>
+          <C span={12}>
+            {/* The resolver is rewritten only where the host keeps what the
+                panel writes; where it does not, the reason stands above. */}
+            {snapshot?.writable && (
+              <Allowed host={host.id} action="dns.host.apply">
+                <ResolverChange
+                  seed={{
+                    interface: managementLink?.name ?? "",
+                    servers: (snapshot?.servers ?? []).join("\n"),
+                    // A domain the host reports with a leading tilde is routed,
+                    // not searched; the name under it is what a search domain is.
+                    search_domains: (snapshot?.search_domains ?? []).map((one) => one.replace(/^~/, "")).join("\n"),
+                    ignore_auto_dns: true,
+                    rollback_seconds: 120,
+                  }}
+                  suggestions={{ interface: (snapshot?.links ?? []).map((link) => link.name) }}
+                  onIntent={setIntent}
+                />
+              </Allowed>
+            )}
+          </C>
+        </Grid>
+      )}
     </>
   );
 }
@@ -532,19 +559,10 @@ function ResolverChange({ seed, suggestions, onIntent }: {
   const domains = listOf(value, "search_domains");
 
   return (
-    <Card
+    <Form
       title={t("Change resolver")}
       note={t("A host that cannot resolve names loses the directory, Kerberos and with them logins — so this change is armed with the same rollback timer as an address change.")}
-    >
-      <Stack>
-        <RegistryFields
-          entry={entry}
-          value={value}
-          onChange={setValue}
-          json={json}
-          onJson={setJson}
-          suggestions={suggestions}
-        />
+      actions={(
         <Button
           testId="apply-resolver"
           disabled={!orderReady(order) || json !== ""}
@@ -561,8 +579,17 @@ function ResolverChange({ seed, suggestions, onIntent }: {
         >
           {t("Apply resolver")}
         </Button>
-      </Stack>
-    </Card>
+      )}
+    >
+      <RegistryFields
+        entry={entry}
+        value={value}
+        onChange={setValue}
+        json={json}
+        onJson={setJson}
+        suggestions={suggestions}
+      />
+    </Form>
   );
 }
 
@@ -814,21 +841,3 @@ function Confirm({ host, title, what, busy, onConfirm, onCancel }: {
     </Modal>
   );
 }
-
-/** The name this screen's arrangement is stored under. */
-export const RESOLVER_SCREEN = "next_host_dns";
-
-/** The containers this screen can draw, and the shape each ships with. */
-export const RESOLVER_BOARD: BoardEntry[] = [
-  { key: "servers", title: "Name servers", width: 3, height: 1 },
-  { key: "domains", title: "Search domains", width: 3, height: 1 },
-  { key: "encrypted", title: "Links with DoT", width: 3, height: 1 },
-  { key: "owner", title: "Owner of resolv.conf", width: 3, height: 1 },
-  { key: "resolution", title: "Resolution", width: 8, height: 2 },
-  { key: "ownership", title: "Ownership", width: 4, height: 2 },
-  { key: "configuration", title: "Configuration", width: 6, height: 2 },
-  { key: "test", title: "Test resolution from the host", width: 6, height: 3 },
-  { key: "change", title: "Change resolver", width: 12, height: 5 },
-  { key: "links", title: "Per-link resolvers", width: 12, height: 3 },
-  { key: "source", title: "Where this came from", width: 12, height: 1 },
-];

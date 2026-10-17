@@ -7,7 +7,7 @@ import "@testing-library/jest-dom/vitest";
 import { Schedules, commandOf, hostClock } from "./Schedules";
 import { ToastProvider } from "../../../components/Toast";
 import type { Host } from "../../../lib/types";
-import type { Schedule } from "../../../pages/host/Schedules";
+import type { Schedule } from "../../../lib/host/schedules";
 
 /**
  * The recurring work of one host, and the line the screen will not cross:
@@ -80,11 +80,18 @@ const entry = (over: Partial<Schedule> = {}): Schedule => ({
   ...over,
 });
 
-function draw(one: Host = host()) {
+/**
+ * The screen is three sub-tabs since 17.10 - the readings, the list of
+ * entries and the form - and the address names which one is open, so a
+ * test that works on the list asks for `?tab=schedules` the way a reader
+ * following a link would.
+ */
+function draw(one: Host = host(), tab?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const where = tab ? `/hosts/${one.id}/schedules?tab=${tab}` : `/hosts/${one.id}/schedules`;
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter>
+      <MemoryRouter initialEntries={[where]}><ToastProvider>{children}</ToastProvider></MemoryRouter>
     </QueryClientProvider>
   );
   return render(<Schedules host={one} />, { wrapper });
@@ -102,7 +109,7 @@ describe("the recurring work of one host", () => {
       "/api/v1/hosts/h1/actions": allow(...EVERY),
       "/api/v1/hosts/h1/inventory/schedules": fragment({ schedules: [entry()], timezone: "Europe/Warsaw" }),
     });
-    draw();
+    draw(host(), "schedules");
     await waitFor(() => expect(screen.getByTestId("run-nightly-backup")).toBeEnabled());
     fireEvent.click(screen.getByTestId("run-nightly-backup"));
     expect(sent).toHaveLength(0);
@@ -123,7 +130,7 @@ describe("the recurring work of one host", () => {
       "/api/v1/hosts/h1/actions": allow(...EVERY),
       "/api/v1/hosts/h1/inventory/schedules": fragment({ schedules: [entry()] }),
     });
-    draw();
+    draw(host(), "schedules");
     await waitFor(() => expect(screen.getByTestId("schedule-nightly-backup")).toBeInTheDocument());
     fireEvent.click(within(screen.getByTestId("schedule-nightly-backup")).getByRole("button", { name: "Disable" }));
     await waitFor(() => expect(sent).toHaveLength(1));
@@ -142,7 +149,7 @@ describe("the recurring work of one host", () => {
         schedules: [entry({ id: "logrotate:3", source: "host", path: "/etc/crontab", line: 3 })],
       }),
     });
-    draw();
+    draw(host(), "schedules");
     await waitFor(() => expect(screen.getByTestId("schedule-logrotate:3")).toBeInTheDocument());
     const row = screen.getByTestId("schedule-logrotate:3");
     expect(row).toHaveTextContent("host admin");
@@ -229,7 +236,7 @@ describe("the recurring work of one host", () => {
       "/api/v1/hosts/h1/actions": allow("schedule.disable"),
       "/api/v1/hosts/h1/inventory/schedules": fragment({ schedules: [entry()] }),
     });
-    draw();
+    draw(host(), "schedules");
     await waitFor(() => expect(screen.getByTestId("schedule-nightly-backup")).toBeInTheDocument());
     const row = screen.getByTestId("schedule-nightly-backup");
     expect(within(row).queryByRole("button", { name: "Run now" })).toBeNull();

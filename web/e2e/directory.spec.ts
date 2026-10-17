@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { absent, expectHealthy, permissions, watchErrors } from "./fleet";
+import { absent, card, expectHealthy, formOf, head, permissions, watchErrors } from "./fleet";
 
 /**
  * The identity directory page, one tab at a time.
@@ -23,18 +23,13 @@ test.beforeEach(() => {
   test.skip(!granted.has("identity.read"), absent("the token may not read the directory (identity.read)"));
 });
 
-/** The page header of the directory page. */
-function header(page: Page) {
-  return page.locator(".ui-pagehead").getByRole("heading", { name: "Identity directory" });
-}
-
 /** Opens the directory page and switches to the named tab. */
 async function openTab(page: Page, name: string) {
   await page.goto("/directory");
-  await expect(header(page)).toBeVisible();
-  const tabs = page.locator(".ui-tabs").first();
-  await tabs.getByRole("button", { name, exact: true }).click();
-  await expect(tabs.getByRole("button", { name, exact: true })).toHaveClass(/active/);
+  await expect(head(page, "Identity directory")).toBeVisible();
+  const tab = page.getByRole("tab", { name, exact: true });
+  await tab.click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
 }
 
 /** A directory collection as the API lists it. */
@@ -44,10 +39,9 @@ async function collection<T>(request: APIRequestContext, path: string): Promise<
   return ((await response.json()) as Items<T>).items;
 }
 
-/** The tab has settled: its table is there, or the sentence that says it is empty. */
-async function expectSettled(page: Page, empty: RegExp) {
-  const table = page.locator(".ui-panel table").first();
-  await expect(table.or(page.getByText(empty)).first()).toBeVisible();
+/** The tab settled: its table is there, or the sentence that says it is empty. */
+async function expectSettled(page: Page, testId: string, empty: RegExp) {
+  await expect(page.getByTestId(testId).or(page.getByText(empty)).first()).toBeVisible();
 }
 
 test("users are listed one row per account", async ({ page, request }) => {
@@ -55,14 +49,14 @@ test("users are listed one row per account", async ({ page, request }) => {
   const users = await collection<{ uid: string }>(request, "/api/v1/identity/users");
   await openTab(page, "Users");
   if (users.length === 0) {
-    await expect(page.getByText("No accounts.")).toBeVisible();
+    await expect(page.getByText("The directory holds no accounts.")).toBeVisible();
   } else {
-    const table = page.locator(".ui-panel table").first();
+    const table = page.getByTestId("accounts");
     await expect(table.locator("tbody tr")).toHaveCount(users.length);
-    await expect(table.getByRole("cell", { name: users[0].uid, exact: true })).toBeVisible();
+    await expect(table.locator(`[data-testid="pick-${users[0].uid}"]`)).toBeVisible();
   }
-  await expect(page.getByRole("heading", { name: "Preserved accounts" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Recent changes" })).toBeVisible();
+  await expect(card(page, "Preserved accounts")).toBeVisible();
+  await expect(card(page, "Recent changes")).toBeVisible();
   await expectHealthy(page, errors);
 });
 
@@ -70,9 +64,9 @@ test("groups are listed with their members", async ({ page, request }) => {
   const { errors } = watchErrors(page);
   const groups = await collection<{ name: string }>(request, "/api/v1/identity/groups");
   await openTab(page, "Groups");
-  await expectSettled(page, /^No groups\.$/);
+  await expectSettled(page, "groups", /^No groups\.$/);
   if (groups.length > 0) {
-    await expect(page.getByRole("cell", { name: groups[0].name, exact: true })).toBeVisible();
+    await expect(page.getByTestId("groups")).toContainText(groups[0].name);
   }
   await expectHealthy(page, errors);
 });
@@ -81,8 +75,9 @@ test("HBAC rules are listed with the simulation below them", async ({ page }) =>
   test.skip(!granted.has("identity.policy.read"), absent("the token may not read the access rules (identity.policy.read)"));
   const { errors } = watchErrors(page);
   await openTab(page, "HBAC rules");
-  await expectSettled(page, /^No rules\.$/);
-  await expect(page.getByRole("heading", { name: "Simulate access" })).toBeVisible();
+  await expectSettled(page, "hbac", /^No rules\.$/);
+  // The simulation is a form, not a container: a question put to the directory.
+  await expect(formOf(page, "Simulate access")).toBeVisible();
   await expectHealthy(page, errors);
 });
 
@@ -90,7 +85,7 @@ test("sudo rules are listed", async ({ page }) => {
   test.skip(!granted.has("identity.policy.read"), absent("the token may not read the sudo rules (identity.policy.read)"));
   const { errors } = watchErrors(page);
   await openTab(page, "sudo rules");
-  await expectSettled(page, /^No sudo rules\.$/);
+  await expectSettled(page, "sudo", /^No sudo rules\.$/);
   await expectHealthy(page, errors);
 });
 
@@ -98,10 +93,10 @@ test("hosts show the enrolled directory entries", async ({ page, request }) => {
   const { errors } = watchErrors(page);
   const hosts = await collection<{ fqdn: string; enrolled: boolean }>(request, "/api/v1/identity/hosts");
   await openTab(page, "Hosts");
-  await expectSettled(page, /^The directory has no host entries\.$/);
+  await expectSettled(page, "directory-hosts", /^The directory has no host entries\.$/);
   const enrolled = hosts.find((host) => host.enrolled) ?? hosts[0];
   if (enrolled) {
-    const row = page.getByRole("row").filter({ hasText: enrolled.fqdn });
+    const row = page.getByTestId("directory-hosts").locator("tbody tr").filter({ hasText: enrolled.fqdn });
     await expect(row.first()).toBeVisible();
     // The fleet column settles on a link or on the fact that the host is
     // not in the fleet; "Checking…" is neither.
@@ -114,9 +109,9 @@ test("host groups are listed with their hosts", async ({ page, request }) => {
   const { errors } = watchErrors(page);
   const groups = await collection<{ name: string }>(request, "/api/v1/identity/host-groups");
   await openTab(page, "Host groups");
-  await expectSettled(page, /^The directory has no host groups\.$/);
+  await expectSettled(page, "host-groups", /^The directory has no host groups\.$/);
   if (groups.length > 0) {
-    await expect(page.getByRole("cell", { name: groups[0].name, exact: true })).toBeVisible();
+    await expect(page.getByTestId("host-groups")).toContainText(groups[0].name);
   }
   await expectHealthy(page, errors);
 });
@@ -125,35 +120,41 @@ test("SSH keys split the accounts by whether they have one", async ({ page, requ
   const { errors } = watchErrors(page);
   const users = await collection<{ uid: string; ssh_key_fingerprints?: string[] }>(request, "/api/v1/identity/users");
   await openTab(page, "SSH keys");
-  await expect(page.getByRole("heading", { name: "Accounts with keys" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Accounts without keys" })).toBeVisible();
+  await expect(card(page, "Accounts with keys")).toBeVisible();
+  await expect(card(page, "Accounts without keys")).toBeVisible();
+  /* The split used to be said in a sentence over the two tables; it is a
+     ring with its own legend now, and the legend carries the same two
+     counts plus the keys themselves. */
   const withKeys = users.filter((user) => (user.ssh_key_fingerprints ?? []).length > 0).length;
-  await expect(page.getByText(new RegExp(`^\\d+ keys on ${withKeys} accounts$`))).toBeVisible();
+  const keys = users.reduce((sum, user) => sum + (user.ssh_key_fingerprints ?? []).length, 0);
+  const legend = page.locator(".fl-ring, .fl-card").filter({ hasText: "Keys on record" }).first();
+  await expect(legend).toContainText(String(withKeys));
+  await expect(legend).toContainText(String(keys));
   await expectHealthy(page, errors);
 });
 
 test("services are listed read-only", async ({ page }) => {
   const { errors } = watchErrors(page);
   await openTab(page, "Services");
-  await expectSettled(page, /^The directory has no service principals the panel can read\.$/);
-  await expect(page.getByPlaceholder("filter by principal or host")).toBeVisible();
+  await expectSettled(page, "services", /^The directory has no service principals the panel can read\.$/);
+  await expect(page.getByTestId("service-filter")).toBeVisible();
   await expectHealthy(page, errors);
 });
 
 test("DNS shows the zones and the records of the first one", async ({ page }) => {
   const { errors } = watchErrors(page);
   await openTab(page, "DNS");
-  await expect(page.locator(".ui-toolbar select").first()).toBeVisible();
-  await expectSettled(page, /^This zone has no records the panel can read\.$/);
+  await expect(page.getByTestId("zone")).toBeVisible();
+  await expectSettled(page, "dns-records", /^This zone has no records the panel can read\.$/);
   await expectHealthy(page, errors);
 });
 
 test("integration health names the connector and the fleet half", async ({ page }) => {
   const { errors } = watchErrors(page);
   await openTab(page, "Integration health");
-  await expect(page.getByRole("heading", { name: "Connector" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Keytab" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Hosts offline from the directory" })).toBeVisible();
+  await expect(card(page, "Connector")).toBeVisible();
+  await expect(card(page, "Keytab")).toBeVisible();
+  await expect(card(page, "Hosts offline from the directory")).toBeVisible();
   if (status.principal) {
     await expect(page.getByText(status.principal, { exact: true }).first()).toBeVisible();
   }

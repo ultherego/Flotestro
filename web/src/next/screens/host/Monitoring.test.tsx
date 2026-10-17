@@ -85,11 +85,19 @@ const alert = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-function draw() {
+/**
+ * The module is three sub-tabs since 17.10 - what is alerting, the
+ * drawings, and the two things that can be ordered - and the address
+ * says which one is open. A test asks for the tab whose content it
+ * reads, the way a reader following a link would.
+ */
+function draw(tab = "state") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter>
+      <MemoryRouter initialEntries={[`/hosts/h1/monitoring?tab=${tab}`]}>
+        <ToastProvider>{children}</ToastProvider>
+      </MemoryRouter>
     </QueryClientProvider>
   );
   return render(<Monitoring host={host} />, { wrapper });
@@ -126,7 +134,7 @@ describe("the monitoring module of a host", () => {
         last_sample_at: "2026-10-16T08:30:00Z",
       },
     });
-    draw();
+    draw("charts");
     // The banner says it, and every chart repeats it at its own foot.
     await waitFor(() => expect(screen.getAllByText(/1 gaps in this window/).length).toBeGreaterThan(0));
     expect(screen.getByText(/clock_skew/)).toBeInTheDocument();
@@ -148,7 +156,7 @@ describe("the monitoring module of a host", () => {
         last_sample_at: "2026-10-16T08:01:00Z",
       },
     });
-    draw();
+    draw("charts");
     await waitFor(() => expect(screen.getByTestId("cpu-chart")).toBeInTheDocument());
     // Every reading is 12%, and the axis still goes to a hundred: a chart
     // scaled to its own highest reading says a host at 12% is as loaded as
@@ -173,7 +181,7 @@ describe("the monitoring module of a host", () => {
       },
       "/api/v1/monitoring/rules": { items: [{ id: "r1", name: "CPU high" }], count: 1, metrics: [], operators: [], severities: [] },
     });
-    draw();
+    draw("change");
     await waitFor(() => expect(screen.getByTestId("silence")).toBeInTheDocument());
     expect(screen.getByTestId("silence")).toBeDisabled();
     fireEvent.change(screen.getByTestId("silence-reason"), { target: { value: "short" } });
@@ -200,7 +208,12 @@ describe("the monitoring module of a host", () => {
     await waitFor(() => expect(screen.getByTestId("alert-a1")).toBeInTheDocument());
     // Without a reason the button leads only to a refusal, so it is shut.
     expect(screen.getByTestId("silence-r1")).toBeDisabled();
-    fireEvent.change(screen.getByTestId("silence-reason"), { target: { value: "known noisy sensor" } });
+    // The reason is written in the Silence form, which is a decision and
+    // so lives on the change tab; the row of the alert still takes it,
+    // and the tab keeps what was typed while the reader walks back.
+    fireEvent.click(screen.getByRole("tab", { name: "Change" }));
+    fireEvent.change(await screen.findByTestId("silence-reason"), { target: { value: "known noisy sensor" } });
+    fireEvent.click(screen.getByRole("tab", { name: "State" }));
     await waitFor(() => expect(screen.getByTestId("silence-r1")).not.toBeDisabled());
     fireEvent.click(screen.getByTestId("silence-r1"));
     await waitFor(() => expect(posted).toHaveLength(1));
@@ -246,7 +259,7 @@ describe("the monitoring module of a host", () => {
         }],
       },
     });
-    draw();
+    draw("change");
     await waitFor(() => expect(screen.getByTestId("probe")).toBeInTheDocument());
     // A half-written address is not a target: the button stays shut.
     fireEvent.change(screen.getByTestId("probe-target"), { target: { value: "app/health" } });
@@ -276,7 +289,7 @@ describe("the monitoring module of a host", () => {
         items: [{ status: "failed", error_code: "probe_refused", message: "the target is outside the allowed range" }],
       },
     });
-    draw();
+    draw("change");
     await waitFor(() => expect(screen.getByTestId("probe")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("probe-target"), { target: { value: "https://app/health" } });
     await waitFor(() => expect(screen.getByTestId("probe")).not.toBeDisabled());
@@ -294,7 +307,7 @@ describe("the monitoring module of a host", () => {
         latest: point({ at: "2026-10-16T08:00:00Z" }), last_sample_at: "2026-10-16T08:00:00Z",
       },
     });
-    draw();
+    draw("charts");
     // An older agent does not report its own footprint; the facts say so
     // with a dash, and the chart is left out rather than drawn at nought.
     await screen.findByText(/does not report its footprint/);

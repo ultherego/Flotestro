@@ -76,69 +76,62 @@
 
     <figure class="figure">
       <img src="../img/dashboard.png" alt="Dashboard floty: dostępność hostów, problemy według rodzaju, operacje z ostatnich 24 godzin, to, co wymaga uwagi, oraz skład floty." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Dashboard.</b> Tylko to, co wymaga decyzji. Po lewej dostępność hostów &mdash;
-        cztery online, zero nieaktualnych, offline, nieznanych, w kwarantannie i w trybie
-        serwisowym &mdash; po prawej problemy według rodzaju: 13 znalezisk bezpieczeństwa, 8
-        nieudanych zadań w ciągu 24 godzin, 6 kontroli z wynikiem nieznanym. Niżej zakończone
-        operacje na godzinę według wyniku; blok <i>wymaga uwagi</i> liczony w bazie danych: dwa hosty z
-        nieudanymi jednostkami, jeden enrollment w toku i cztery certyfikaty
-        agentów wygasające w ciągu 30 dni; oraz skład floty według systemu,
-        wersji agenta, site i środowiska.</figcaption>
+      <figcaption><b>Dashboard.</b> Tylko to, co wymaga decyzji. U góry cztery liczniki &mdash;
+        ile hostów jest wdrożonych, ile odpowiada, co czeka na człowieka i co znalazły kontrole
+        &mdash; a pod nimi sama kolejka: kampanie czekające na zatwierdzenie, wyniki, których
+        nikt nie potwierdził, znaleziska bezpieczeństwa, hosty z nieudanymi jednostkami. Niżej
+        skład floty według systemu, wersji agenta, site&rsquo;u i środowiska, niepowodzenia z
+        ostatniej doby wraz z hostem, do którego należą, i kampanie wciąż w biegu. Liczba,
+        której nikt nie zdołał ustalić, jest myślnikiem, nigdy zerem.</figcaption>
     </figure>
 
     <figure class="figure">
       <img src="../img/hosts.png" alt="Lista hostów z filtrami po stronie serwera i wierszem na host: stan, system, site, środowisko, domena, aktualizacje, nieudane jednostki, restart i ostatni kontakt." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Hosty.</b> Filtry działają po stronie serwera: nazwa hosta lub adres, site,
-        środowisko, właściciel, tagi, dalej system operacyjny, stan, cykl życia, tryb serwisowy,
-        możliwości i kanał wydań. Wiersz niesie stan, system tak, jak zgłosił go host &mdash;
-        <code>arch</code>, <code>debian 13</code>, <code>fedora 42</code>,
-        <code>ubuntu 24.04</code> &mdash; site i środowisko, to, czy jest w domenie, ile aktualizacji
-        na niego czeka, ile jednostek padło, czy chce restartu i kiedy był
-        widziany ostatni raz.</figcaption>
+      <figcaption><b>Hosty.</b> Dwadzieścia trzy filtry, każdy zawężający po stronie serwera i każdy
+        zapisany w adresie, więc odnośnik do &bdquo;wszystkich debianów w labie czekających na
+        restart&rdquo; otwiera się dokładnie na tym. Wiersz niesie stan, adres i to, skąd panel
+        go zna, system tak, jak zgłosił go host, site i środowisko, przynależność do domeny,
+        liczbę czekających aktualizacji i moment ostatniego kontaktu. Nagłówek sortuje listę,
+        wybór kolumn ją zwęża, a przeglądarka pamięta, co zostało zwinięte.</figcaption>
     </figure>
 
     <h3>Pojedynczy host</h3>
 
     <figure class="figure">
       <img src="../img/host-overview.png" alt="Strona hosta: menu modułów, adaptery dostępne na tym hoście, fakty systemowe i sprzęt zgłoszony przez agenta." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Przegląd hosta.</b> Menu po lewej to moduły tego hosta: pakiety, usługi,
+      <figcaption><b>Przegląd hosta.</b> Szyna staje się modułami tego hosta: pakiety, usługi,
         procesy, harmonogramy, jądro, czas, zasilanie, sieć, DNS, firewall, SSH, pamięć masowa,
-        pliki, kopie zapasowe, kontenery, Compose, bezpieczeństwo, podatności, certyfikaty.
-        Każda strona mówi, skąd wzięły się fakty i kiedy, tutaj
-        <code>agent/os-release+procfs, revision 1dc313f1f045, observed 8m ago</code>. Spośród
-        adapterów na tym hoście 16 potrafi czytać i zmieniać, 2 są tylko do odczytu, a 5 jest
-        niedostępnych, co jest inną odpowiedzią niż zero. Obok tożsamości i sprzętu stoi to, co
-        wymaga uwagi na samym tym hoście: żadnych nieudanych jednostek, 36 czekających
-        aktualizacji, brak aktualizacji bezpieczeństwa.</figcaption>
+        pliki, kopie zapasowe, kontenery, Compose, polityki, bezpieczeństwo, podatności,
+        certyfikaty, konta, tożsamość, zadania, audyt. Każdy kontener mówi, skąd ma swoje fakty
+        i kiedy &mdash; adapter, rewizja, jak dawno obserwowane. Spośród adapterów, które ten
+        host zgłasza, część potrafi czytać i zmieniać, część tylko czytać, a część jest
+        niedostępna wraz z powodem podanym przez samego hosta, co jest inną odpowiedzią niż
+        zero.</figcaption>
     </figure>
 
     <figure class="figure">
       <img src="../img/host-packages.png" alt="Strona pakietów jednego hosta: aktualizacje według stanu, źródła pakietów, operacje, o które może poprosić operator, oraz wersja samego agenta." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Pakiety hosta.</b> 351 pakietów aktualnych, 36 do aktualizacji, w tym żadnej
-        aktualizacji bezpieczeństwa. Po prawej źródła tak, jak zgłasza je host: 387 zainstalowanych przez
-        <code>apt</code>, zdrowa baza pakietów, siedem repozytoriów, z czego jedno ma sprawdzane
-        podpisy i żadne nie jest zarządzane przez panel. Operator może zaplanować aktualizacje
-        &mdash; samo ich policzenie niczego na hoście nie zmienia &mdash; albo zainstalować,
-        wstrzymać, zdjąć wstrzymanie i zaplanować usunięcie. Zwykłe aktualizacje nie ruszają
-        agenta: jego wymiana to osobna operacja, a za wykonaną uznaje się ją dopiero wtedy, gdy
-        host wraca, zgłaszając wersję, o którą poproszono.</figcaption>
+      <figcaption><b>Pakiety hosta.</b> Tutaj maszyna na Archu: 208 pakietów aktualnych, 18 do
+        aktualizacji, zero wstrzymanych, a liczba aktualizacji bezpieczeństwa to
+        <i>nie policzono</i>, nie zero &mdash; pacman aktualizuje system w całości i nie potrafi
+        jej podać. Po prawej to, co zarządza oprogramowaniem i skąd ono pochodzi: 226
+        zainstalowanych przez <code>pacman</code>, zdrowa baza pakietów, trzy repozytoria ze
+        sprawdzanymi podpisami. Operator może zaplanować aktualizacje, co niczego na hoście nie
+        zmienia, albo zainstalować, wstrzymać, zdjąć wstrzymanie i zaplanować usunięcie. Zwykłe
+        aktualizacje nie ruszają agenta: jego wymiana to osobna operacja i liczy się za wykonaną
+        dopiero wtedy, gdy host wróci, meldując wersję, o którą poproszono.</figcaption>
     </figure>
 
     <h3>Zmiana w całej flocie</h3>
 
     <figure class="figure">
       <img src="../img/campaign.png" alt="Zakończona kampania: liczby celów, ustawienia canary i fal, zapis zatwierdzenia, fale oraz plany z ich odciskami." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Kampania.</b> Zakończona kampania <code>file.ensure</code> na czterech
-        hostach: jeden canary i dwie fale, najwyżej dwa hosty naraz, próg niepowodzeń 25% albo
-        jeden host, polityka restartu <code>never</code>, polityka dla hostów offline
-        <code>replan_on_reconnect</code> i kontrakt operacji wypisany na stronie &mdash;
-        anulowanie między krokami, ponowienie po nowym planie, rollback przez dokładne
-        odtworzenie, weryfikacja przez ponowne sprawdzenie planu. Zapis zatwierdzenia mówi, kto
-        zatwierdził, na jakim uwierzytelnieniu (token API, bez ponownego uwierzytelnienia) i
-        dlaczego: <i>zmiana CHG-1042 zatwierdzona na cotygodniowym przeglądzie</i>. Powstaje raz
-        i nigdy się nie zmienia. Pod falami jeden wiersz na każdy kształt zmiany, z odciskiem planu i
-        czasem ważności &mdash; host, którego plan zdążył się zmienić, odmawia
-        wykonania.</figcaption>
+      <figcaption><b>Kampania.</b> Remediacja bezpieczeństwa na trzech hostach, anulowana zanim
+        cokolwiek zmieniła &mdash; więc przy każdym hoście stoi <i>pominięty</i>, a każdy
+        licznik pokazuje zero, co jest prawdą o kampanii, którą zatrzymano. Canary to pierwsza
+        fala i tak jest rysowana; obok fal stoi to, co czeka na człowieka, jak daleko doszedł
+        rozruch i pełny stan każdego hosta, który kampania wybrała. Zapis tego, kto ją zlecił,
+        kto zatwierdził i dlaczego, powstaje raz i nigdy się nie zmienia.</figcaption>
     </figure>
 
     <h3>Co panel obserwuje</h3>
@@ -146,44 +139,46 @@
     <figure class="figure">
       <img src="../img/security.png" alt="Strona bezpieczeństwa: znaleziska według stanu, tabela kontroli z wartością oczekiwaną oraz znaleziska według wagi i hosta." width="1600" height="1000" loading="lazy">
       <figcaption><b>Bezpieczeństwo.</b> Wersjonowane kontrole oceniane w panelu na faktach, które
-        hosty i tak zgłaszają: 13 kontroli na czterech hostach, 13 znalezisk wymagających
-        działania, 23 zaliczone, 6 nieznanych, 10 takich, które nie dotyczą hosta, 6 takich, które
-        panel potrafi naprawić. Każdy wiersz podaje nazwę kontroli i jej identyfikator &mdash;
-        <code>ssh.password-auth</code>, <code>exposure.listening</code>,
-        <code>kernel.rp-filter</code> &mdash; oraz wartość, względem której była oceniana. Jedno
-        złe ustawienie na stu hostach to jeden problem, a naprawa to jedna kampania z jednym
-        zatwierdzeniem.</figcaption>
+        hosty i tak zgłaszają: 21 znalezisk na czterech hostach, 25 zaliczonych, 6 takich, na
+        które żaden host nie odpowiedział, i 12 takich, które panel potrafi naprawić stąd jedną
+        kampanią. Każdy wiersz nazywa kontrolę i jej identyfikator &mdash;
+        <code>sudo.root_nopasswd</code>, <code>exposure.listening</code> &mdash; wagę, wartość,
+        wobec której oceniano, a tam, gdzie kontrola nie ma operacji naprawczej, mówi to wprost,
+        zamiast oferować naprawę, której nie ma. Jedno złe ustawienie na stu hostach to jeden
+        problem.</figcaption>
     </figure>
 
     <figure class="figure">
       <img src="../img/readiness.png" alt="Strona gotowości: ile hostów milczy o swoich adapterach, ile operacji ich wymaga i co każdy host powiedział o tych, których nie oferuje." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Gotowość.</b> Co flota naprawdę da się zlecić, zanim ktokolwiek zleci.
-        Cztery hosty, żaden nie milczy o swoich adapterach, 114 operacji ich wymaga i
-        <b>żadnej nie da się zlecić nigdzie</b> &mdash; a przy każdym adapterze, którego host
-        nie oferuje, powód jego własnymi słowami: <i>this host has no Docker socket</i>,
-        <i>network is here and offers no write</i>, <i>this host does not run certmonger</i>,
-        <i>this host has no SELinux to switch</i>. Host innej rodziny to powód, nie usterka, a
-        strona mówi, co jest czym, zamiast liczyć brak jako zero.</figcaption>
+      <figcaption><b>Gotowość.</b> Czego flocie nie da się zlecić, zanim ktokolwiek zleci. Osiem
+        wymagań nie jest spełnionych wszędzie, a żadnej operacji nie brakuje adresata
+        całkowicie; żaden host nie milczy o swoich adapterach, co ma znaczenie, bo host, który
+        nic nie powiedział, to nie host, któremu niczego nie brakuje. Przy każdym adapterze,
+        którego host nie oferuje, powód jego własnymi słowami &mdash; <i>this host has no Docker
+        socket</i>, <i>network is here and offers no write</i>, <i>this host does not run
+        certmonger</i> &mdash; i operacje, które ten powód blokuje. Host z innej rodziny to
+        powód, nie wada, i strona mówi, które jest które, zamiast liczyć lukę jako zero.</figcaption>
     </figure>
 
     <figure class="figure">
       <img src="../img/monitoring.png" alt="Strona monitoringu: alerty według wagi, pokrycie hostów oraz reguły alertów wraz z ich warunkami." width="1600" height="1000" loading="lazy">
       <figcaption><b>Monitoring.</b> Każdy agent próbkuje swój host; reguły z tej strony zamieniają
         próbki w alerty i nic nie odpali bez reguły, którą operator może tu przeczytać. Najpierw
-        pokrycie &mdash; cztery hosty zgłaszają dane, żaden nie milczy, pięć reguł włączonych
-        &mdash; a potem same reguły: <code>filesystem_used_percent &gt; 90%</code> utrzymane przez
-        dziesięć minut to ostrzeżenie dla całej floty, ta sama metryka powyżej 97% jest krytyczna
-        i nie czeka wcale.</figcaption>
+        pokrycie &mdash; ile hostów zgłasza dane, ile zamilkło, ile reguł jest włączonych &mdash;
+        a potem same reguły, każda z metryką, progiem, czasem, przez jaki musi się utrzymać, i
+        zasięgiem hostów. Nie ma drugiego systemu do zainstalowania ani eksportera do
+        utrzymywania.</figcaption>
     </figure>
 
     <figure class="figure">
       <img src="../img/audit.png" alt="Strona audytu: zdarzenia na godzinę według wyniku, podsumowanie wyników i aktorów, filtry oraz tabela zdarzeń." width="1600" height="1000" loading="lazy">
       <figcaption><b>Audyt.</b> Każde powodzenie i niepowodzenie tworzy zdarzenie; każda odmowa
-        również. Wśród stu wypisanych tutaj: 89 się powiodło, 9 zawiodło, 2 zostały odrzucone,
-        policzone według aktora &mdash; nazwany operator, sam panel oraz kampanie pod własnymi
-        identyfikatorami. Wiersz niesie czas, aktora, rodzaj, operację, cel i wynik, a pod nazwą
-        użytkownika uwierzytelnienie, na którym oparło się żądanie: sesję i kontekst
-        uwierzytelnienia, w jakim ją nadano.</figcaption>
+        również. Ślad zawęża się po stronie serwera &mdash; wynik, aktor, operacja, cel, okno
+        czasu &mdash; więc czytane jest dokładnie to, o co poproszono. Wśród stu wypisanych
+        tutaj 42 się powiodły, 58 zostało odrzuconych, żadne nie zawiodło; wiersz niesie czas,
+        aktora, rodzaj, operację, cel i wynik, a pod nazwą użytkownika sesję i sposób
+        uwierzytelnienia, na którym żądanie się opierało. To, na czym opierało się
+        zatwierdzenie, i pola, które zmiana ruszyła, stoją pod wierszem, bez pytania.</figcaption>
     </figure>
 
     <ul class="linkrow">

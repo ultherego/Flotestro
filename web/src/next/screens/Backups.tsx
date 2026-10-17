@@ -1,13 +1,12 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { absoluteTime, relativeTime } from "../../lib/format";
 import { useT, type Translate } from "../../i18n";
-import { Board } from "../Board";
-import type { BoardEntry } from "../../components/board";
 import {
-  Band, Bars, Card, Chart, Empty, Kpi, Pill, Problem, Seg, Table, TwoLine, type Segment, type Tone,
+  Band, Bars, C, Card, Chart, Empty, Grid, Kpi, Kpis, Pill, Problem, Seg, Table, Tabs, TwoLine,
+  useTab, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -140,7 +139,7 @@ export function Backups() {
   const calendar = lastDays(rows, DAYS);
 
   return (
-    <Board screen={BACKUPS_SCREEN} catalogue={BACKUPS} drawn={{
+    <Readings panels={{
       never: (
         <Kpi
           icon="backups"
@@ -359,7 +358,7 @@ export function Backups() {
               {
                 key: "host",
                 head: t("Host"),
-                cell: (one) => <Link to={`/next/hosts/${one.host_id}/backups`}>{one.hostname}</Link>,
+                cell: (one) => <Link to={`/hosts/${one.host_id}/backups`}>{one.hostname}</Link>,
               },
               { key: "definition", head: t("Definition"), cell: (one) => one.definition },
               {
@@ -400,6 +399,53 @@ export function Backups() {
   );
 }
 
+/** The sub-tabs of this screen: what the fleet copies, and the definitions. */
+const BACKUP_TABS = ["coverage", "definitions"] as const;
+
+/**
+ * Two readings rather than ten containers.
+ *
+ * The four tiles stay above the tabs: they are one shape, they are what a
+ * reader looks at first, and they hold on both tabs. Under them, coverage
+ * answers "is the fleet copied" and the definitions answer "which of them
+ * is wrong" - and each section is as tall as what it holds, which a cell
+ * of a board could not be.
+ */
+function Readings({ panels }: { panels: Record<string, ReactNode> }) {
+  const t = useT();
+  const [tab, go] = useTab(BACKUP_TABS);
+  return (
+    <>
+      <Kpis>
+        {panels.never}
+        {panels.stale}
+        {panels.unverified}
+        {panels.unrestored}
+      </Kpis>
+
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "coverage", label: t("Coverage") },
+          { value: "definitions", label: t("Definitions") },
+        ]}
+      />
+
+      {tab === "coverage" && (
+        <Grid>
+          <C span={7}>{panels.age}</C>
+          <C span={5}>{panels.coverage}</C>
+          <C span={8}>{panels.calendar}</C>
+          <C span={4}>{panels.tools}</C>
+          <C span={12}>{panels.repositories}</C>
+        </Grid>
+      )}
+      {tab === "definitions" && <Grid><C span={12}>{panels.list}</C></Grid>}
+    </>
+  );
+}
+
 /** What the age pill says: hours while they are still readable, then days. */
 function age(t: Translate, one: Item): string {
   if (one.status === "never") return t("never ran");
@@ -433,19 +479,3 @@ export function lastDays(items: Item[], days: number): { labels: string[]; value
   });
   return { labels, values };
 }
-
-export const BACKUPS_SCREEN = "next_backups";
-
-export const BACKUPS: BoardEntry[] = [
-  { key: "never", title: "Never ran", width: 3, height: 1 },
-  { key: "stale", title: "Stale", width: 3, height: 1 },
-  { key: "unverified", title: "Unverified", width: 3, height: 1 },
-  { key: "unrestored", title: "Never restored", width: 3, height: 1 },
-  { key: "age", title: "Age of the newest copy", width: 7, height: 2 },
-  { key: "coverage", title: "Hosts", width: 5, height: 2 },
-  // A chart of a fixed height over a fixed fortnight: it does not grow with the fleet.
-  { key: "calendar", title: "Last 14 days", width: 8, height: 2 },
-  { key: "tools", title: "Tools and verification", width: 4, height: 2 },
-  { key: "repositories", title: "Repositories", width: 12, height: 4 },
-  { key: "list", title: "Definitions", width: 12, height: 5 },
-];

@@ -7,16 +7,17 @@ import { absoluteTime, relativeTime } from "../../../lib/format";
 import type { Host, InventoryFragment, Job } from "../../../lib/types";
 import { useT, type Translate } from "../../../i18n";
 import {
-  body, count, emptyForm, flag, operationForm, payloadTextOf, readPayloadText, text,
-  type FieldSuggestions, type FieldValue, type FormProblem, type FormValue,
+  body, count, flag, payloadTextOf, readPayloadText, text,
+  type FieldSuggestions, type FieldValue, type FormValue,
   type OperationEntry, type OperationField,
 } from "../../../lib/operations";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Band, Banner, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Kpi, Modal, Note, Pill,
-  Table, Tag, Tags, type Segment,
+  Band, Banner, Button, C, Card, Check, Empty, Fact, Facts, Field, Fields, Form, Grid, Kpi, Modal,
+  Note, Pill, Table, Tabs, Tag, Tags, useTab, type Segment,
 } from "../../kit";
+import {
+  orderReady, refusalOf, registryOrder, type RegistryOrder,
+} from "../../../lib/host/module";
 
 /**
  * Power, boot and the maintenance window.
@@ -206,9 +207,9 @@ export function JobLine({ job, hostID }: { job: Job; hostID: string }) {
           : t("Job {id} has been queued.", { id: job.id.slice(0, 8) })}
       </span>
       {" "}
-      <Link to={`/next/jobs/${job.id}`}>{t("Open the job")}</Link>
+      <Link to={`/jobs/${job.id}`}>{t("Open the job")}</Link>
       {" "}
-      <Link to={`/next/hosts/${hostID}/jobs`}>{t("See all jobs")}</Link>
+      <Link to={`/hosts/${hostID}/jobs`}>{t("See all jobs")}</Link>
     </Note>
   );
 }
@@ -408,48 +409,10 @@ function OneField({ field, value, problem, set, suggestions }: {
 
 /* ------------------------------------------------- the registry's orders */
 
-/** One order as the registry composes it: what would be sent, and what is wrong with it. */
-export type RegistryOrder = {
-  action: string;
-  payload: Record<string, unknown>;
-  problems: FormProblem[];
-};
-
-/**
- * Puts an order through the registry entry of its action. The seed carries
- * only the fields the module fills in; the rest come from the entry's own
- * empty form, so the payload is the one the Bulk workspace would send.
- */
-export function registryOrder(action: string, seed: FormValue): RegistryOrder {
-  const entry = operationForm(action);
-  // An action with no entry is a programming mistake, not an operator one:
-  // the order is refused rather than sent as a payload nobody composed.
-  if (!entry) {
-    return {
-      action,
-      payload: {},
-      problems: [{ message: "The registry has no form for {action} yet.", params: { action } }],
-    };
-  }
-  const form = { ...emptyForm(entry), ...seed };
-  return { action, payload: entry.toPayload(form), problems: entry.validate(form) };
-}
-
-/** Whether the registry would take this order as it stands. */
-export function orderReady(order: RegistryOrder): boolean {
-  return order.problems.length === 0;
-}
-
-/**
- * The first refusal of an order as a sentence, or an empty string when the
- * registry takes it. It is what a disabled button says in its hint, so it
- * takes the translator rather than calling the hook: a row in a list uses
- * it too.
- */
-export function refusalOf(t: Translate, order: RegistryOrder): string {
-  const problem = order.problems[0];
-  return problem ? t(problem.message, problem.params) : "";
-}
+/* The registry's order model is lib/host/module's: every module of a host
+   page composes its order the same way, through the registry entry, so
+   there is one copy of what "ready" and "refused" mean. */
+export { orderReady, refusalOf, registryOrder, type RegistryOrder };
 
 /**
  * The one line that says where a module's reading came from and how old
@@ -496,7 +459,7 @@ export function dashedBootID(id: string): string {
 /** The Logs module of this host, narrowed to one boot. */
 export function bootLogsPath(hostID: string, bootID: string): string {
   const bare = bootID.replace(/-/g, "").toLowerCase();
-  return `/next/hosts/${encodeURIComponent(hostID)}/logs?boot=${encodeURIComponent(bare)}`;
+  return `/hosts/${encodeURIComponent(hostID)}/logs?boot=${encodeURIComponent(bare)}`;
 }
 
 /** The uptime in a form that reads without arithmetic in one's head. */
@@ -515,8 +478,15 @@ const POWER_CHANGES = ["system.reboot", "system.shutdown"];
 /** The shortest reason a shutdown is accepted with, before the dialog opens. */
 const SHUTDOWN_REASON = 10;
 
+/**
+ * The sub-tabs of this module: what the machine's boot state is, and
+ * what may be done to it. The address carries the open one.
+ */
+const POWER_TABS = ["state", "change"] as const;
+
 export function Power({ host }: { host: Host }) {
   const t = useT();
+  const [tab, go] = useTab(POWER_TABS);
   const [intent, setIntent] = useState<Intent | null>(null);
   const [shutdownReason, setShutdownReason] = useState("");
   const [ignoreInhibitors, setIgnoreInhibitors] = useState(false);
@@ -571,16 +541,16 @@ export function Power({ host }: { host: Host }) {
       {order.message && <Banner tone="error">{order.message}</Banner>}
       {order.job && <JobLine job={order.job} hostID={host.id} />}
 
-      <Board screen={POWER_SCREEN} catalogue={HOST_POWER} drawn={{
-        uptime: (
+      <Grid>
+        <C span={4}>
           <Kpi
             icon="power"
             label={t("Uptime")}
             value={uptime === undefined || uptime === null ? null : uptimeWords(uptime)}
             note={snapshot?.observed_at ? t("as of {when}", { when: relativeTime(snapshot.observed_at) }) : undefined}
           />
-        ),
-        reboot: (
+        </C>
+        <C span={4}>
           <Kpi
             icon="power"
             label={t("Reboot required")}
@@ -590,8 +560,8 @@ export function Power({ host }: { host: Host }) {
             tone={snapshot?.reboot_required ? "warn" : "ok"}
             note={(snapshot?.reboot_reasons ?? []).length > 0 ? snapshot!.reboot_reasons!.join(", ") : undefined}
           />
-        ),
-        holds: (
+        </C>
+        <C span={4}>
           <Kpi
             icon="jobs"
             label={t("Inhibitors")}
@@ -599,204 +569,232 @@ export function Power({ host }: { host: Host }) {
             tone={blocking.length > 0 ? "warn" : "ok"}
             note={blocking.length > 0 ? t("{n} of them blocking", { n: blocking.length }) : undefined}
           />
-        ),
-        bands: (
-          <Card
-            title={t("Holds and reasons")}
-            note={t("What logind would hold a shutdown for, and what asks for a reboot.")}
-          >
-            <Band segments={holds} testId="power-holds" />
-          </Card>
-        ),
-        boot: (
-          <Card title={t("This boot")} foot={freshnessOf(t, module.data)}>
-            <Facts>
-              <Fact label={t("Boot ID")}>
-                {snapshot?.boot_id
-                  ? (
-                    <Link to={bootLogsPath(host.id, snapshot.boot_id)} title={t("The journal of this boot")}>
-                      {snapshot.boot_id}
-                    </Link>
-                  )
-                  : <Pill tone="unknown">{t("unknown")}</Pill>}
-              </Fact>
-              {/* The boot instant absolute beside the relative one, and the
-                  uptime marked as of the read: the two are read at different
-                  moments and would otherwise seem to disagree. */}
-              <Fact label={t("Booted")}>
-                {snapshot?.booted_at
-                  ? <span title={absoluteTime(snapshot.booted_at)}>{relativeTime(snapshot.booted_at)}</span>
-                  : <Pill tone="unknown">{t("unknown")}</Pill>}
-              </Fact>
-              <Fact label={t("Uptime")}>
-                {uptime === undefined || uptime === null
-                  ? <Pill tone="unknown">{t("unknown")}</Pill>
-                  : <span title={t("as of the last read")}>{uptimeWords(uptime)}</span>}
-              </Fact>
-              <Fact label={t("Running kernel")}>
-                {snapshot?.running_kernel || <Pill tone="unknown">{t("unknown")}</Pill>}
-              </Fact>
-              <Fact label={t("Reboot required")}>
-                {snapshot?.reboot_required === undefined || snapshot?.reboot_required === null
-                  ? <Pill tone="unknown">{t("unknown")}</Pill>
-                  : snapshot.reboot_required ? t("yes") : t("no")}
-              </Fact>
-              {/* "Why" is the whole answer here: a host that requires a
-                  reboot without a reason tells the operator nothing. */}
-              <Fact label={t("Why")}>
-                {(snapshot?.reboot_reasons ?? []).length > 0
-                  ? snapshot!.reboot_reasons!.join(", ")
-                  : <Note>{t("nothing asks for one")}</Note>}
-              </Fact>
-              <Fact label={t("Scheduled shutdown")}>
-                {snapshot?.scheduled_shutdown
-                  ? (
-                    <>
-                      <Pill tone="warn">{snapshot.scheduled_shutdown.mode}</Pill>
-                      {" "}
-                      <span title={absoluteTime(snapshot.scheduled_shutdown.at)}>
-                        {relativeTime(snapshot.scheduled_shutdown.at)}
-                      </span>
-                    </>
-                  )
-                  : t("none")}
-              </Fact>
-              <Fact label={t("Boots in the journal")}>
-                {known ? (known.last_boots ?? []).length : <Pill tone="unknown">{t("unknown")}</Pill>}
-              </Fact>
-            </Facts>
-          </Card>
-        ),
-        maintenance: <MaintenanceWindow host={host} />,
-        inhibitors: (
-          <Card
-            title={t("Inhibitors")}
-            note={t("What logind would hold a shutdown for. A delay is waited out; a block stops the operation until an operator decides otherwise.")}
-            flush
-          >
-            {!snapshot?.inhibitors_known ? (
-              <Empty>{t("This host did not report inhibitors.")}</Empty>
-            ) : (
+        </C>
+      </Grid>
+
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "state", label: t("State") },
+          { value: "change", label: t("Change") },
+        ]}
+      />
+
+      {tab === "state" && (
+        <Grid>
+          <C span={7}>
+            <Card
+              title={t("Holds and reasons")}
+              note={t("What logind would hold a shutdown for, and what asks for a reboot.")}
+            >
+              <Band segments={holds} testId="power-holds" />
+            </Card>
+          </C>
+          <C span={5}>
+            <Card title={t("This boot")} foot={freshnessOf(t, module.data)}>
+              <Facts>
+                <Fact label={t("Boot ID")}>
+                  {snapshot?.boot_id
+                    ? (
+                      <Link to={bootLogsPath(host.id, snapshot.boot_id)} title={t("The journal of this boot")}>
+                        {snapshot.boot_id}
+                      </Link>
+                    )
+                    : <Pill tone="unknown">{t("unknown")}</Pill>}
+                </Fact>
+                {/* The boot instant absolute beside the relative one, and the
+                    uptime marked as of the read: the two are read at different
+                    moments and would otherwise seem to disagree. */}
+                <Fact label={t("Booted")}>
+                  {snapshot?.booted_at
+                    ? <span title={absoluteTime(snapshot.booted_at)}>{relativeTime(snapshot.booted_at)}</span>
+                    : <Pill tone="unknown">{t("unknown")}</Pill>}
+                </Fact>
+                <Fact label={t("Uptime")}>
+                  {uptime === undefined || uptime === null
+                    ? <Pill tone="unknown">{t("unknown")}</Pill>
+                    : <span title={t("as of the last read")}>{uptimeWords(uptime)}</span>}
+                </Fact>
+                <Fact label={t("Running kernel")}>
+                  {snapshot?.running_kernel || <Pill tone="unknown">{t("unknown")}</Pill>}
+                </Fact>
+                <Fact label={t("Reboot required")}>
+                  {snapshot?.reboot_required === undefined || snapshot?.reboot_required === null
+                    ? <Pill tone="unknown">{t("unknown")}</Pill>
+                    : snapshot.reboot_required ? t("yes") : t("no")}
+                </Fact>
+                {/* "Why" is the whole answer here: a host that requires a
+                    reboot without a reason tells the operator nothing. */}
+                <Fact label={t("Why")}>
+                  {(snapshot?.reboot_reasons ?? []).length > 0
+                    ? snapshot!.reboot_reasons!.join(", ")
+                    : <Note>{t("nothing asks for one")}</Note>}
+                </Fact>
+                <Fact label={t("Scheduled shutdown")}>
+                  {snapshot?.scheduled_shutdown
+                    ? (
+                      <>
+                        <Pill tone="warn">{snapshot.scheduled_shutdown.mode}</Pill>
+                        {" "}
+                        <span title={absoluteTime(snapshot.scheduled_shutdown.at)}>
+                          {relativeTime(snapshot.scheduled_shutdown.at)}
+                        </span>
+                      </>
+                    )
+                    : t("none")}
+                </Fact>
+                <Fact label={t("Boots in the journal")}>
+                  {known ? (known.last_boots ?? []).length : <Pill tone="unknown">{t("unknown")}</Pill>}
+                </Fact>
+              </Facts>
+            </Card>
+          </C>
+          <C span={12}>
+            <MaintenanceState host={host} />
+          </C>
+          <C span={12}>
+            <Card
+              title={t("Inhibitors")}
+              note={t("What logind would hold a shutdown for. A delay is waited out; a block stops the operation until an operator decides otherwise.")}
+              flush
+            >
+              {!snapshot?.inhibitors_known ? (
+                <Empty>{t("This host did not report inhibitors.")}</Empty>
+              ) : (
+                <Table
+                  rows={snapshot.inhibitors ?? []}
+                  keyOf={(one, index) => `${one.who}-${index}`}
+                  empty={t("Nothing is holding a shutdown on this host.")}
+                  columns={[
+                    { key: "who", head: t("Who"), cell: (one) => one.who },
+                    { key: "user", head: t("User"), minor: true, cell: (one) => one.user || "—" },
+                    { key: "what", head: t("What"), tight: true, cell: (one) => one.what || "—" },
+                    { key: "why", head: t("Why"), minor: true, cell: (one) => one.why || "—" },
+                    { key: "mode", head: t("Mode"), cell: (one) => (
+                      one.mode === "block" ? <Pill tone="warn">{t("block")}</Pill> : one.mode || "—"
+                    ) },
+                  ]}
+                />
+              )}
+            </Card>
+          </C>
+          <C span={12}>
+            <Card
+              title={t("Last boots")}
+              note={t("The journal numbers boots back from the current one: 0 is this boot, -1 the one before.")}
+              flush
+            >
               <Table
-                rows={snapshot.inhibitors ?? []}
-                keyOf={(one, index) => `${one.who}-${index}`}
-                empty={t("Nothing is holding a shutdown on this host.")}
+                rows={boots}
+                keyOf={(one) => one.boot_id}
+                loading={module.isLoading}
+                empty={t("The journal on this host lists no earlier boots.")}
                 columns={[
-                  { key: "who", head: t("Who"), cell: (one) => one.who },
-                  { key: "user", head: t("User"), minor: true, cell: (one) => one.user || "—" },
-                  { key: "what", head: t("What"), tight: true, cell: (one) => one.what || "—" },
-                  { key: "why", head: t("Why"), minor: true, cell: (one) => one.why || "—" },
-                  { key: "mode", head: t("Mode"), cell: (one) => (
-                    one.mode === "block" ? <Pill tone="warn">{t("block")}</Pill> : one.mode || "—"
+                  { key: "index", head: "#", num: true, cell: (one) => one.index },
+                  { key: "boot", head: t("Boot ID"), tight: true, cell: (one) => (
+                    <>
+                      <Link to={bootLogsPath(host.id, one.boot_id)} title={t("The journal of this boot")}>
+                        {dashedBootID(one.boot_id)}
+                      </Link>
+                      {one.index === 0 && <Pill tone="ok">{t("this boot")}</Pill>}
+                    </>
+                  ) },
+                  { key: "first", head: t("First entry"), cell: (one) => (
+                    <span title={absoluteTime(one.first_entry)}>{relativeTime(one.first_entry)}</span>
+                  ) },
+                  { key: "last", head: t("Last entry"), cell: (one) => (
+                    <span title={absoluteTime(one.last_entry)}>{relativeTime(one.last_entry)}</span>
                   ) },
                 ]}
               />
-            )}
-          </Card>
-        ),
-        act: (
-          <Card
-            title={t("Power")}
-            note={t("A reboot is finished only when the host comes back with a new boot ID; a shutdown is never finished here, because nothing in this panel can turn the machine back on.")}
-          >
-            <Fields>
-              <Field
-                label={t("Reason for shutting this host down")}
-                hint={t("A reboot asks for its reason at the confirmation. A shutdown needs one here first, at least 10 characters: nobody will read the panel to find out why the host is dark.")}
-                wide
-              >
-                <input
-                  value={shutdownReason}
-                  onChange={(event) => setShutdownReason(event.target.value)}
-                  placeholder={t("disk replacement, ticket 1234")}
-                  data-testid="shutdown-reason"
-                />
-              </Field>
-            </Fields>
-            {/* The checkbox stands over both buttons and governs both: a
-                restart interrupts the same work a shutdown does. */}
-            <Check checked={ignoreInhibitors} onChange={setIgnoreInhibitors}>
-              {t("override inhibitors")}
-            </Check>
-            <Note>
-              {t("Both are delayed 15 seconds on the host, so whoever is logged in sees the warning.")}
-            </Note>
-            <Guard action="system.reboot" host={host.id} explain>
-              <Button
-                testId="reboot"
-                onClick={() => setIntent({
-                  action: "system.reboot",
-                  label: t("Reboot host"),
-                  description: t("{host} will reboot. The panel treats the operation as finished only when the host comes back with a new boot ID, so a host that does not return shows up as failed, not as done.", { host: host.hostname }),
-                  payload: { reboot: { delay_seconds: 15, reason: "operator reboot", ignore_inhibitors: ignoreInhibitors } },
-                })}
-              >
-                {t("Reboot")}
-              </Button>
-            </Guard>
-            <Guard action="system.shutdown" host={host.id} explain>
-              <Button
-                kind="danger"
-                testId="shutdown"
-                disabled={shutdownReason.trim().length < SHUTDOWN_REASON}
-                title={t("a shutdown needs a reason: nobody will read the panel to find out why this host is dark")}
-                onClick={() => setIntent({
-                  action: "system.shutdown",
-                  label: t("Shut down host"),
-                  danger: true,
-                  description: t("{host} will power off. Nothing in this panel can turn it back on — that needs physical or out-of-band access to the machine.", { host: host.hostname })
-                    + (blocking.length
-                      ? " " + (ignoreInhibitors
-                        ? t("{n} blocking inhibitor(s) will be overridden.", { n: blocking.length })
-                        : t("{n} inhibitor(s) are blocking shutdown; the host will refuse.", { n: blocking.length }))
-                      : ""),
-                  payload: {
-                    power: {
-                      mode: "poweroff",
-                      delay_seconds: 15,
-                      reason: shutdownReason,
-                      ignore_inhibitors: ignoreInhibitors,
-                    },
-                  },
-                })}
-              >
-                {t("Shut down")}
-              </Button>
-            </Guard>
-          </Card>
-        ),
-        boots: (
-          <Card
-            title={t("Last boots")}
-            note={t("The journal numbers boots back from the current one: 0 is this boot, -1 the one before.")}
-            flush
-          >
-            <Table
-              rows={boots}
-              keyOf={(one) => one.boot_id}
-              loading={module.isLoading}
-              empty={t("The journal on this host lists no earlier boots.")}
-              columns={[
-                { key: "index", head: "#", num: true, cell: (one) => one.index },
-                { key: "boot", head: t("Boot ID"), tight: true, cell: (one) => (
-                  <>
-                    <Link to={bootLogsPath(host.id, one.boot_id)} title={t("The journal of this boot")}>
-                      {dashedBootID(one.boot_id)}
-                    </Link>
-                    {one.index === 0 && <Pill tone="ok">{t("this boot")}</Pill>}
-                  </>
-                ) },
-                { key: "first", head: t("First entry"), cell: (one) => (
-                  <span title={absoluteTime(one.first_entry)}>{relativeTime(one.first_entry)}</span>
-                ) },
-                { key: "last", head: t("Last entry"), cell: (one) => (
-                  <span title={absoluteTime(one.last_entry)}>{relativeTime(one.last_entry)}</span>
-                ) },
-              ]}
-            />
-          </Card>
-        ),
-      }} />
+            </Card>
+          </C>
+        </Grid>
+      )}
+
+      {tab === "change" && (
+        <Grid>
+          <C span={12}>
+            <MaintenanceWindow host={host} />
+          </C>
+          <C span={12}>
+            <Form
+              title={t("Power")}
+              note={t("A reboot is finished only when the host comes back with a new boot ID; a shutdown is never finished here, because nothing in this panel can turn the machine back on.")}
+              actions={(
+                <>
+                  <Guard action="system.reboot" host={host.id} explain>
+                    <Button
+                      testId="reboot"
+                      onClick={() => setIntent({
+                        action: "system.reboot",
+                        label: t("Reboot host"),
+                        description: t("{host} will reboot. The panel treats the operation as finished only when the host comes back with a new boot ID, so a host that does not return shows up as failed, not as done.", { host: host.hostname }),
+                        payload: { reboot: { delay_seconds: 15, reason: "operator reboot", ignore_inhibitors: ignoreInhibitors } },
+                      })}
+                    >
+                      {t("Reboot")}
+                    </Button>
+                  </Guard>
+                  <Guard action="system.shutdown" host={host.id} explain>
+                    <Button
+                      kind="danger"
+                      testId="shutdown"
+                      disabled={shutdownReason.trim().length < SHUTDOWN_REASON}
+                      title={t("a shutdown needs a reason: nobody will read the panel to find out why this host is dark")}
+                      onClick={() => setIntent({
+                        action: "system.shutdown",
+                        label: t("Shut down host"),
+                        danger: true,
+                        description: t("{host} will power off. Nothing in this panel can turn it back on — that needs physical or out-of-band access to the machine.", { host: host.hostname })
+                          + (blocking.length
+                            ? " " + (ignoreInhibitors
+                              ? t("{n} blocking inhibitor(s) will be overridden.", { n: blocking.length })
+                              : t("{n} inhibitor(s) are blocking shutdown; the host will refuse.", { n: blocking.length }))
+                            : ""),
+                        payload: {
+                          power: {
+                            mode: "poweroff",
+                            delay_seconds: 15,
+                            reason: shutdownReason,
+                            ignore_inhibitors: ignoreInhibitors,
+                          },
+                        },
+                      })}
+                    >
+                      {t("Shut down")}
+                    </Button>
+                  </Guard>
+                </>
+              )}
+            >
+              <Fields>
+                <Field
+                  label={t("Reason for shutting this host down")}
+                  hint={t("A reboot asks for its reason at the confirmation. A shutdown needs one here first, at least 10 characters: nobody will read the panel to find out why the host is dark.")}
+                  wide
+                >
+                  <input
+                    value={shutdownReason}
+                    onChange={(event) => setShutdownReason(event.target.value)}
+                    placeholder={t("disk replacement, ticket 1234")}
+                    data-testid="shutdown-reason"
+                  />
+                </Field>
+              </Fields>
+              {/* The checkbox stands over both buttons and governs both: a
+                  restart interrupts the same work a shutdown does. */}
+              <Check checked={ignoreInhibitors} onChange={setIgnoreInhibitors}>
+                {t("override inhibitors")}
+              </Check>
+              <Note>
+                {t("Both are delayed 15 seconds on the host, so whoever is logged in sees the warning.")}
+              </Note>
+            </Form>
+          </C>
+        </Grid>
+      )}
 
       {intent && (
         <Confirm
@@ -820,9 +818,36 @@ export function Power({ host }: { host: Host }) {
 }
 
 /**
- * The maintenance window. It is not an operation on the host and does not
- * go through the job queue: it changes what the panel thinks about the
- * host.
+ * Whether somebody is working on this machine now. A reading: the window
+ * is declared in the form of the same name under "Change".
+ */
+function MaintenanceState({ host }: { host: Host }) {
+  const t = useT();
+  const active = Boolean(host.maintenance && new Date(host.maintenance.until).getTime() > Date.now());
+  return (
+    <Card
+      title={t("Maintenance window")}
+      note={t("A window says somebody is working on this machine: campaigns skip it and its alerts stay quiet.")}
+    >
+      {active ? (
+        <Facts>
+          <Fact label={t("Until")}>
+            <span title={absoluteTime(host.maintenance!.until)}>{relativeTime(host.maintenance!.until)}</span>
+          </Fact>
+          <Fact label={t("Reason")}>{host.maintenance!.reason || "—"}</Fact>
+          <Fact label={t("Declared by")}>{host.maintenance!.set_by || "—"}</Fact>
+        </Facts>
+      ) : (
+        <Empty>{t("This host is not in a maintenance window.")}</Empty>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * Declaring the maintenance window. It is not an operation on the host
+ * and does not go through the job queue: it changes what the panel thinks
+ * about the host.
  */
 function MaintenanceWindow({ host }: { host: Host }) {
   const t = useT();
@@ -844,21 +869,30 @@ function MaintenanceWindow({ host }: { host: Host }) {
   const active = Boolean(host.maintenance && new Date(host.maintenance.until).getTime() > Date.now());
 
   return (
-    <Card
+    <Form
       title={t("Maintenance window")}
-      note={t("A window says somebody is working on this machine: campaigns skip it and its alerts stay quiet. It always has an end — a window without one ends as a host nobody patches and nobody remembers.")}
-    >
-      {active ? (
-        <Facts>
-          <Fact label={t("Until")}>
-            <span title={absoluteTime(host.maintenance!.until)}>{relativeTime(host.maintenance!.until)}</span>
-          </Fact>
-          <Fact label={t("Reason")}>{host.maintenance!.reason || "—"}</Fact>
-          <Fact label={t("Declared by")}>{host.maintenance!.set_by || "—"}</Fact>
-        </Facts>
-      ) : (
-        <Empty>{t("This host is not in a maintenance window.")}</Empty>
+      note={t("A window always has an end — a window without one ends as a host nobody patches and nobody remembers.")}
+      actions={(
+        <>
+          <Button
+            testId="window-start"
+            disabled={!reason.trim() || set.isPending}
+            onClick={() => set.mutate({ duration_minutes: minutes, reason })}
+          >
+            {active ? t("Extend window") : t("Start window")}
+          </Button>
+          <Button
+            kind="quiet"
+            testId="window-end"
+            disabled={!active || set.isPending}
+            onClick={() => set.mutate({ clear: true })}
+          >
+            {t("End window")}
+          </Button>
+          {message && <Note>{message}</Note>}
+        </>
       )}
+    >
       <Fields>
         <Field label={t("Duration (minutes)")} hint={t("Counted from now; the window ends on its own.")}>
           <input
@@ -878,38 +912,6 @@ function MaintenanceWindow({ host }: { host: Host }) {
           />
         </Field>
       </Fields>
-      <Button
-        testId="window-start"
-        disabled={!reason.trim() || set.isPending}
-        onClick={() => set.mutate({ duration_minutes: minutes, reason })}
-      >
-        {active ? t("Extend window") : t("Start window")}
-      </Button>
-      <Button
-        kind="quiet"
-        testId="window-end"
-        disabled={!active || set.isPending}
-        onClick={() => set.mutate({ clear: true })}
-      >
-        {t("End window")}
-      </Button>
-      {message && <Note>{message}</Note>}
-    </Card>
+    </Form>
   );
 }
-
-/** The name this module's arrangement is stored under. */
-export const POWER_SCREEN = "next_host_power";
-
-/** The containers this module can draw, and the shape each ships with. */
-export const HOST_POWER: BoardEntry[] = [
-  { key: "uptime", title: "Uptime", width: 4, height: 1 },
-  { key: "reboot", title: "Reboot required", width: 4, height: 1 },
-  { key: "holds", title: "Inhibitors", width: 4, height: 1 },
-  { key: "bands", title: "Holds and reasons", width: 7, height: 2 },
-  { key: "boot", title: "This boot", width: 5, height: 3 },
-  { key: "maintenance", title: "Maintenance window", width: 7, height: 3 },
-  { key: "act", title: "Power", width: 5, height: 3 },
-  { key: "inhibitors", title: "Inhibitors", width: 7, height: 3 },
-  { key: "boots", title: "Last boots", width: 12, height: 3 },
-];

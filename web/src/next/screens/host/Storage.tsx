@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../../lib/api";
 import { awaitJob } from "../../../lib/jobs";
@@ -8,14 +8,14 @@ import {
   emptyForm, operationForm, type FieldSuggestions, type FormValue,
 } from "../../../lib/operations";
 import { useT } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import { PlanBody } from "../Job";
 import type { HostPlan, PackagePlanFacts } from "../../../components/plan";
 import {
-  Band, Banner, Bars, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Kpi, Meter, Note,
-  Pill, Readout, Table, Tag, Tags, TwoLine, type Segment, type Tone,
+  Band, Banner, Bars, Button, C, Card, Check, Empty, Fact, Facts, Field, Fields, Form, Grid, Kpi,
+  Meter, Note, Pill, Readout, Table, Tabs, Tag, Tags, TwoLine, useTab,
+  type Segment, type Tone,
 } from "../../kit";
+import { useAllowed } from "../../../lib/actions";
 import {
   Confirm, freshnessOf, Guard, JobLine, OperationFields, ReadOnlyNotice, useOrder, type Intent,
 } from "./Power";
@@ -454,17 +454,29 @@ function useRead<T>(host: Host) {
   };
 }
 
+/**
+ * Three readings and one place where things are decided.
+ *
+ * This module was the worst of the board's victims: fourteen containers
+ * on one grid, two of them called "Mounts" and two of them "Devices", a
+ * mount wizard among them as though a form were a measurement. The
+ * mounts, the devices, SMART and the arrays are what the host is;
+ * the volume manager is a world of its own and gets a sub-tab; and every
+ * order this module places is composed in the last one.
+ */
+const STORAGE_TABS = ["state", "volumes", "change"] as const;
+
 export function Storage({ host }: { host: Host }) {
   const t = useT();
   const queryClient = useQueryClient();
   const [intent, setIntent] = useState<Intent | null>(null);
   const [unmounting, setUnmounting] = useState("");
   const [smartOf, setSmartOf] = useState<Device | null>(null);
-  const [wizard, setWizard] = useState(false);
   // The order being composed in a form of the operation registry: the
   // volume and group operations need values typed in, and they come from
   // the same registry the Bulk wizard draws from.
   const [layer, setLayer] = useState<{ action: string; seed: FormValue } | null>(null);
+  const mayMount = useAllowed(host.id, "mount.ensure").allowed;
 
   const module = useQuery({
     queryKey: ["inventory", host.id, "storage"],
@@ -484,7 +496,6 @@ export function Storage({ host }: { host: Host }) {
   const order = useOrder(host, (job) => {
     setIntent(null);
     setUnmounting("");
-    setWizard(false);
     setLayer(null);
     refresh(job);
   });
@@ -531,29 +542,26 @@ export function Storage({ host }: { host: Host }) {
     return into;
   }, {})).sort((a, b) => b[1] - a[1]);
 
+  /* A sub-tab with nothing to hold is a tab that opens on an empty page:
+     the volume manager is only offered where the host has one, and the
+     orders only where one may be placed or one is being composed. */
+  const names = STORAGE_TABS.filter((one) =>
+    (one !== "volumes" || !snapshot?.lvm_unavailable_reason)
+    && (one !== "change" || mayMount || layer !== null));
+  const [tab, goTab] = useTab(names);
+  /* A form is asked for in one place and opens in another: the row that
+     orders a volume operation sends the reader to where the orders are
+     composed, rather than unfolding a form inside the table's container. */
+  const openLayer = (next: { action: string; seed: FormValue }) => {
+    setLayer(next);
+    goTab("change");
+  };
+
   if (!module.data && !module.isLoading) {
     return <Empty>{t("This host has not reported its storage yet.")}</Empty>;
   }
 
-  return (
-    <>
-      <ReadOnlyNotice host={host.id} actions={STORAGE_CHANGES} />
-      {snapshot?.unavailable_reason && (
-        <Banner tone="warn">
-          {t("Storage state could not be read: {reason}", { reason: snapshot.unavailable_reason })}
-        </Banner>
-      )}
-      {order.message && <Banner tone="error">{order.message}</Banner>}
-      {/* The host refused to plan the unmount: nothing is offered to confirm. */}
-      {unmounting && unmountPlan.attempt && !plannedUnmount && (
-        <Banner tone="error">
-          {unmountBinding?.plan.refusal || unmountPlan.attempt.message
-            || t("The host refused to plan the unmount of {target}.", { target: unmounting })}
-        </Banner>
-      )}
-      {order.job && <JobLine job={order.job} hostID={host.id} />}
-
-      <Board screen={STORAGE_SCREEN} catalogue={HOST_STORAGE} drawn={{
+  const panels: Record<string, ReactNode> = {
         mounts: (
           <Kpi
             icon="storage"
@@ -579,9 +587,12 @@ export function Storage({ host }: { host: Host }) {
             note={t("mounted now, not written in fstab")}
           />
         ),
+        /* This band and the table below it were both called "Mounts", so
+           neither title said which container the reader was in. The band
+           is the states; the table is the mounts themselves. */
         states: (
           <Card
-            title={t("Mounts")}
+            title={t("Mounts by state")}
             note={t("Mounted now against written in fstab, and the filesystems that are filling up.")}
             foot={freshnessOf(t, module.data)}
             tools={(
@@ -600,8 +611,14 @@ export function Storage({ host }: { host: Host }) {
             <Band segments={states} testId="mount-states" />
           </Card>
         ),
+        /* The same again: this count and the device table were both
+           "Devices". This one counts what the kernel reports, of three
+           kinds; the table lists the devices. */
         devices_by_kind: (
-          <Card title={t("Devices")} note={t("What the kernel sees, by kind.")}>
+          <Card
+            title={t("What the kernel sees")}
+            note={t("Block devices by kind, volume groups and software RAID.")}
+          >
             {deviceTypes.length > 0
               ? <Bars items={deviceTypes.map(([type, count]) => ({ label: type, value: count }))} />
               : <Empty>{t("This host reports no block device.")}</Empty>}
@@ -635,18 +652,18 @@ export function Storage({ host }: { host: Host }) {
                 )}
           </Card>
         ),
-        wizard: wizard ? (
+        wizard: (
           <Guard action="mount.ensure" host={host.id} explain>
-            <MountWizard host={host} devices={devices} onIntent={setIntent} onClose={() => setWizard(false)} />
+            <MountWizard host={host} devices={devices} onIntent={setIntent} onClose={() => goTab("state")} />
           </Guard>
-        ) : undefined,
+        ),
         mount_list: (
           <Card
             title={t("Mounts")}
             tools={(
               <Guard action="mount.ensure" host={host.id}>
-                <Button kind="quiet" testId="mount-open" onClick={() => setWizard((open) => !open)}>
-                  {wizard ? t("Cancel") : t("Mount a filesystem")}
+                <Button kind="quiet" testId="mount-open" onClick={() => goTab("change")}>
+                  {t("Mount a filesystem")}
                 </Button>
               </Guard>
             )}
@@ -817,7 +834,7 @@ export function Storage({ host }: { host: Host }) {
                   array={array}
                   hostID={host.id}
                   onIntent={setIntent}
-                  onAdd={(seed) => setLayer({ action: "raid.member.add", seed })}
+                  onAdd={(seed) => openLayer({ action: "raid.member.add", seed })}
                 />
               ))
             )}
@@ -857,7 +874,7 @@ export function Storage({ host }: { host: Host }) {
                         <Button
                           kind="quiet"
                           testId={`new-volume-${one.name}`}
-                          onClick={() => setLayer({
+                          onClick={() => openLayer({
                             action: "lvm.volume.create",
                             seed: { group: one.name, expected_group_uuid: one.uuid ?? "" },
                           })}
@@ -869,7 +886,7 @@ export function Storage({ host }: { host: Host }) {
                         <Button
                           kind="danger"
                           testId={`extend-group-${one.name}`}
-                          onClick={() => setLayer({
+                          onClick={() => openLayer({
                             action: "lvm.group.extend",
                             seed: { group: one.name, expected_group_uuid: one.uuid ?? "" },
                           })}
@@ -942,7 +959,7 @@ export function Storage({ host }: { host: Host }) {
                     devices={devices}
                     hostID={host.id}
                     onIntent={setIntent}
-                    onLayer={setLayer}
+                    onLayer={openLayer}
                   />
                 ) },
               ]}
@@ -958,7 +975,64 @@ export function Storage({ host }: { host: Host }) {
             onClose={() => setLayer(null)}
           />
         ) : undefined,
-      }} />
+  };
+
+  return (
+    <>
+      <ReadOnlyNotice host={host.id} actions={STORAGE_CHANGES} />
+      {snapshot?.unavailable_reason && (
+        <Banner tone="warn">
+          {t("Storage state could not be read: {reason}", { reason: snapshot.unavailable_reason })}
+        </Banner>
+      )}
+      {order.message && <Banner tone="error">{order.message}</Banner>}
+      {/* The host refused to plan the unmount: nothing is offered to confirm. */}
+      {unmounting && unmountPlan.attempt && !plannedUnmount && (
+        <Banner tone="error">
+          {unmountBinding?.plan.refusal || unmountPlan.attempt.message
+            || t("The host refused to plan the unmount of {target}.", { target: unmounting })}
+        </Banner>
+      )}
+      {order.job && <JobLine job={order.job} hostID={host.id} />}
+
+      <Grid>
+        <C span={4}>{panels.mounts}</C>
+        <C span={4}>{panels.full}</C>
+        <C span={4}>{panels.volatile}</C>
+      </Grid>
+
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={names.map((one) => ({
+          value: one,
+          label: one === "state" ? t("State") : one === "volumes" ? t("Volumes") : t("Change"),
+        }))}
+      />
+
+      {tab === "state" && (
+        <Grid>
+          <C span={7}>{panels.states}</C>
+          <C span={5}>{panels.devices_by_kind}</C>
+          <C span={12}>{panels.mount_list}</C>
+          <C span={12}>{panels.devices}</C>
+          {panels.smart && <C span={12}>{panels.smart}</C>}
+          <C span={12}>{panels.raid}</C>
+        </Grid>
+      )}
+      {tab === "volumes" && (
+        <Grid>
+          {panels.groups && <C span={6}>{panels.groups}</C>}
+          {panels.volumes && <C span={6}>{panels.volumes}</C>}
+          {panels.physical && <C span={12}>{panels.physical}</C>}
+        </Grid>
+      )}
+      {tab === "change" && (
+        <>
+          {panels.layer}
+          {panels.wizard}
+        </>
+      )}
 
       {confirming && (
         <Confirm
@@ -1380,10 +1454,30 @@ function LayerWizard({ action, seed, suggestions, onIntent, onClose }: {
   const ready = entry.validate(value).length === 0 && json === "";
 
   return (
-    <Card
+    <Form
+      testId="layer-form"
       title={t(entry.title)}
       note={entry.note ? t(entry.note) : undefined}
-      tools={<Button kind="quiet" onClick={onClose} testId="layer-cancel">{t("Cancel")}</Button>}
+      actions={
+        <>
+          <Button
+            testId="layer-order"
+            disabled={!ready}
+            onClick={() => onIntent({
+              action,
+              label: t(entry.title),
+              danger: true,
+              description: t("{operation} on {target}.", {
+                operation: entry.title, target: entry.summary(entry.toPayload(value)),
+              }),
+              payload: entry.toPayload(value),
+            })}
+          >
+            {t("Order")}
+          </Button>
+          <Button kind="quiet" onClick={onClose} testId="layer-cancel">{t("Cancel")}</Button>
+        </>
+      }
     >
       <OperationFields
         entry={entry}
@@ -1393,22 +1487,7 @@ function LayerWizard({ action, seed, suggestions, onIntent, onClose }: {
         onJson={setJson}
         suggestions={suggestions}
       />
-      <Button
-        testId="layer-order"
-        disabled={!ready}
-        onClick={() => onIntent({
-          action,
-          label: t(entry.title),
-          danger: true,
-          description: t("{operation} on {target}.", {
-            operation: entry.title, target: entry.summary(entry.toPayload(value)),
-          }),
-          payload: entry.toPayload(value),
-        })}
-      >
-        {t("Order")}
-      </Button>
-    </Card>
+    </Form>
   );
 }
 
@@ -1567,9 +1646,29 @@ function MountWizard({ host, devices, onIntent, onClose }: {
   };
 
   return (
-    <Card
+    <Form
+      testId="mount-form"
       title={t("Mount a filesystem")}
-      tools={<Button kind="quiet" onClick={onClose} testId="mount-cancel">{t("Cancel")}</Button>}
+      note={t("The host plans the mount first; the change carries the digest of that plan, so an fstab entry written in the meantime refuses the order instead of deciding what gets mounted.")}
+      actions={
+        <>
+          <Button
+            testId="mount-order"
+            disabled={!hash}
+            onClick={() => onIntent({
+              action: "mount.ensure",
+              label: t("Mount filesystem"),
+              description: persist
+                ? t("{source} will be mounted at {target} as {type} and written to fstab.", { source, target, type })
+                : t("{source} will be mounted at {target} as {type} for this boot only.", { source, target, type }),
+              payload: { storage: { source, target, fs_type: type, options, persist, plan_hash: hash } },
+            })}
+          >
+            {t("Mount")}
+          </Button>
+          <Button kind="quiet" onClick={onClose} testId="mount-cancel">{t("Cancel")}</Button>
+        </>
+      }
     >
       <Fields>
         <Field
@@ -1640,41 +1739,7 @@ function MountWizard({ host, devices, onIntent, onClose }: {
           {plan.busy ? t("Planning…") : t("Plan on the host")}
         </Button>
       </Guard>
-      <Button
-        testId="mount-order"
-        disabled={!hash}
-        onClick={() => onIntent({
-          action: "mount.ensure",
-          label: t("Mount filesystem"),
-          description: persist
-            ? t("{source} will be mounted at {target} as {type} and written to fstab.", { source, target, type })
-            : t("{source} will be mounted at {target} as {type} for this boot only.", { source, target, type }),
-          payload: { storage: { source, target, fs_type: type, options, persist, plan_hash: hash } },
-        })}
-      >
-        {t("Mount")}
-      </Button>
-    </Card>
+    </Form>
   );
 }
 
-/** The name this module's arrangement is stored under. */
-export const STORAGE_SCREEN = "next_host_storage";
-
-/** The containers this module can draw, and the shape each ships with. */
-export const HOST_STORAGE: BoardEntry[] = [
-  { key: "mounts", title: "Mounts", width: 4, height: 1 },
-  { key: "full", title: "Over 80 % full", width: 4, height: 1 },
-  { key: "volatile", title: "Gone after reboot", width: 4, height: 1 },
-  { key: "states", title: "Mounts", width: 7, height: 2 },
-  { key: "devices_by_kind", title: "Devices", width: 5, height: 3 },
-  { key: "wizard", title: "Mount a filesystem", width: 12, height: 4 },
-  { key: "mount_list", title: "Mounts", width: 12, height: 4 },
-  { key: "devices", title: "Devices", width: 12, height: 4 },
-  { key: "smart", title: "SMART", width: 12, height: 4 },
-  { key: "raid", title: "Software RAID", width: 12, height: 4 },
-  { key: "groups", title: "Volume groups", width: 6, height: 3 },
-  { key: "volumes", title: "Volumes", width: 6, height: 3 },
-  { key: "physical", title: "Physical volumes", width: 12, height: 3 },
-  { key: "layer", title: "An order on the volumes", width: 12, height: 4 },
-];

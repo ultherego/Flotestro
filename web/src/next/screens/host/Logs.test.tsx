@@ -83,7 +83,7 @@ const reads = {
   })),
 };
 
-function draw(at = "/next/hosts/h1/logs", on: Host = host()) {
+function draw(at = "/hosts/h1/logs", on: Host = host()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
@@ -155,7 +155,10 @@ describe("the logs module of a host", () => {
 
   it("counts nothing before a read, and never draws a nought for it", async () => {
     Object.assign(answers, { "/api/v1/settings/layout": layout, "/api/v1/hosts/h1/actions": reads });
-    draw();
+    // The counts and the shape of the read are the result, which is the
+    // second sub-tab since 17.10; a read of its own accord moves the
+    // screen there, and a link may land on it too.
+    draw("/hosts/h1/logs?tab=result");
     const band = await screen.findByTestId("line-counts");
     // Nothing has been read, so no line has been sorted: every count is a
     // dash. A nought here would say the host logged nothing.
@@ -167,7 +170,7 @@ describe("the logs module of a host", () => {
   it("will not send a boot filter the agent cannot apply", async () => {
     Object.assign(answers, { "/api/v1/settings/layout": layout, "/api/v1/hosts/h1/actions": reads });
     const old = host({ capabilities: [journald({ suppression_notice: true })] });
-    draw("/next/hosts/h1/logs?boot=" + "a".repeat(32), old);
+    draw("/hosts/h1/logs?boot=" + "a".repeat(32), old);
     await screen.findByTestId("read");
     expect(screen.getByTestId("boot-filter")).toBeInTheDocument();
     expect(screen.getByTestId("read")).toBeDisabled();

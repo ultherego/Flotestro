@@ -55,10 +55,18 @@ const fragment = (payload: Record<string, unknown>) => ({
   observed_at: "2026-10-16T08:00:00Z", payload,
 });
 
-function draw(one: Host = host()) {
+/**
+ * The screen is two sub-tabs since 17.10, and the address names which one
+ * is open - so a test that reads the kernel history asks for that tab, the
+ * way a reader following a link would.
+ */
+function draw(one: Host = host(), tab?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const where = tab ? `/hosts/${one.id}/system?tab=${tab}` : `/hosts/${one.id}/system`;
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[where]}><ToastProvider>{children}</ToastProvider></MemoryRouter>
+    </QueryClientProvider>
   );
   return render(<System host={one} />, { wrapper });
 }
@@ -109,7 +117,7 @@ describe("the platform of one host", () => {
       }),
       "/api/v1/hosts/h1/system/history": { items: [] },
     });
-    draw();
+    draw(host(), "hardware");
     await waitFor(() => expect(screen.getByTestId("not-read")).toBeInTheDocument());
     // The reason travels to the reader twice: on the fact itself and in
     // the list of everything that could not be read.
@@ -128,10 +136,10 @@ describe("the platform of one host", () => {
         { name: "systemd", version: 1, available: true, read_only: false },
         { name: "docker", version: 1, available: false, read_only: false, reason: "no docker socket" },
       ],
-    }));
+    }), "capabilities");
     await waitFor(() => expect(screen.getByTestId("adapters")).toBeInTheDocument());
     const table = screen.getByTestId("adapters");
-    expect(within(table).getByRole("link", { name: "systemd" })).toHaveAttribute("href", "/next/hosts/h1/services");
+    expect(within(table).getByRole("link", { name: "systemd" })).toHaveAttribute("href", "/hosts/h1/services");
     expect(table).toHaveTextContent("no docker socket");
     expect(table).toHaveTextContent("unavailable");
   });
@@ -152,7 +160,7 @@ describe("the platform of one host", () => {
         ],
       },
     });
-    draw();
+    draw(host(), "history");
     await waitFor(() => expect(screen.getByTestId("system-history")).toHaveTextContent("6.10.9-arch1-1"));
     expect(screen.getByTestId("system-history")).toHaveTextContent("6.11.4-arch1-1");
   });

@@ -6,13 +6,11 @@ import { useAllowed, useModuleAccess } from "../../../lib/actions";
 import { absoluteTime, relativeTime } from "../../../lib/format";
 import { capability } from "../../../lib/modules";
 import type { Host, InventoryFragment, Job } from "../../../lib/types";
-import { stateName } from "../../../components/ui";
+import { stateName } from "../../../lib/states";
 import { useT } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Actions, Band, Banner, Bars, Bones, Button, Card, Empty, Fact, Facts, Field, Fields, HeadActions,
-  Modal, Note, Pill, Table, type Segment, type Tone,
+  Actions, Band, Banner, Bars, Bones, Button, C, Card, Empty, Fact, Facts, Field, Fields, Form,
+  Grid, HeadActions, Modal, Note, Pill, Table, Tabs, useTab, type Segment, type Tone,
 } from "../../kit";
 
 /**
@@ -273,8 +271,21 @@ function Confirm({ host, title, children, label, busy, onConfirm, onClose, testI
 
 /* ------------------------------------------------------------ the module */
 
+/**
+ * The two parts of this module: how the host came out of the checks, and
+ * what is being done about it.
+ *
+ * The checks, the sockets and the findings are read. The plan that fixes
+ * a set of findings is a decision, and until 17.10 it stood in the foot
+ * of the very table it was about - so the tick boxes, the counts and the
+ * order all looked like the same rectangle. The decision has a face of
+ * its own now, in a sub-tab that is in the address.
+ */
+const SECURITY_TABS = ["state", "remediation"] as const;
+
 export function Security({ host }: { host: Host }) {
   const t = useT();
+  const [tab, goTab] = useTab(SECURITY_TABS);
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string[]>([]);
   const [message, setMessage] = useState("");
@@ -423,20 +434,30 @@ export function Security({ host }: { host: Host }) {
         // host's jobs: "waiting for approval" is a sentence to act on.
         <Banner
           tone="info"
-          actions={<Link to={`/next/hosts/${host.id}/jobs`}>{t("See all jobs")}</Link>}
+          actions={<Link to={`/hosts/${host.id}/jobs`}>{t("See all jobs")}</Link>}
         >
           {(ordered.requires_approval
             ? t("Job {id} is waiting for approval.")
             : t("Job {id} has been queued.")).split("{id}")[0]}
-          <Link to={`/next/jobs/${ordered.id}`}>{ordered.id.slice(0, 8)}</Link>
+          <Link to={`/jobs/${ordered.id}`}>{ordered.id.slice(0, 8)}</Link>
           {(ordered.requires_approval
             ? t("Job {id} is waiting for approval.")
             : t("Job {id} has been queued.")).split("{id}")[1] ?? ""}
         </Banner>
       )}
 
-      <Board screen="next_host_security" catalogue={HOST_SECURITY} drawn={{
-        checks: (
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "state", label: t("State") },
+          { value: "remediation", label: t("Remediation") },
+        ]}
+      />
+
+      {tab === "state" && (
+        <Grid>
+          <C span={12}>
           <Card
             title={t("Checks")}
             note={t("Every versioned check, by its verdict on this host.")}
@@ -452,8 +473,8 @@ export function Security({ host }: { host: Host }) {
                 zeros: nothing counted is not nothing wrong. */}
             <Band segments={checks} testId="check-counts" />
           </Card>
-        ),
-        need: (
+          </C>
+          <C span={4}>
           <Card title={t("Need action")} note={t("By what happens when nobody does anything.")}>
             {failing === undefined ? <Bones rows={4} /> : (
               <Bars items={SEVERITIES.map((severity) => ({
@@ -463,8 +484,8 @@ export function Security({ host }: { host: Host }) {
               }))} />
             )}
           </Card>
-        ),
-        reach: (
+          </C>
+          <C span={4}>
           <Card title={t("Where the host listens")} note={t("By reach, as the host names it.")}>
             {snapshot?.listening_known ? (
               <Bars items={[
@@ -476,8 +497,8 @@ export function Security({ host }: { host: Host }) {
               <Empty icon="network">{t("This host did not report its listening sockets.")}</Empty>
             )}
           </Card>
-        ),
-        state: (
+          </C>
+          <C span={4}>
           <Card title={t("Protective state")}>
             <Facts>
               <Fact label={t("Mandatory access control")}>
@@ -574,8 +595,8 @@ export function Security({ host }: { host: Host }) {
               </Fact>
             </Facts>
           </Card>
-        ),
-        sockets: (
+          </C>
+          <C span={12}>
           <Card
             title={t("Listening sockets")}
             note={t("Every socket the host listens on, the ones beyond the loopback first. A socket on every interface is a way into this host for anyone who can see its network; the panel names the reach and does not rule what is visible from where.")}
@@ -603,8 +624,8 @@ export function Security({ host }: { host: Host }) {
               />
             )}
           </Card>
-        ),
-        findings: (
+          </C>
+          <C span={12}>
           <Card
             title={t("Findings")}
             note={report.data
@@ -617,26 +638,13 @@ export function Security({ host }: { host: Host }) {
               : undefined}
             foot={
               <>
-                {/* The plan and its stop go through the remediation endpoint,
-                    which asks for the same permission the catalogue names for
-                    security.remediate; the preview of that action answers for
-                    both. */}
-                <Guard action="security.remediate" host={host.id}>
-                  <Button
-                    disabled={!selected.length || remediate.isPending || Boolean(running)}
-                    title={running ? t("a remediation plan is already running on this host") : undefined}
-                    testId="fix-selected"
-                    onClick={() => setIntent({
-                      label: t("Apply remediation"),
-                      description: t("{n} finding(s) on {host} will be fixed step by step, each step an ordinary job of the module that owns it, with its own permissions and approval. The next step starts only once the previous one succeeded, and the plan stops at the first failure. It is bound to the state you are looking at: if the host changed meanwhile, the request is refused.", {
-                        n: selected.length, host: host.hostname,
-                      }),
-                    })}
-                  >
-                    {t("Fix selected ({n})", { n: selected.length })}
-                  </Button>
-                </Guard>
+                {/* What is ticked here is carried out under Remediation:
+                    the table is what the host came out of the checks as,
+                    and the order that changes it is not a column of it. */}
                 <span>{t("{n} of the findings that need action have an operation behind them", { n: fixable.length })}</span>
+                {selected.length > 0 && (
+                  <span>{t("{n} ticked for a fix; order it under Remediation.", { n: selected.length })}</span>
+                )}
                 {report.data?.generated_at && (
                   <span
                     title={`${t("The fingerprint of this set of findings; a remediation is bound to it and refused when the host changed meanwhile.")} ${report.data.plan_hash} (${t("canonical form v{n}", { n: report.data.plan_hash_version })})`}
@@ -727,8 +735,51 @@ export function Security({ host }: { host: Host }) {
               ]}
             />
           </Card>
-        ),
-        plans: (
+          </C>
+        </Grid>
+      )}
+
+      {tab === "remediation" && (
+        <>
+          {/* The plan and its stop go through the remediation endpoint,
+              which asks for the same permission the catalogue names for
+              security.remediate; the preview of that action answers for
+              both. */}
+          <Guard action="security.remediate" host={host.id}>
+            <Form
+              title={t("Fix the findings you ticked")}
+              note={t("Each step is an ordinary job of the module that owns it, with its own permissions and approval. Tick what is to be fixed in the findings under State.")}
+              actions={
+                <Button
+                  disabled={!selected.length || remediate.isPending || Boolean(running)}
+                  title={running ? t("a remediation plan is already running on this host") : undefined}
+                  testId="fix-selected"
+                  onClick={() => setIntent({
+                    label: t("Apply remediation"),
+                    description: t("{n} finding(s) on {host} will be fixed step by step, each step an ordinary job of the module that owns it, with its own permissions and approval. The next step starts only once the previous one succeeded, and the plan stops at the first failure. It is bound to the state you are looking at: if the host changed meanwhile, the request is refused.", {
+                      n: selected.length, host: host.hostname,
+                    }),
+                  })}
+                >
+                  {t("Fix selected ({n})", { n: selected.length })}
+                </Button>
+              }
+            >
+              {selected.length === 0 ? (
+                <Note>
+                  {t("Nothing is ticked. {n} of the findings that need action have an operation behind them.", { n: fixable.length })}
+                </Note>
+              ) : (
+                <Facts>
+                  <Fact label={t("Checks to be fixed")}>{selected.join(", ")}</Fact>
+                  <Fact label={t("Findings fingerprint")}>
+                    {report.data ? report.data.plan_hash.slice(0, 12) : <Pill tone="unknown">{t("unknown")}</Pill>}
+                  </Fact>
+                </Facts>
+              )}
+            </Form>
+          </Guard>
+
           <Card
             title={t("Remediation plans")}
             note={t("Steps run one after another: each is an ordinary job of the module that owns it, and the next one starts only once the previous succeeded. A step that needs a reboot ends the plan — what comes after a reboot has to be judged against the host that came back.")}
@@ -780,7 +831,7 @@ export function Security({ host }: { host: Host }) {
                       // at once.
                       { key: "lock", head: t("Lock"), minor: true, cell: (step) => step.lock_class || <Note>—</Note> },
                       { key: "job", head: t("Job"), cell: (step) => step.job_id
-                        ? <Link to={`/next/jobs/${step.job_id}`}>{step.job_id.slice(0, 8)}</Link>
+                        ? <Link to={`/jobs/${step.job_id}`}>{step.job_id.slice(0, 8)}</Link>
                         : "—" },
                       { key: "state", head: t("State"), cell: (step) => (
                         <>
@@ -794,8 +845,8 @@ export function Security({ host }: { host: Host }) {
               ))
             )}
           </Card>
-        ),
-      }} />
+        </>
+      )}
 
       {intent && (
         <Confirm
@@ -827,17 +878,3 @@ export function Security({ host }: { host: Host }) {
     </>
   );
 }
-
-/** The containers this module can draw, and the shape each ships with. */
-export const HOST_SECURITY: BoardEntry[] = [
-  { key: "checks", title: "Checks", width: 12, height: 2 },
-  { key: "need", title: "Need action", width: 4, height: 2 },
-  { key: "reach", title: "Where the host listens", width: 4, height: 2 },
-  { key: "state", title: "Protective state", width: 4, height: 2 },
-  { key: "sockets", title: "Listening sockets", width: 12, height: 3 },
-  { key: "findings", title: "Findings", width: 12, height: 5 },
-  { key: "plans", title: "Remediation plans", width: 12, height: 4 },
-];
-
-/** The name this module's arrangement is stored under. */
-export const HOST_SECURITY_SCREEN = "next_host_security";

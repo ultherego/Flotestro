@@ -252,9 +252,9 @@ describe("the two phases of a rotation", () => {
     draw();
 
     // Phase two, and no second preparation is offered beside it.
-    await waitFor(() => expect(screen.getByTestId("ca-phase")).toHaveTextContent("Phase 2"));
+    await waitFor(() => expect(screen.getByTestId("ca-rotation")).toHaveTextContent("Phase 2"));
     expect(screen.queryByTestId("ca-prepare")).toBeNull();
-    expect(screen.getByTestId("ca-phase")).toHaveTextContent("12 remaining");
+    expect(screen.getByTestId("ca-rotation")).toHaveTextContent("12 remaining");
     // A relay that lacks the new CA loses the site it terminates, so it is
     // said beside the hosts rather than left out.
     expect(screen.getByTestId("ca-relays-missing")).toHaveTextContent("2 relays");

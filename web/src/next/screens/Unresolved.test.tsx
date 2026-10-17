@@ -97,8 +97,8 @@ describe("the screen of unconfirmed operations", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("unresolved-a1")).toBeInTheDocument());
     const row = screen.getByTestId("unresolved-a1");
-    expect(within(row).getByRole("link", { name: "agent-debian" })).toHaveAttribute("href", "/next/hosts/h1");
-    expect(within(row).getByRole("link", { name: "sysctl.ensure" })).toHaveAttribute("href", "/next/jobs/j1");
+    expect(within(row).getByRole("link", { name: "agent-debian" })).toHaveAttribute("href", "/hosts/h1");
+    expect(within(row).getByRole("link", { name: "sysctl.ensure" })).toHaveAttribute("href", "/jobs/j1");
     // The conclusion in the operator's language, and the two values it was
     // drawn from underneath it.
     expect(within(row).getByTestId("reading-a1")).toHaveTextContent("The change did not hold.");
@@ -205,18 +205,18 @@ describe("narrowing", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("unresolved-a1")).toBeInTheDocument());
     asked.length = 0;
-    fireEvent.click(screen.getByRole("button", { name: "Did it happen?" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Did it happen?" }));
     await waitFor(() => expect(asked.some((one) => one.includes("kind=outcome_unknown"))).toBe(true));
   });
 
-  it("clears the other narrowing, so no combination can hold nothing by construction", async () => {
+  it("is one question at a time, so no combination can hold nothing by construction", async () => {
     Object.assign(answers, { "/api/v1/unresolved": page() });
     draw();
     await waitFor(() => expect(screen.getByTestId("unresolved-a1")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Did it happen?" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Did it happen?" }));
     await waitFor(() => expect(asked.some((one) => one.includes("kind=outcome_unknown"))).toBe(true));
     asked.length = 0;
-    fireEvent.click(screen.getByRole("button", { name: "Could not be read" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Could not be read" }));
     await waitFor(() => expect(asked.some((one) => one.includes("reading=could_not_read"))).toBe(true));
     expect(asked.every((one) => !one.includes("kind="))).toBe(true);
   });

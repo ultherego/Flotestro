@@ -3,12 +3,12 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { FleetReadiness, ReadinessGap } from "../../lib/types";
-import { readinessVerdict, type ReadinessVerdict } from "../../pages/Readiness";
+import { readinessVerdict, type ReadinessVerdict } from "../../lib/readiness";
 import { useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Banner, Card, Empty, Kpi, Pill, Problem, Stack, Table, Tag, Tags, type Tone, TwoLine,
+  Banner, Card, Empty, Kpi, Pill, Problem, Stack, Table, Tabs, Tag, Tags, type Tone, TwoLine, useTab,
 } from "../kit";
 
 /**
@@ -43,6 +43,7 @@ export function Readiness() {
   // it down the screen, which is a poor way to read something opened on
   // purpose.
   const [opened, setOpened] = useState("");
+  const [tab, goTab] = useTab(READINESS_TABS);
 
   if (view.error) return <Problem>{String(view.error)}</Problem>;
 
@@ -53,9 +54,22 @@ export function Readiness() {
   const verdict = data ? readinessVerdict(data) : undefined;
   const chosen = gaps.find((one) => one.requirement === opened);
 
+  // Choosing a requirement opens what it blocks, on the tab that reads it.
+  const open = (requirement: string) => {
+    setOpened(requirement);
+    if (requirement) goTab("blocks");
+  };
+
   return (
     <>
-      
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "gaps", label: t("Gaps") },
+          { value: "blocks", label: t("What it blocks") },
+        ]}
+      />
       <Board
         screen={READINESS_SCREEN}
         catalogue={READINESS}
@@ -114,28 +128,28 @@ export function Readiness() {
             note={t("ordering one of these would be refused everywhere")}
           />
         ),
-        nowhere: nowhere.length > 0 && (
+        nowhere: tab === "gaps" && nowhere.length > 0 && (
           <Card
             title={t("Nowhere in this fleet")}
             note={t("No visible host offers what these operations need, so ordering one would be refused everywhere.")}
             flush
           >
-            <Gaps gaps={nowhere} opened={opened} onOpen={setOpened} testId="gaps-nowhere" />
+            <Gaps gaps={nowhere} opened={opened} onOpen={open} testId="gaps-nowhere" />
           </Card>
         ),
-        somewhere: somewhere.length > 0 && (
+        somewhere: tab === "gaps" && somewhere.length > 0 && (
           <Card
             title={t("On some hosts")}
             note={t("Other hosts offer these, so an operation reaches part of the fleet. A host of another family is often a reason rather than a fault.")}
             flush
           >
-            <Gaps gaps={somewhere} opened={opened} onOpen={setOpened} testId="gaps-somewhere" />
+            <Gaps gaps={somewhere} opened={opened} onOpen={open} testId="gaps-somewhere" />
           </Card>
         ),
-        blocked: (
+        blocked: tab !== "blocks" ? undefined : (
           <Card
             title={t("What it blocks")}
-            note={chosen ? chosen.requirement : t("Pick a requirement above.")}
+            note={chosen ? chosen.requirement : t("Pick a requirement on the Gaps tab.")}
           >
             {chosen
               ? (
@@ -204,7 +218,7 @@ function Gaps({ gaps, opened, onOpen, testId }: {
             <Stack>
               <Tags>
                 {one.hosts.map((host) => (
-                  <Tag key={host.id}><Link to={`/next/hosts/${host.id}`}>{host.hostname}</Link></Tag>
+                  <Tag key={host.id}><Link to={`/hosts/${host.id}`}>{host.hostname}</Link></Tag>
                 ))}
               </Tags>
               {one.satisfied > 0 && (
@@ -257,14 +271,16 @@ function Said({ gap }: { gap: ReadinessGap }) {
   );
 }
 
+const READINESS_TABS = ["gaps", "blocks"] as const;
+
 export const READINESS_SCREEN = "next_readiness";
 
 export const READINESS: BoardEntry[] = [
-  { key: "hosts", title: "Hosts", width: 3, height: 1 },
-  { key: "silent", title: "Silent about their adapters", width: 3, height: 1 },
-  { key: "operations", title: "Operations that need an adapter", width: 3, height: 1 },
-  { key: "unorderable", title: "Orderable nowhere", width: 3, height: 1 },
-  { key: "nowhere", title: "Nowhere in this fleet", width: 12, height: 3 },
-  { key: "somewhere", title: "On some hosts", width: 12, height: 3 },
-  { key: "blocked", title: "What it blocks", width: 12, height: 2 },
+  { key: "hosts", title: "Hosts", width: 3, height: 2 },
+  { key: "silent", title: "Silent about their adapters", width: 3, height: 2 },
+  { key: "operations", title: "Operations that need an adapter", width: 3, height: 2 },
+  { key: "unorderable", title: "Orderable nowhere", width: 3, height: 2 },
+  { key: "nowhere", title: "Nowhere in this fleet", width: 12, height: 5 },
+  { key: "somewhere", title: "On some hosts", width: 12, height: 5 },
+  { key: "blocked", title: "What it blocks", width: 12, height: 4 },
 ];

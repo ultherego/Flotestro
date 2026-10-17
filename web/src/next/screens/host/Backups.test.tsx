@@ -95,10 +95,18 @@ const report = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-function draw() {
+/**
+ * The module is two sub-tabs since 17.10, and the address says which one
+ * is open - so a test that reads the definitions, the copies or the run
+ * history asks for that tab, the way a reader following a link would.
+ */
+function draw(tab?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const where = tab ? `/hosts/h1/backups?tab=${tab}` : "/hosts/h1/backups";
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[where]}>{children}</MemoryRouter>
+    </QueryClientProvider>
   );
   return render(<Backups host={host} />, { wrapper });
 }
@@ -156,7 +164,7 @@ describe("the backups of a host", () => {
       "/api/v1/hosts/h1/backups": report(),
       "/api/v1/hosts/h1/actions": actions(),
     });
-    draw();
+    draw("definitions");
     const row = await screen.findByTestId("definition-nightly");
     expect(row).toHaveTextContent("9 h old");
     expect(row).toHaveTextContent("/srv/backup");
@@ -168,7 +176,7 @@ describe("the backups of a host", () => {
       "/api/v1/hosts/h1/backups": report(),
       "/api/v1/hosts/h1/actions": actions(),
     });
-    draw();
+    draw("definitions");
     const row = await screen.findByTestId("definition-nightly");
     expect(within(row).getByText("not verified")).toBeInTheDocument();
     expect(within(row).queryByText("failed")).toBeNull();
@@ -181,7 +189,7 @@ describe("the backups of a host", () => {
       }),
       "/api/v1/hosts/h1/actions": actions(),
     });
-    draw();
+    draw("definitions");
     const row = await screen.findByTestId("definition-nightly");
     expect(row).toHaveTextContent("—");
     expect(within(row).queryByText("0 B")).toBeNull();
@@ -192,7 +200,7 @@ describe("the backups of a host", () => {
       "/api/v1/hosts/h1/backups": report({ definitions: [] }),
       "/api/v1/hosts/h1/actions": actions(),
     });
-    draw();
+    draw("definitions");
     await waitFor(() =>
       expect(screen.getByText(/The panel does not back up anything on this host yet/)).toBeInTheDocument());
   });
@@ -216,7 +224,7 @@ describe("what the module does", () => {
       "/api/v1/hosts/h1/backups": report(),
       "/api/v1/hosts/h1/actions": actions(),
     });
-    draw();
+    draw("definitions");
     fireEvent.click(await screen.findByTestId("plan-nightly"));
     await waitFor(() => expect(posted).toHaveLength(1));
     expect(posted[0].path).toBe("/api/v1/hosts/h1/operations");
@@ -231,7 +239,7 @@ describe("what the module does", () => {
       "/api/v1/hosts/h1/backups": report(),
       "/api/v1/hosts/h1/actions": actions(),
     });
-    draw();
+    draw("definitions");
     fireEvent.click(await screen.findByTestId("run-nightly"));
     const confirm = screen.getByTestId("confirm-order");
     expect(confirm).toBeDisabled();
@@ -251,7 +259,7 @@ describe("what the module does", () => {
       "/api/v1/hosts/h1/backups": report(),
       "/api/v1/hosts/h1/actions": actions(),
     });
-    draw();
+    draw("definitions");
     fireEvent.click(await screen.findByTestId("verify-nightly"));
     fireEvent.change(screen.getByTestId("confirm-reason"), { target: { value: "quarterly check" } });
     fireEvent.change(screen.getByTestId("confirm-host"), { target: { value: "agent-arch" } });
@@ -291,7 +299,7 @@ describe("what the module does", () => {
       "/api/v1/hosts/h1/backups": report(),
       "/api/v1/hosts/h1/actions": actions(),
     });
-    draw();
+    draw("definitions");
     fireEvent.click(await screen.findByTestId("forget-nightly"));
     expect(screen.getByText(/Nothing is deleted from the repository/)).toBeInTheDocument();
     fireEvent.change(screen.getByTestId("confirm-reason"), { target: { value: "the host is leaving" } });
@@ -310,7 +318,7 @@ describe("what the module does", () => {
       ] },
       "/api/v1/hosts/h1/actions": actions(),
     });
-    draw();
+    draw("definitions");
     const row = await screen.findByTestId("definition-nightly");
     fireEvent.click(within(row).getByRole("button", { name: "nightly" }));
     const runs = await screen.findByTestId("runs");
@@ -343,7 +351,7 @@ describe("the repository and the restore", () => {
       "/api/v1/hosts/h1/actions": actions(),
       "/api/v1/jobs/0123456789abcdef/attempts": planned,
     });
-    draw();
+    draw("definitions");
     // The copies come from the plan the host answered with, and the plan
     // belongs to the definition it was read for.
     const row = await screen.findByTestId("definition-nightly");
@@ -384,7 +392,7 @@ describe("the repository and the restore", () => {
         items: [{ status: "succeeded", detail: { state: { unavailable_reason: "wrong password" } } }],
       },
     });
-    draw();
+    draw("definitions");
     fireEvent.click(await screen.findByTestId("plan-nightly"));
     await waitFor(() =>
       expect(screen.getByText(/The repository could not be read: wrong password/)).toBeInTheDocument());
@@ -397,7 +405,7 @@ describe("what the server refuses", () => {
       "/api/v1/hosts/h1/backups": report(),
       "/api/v1/hosts/h1/actions": actions({ "backup.run": { allowed: false, missing: "backup.run" } }),
     });
-    draw();
+    draw("definitions");
     await screen.findByTestId("definition-nightly");
     await waitFor(() => expect(screen.queryByTestId("run-nightly")).toBeNull());
     // The others are untouched: one refusal is not a read-only module.

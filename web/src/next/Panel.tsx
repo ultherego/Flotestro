@@ -1,4 +1,5 @@
-import { Route, Routes, useLocation } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { usePreferences } from "../lib/preferences";
 import { Shell } from "./Shell";
 import { Dashboard } from "./screens/Dashboard";
 import { Hosts } from "./screens/Hosts";
@@ -41,7 +42,7 @@ import { LookProvider, type Look } from "./look";
 import { useT } from "../i18n";
 
 /**
- * The panel being written again, under /next.
+ * The panel.
  *
  * It stands beside the one it replaces rather than over it: the
  * laboratory goes on running the panel the owner uses while the screens
@@ -65,18 +66,18 @@ const TITLES: Record<string, string> = {
 export function NextPanel({ look }: { look: Look }) {
   const t = useT();
   const location = useLocation();
-  const section = location.pathname.replace(/^\/next\/?/, "").split("/")[0] ?? "";
+  const section = location.pathname.replace(/^\//, "").split("/")[0] ?? "";
   const title = TITLES[section] ?? section.charAt(0).toUpperCase() + section.slice(1);
 
   // One machine brings its own shell, because its rail is its modules and
   // not the fleet's places. Wrapped in the fleet's shell as well it drew
   // two of everything - two rails, two bars, two brands.
-  if (/^\/next\/hosts\/(?!new$)[^/]+/.test(location.pathname)) {
+  if (/^\/hosts\/(?!new$)[^/]+/.test(location.pathname)) {
     return (
       <LookProvider look={look}>
       <Routes>
-        <Route path="/next/hosts/:id" element={<HostWorkspace />} />
-        <Route path="/next/hosts/:id/:module" element={<HostWorkspace />} />
+        <Route path="/hosts/:id" element={<HostWorkspace />} />
+        <Route path="/hosts/:id/:module" element={<HostWorkspace />} />
       </Routes>
       </LookProvider>
     );
@@ -93,11 +94,11 @@ export function NextPanel({ look }: { look: Look }) {
    * screens holds every one of them to a title and an explanation.
    */
   const ownHeading = [
-    /^\/next\/jobs\/[^/]+$/, /^\/next\/hosts\/new$/, /^\/next\/setup$/,
+    /^\/jobs\/[^/]+$/, /^\/hosts\/new$/, /^\/setup$/,
     // One campaign names itself; the schedules screen is given its frame
     // where it is routed, so the shell draws neither.
-    /^\/next\/campaigns\/[^/]+$/,
-    /^\/next\/(bulk|reports|settings|secrets|directory|status|support)$/,
+    /^\/campaigns\/[^/]+$/,
+    /^\/(bulk|reports|settings|secrets|directory|status|support)$/,
   ].some((one) => one.test(location.pathname));
   const about = ownHeading ? undefined : ABOUT[section === "" ? "dashboard" : section];
 
@@ -115,23 +116,23 @@ export function NextPanel({ look }: { look: Look }) {
         />
       )}
       <Routes>
-        <Route path="/next" element={<Dashboard />} />
-        <Route path="/next/dashboard" element={<Dashboard />} />
-        <Route path="/next/hosts" element={<Hosts />} />
-        <Route path="/next/hosts/new" element={<AddHost />} />
-        <Route path="/next/bulk" element={<Bulk />} />
-        <Route path="/next/reports" element={<Reports />} />
-        <Route path="/next/directory" element={<Directory />} />
-        <Route path="/next/settings" element={<Settings />} />
-        <Route path="/next/secrets" element={<Secrets />} />
-        <Route path="/next/status" element={<Status />} />
-        <Route path="/next/support" element={<Support />} />
-        <Route path="/next/jobs/:id" element={<Job />} />
-        <Route path="/next/campaigns/:id" element={<Campaign />} />
-        <Route path="/next/campaigns" element={<Campaigns />} />
+        <Route path="/" element={<Landing />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/hosts" element={<Hosts />} />
+        <Route path="/hosts/new" element={<AddHost />} />
+        <Route path="/bulk" element={<Bulk />} />
+        <Route path="/reports" element={<Reports />} />
+        <Route path="/directory" element={<Directory />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="/secrets" element={<Secrets />} />
+        <Route path="/status" element={<Status />} />
+        <Route path="/support" element={<Support />} />
+        <Route path="/jobs/:id" element={<Job />} />
+        <Route path="/campaigns/:id" element={<Campaign />} />
+        <Route path="/campaigns" element={<Campaigns />} />
         {/* Before the one campaign: "schedules" is a word, not an id. */}
         <Route
-          path="/next/campaigns/schedules"
+          path="/campaigns/schedules"
           element={
             <Screen
               title={t("Scheduled campaigns")}
@@ -145,33 +146,33 @@ export function NextPanel({ look }: { look: Look }) {
             </Screen>
           }
         />
-        <Route path="/next/security" element={<Security />} />
-        <Route path="/next/jobs" element={<Jobs />} />
-        <Route path="/next/unresolved" element={<Unresolved />} />
-        <Route path="/next/vulnerabilities" element={<Vulnerabilities />} />
-        <Route path="/next/certificates" element={<Certificates />} />
-        <Route path="/next/backups" element={<Backups />} />
-        <Route path="/next/monitoring" element={<Monitoring />} />
-        <Route path="/next/reads/:id" element={<Reads />} />
-        <Route path="/next/readiness" element={<Readiness />} />
-        <Route path="/next/reads" element={<Reads />} />
-        <Route path="/next/profile" element={<Profile />} />
-        <Route path="/next/audit" element={<Audit />} />
-        <Route path="/next/notifications" element={<Notifications />} />
-        <Route path="/next/budgets" element={<Budgets />} />
-        <Route path="/next/policies" element={<Policies />} />
-        <Route path="/next/policies/:id" element={<Policies />} />
-        <Route path="/next/setup" element={<Setup />} />
-        <Route path="/next/groups/:id" element={<Groups />} />
-        <Route path="/next/relays/:id" element={<Relays />} />
-        <Route path="/next/secrets/:name" element={<Secrets />} />
-        <Route path="/next/vulnerabilities/:cve" element={<Vulnerabilities />} />
-        <Route path="/next/relays" element={<Relays />} />
-        <Route path="/next/groups" element={<Groups />} />
-        <Route path="/next/tags" element={<Tags />} />
-        <Route path="/next/teams" element={<Teams />} />
-        <Route path="/next/access" element={<Access />} />
-        <Route path="*" element={<NotYet />} />
+        <Route path="/security" element={<Security />} />
+        <Route path="/jobs" element={<Jobs />} />
+        <Route path="/unresolved" element={<Unresolved />} />
+        <Route path="/vulnerabilities" element={<Vulnerabilities />} />
+        <Route path="/certificates" element={<Certificates />} />
+        <Route path="/backups" element={<Backups />} />
+        <Route path="/monitoring" element={<Monitoring />} />
+        <Route path="/reads/:id" element={<Reads />} />
+        <Route path="/readiness" element={<Readiness />} />
+        <Route path="/reads" element={<Reads />} />
+        <Route path="/profile" element={<Profile />} />
+        <Route path="/audit" element={<Audit />} />
+        <Route path="/notifications" element={<Notifications />} />
+        <Route path="/budgets" element={<Budgets />} />
+        <Route path="/policies" element={<Policies />} />
+        <Route path="/policies/:id" element={<Policies />} />
+        <Route path="/setup" element={<Setup />} />
+        <Route path="/groups/:id" element={<Groups />} />
+        <Route path="/relays/:id" element={<Relays />} />
+        <Route path="/secrets/:name" element={<Secrets />} />
+        <Route path="/vulnerabilities/:cve" element={<Vulnerabilities />} />
+        <Route path="/relays" element={<Relays />} />
+        <Route path="/groups" element={<Groups />} />
+        <Route path="/tags" element={<Tags />} />
+        <Route path="/teams" element={<Teams />} />
+        <Route path="/access" element={<Access />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
       </ShellHead.Provider>
     </Shell>
@@ -179,17 +180,36 @@ export function NextPanel({ look }: { look: Look }) {
   );
 }
 
-/** A place the rewrite has not reached. It says so, and where to go. */
-function NotYet() {
+/**
+ * An address this panel does not serve.
+ *
+ * It used to offer the panel being replaced, because every screen not yet
+ * rewritten was still there. There is no second panel now, so it says
+ * plainly that the address leads nowhere and offers the board.
+ */
+function NotFound() {
   const t = useT();
   const location = useLocation();
-  const where = location.pathname.replace(/^\/next/, "") || "/";
   return (
     <>
-      <Head title={t("Not written yet")} lead={t("This screen is still being rewritten.")} />
-      <Empty action={<a className="fl-btn fl-quiet" href={where}>{t("Open it in the panel as it is")}</a>}>
-        {t("The new panel is being written screen by screen; this one has not been reached yet.")}
+      <Head title={t("Page not found.")} lead={location.pathname} />
+      <Empty icon="search" action={<Link className="fl-btn fl-quiet" to="/dashboard">{t("Go to the dashboard")}</Link>}>
+        {t("No screen of this panel answers to that address.")}
       </Empty>
     </>
   );
+}
+
+/**
+ * The first page: the one the reader chose, the dashboard until then.
+ *
+ * A person who lives on the host list should not pass through the board
+ * every morning, so the panel asks what they set and goes there. It waits
+ * for the answer rather than guessing: a redirect to the dashboard and a
+ * second one to the real choice is a flicker nobody asked for.
+ */
+function Landing() {
+  const { preferences, settled } = usePreferences();
+  if (!settled) return null;
+  return <Navigate to={preferences.landing_page || "/dashboard"} replace />;
 }

@@ -6,7 +6,7 @@ import "@testing-library/jest-dom/vitest";
 import { ApiError } from "../../lib/api";
 import {
   Secrets, filterSecrets, reasonGiven, secretAddress, secretReference, storeCounts, destroyable,
-  REASON_MIN_LENGTH, SECRETS_SCREEN,
+  REASON_MIN_LENGTH,
 } from "./Secrets";
 import { ToastProvider } from "../../components/Toast";
 
@@ -82,15 +82,15 @@ function Where() {
  * secret. The name is the identifier in both, because the value is the
  * identifier of nothing and may never stand in an address.
  */
-function draw(at = "/next/secrets") {
+function draw(at = "/secrets") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[at]}>
         <ToastProvider>
           <Routes>
-            <Route path="/next/secrets" element={<Secrets />} />
-            <Route path="/next/secrets/:name" element={<Secrets />} />
+            <Route path="/secrets" element={<Secrets />} />
+            <Route path="/secrets/:name" element={<Secrets />} />
           </Routes>
           <Where />
         </ToastProvider>
@@ -141,7 +141,7 @@ describe("what the store says about itself", () => {
   });
 
   it("leads to the record inside the new panel", () => {
-    expect(secretAddress("repo.token")).toBe("/next/secrets/repo.token");
+    expect(secretAddress("repo.token")).toBe("/secrets/repo.token");
   });
 });
 
@@ -154,7 +154,7 @@ describe("the secret store", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("secret-repo.token")).toBeInTheDocument());
     const row = screen.getByTestId("secret-repo.token");
-    expect(within(row).getByRole("link", { name: "repo.token" })).toHaveAttribute("href", "/next/secrets/repo.token");
+    expect(within(row).getByRole("link", { name: "repo.token" })).toHaveAttribute("href", "/secrets/repo.token");
     expect(row).toHaveTextContent("package repository token");
     expect(row).toHaveTextContent("2");
     expect(within(row).getByText("issuable")).toBeInTheDocument();
@@ -228,18 +228,19 @@ describe("one secret from the address", () => {
       "/api/v1/secrets/repo.token": { ...history(), value: VALUE },
       "/api/v1/whoami": writer,
     });
-    draw("/next/secrets/repo.token");
+    draw("/secrets/repo.token?tab=versions");
     await waitFor(() => expect(screen.getByTestId("version-2")).toBeInTheDocument());
     expect(screen.getByTestId("version-1")).toBeInTheDocument();
     expect(within(screen.getByTestId("version-2")).getByText("current")).toBeInTheDocument();
     expect(screen.getByTestId("kpi-secret-version")).toHaveTextContent("2");
+    fireEvent.click(screen.getByRole("tab", { name: "Secret" }));
     // The reference is what a reader takes away, by name and pinned.
     expect(screen.getByTestId("reference-current")).toHaveTextContent('{"name":"repo.token"}');
     expect(screen.getByTestId("reference-pinned")).toHaveTextContent('{"name":"repo.token","version":2}');
     // The one rule of the whole screen: no value, on the page or in the
     // address.
     expect(document.body.textContent).not.toContain(VALUE);
-    expect(screen.getByTestId("where")).toHaveTextContent("/next/secrets/repo.token");
+    expect(screen.getByTestId("where")).toHaveTextContent("/secrets/repo.token");
     expect(screen.getByTestId("where").textContent).not.toContain(VALUE);
     // The store's own list is not drawn underneath it.
     expect(screen.queryByTestId("secrets-table")).not.toBeInTheDocument();
@@ -251,10 +252,10 @@ describe("one secret from the address", () => {
       "/api/v1/secrets/ghost.token": new ApiError(404, "not_found", "no such secret"),
       "/api/v1/whoami": writer,
     });
-    draw("/next/secrets/ghost.token");
+    draw("/secrets/ghost.token");
     await waitFor(() => expect(screen.getByText(/No secret named ghost.token/)).toBeInTheDocument());
     expect(screen.queryByTestId("secret-versions")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "All secrets" })).toHaveAttribute("href", "/next/secrets");
+    expect(screen.getByRole("link", { name: "All secrets" })).toHaveAttribute("href", "/secrets");
   });
 
   it("puts the secret picked from a row in the address", async () => {
@@ -265,9 +266,10 @@ describe("one secret from the address", () => {
     });
     draw();
     await waitFor(() => expect(screen.getByTestId("secret-repo.token")).toBeInTheDocument());
-    expect(screen.getByTestId("where")).toHaveTextContent("/next/secrets");
+    expect(screen.getByTestId("where")).toHaveTextContent("/secrets");
     fireEvent.click(within(screen.getByTestId("secret-repo.token")).getByRole("link", { name: "repo.token" }));
-    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/next/secrets/repo.token"));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/secrets/repo.token"));
+    fireEvent.click(await screen.findByRole("tab", { name: "Versions" }));
     await waitFor(() => expect(screen.getByTestId("secret-versions")).toBeInTheDocument());
   });
 
@@ -278,7 +280,7 @@ describe("one secret from the address", () => {
       "/api/v1/whoami": writer,
     });
     Object.assign(writes, { "/api/v1/secrets/repo.token/versions/1": history() });
-    draw("/next/secrets/repo.token");
+    draw("/secrets/repo.token?tab=versions");
     await waitFor(() => expect(screen.getByTestId("destroy-1")).toBeInTheDocument());
     // The current version is not offered while the secret is still issuable.
     expect(screen.queryByTestId("destroy-2")).not.toBeInTheDocument();
@@ -304,7 +306,7 @@ describe("one secret from the address", () => {
       "/api/v1/secrets/repo.token": history(),
       "/api/v1/whoami": reader,
     });
-    draw("/next/secrets/repo.token");
+    draw("/secrets/repo.token?tab=versions");
     await waitFor(() => expect(screen.getByTestId("version-1")).toBeInTheDocument());
     expect(screen.queryByTestId("destroy-1")).not.toBeInTheDocument();
   });
@@ -491,25 +493,11 @@ describe("rotating and retiring", () => {
   });
 });
 
-/**
- * The store is arranged by whoever runs the installation, like every
- * other board of the panel. It was drawn on a plain screen in the
- * rewrite, and nothing said so: the control was simply not there and the
- * arrangement already stored for it could not be reached.
+/*
+ * The store was an arrangeable board until 17.10, and the test that
+ * stood here read its arrange bar. The screen is two sub-tabs now -
+ * the store, and the form that writes to it - because a form and a
+ * band of counts are not the same rectangle and a grid treated them
+ * as one. There is no board left to arrange, so there is nothing here
+ * to assert.
  */
-describe("arranging the store", () => {
-  it("offers the arrange bar and draws its containers on the board", async () => {
-    Object.assign(answers, {
-      "/api/v1/secrets": { items: [secret({})] },
-      "/api/v1/whoami": writer,
-      "/api/v1/settings/layout": { widgets: [], present: false, revision: 1 },
-    });
-    draw();
-    await waitFor(() => expect(screen.getByTestId("board")).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByTestId("arrange")).toBeInTheDocument());
-    expect(screen.getByTestId("arrange")).toHaveTextContent("Arrange this screen");
-    // Under the name the server accepts, and the same one every time.
-    expect(SECRETS_SCREEN).toMatch(/^[a-z0-9_]+$/);
-    expect(asked).toContain(`/api/v1/settings/layout/${SECRETS_SCREEN}`);
-  });
-});

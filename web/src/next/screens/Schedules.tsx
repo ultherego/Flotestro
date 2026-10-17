@@ -1,16 +1,19 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Collection } from "../../lib/api";
 import { absoluteTime, relativeTime, toInstant } from "../../lib/format";
 import type { Campaign } from "../../lib/types";
-import { stateName } from "../../components/ui";
+import { stateName } from "../../lib/states";
+import {
+  browserZone, describeRecurrence, emptyRecurrence, parseRecurrence, recurrenceProblem,
+  recurrenceText, WEEKDAYS, type RecurrenceForm,
+} from "../../lib/recurrence";
 import { useT, type Translate } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Kpi, Kpis,
-  Modal, Note, Pill, Presets, Problem, Row, Stack, Table, Toolbar, TwoLine, type Tone,
+  Actions, Banner, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Form, Kpi, Kpis, Modal, Note, Pill, Presets, Problem, Row, Stack, Table, Tabs, Toolbar, TwoLine, type Tone, useTab,
 } from "../kit";
 import { campaignTone } from "./Campaigns";
 
@@ -60,88 +63,19 @@ export type CalendarEntry = {
   set_by?: string;
 };
 
-/** The recurrence as the form holds it; freq "" means one moment. */
-export type RecurrenceForm = {
-  freq: "" | "MONTHLY" | "WEEKLY";
-  monthDay: number;
-  weekdays: string[];
-  hour: number;
-  minute: number;
+/* The recurrence of a schedule lives in lib/recurrence: the bulk wizard
+   keeps one beside an order, and a rule written on one screen is the rule
+   the other reads back. Re-exported under the names this screen uses. */
+export {
+  describeRecurrence, emptyRecurrence, parseRecurrence, recurrenceProblem, recurrenceText,
+  WEEKDAYS, type RecurrenceForm,
 };
 
-/** The weekday codes of RRULE, Monday first as the calendar reads them. */
-export const WEEKDAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
+/** Two digits, for the clock and the calendar. */
+const pad = (value: number) => String(value).padStart(2, "0");
 
 /** How short a reason the audit trail will take. */
 export const SCHEDULE_REASON_MIN_LENGTH = 8;
-
-export function emptyRecurrence(): RecurrenceForm {
-  return { freq: "", monthDay: 1, weekdays: ["MO"], hour: 2, minute: 0 };
-}
-
-/** The rule text the API reads, or an empty string for one moment. */
-export function recurrenceText(form: RecurrenceForm): string {
-  if (!form.freq) return "";
-  const at = `BYHOUR=${form.hour};BYMINUTE=${form.minute}`;
-  if (form.freq === "MONTHLY") return `FREQ=MONTHLY;BYMONTHDAY=${form.monthDay};${at}`;
-  const days = WEEKDAYS.filter((day) => form.weekdays.includes(day));
-  return `FREQ=WEEKLY;BYDAY=${days.join(",")};${at}`;
-}
-
-/**
- * The form of a stored rule, or null when the text is not one the form can
- * hold - the server accepts the same subset, so a stored rule always parses,
- * and null only ever means an empty or foreign text.
- */
-export function parseRecurrence(text: string | undefined): RecurrenceForm | null {
-  if (!text) return null;
-  const form = emptyRecurrence();
-  const parts: Record<string, string> = {};
-  for (const part of text.split(";")) {
-    const [key, value] = part.split("=");
-    if (key && value !== undefined) parts[key.trim().toUpperCase()] = value.trim().toUpperCase();
-  }
-  if (parts.FREQ !== "MONTHLY" && parts.FREQ !== "WEEKLY") return null;
-  form.freq = parts.FREQ;
-  if (parts.BYHOUR !== undefined) form.hour = Number(parts.BYHOUR);
-  if (parts.BYMINUTE !== undefined) form.minute = Number(parts.BYMINUTE);
-  if (form.freq === "MONTHLY") {
-    const day = Number(parts.BYMONTHDAY);
-    if (!Number.isInteger(day) || day < 1 || day > 31) return null;
-    form.monthDay = day;
-  } else {
-    const days = (parts.BYDAY ?? "").split(",").map((day) => day.trim()).filter((day) => WEEKDAYS.includes(day));
-    if (days.length === 0) return null;
-    form.weekdays = WEEKDAYS.filter((day) => days.includes(day));
-  }
-  if (!Number.isInteger(form.hour) || form.hour < 0 || form.hour > 23) return null;
-  if (!Number.isInteger(form.minute) || form.minute < 0 || form.minute > 59) return null;
-  return form;
-}
-
-/** What is wrong with a recurrence form, or null when nothing is. */
-export function recurrenceProblem(form: RecurrenceForm): "no_weekday" | "bad_day" | "bad_time" | null {
-  if (!form.freq) return null;
-  if (!Number.isInteger(form.hour) || form.hour < 0 || form.hour > 23) return "bad_time";
-  if (!Number.isInteger(form.minute) || form.minute < 0 || form.minute > 59) return "bad_time";
-  if (form.freq === "MONTHLY" && (!Number.isInteger(form.monthDay) || form.monthDay < 1 || form.monthDay > 31)) return "bad_day";
-  if (form.freq === "WEEKLY" && !form.weekdays.some((day) => WEEKDAYS.includes(day))) return "no_weekday";
-  return null;
-}
-
-const pad = (value: number) => String(value).padStart(2, "0");
-
-/**
- * The rule in words: "monthly on day 15 at 02:30", "weekly on MO, TH at
- * 22:00", or "once" for a single moment.
- */
-export function describeRecurrence(t: Translate, text: string | undefined): string {
-  const form = parseRecurrence(text);
-  if (!form) return t("once");
-  const at = `${pad(form.hour)}:${pad(form.minute)}`;
-  if (form.freq === "MONTHLY") return t("monthly on day {day} at {time}", { day: form.monthDay, time: at });
-  return t("weekly on {days} at {time}", { days: form.weekdays.join(", "), time: at });
-}
 
 /**
  * The next moment of a schedule in words, read against the clock: how far
@@ -232,14 +166,7 @@ export function entriesByDay(entries: CalendarEntry[], from: Date, to: Date): Ma
   return byDay;
 }
 
-/** The browser's zone, the zone an operator writes the schedule's hours in. */
-export function browserZone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  } catch {
-    return "UTC";
-  }
-}
+export { browserZone };
 
 /** The form of a schedule as it is edited. */
 export type ScheduleForm = {
@@ -373,8 +300,8 @@ export function startsOn(entry: CalendarEntry, day: string): boolean {
 
 /** Where an entry of the calendar leads inside the new panel. */
 export function entryLink(entry: CalendarEntry): string | undefined {
-  if (entry.kind === "campaign_window") return `/next/campaigns/${entry.id}`;
-  if (entry.kind === "host_window") return `/next/hosts/${entry.id}`;
+  if (entry.kind === "campaign_window") return `/campaigns/${entry.id}`;
+  if (entry.kind === "host_window") return `/hosts/${entry.id}`;
   return undefined;
 }
 
@@ -435,6 +362,7 @@ type Ask =
 
 export function Schedules() {
   const t = useT();
+  const [tab, goTab] = useTab(SCHEDULE_TABS);
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<ScheduleForm | null>(null);
   const [editingID, setEditingID] = useState("");
@@ -537,12 +465,205 @@ export function Schedules() {
       {runOutcome && (
         <Banner tone="ok">
           {t("The order was placed:")}{" "}
-          <Link to={`/next/campaigns/${runOutcome.campaign.id}`}>{runOutcome.campaign.name}</Link>{" "}
+          <Link to={`/campaigns/${runOutcome.campaign.id}`}>{runOutcome.campaign.name}</Link>{" "}
           <Pill tone={campaignTone(runOutcome.campaign.state)}>{t(stateName(runOutcome.campaign.state))}</Pill>
         </Banner>
       )}
 
-      <Board screen={SCHEDULES_SCREEN} catalogue={SCHEDULES} drawn={{
+      {editing && (
+      <Form
+        title={editingID ? t("Edit the schedule") : t("New schedule")}
+        note={t("The order is the body of a campaign as the Bulk workspace sends it. It is checked now for what can never be placed, and at every moment for everything else - the hosts, the rights, the window - with the refusal kept on the schedule.")}
+        actions={
+          <Actions>
+            <Button
+              onClick={() => { if (check?.body) save.mutate(check.body); }}
+              disabled={save.isPending || !check?.body}
+              testId="schedule-save"
+            >
+              {save.isPending ? t("Saving…") : editingID ? t("Save the schedule") : t("Create the schedule")}
+            </Button>
+            <Button kind="quiet" onClick={() => { setEditing(null); setEditingID(""); }} testId="schedule-cancel">
+              {t("Cancel")}
+            </Button>
+            {check?.problem && <Note>{problemWords(t, check.problem)}</Note>}
+          </Actions>
+        }
+      >
+        <Stack>
+          <Fields>
+            <Field label={t("Name")}>
+              <input
+                value={editing.name}
+                onChange={(event) => setEditing({ ...editing, name: event.target.value })}
+                data-testid="schedule-name"
+              />
+            </Field>
+            <Field
+              label={t("Timezone")}
+              hint={t("The IANA zone the hours of the recurrence are read in; the first run is typed in the browser's zone.")}
+            >
+              <input
+                className="fl-mono"
+                value={editing.timezone}
+                onChange={(event) => setEditing({ ...editing, timezone: event.target.value })}
+                data-testid="schedule-timezone"
+              />
+            </Field>
+            <Field
+              label={t("First run")}
+              hint={editing.recurrence.freq
+                ? t("Optional with a recurrence: the earliest moment the rule may name.")
+                : t("The one moment the order is placed at, in the browser's zone.")}
+            >
+              <input
+                type="datetime-local"
+                value={editing.startAt}
+                onChange={(event) => setEditing({ ...editing, startAt: event.target.value })}
+                data-testid="schedule-start"
+              />
+            </Field>
+            <Field label={t("Repeats")}>
+              <select
+                value={editing.recurrence.freq}
+                onChange={(event) => setEditing({
+                  ...editing,
+                  recurrence: { ...editing.recurrence, freq: event.target.value as RecurrenceForm["freq"] },
+                })}
+                data-testid="schedule-freq"
+              >
+                <option value="">{t("does not repeat")}</option>
+                <option value="MONTHLY">{t("monthly")}</option>
+                <option value="WEEKLY">{t("weekly")}</option>
+              </select>
+            </Field>
+            {editing.recurrence.freq === "MONTHLY" && (
+              <Field
+                label={t("Day of the month")}
+                hint={t("A month without that day is skipped: the 31st names nothing in April.")}
+              >
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={editing.recurrence.monthDay}
+                  onChange={(event) => setEditing({
+                    ...editing,
+                    recurrence: { ...editing.recurrence, monthDay: Number(event.target.value) },
+                  })}
+                  data-testid="schedule-monthday"
+                />
+              </Field>
+            )}
+            {editing.recurrence.freq && (
+              <>
+                <Field label={t("Hour")}>
+                  <input
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={editing.recurrence.hour}
+                    onChange={(event) => setEditing({
+                      ...editing,
+                      recurrence: { ...editing.recurrence, hour: Number(event.target.value) },
+                    })}
+                    data-testid="schedule-hour"
+                  />
+                </Field>
+                <Field label={t("Minute")}>
+                  <input
+                    type="number"
+                    min={0}
+                    max={59}
+                    value={editing.recurrence.minute}
+                    onChange={(event) => setEditing({
+                      ...editing,
+                      recurrence: { ...editing.recurrence, minute: Number(event.target.value) },
+                    })}
+                    data-testid="schedule-minute"
+                  />
+                </Field>
+              </>
+            )}
+          </Fields>
+
+          {/* The weekdays are a set and not a choice of one, so they are
+              seven switches rather than a Seg. Each carries its own
+              label; a label inside a Field's label would name the field
+              twice and neither of them well. */}
+          {editing.recurrence.freq === "WEEKLY" && (
+            <Stack>
+              <Note>{t("Weekdays")}</Note>
+              <Row>
+                {WEEKDAYS.map((day) => (
+                  <Check
+                    key={day}
+                    checked={editing.recurrence.weekdays.includes(day)}
+                    onChange={(on) => setEditing({
+                      ...editing,
+                      recurrence: {
+                        ...editing.recurrence,
+                        weekdays: on
+                          ? [...editing.recurrence.weekdays, day]
+                          : editing.recurrence.weekdays.filter((present) => present !== day),
+                      },
+                    })}
+                  >
+                    {day}
+                  </Check>
+                ))}
+              </Row>
+            </Stack>
+          )}
+
+          <Fields>
+            <Field
+              label={t("Order (JSON)")}
+              wide
+              hint={t("What POST /api/v1/campaigns takes: name, action, payload, selector and the rollout policy. The reason below is carried into it when it names none.")}
+            >
+              <textarea
+                rows={12}
+                className="fl-mono"
+                spellCheck={false}
+                value={editing.orderText}
+                onChange={(event) => setEditing({ ...editing, orderText: event.target.value })}
+                data-testid="schedule-order"
+              />
+            </Field>
+            <Field
+              label={t("Reason or change reference")}
+              wide
+              hint={t("Kept in the audit trail with the schedule and shown to the approver of every campaign it places.")}
+            >
+              <input
+                value={editing.reason}
+                onChange={(event) => setEditing({ ...editing, reason: event.target.value })}
+                data-testid="schedule-reason"
+              />
+            </Field>
+          </Fields>
+
+          <Check
+            checked={editing.enabled}
+            onChange={(on) => setEditing({ ...editing, enabled: on })}
+          >
+            {t("enabled")}
+          </Check>
+        </Stack>
+      </Form>
+      )}
+
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "schedules", label: t("Schedules") },
+          { value: "calendar", label: t("Calendar") },
+        ]}
+      />
+
+      <Board screen={SCHEDULES_SCREEN} catalogue={SCHEDULES} drawn={forTab(tab, {
         counts: (
           <Kpis>
             <Kpi
@@ -575,190 +696,6 @@ export function Schedules() {
           </Kpis>
         ),
 
-        form: editing ? (
-          <Card
-            title={editingID ? t("Edit the schedule") : t("New schedule")}
-            note={t("The order is the body of a campaign as the Bulk workspace sends it. It is checked now for what can never be placed, and at every moment for everything else - the hosts, the rights, the window - with the refusal kept on the schedule.")}
-            foot={
-              <Actions>
-                <Button
-                  onClick={() => { if (check?.body) save.mutate(check.body); }}
-                  disabled={save.isPending || !check?.body}
-                  testId="schedule-save"
-                >
-                  {save.isPending ? t("Saving…") : editingID ? t("Save the schedule") : t("Create the schedule")}
-                </Button>
-                <Button kind="quiet" onClick={() => { setEditing(null); setEditingID(""); }} testId="schedule-cancel">
-                  {t("Cancel")}
-                </Button>
-                {check?.problem && <Note>{problemWords(t, check.problem)}</Note>}
-              </Actions>
-            }
-          >
-            <Stack>
-              <Fields>
-                <Field label={t("Name")}>
-                  <input
-                    value={editing.name}
-                    onChange={(event) => setEditing({ ...editing, name: event.target.value })}
-                    data-testid="schedule-name"
-                  />
-                </Field>
-                <Field
-                  label={t("Timezone")}
-                  hint={t("The IANA zone the hours of the recurrence are read in; the first run is typed in the browser's zone.")}
-                >
-                  <input
-                    className="fl-mono"
-                    value={editing.timezone}
-                    onChange={(event) => setEditing({ ...editing, timezone: event.target.value })}
-                    data-testid="schedule-timezone"
-                  />
-                </Field>
-                <Field
-                  label={t("First run")}
-                  hint={editing.recurrence.freq
-                    ? t("Optional with a recurrence: the earliest moment the rule may name.")
-                    : t("The one moment the order is placed at, in the browser's zone.")}
-                >
-                  <input
-                    type="datetime-local"
-                    value={editing.startAt}
-                    onChange={(event) => setEditing({ ...editing, startAt: event.target.value })}
-                    data-testid="schedule-start"
-                  />
-                </Field>
-                <Field label={t("Repeats")}>
-                  <select
-                    value={editing.recurrence.freq}
-                    onChange={(event) => setEditing({
-                      ...editing,
-                      recurrence: { ...editing.recurrence, freq: event.target.value as RecurrenceForm["freq"] },
-                    })}
-                    data-testid="schedule-freq"
-                  >
-                    <option value="">{t("does not repeat")}</option>
-                    <option value="MONTHLY">{t("monthly")}</option>
-                    <option value="WEEKLY">{t("weekly")}</option>
-                  </select>
-                </Field>
-                {editing.recurrence.freq === "MONTHLY" && (
-                  <Field
-                    label={t("Day of the month")}
-                    hint={t("A month without that day is skipped: the 31st names nothing in April.")}
-                  >
-                    <input
-                      type="number"
-                      min={1}
-                      max={31}
-                      value={editing.recurrence.monthDay}
-                      onChange={(event) => setEditing({
-                        ...editing,
-                        recurrence: { ...editing.recurrence, monthDay: Number(event.target.value) },
-                      })}
-                      data-testid="schedule-monthday"
-                    />
-                  </Field>
-                )}
-                {editing.recurrence.freq && (
-                  <>
-                    <Field label={t("Hour")}>
-                      <input
-                        type="number"
-                        min={0}
-                        max={23}
-                        value={editing.recurrence.hour}
-                        onChange={(event) => setEditing({
-                          ...editing,
-                          recurrence: { ...editing.recurrence, hour: Number(event.target.value) },
-                        })}
-                        data-testid="schedule-hour"
-                      />
-                    </Field>
-                    <Field label={t("Minute")}>
-                      <input
-                        type="number"
-                        min={0}
-                        max={59}
-                        value={editing.recurrence.minute}
-                        onChange={(event) => setEditing({
-                          ...editing,
-                          recurrence: { ...editing.recurrence, minute: Number(event.target.value) },
-                        })}
-                        data-testid="schedule-minute"
-                      />
-                    </Field>
-                  </>
-                )}
-              </Fields>
-
-              {/* The weekdays are a set and not a choice of one, so they are
-                  seven switches rather than a Seg. Each carries its own
-                  label; a label inside a Field's label would name the field
-                  twice and neither of them well. */}
-              {editing.recurrence.freq === "WEEKLY" && (
-                <Stack>
-                  <Note>{t("Weekdays")}</Note>
-                  <Row>
-                    {WEEKDAYS.map((day) => (
-                      <Check
-                        key={day}
-                        checked={editing.recurrence.weekdays.includes(day)}
-                        onChange={(on) => setEditing({
-                          ...editing,
-                          recurrence: {
-                            ...editing.recurrence,
-                            weekdays: on
-                              ? [...editing.recurrence.weekdays, day]
-                              : editing.recurrence.weekdays.filter((present) => present !== day),
-                          },
-                        })}
-                      >
-                        {day}
-                      </Check>
-                    ))}
-                  </Row>
-                </Stack>
-              )}
-
-              <Fields>
-                <Field
-                  label={t("Order (JSON)")}
-                  wide
-                  hint={t("What POST /api/v1/campaigns takes: name, action, payload, selector and the rollout policy. The reason below is carried into it when it names none.")}
-                >
-                  <textarea
-                    rows={12}
-                    className="fl-mono"
-                    spellCheck={false}
-                    value={editing.orderText}
-                    onChange={(event) => setEditing({ ...editing, orderText: event.target.value })}
-                    data-testid="schedule-order"
-                  />
-                </Field>
-                <Field
-                  label={t("Reason or change reference")}
-                  wide
-                  hint={t("Kept in the audit trail with the schedule and shown to the approver of every campaign it places.")}
-                >
-                  <input
-                    value={editing.reason}
-                    onChange={(event) => setEditing({ ...editing, reason: event.target.value })}
-                    data-testid="schedule-reason"
-                  />
-                </Field>
-              </Fields>
-
-              <Check
-                checked={editing.enabled}
-                onChange={(on) => setEditing({ ...editing, enabled: on })}
-              >
-                {t("enabled")}
-              </Check>
-            </Stack>
-          </Card>
-        ) : undefined,
-
         schedules: (
           <Card
             title={t("Schedules")}
@@ -775,7 +712,7 @@ export function Schedules() {
             {items !== undefined && rows.length === 0 ? (
               <Empty
                 icon="schedules"
-                action={<Link to="/next/bulk">{t("Schedule one from the Bulk workspace")}</Link>}
+                action={<Link to="/bulk">{t("Schedule one from the Bulk workspace")}</Link>}
               >
                 {t("No campaign runs on a clock here yet.")}
               </Empty>
@@ -830,7 +767,7 @@ export function Schedules() {
                         ? <span title={absoluteTime(one.last_run_at)}>{relativeTime(one.last_run_at)}</span>
                         : <span className="fl-faint">—</span>}
                       {one.last_campaign_id && (
-                        <> · <Link to={`/next/campaigns/${one.last_campaign_id}`}>{t("campaign")}</Link></>
+                        <> · <Link to={`/campaigns/${one.last_campaign_id}`}>{t("campaign")}</Link></>
                       )}
                       {one.last_error && (
                         <> <Pill tone="error" title={one.last_error}>{t("refused")}</Pill></>
@@ -911,7 +848,7 @@ export function Schedules() {
             )}
           </Card>
         ),
-      }} />
+      })} />
 
       {/* Running one early, turning one off and deleting one all change what
           the fleet does without anybody watching, so each is asked first and
@@ -1068,9 +1005,29 @@ function DayEntry({ entry, day }: { entry: CalendarEntry; day: string }) {
 
 export const SCHEDULES_SCREEN = "next_schedules";
 
+/** The two readings of this screen, one at a time. */
+const SCHEDULE_TABS = ["schedules", "calendar"] as const;
+type ScheduleTab = typeof SCHEDULE_TABS[number];
+
+/**
+ * Only the container of the open tab is drawn; the figures above stay.
+ *
+ * What the schedules ARE and WHEN they fire are two readings of one
+ * thing, and on one screen the calendar - a month of seven columns -
+ * pushed the list of schedules a screen's height down. A container left
+ * out of the record is left out of the board, so nothing here is hidden
+ * by a style.
+ */
+function forTab(tab: ScheduleTab, record: Record<string, ReactNode>): Record<string, ReactNode> {
+  return {
+    ...record,
+    schedules: tab === "schedules" ? record.schedules : undefined,
+    calendar: tab === "calendar" ? record.calendar : undefined,
+  };
+}
+
 export const SCHEDULES: BoardEntry[] = [
-  { key: "counts", title: "Schedules at a glance", width: 12, height: 1 },
-  { key: "form", title: "The schedule", width: 12, height: 5 },
-  { key: "schedules", title: "Schedules", width: 12, height: 4 },
-  { key: "calendar", title: "Maintenance calendar", width: 12, height: 4 },
+  { key: "counts", title: "Schedules at a glance", width: 12, height: 2 },
+  { key: "schedules", title: "Schedules", width: 12, height: 7 },
+  { key: "calendar", title: "Maintenance calendar", width: 12, height: 7 },
 ];

@@ -7,21 +7,23 @@ import { absoluteTime, relativeTime } from "../../../lib/format";
 import {
   RELEASE_CHANNELS, type Attempt, type Host, type InventoryFragment, type Job, type ReleaseChannel,
 } from "../../../lib/types";
-import { stateName } from "../../../components/ui";
+import { stateName } from "../../../lib/states";
 import {
   agentUpgradeOrder, changePayload, filterRows, heldCount, operationBody, packageRows, packageVersion,
   planBinding, planExpired, planMode,
   type ApprovedPlan, type InstalledPackage, type PackageFilter, type PackageRow, type PackagesState,
   type PlanChange, type PlanHeader,
-} from "../../../pages/host/Packages";
-import { orderReady, refusalOf } from "../../../pages/host/shared";
+} from "../../../lib/host/packages";
+import { orderReady, refusalOf } from "../../../lib/host/module";
 import { useT } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Actions, Band, Banner, Bars, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Modal, Note,
-  PAGE_SIZES, Pager, Pill, Problem, Seg, Table, Tag, Toolbar, type Segment, type Tone,
+  Actions, Band, Banner, Bars, Button, C, Card, Check, Empty, Fact, Facts, Field, Fields, Find, Form,
+  Grid, Modal, Note, PAGE_SIZES, Pager, Pill, Problem, Seg, Table, Tabs, Tag, Toolbar, useTab,
+  type Segment, type Tone,
 } from "../../kit";
+
+/** The sub-tabs of this screen, in the order a reader wants them. */
+const PACKAGE_TABS = ["state", "change", "history"] as const;
 
 /**
  * The software of one host: what is installed, where it comes from, and
@@ -145,6 +147,7 @@ function ReadOnlyNotice({ host, actions }: { host: string; actions: string[] }) 
 
 export function Packages({ host }: { host: Host }) {
   const t = useT();
+  const [tab, go] = useTab(PACKAGE_TABS);
   const queryClient = useQueryClient();
 
   const module = useQuery({
@@ -324,320 +327,341 @@ export function Packages({ host }: { host: Host }) {
         />
       )}
 
-      <Board screen={HOST_PACKAGES_SCREEN} catalogue={HOST_PACKAGES} drawn={{
-        /* The counts decide whether the rest is worth reading; an unknown
-           count is a dash, because a nought would mean "nothing to do". */
-        updates: (
-          <Card
-            title={t("Updates")}
-            note={t("The installed packages by what waits for them.")}
-            foot={freshness}
-          >
-            <Band segments={updates} testId="updates" />
-            {pending === undefined && (
-              <Note>
-                {packages?.unavailable_reason
-                  ? t("The update counts could not be read: {reason}", { reason: packages.unavailable_reason })
-                  : t("The host has not counted its updates yet; plan updates below to count them.")}
-              </Note>
-            )}
-          </Card>
-        ),
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "state", label: t("State") },
+          { value: "change", label: t("Change") },
+          { value: "history", label: t("History") },
+        ]}
+      />
 
-        sources: (
-          <Card title={t("Sources")} note={t("What manages the software here, and where it comes from.")}>
-            <Facts>
-              <Fact label={t("Installed")}>
-                {packages?.installed ?? <Pill tone="unknown">{t("unknown")}</Pill>}
-              </Fact>
-              <Fact label={t("Manager")}>{packages?.manager || "—"}</Fact>
-              <Fact label={t("Package database")}>
-                {host.package_database_broken
-                  ? (
-                    <>
-                      <Pill tone="error">{t("needs repair")}</Pill>
-                      {/* Every other package operation is refused while the
-                          database is broken, so the repair stands where the
-                          verdict is. */}
-                      <Guard action="packages.repair" host={host.id}>
-                        <Button kind="word" onClick={() => setRepairing(true)} disabled={repairing} testId="repair">
-                          {t("Repair the package database…")}
-                        </Button>
-                      </Guard>
-                    </>
-                  )
-                  : <Pill tone="ok">{t("healthy")}</Pill>}
-              </Fact>
-              <Fact label={t("Repositories")}>
-                {knownSources ? knownSources.length : <Pill tone="unknown">{t("unknown")}</Pill>}
-              </Fact>
-            </Facts>
-            {knownSources
-              ? (
-                <Bars items={[
-                  { label: t("enabled"), value: countWhere(knownSources, (one) => one.enabled) ?? 0, tone: "ok" },
-                  { label: t("signatures checked"), value: countWhere(knownSources, (one) => one.signed) ?? 0, tone: "ok" },
-                  { label: t("not checked"), value: countWhere(knownSources, (one) => !one.signed) ?? 0, tone: "error" },
-                  { label: t("managed by the panel"), value: countWhere(knownSources, (one) => one.managed) ?? 0, tone: "info" },
-                ]} />
-              )
-              : <Note>{t("The sources have not been read, so nothing is counted here.")}</Note>}
-          </Card>
-        ),
-
-        plan: (
-          <Guard action="packages.plan" host={host.id}>
-            <PlanUpdates
+      {tab === "state" && (
+        <Grid>
+          <C span={12}>
+            <Card
+              title={t("Updates")}
+              note={t("The installed packages by what waits for them.")}
+              foot={freshness}
+            >
+              <Band segments={updates} testId="updates" />
+              {pending === undefined && (
+                <Note>
+                  {packages?.unavailable_reason
+                    ? t("The update counts could not be read: {reason}", { reason: packages.unavailable_reason })
+                    : t("The host has not counted its updates yet; plan updates on the Change tab to count them.")}
+                </Note>
+              )}
+            </Card>
+          </C>
+          <C span={12}>
+            <Card title={t("Sources")} note={t("What manages the software here, and where it comes from.")}>
+              <Facts>
+                <Fact label={t("Installed")}>
+                  {packages?.installed ?? <Pill tone="unknown">{t("unknown")}</Pill>}
+                </Fact>
+                <Fact label={t("Manager")}>{packages?.manager || "—"}</Fact>
+                <Fact label={t("Package database")}>
+                  {host.package_database_broken
+                    ? (
+                      <>
+                        <Pill tone="error">{t("needs repair")}</Pill>
+                        {/* Every other package operation is refused while the
+                            database is broken, so the repair stands where the
+                            verdict is. */}
+                        <Guard action="packages.repair" host={host.id}>
+                          <Button kind="word" onClick={() => setRepairing(true)} disabled={repairing} testId="repair">
+                            {t("Repair the package database…")}
+                          </Button>
+                        </Guard>
+                      </>
+                    )
+                    : <Pill tone="ok">{t("healthy")}</Pill>}
+                </Fact>
+                <Fact label={t("Repositories")}>
+                  {knownSources ? knownSources.length : <Pill tone="unknown">{t("unknown")}</Pill>}
+                </Fact>
+              </Facts>
+              {knownSources
+                ? (
+                  <Bars items={[
+                    { label: t("enabled"), value: countWhere(knownSources, (one) => one.enabled) ?? 0, tone: "ok" },
+                    { label: t("signatures checked"), value: countWhere(knownSources, (one) => one.signed) ?? 0, tone: "ok" },
+                    { label: t("not checked"), value: countWhere(knownSources, (one) => !one.signed) ?? 0, tone: "error" },
+                    { label: t("managed by the panel"), value: countWhere(knownSources, (one) => one.managed) ?? 0, tone: "info" },
+                  ]} />
+                )
+                : <Note>{t("The sources have not been read, so nothing is counted here.")}</Note>}
+            </Card>
+          </C>
+          <C span={12}>
+            <InstalledPackages
               host={host}
-              pacman={pacman}
-              busy={request.isPending}
+              packages={packages}
+              busy={request.isPending || planRemoval.isPending}
+              reading={readList.isPending}
+              onRead={() => readList.mutate()}
+              onHold={(name, hold) => request.mutate({
+                action: "packages.hold.set",
+                payload: { package_change: { packages: [name], hold } },
+              })}
+              onRemove={(name) => { setPlan(null); planRemoval.mutate([name]); }}
               onSay={say}
               onFail={fail}
             />
-          </Guard>
-        ),
+          </C>
+        </Grid>
+      )}
 
-        change: (
-          <Card
-            title={t("Install, remove or hold")}
-            note={t("One list of names, and three different decisions about it.")}
-          >
-            <Fields>
-              <Field label={t("Package names (space or comma separated)")} wide>
-                <input
-                  value={names}
-                  onChange={(event) => { setNames(event.target.value); setPlan(null); }}
-                  placeholder="nginx htop"
-                  data-testid="package-names"
-                />
-              </Field>
-            </Fields>
-            {/* An installation is planned on the host first: the operator
-                reads what would really be pulled in, and the change carries
-                the digest of that plan. There is no install button before
-                the plan - a change with nothing to bind it to is the false
-                success this screen no longer offers. */}
-            <Guard action="packages.install" host={host.id}>
-              <PlanThenApply
+      {tab === "change" && (
+        <Grid>
+          <C span={12}>
+            <Guard action="packages.plan" host={host.id}>
+              <PlanUpdates
                 host={host}
-                action="packages.install"
-                packages={list()}
-                planLabel={t("Plan install")}
-                applyLabel={t("Install the planned packages")}
-                busy={request.isPending || planRemoval.isPending}
+                pacman={pacman}
+                busy={request.isPending}
                 onSay={say}
                 onFail={fail}
               />
             </Guard>
-            <Actions>
-              <Guard action="packages.hold.set" host={host.id}>
-                <Button
-                  kind="quiet"
-                  disabled={request.isPending || list().length === 0}
-                  onClick={() => request.mutate({
-                    action: "packages.hold.set",
-                    payload: { package_change: { packages: list(), hold: true } },
-                  })}
-                  testId="hold"
-                >
-                  {t("Hold")}
-                </Button>
-                <Button
-                  kind="quiet"
-                  disabled={request.isPending || list().length === 0}
-                  onClick={() => request.mutate({
-                    action: "packages.hold.set",
-                    payload: { package_change: { packages: list(), hold: false } },
-                  })}
-                  testId="unhold"
-                >
-                  {t("Unhold")}
-                </Button>
-              </Guard>
-              {/* A removal does not go straight through: one package can
-                  drag dozens of dependants along, and the operator is to
-                  see them first. The plan is a read, but it prepares a
-                  removal, so it stands behind the right to remove. */}
-              <Guard action="packages.remove" host={host.id}>
-                <Button
-                  kind="danger"
-                  disabled={planRemoval.isPending || list().length === 0}
-                  onClick={() => planRemoval.mutate(list())}
-                  testId="plan-removal"
-                >
-                  {planRemoval.isPending ? t("Planning…") : t("Plan removal")}
-                </Button>
-              </Guard>
-            </Actions>
-          </Card>
-        ),
-
-        agent: (
-          <Card
-            title={t("Agent")}
-            note={t("The agent is left alone by ordinary package upgrades: replacing it in the middle of a transaction it is running would cut the host off from management with nobody to report the result. Replacing it is its own operation, and it counts as done only when the host comes back reporting the version that was asked for.")}
-          >
-            <Facts>
-              <Fact label={t("Agent version")}>
-                {host.agent_version || <Pill tone="unknown">{t("unknown")}</Pill>}
-              </Fact>
-              <Fact label={t("Release channel")}>
-                <Pill tone={host.release_channel === "beta" ? "warn" : "ok"}>{host.release_channel}</Pill>
-              </Fact>
-            </Facts>
-            <Fields>
-              {/* The channel decides which releases reach the host first: a
-                  fleet upgrade in waves names the beta hosts before the
-                  stable ones. It is assigned here, never implied. */}
-              <Field label={t("Release channel")}>
-                <select
-                  value={host.release_channel}
-                  disabled={setChannel.isPending}
-                  onChange={(event) => setChannel.mutate(event.target.value as ReleaseChannel)}
-                  data-testid="release-channel"
-                >
-                  {RELEASE_CHANNELS.map((name) => (
-                    <option key={name} value={name}>
-                      {name === "beta" ? t("beta (sees a release first)") : t("stable")}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label={t("Target agent version (currently {version})", { version: host.agent_version || t("unknown") })}>
-                <input
-                  value={agentVersion}
-                  onChange={(event) => setAgentVersion(event.target.value)}
-                  placeholder={t("e.g. {version}", { version: host.agent_version || "0.51.0" })}
-                  data-testid="agent-version"
-                />
-              </Field>
-              <Field
-                label={t("Package checksum")}
-                wide
-                hint={t("The SHA-256 from the release. Without it the host installs whatever its repository serves under that version: the repository's own signature is then the only proof, and the panel has none of its own.")}
-              >
-                <input
-                  value={agentDigest}
-                  onChange={(event) => setAgentDigest(event.target.value.trim())}
-                  placeholder={t("64 hexadecimal characters, or empty")}
-                  data-testid="agent-digest"
-                />
-              </Field>
-              <Field
-                label={t("Fall back to")}
-                hint={t("The version to return to when the host does not come back with the new one. Empty means no prepared return.")}
-              >
-                <input
-                  value={agentRollback}
-                  onChange={(event) => setAgentRollback(event.target.value.trim())}
-                  placeholder={t("e.g. {version}", { version: host.agent_version || "0.51.0" })}
-                  data-testid="agent-rollback"
-                />
-              </Field>
-            </Fields>
-            <Actions>
-              <Guard action="agent.upgrade" host={host.id}>
-                <Button
-                  // The version the host already runs is this screen's own
-                  // refusal: the registry sees the form, not the host.
-                  disabled={!orderReady(agentRequest) || agentVersion === host.agent_version}
-                  title={refusalOf(t, agentRequest)}
-                  onClick={() => request.mutate({ action: agentRequest.action, payload: agentRequest.payload })}
-                  testId="replace-agent"
-                >
-                  {t("Replace agent")}
-                </Button>
-              </Guard>
-            </Actions>
-            {!orderReady(agentRequest) && agentVersion !== "" && <Note>{refusalOf(t, agentRequest)}</Note>}
-          </Card>
-        ),
-
-        removal: plan !== null && (
-          <Card
-            title={t("Removal plan")}
-            note={t("What the host would really take away, computed on the host.")}
-            foot={plan.plan.removals?.length
-              ? t("{n} package(s) would be removed. The host recomputes this set before removing; a difference cancels the operation.", { n: plan.plan.removals.length })
-              : undefined}
-            flush
-          >
-            {plan.plan.protected && plan.plan.protected.length > 0 && (
-              <Banner tone="error">
-                {t("These packages are protected and will not be removed: {packages}. Removing them would leave the host unmanageable or unbootable.", {
-                  packages: plan.plan.protected.join(", "),
-                })}
-              </Banner>
-            )}
-            {!plan.plan.removals?.length
-              ? <Empty>{t("Nothing would be removed.")}</Empty>
-              : (
+          </C>
+          <C span={12}>
+            <Form
+              title={t("Install, remove or hold")}
+              note={t("One list of names, and three different decisions about it.")}
+              actions={(
                 <>
-                  <Table
-                    rows={plan.plan.removals}
-                    keyOf={(one) => one}
-                    testId="removals"
-                    columns={[
-                      { key: "package", head: t("Package"), tight: true, cell: (one) => one },
-                      {
-                        key: "why", head: t("Reason"),
-                        cell: (one) => (plan.requested.includes(one) ? t("requested") : t("dependency")),
-                      },
-                    ]}
-                  />
-                  {(!plan.plan.protected || plan.plan.protected.length === 0) && (
-                    <Actions>
-                      <Guard action="packages.remove" host={host.id}>
-                        <Button
-                          kind="danger"
-                          onClick={() => setToRemove({ requested: plan.requested, removals: plan.plan.removals ?? [] })}
-                          testId="remove-these"
-                        >
-                          {t("Remove these packages")}
-                        </Button>
-                      </Guard>
-                    </Actions>
-                  )}
+                  <Guard action="packages.hold.set" host={host.id}>
+                    <Button
+                      kind="quiet"
+                      disabled={request.isPending || list().length === 0}
+                      onClick={() => request.mutate({
+                        action: "packages.hold.set",
+                        payload: { package_change: { packages: list(), hold: true } },
+                      })}
+                      testId="hold"
+                    >
+                      {t("Hold")}
+                    </Button>
+                    <Button
+                      kind="quiet"
+                      disabled={request.isPending || list().length === 0}
+                      onClick={() => request.mutate({
+                        action: "packages.hold.set",
+                        payload: { package_change: { packages: list(), hold: false } },
+                      })}
+                      testId="unhold"
+                    >
+                      {t("Unhold")}
+                    </Button>
+                  </Guard>
+                  {/* A removal does not go straight through: one package can
+                      drag dozens of dependants along, and the operator is to
+                      see them first. The plan is a read, but it prepares a
+                      removal, so it stands behind the right to remove. */}
+                  <Guard action="packages.remove" host={host.id}>
+                    <Button
+                      kind="danger"
+                      disabled={planRemoval.isPending || list().length === 0}
+                      onClick={() => planRemoval.mutate(list())}
+                      testId="plan-removal"
+                    >
+                      {planRemoval.isPending ? t("Planning…") : t("Plan removal")}
+                    </Button>
+                  </Guard>
                 </>
               )}
-          </Card>
-        ),
+            >
+              <Fields>
+                <Field label={t("Package names (space or comma separated)")} wide>
+                  <input
+                    value={names}
+                    onChange={(event) => { setNames(event.target.value); setPlan(null); }}
+                    placeholder="nginx htop"
+                    data-testid="package-names"
+                  />
+                </Field>
+              </Fields>
+              {/* An installation is planned on the host first: the operator
+                  reads what would really be pulled in, and the change carries
+                  the digest of that plan. There is no install button before
+                  the plan - a change with nothing to bind it to is the false
+                  success this screen no longer offers. */}
+              <Guard action="packages.install" host={host.id}>
+                <PlanThenApply
+                  host={host}
+                  action="packages.install"
+                  packages={list()}
+                  planLabel={t("Plan install")}
+                  applyLabel={t("Install the planned packages")}
+                  busy={request.isPending || planRemoval.isPending}
+                  onSay={say}
+                  onFail={fail}
+                />
+              </Guard>
+            </Form>
+          </C>
+          {plan !== null && (
+            <C span={12}>
+              <Card
+                title={t("Removal plan")}
+                note={t("What the host would really take away, computed on the host.")}
+                foot={plan.plan.removals?.length
+                  ? t("{n} package(s) would be removed. The host recomputes this set before removing; a difference cancels the operation.", { n: plan.plan.removals.length })
+                  : undefined}
+                flush
+              >
+                {plan.plan.protected && plan.plan.protected.length > 0 && (
+                  <Banner tone="error">
+                    {t("These packages are protected and will not be removed: {packages}. Removing them would leave the host unmanageable or unbootable.", {
+                      packages: plan.plan.protected.join(", "),
+                    })}
+                  </Banner>
+                )}
+                {!plan.plan.removals?.length
+                  ? <Empty>{t("Nothing would be removed.")}</Empty>
+                  : (
+                    <>
+                      <Table
+                        rows={plan.plan.removals}
+                        keyOf={(one) => one}
+                        testId="removals"
+                        columns={[
+                          { key: "package", head: t("Package"), tight: true, cell: (one) => one },
+                          {
+                            key: "why", head: t("Reason"),
+                            cell: (one) => (plan.requested.includes(one) ? t("requested") : t("dependency")),
+                          },
+                        ]}
+                      />
+                      {(!plan.plan.protected || plan.plan.protected.length === 0) && (
+                        <Actions>
+                          <Guard action="packages.remove" host={host.id}>
+                            <Button
+                              kind="danger"
+                              onClick={() => setToRemove({ requested: plan.requested, removals: plan.plan.removals ?? [] })}
+                              testId="remove-these"
+                            >
+                              {t("Remove these packages")}
+                            </Button>
+                          </Guard>
+                        </Actions>
+                      )}
+                    </>
+                  )}
+              </Card>
+            </C>
+          )}
+          <C span={12}>
+            <Form
+              title={t("Agent")}
+              note={t("The agent is left alone by ordinary package upgrades: replacing it in the middle of a transaction it is running would cut the host off from management with nobody to report the result. Replacing it is its own operation, and it counts as done only when the host comes back reporting the version that was asked for.")}
+              actions={(
+                <>
+                  <Guard action="agent.upgrade" host={host.id}>
+                    <Button
+                      // The version the host already runs is this screen's own
+                      // refusal: the registry sees the form, not the host.
+                      disabled={!orderReady(agentRequest) || agentVersion === host.agent_version}
+                      title={refusalOf(t, agentRequest)}
+                      onClick={() => request.mutate({ action: agentRequest.action, payload: agentRequest.payload })}
+                      testId="replace-agent"
+                    >
+                      {t("Replace agent")}
+                    </Button>
+                  </Guard>
+                  {!orderReady(agentRequest) && agentVersion !== "" && <Note>{refusalOf(t, agentRequest)}</Note>}
+                </>
+              )}
+            >
+              <Facts>
+                <Fact label={t("Agent version")}>
+                  {host.agent_version || <Pill tone="unknown">{t("unknown")}</Pill>}
+                </Fact>
+                <Fact label={t("Release channel")}>
+                  <Pill tone={host.release_channel === "beta" ? "warn" : "ok"}>{host.release_channel}</Pill>
+                </Fact>
+              </Facts>
+              <Fields>
+                {/* The channel decides which releases reach the host first: a
+                    fleet upgrade in waves names the beta hosts before the
+                    stable ones. It is assigned here, never implied. */}
+                <Field label={t("Release channel")}>
+                  <select
+                    value={host.release_channel}
+                    disabled={setChannel.isPending}
+                    onChange={(event) => setChannel.mutate(event.target.value as ReleaseChannel)}
+                    data-testid="release-channel"
+                  >
+                    {RELEASE_CHANNELS.map((name) => (
+                      <option key={name} value={name}>
+                        {name === "beta" ? t("beta (sees a release first)") : t("stable")}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label={t("Target agent version (currently {version})", { version: host.agent_version || t("unknown") })}>
+                  <input
+                    value={agentVersion}
+                    onChange={(event) => setAgentVersion(event.target.value)}
+                    placeholder={t("e.g. {version}", { version: host.agent_version || "0.51.0" })}
+                    data-testid="agent-version"
+                  />
+                </Field>
+                <Field
+                  label={t("Package checksum")}
+                  wide
+                  hint={t("The SHA-256 from the release. Without it the host installs whatever its repository serves under that version: the repository's own signature is then the only proof, and the panel has none of its own.")}
+                >
+                  <input
+                    value={agentDigest}
+                    onChange={(event) => setAgentDigest(event.target.value.trim())}
+                    placeholder={t("64 hexadecimal characters, or empty")}
+                    data-testid="agent-digest"
+                  />
+                </Field>
+                <Field
+                  label={t("Fall back to")}
+                  hint={t("The version to return to when the host does not come back with the new one. Empty means no prepared return.")}
+                >
+                  <input
+                    value={agentRollback}
+                    onChange={(event) => setAgentRollback(event.target.value.trim())}
+                    placeholder={t("e.g. {version}", { version: host.agent_version || "0.51.0" })}
+                    data-testid="agent-rollback"
+                  />
+                </Field>
+              </Fields>
+            </Form>
+          </C>
+          <C span={12}>
+            <Repositories
+              hostID={host.id}
+              view={packages?.repositories}
+              open={sourceForm}
+              onOpen={setSourceForm}
+              onIntent={setSourceIntent}
+            />
+          </C>
+          {sourceForm && (
+            <C span={12}>
+              <Guard action="packages.repository.set" host={host.id}>
+                <SourceForm manager={packages?.manager} onIntent={setSourceIntent} />
+              </Guard>
+            </C>
+          )}
+        </Grid>
+      )}
 
-        installed: (
-          <InstalledPackages
-            host={host}
-            packages={packages}
-            busy={request.isPending || planRemoval.isPending}
-            reading={readList.isPending}
-            onRead={() => readList.mutate()}
-            onHold={(name, hold) => request.mutate({
-              action: "packages.hold.set",
-              payload: { package_change: { packages: [name], hold } },
-            })}
-            onRemove={(name) => { setPlan(null); planRemoval.mutate([name]); }}
-            onSay={say}
-            onFail={fail}
-          />
-        ),
-
-        repositories: (
-          <Repositories
-            hostID={host.id}
-            view={packages?.repositories}
-            open={sourceForm}
-            onOpen={setSourceForm}
-            onIntent={setSourceIntent}
-          />
-        ),
-
-        sourceform: sourceForm && (
-          <Guard action="packages.repository.set" host={host.id}>
-            <SourceForm manager={packages?.manager} onIntent={setSourceIntent} />
-          </Guard>
-        ),
-
-        history: <TransactionHistory hostId={host.id} />,
-      }} />
+      {tab === "history" && (
+        <Grid>
+          <C span={12}>
+            <TransactionHistory hostId={host.id} />
+          </C>
+        </Grid>
+      )}
     </>
   );
 }
@@ -675,11 +699,19 @@ function PlanUpdates({ host, pacman, busy, onSay, onFail }: {
   });
 
   return (
-    <Card
+    <Form
       title={t("Plan updates")}
       note={pacman
         ? t("Count available updates without changing host state. On Arch the plan comes from checkupdates, the whole system upgrades at once and the security count is unknown.")
         : t("Count available updates without changing host state.")}
+      actions={(
+        <>
+          <Button onClick={() => ask.mutate()} disabled={ask.isPending || busy} testId="plan-updates">
+            {ask.isPending ? t("Requesting…") : t("Plan updates")}
+          </Button>
+          <Tag to={`/hosts/${host.id}/jobs`}>{t("See all jobs")}</Tag>
+        </>
+      )}
     >
       <Note>
         {t("Target: {host}", { host: host.hostname })}
@@ -696,13 +728,7 @@ function PlanUpdates({ host, pacman, busy, onSay, onFail }: {
           />
         </Field>
       </Fields>
-      <Actions>
-        <Button onClick={() => ask.mutate()} disabled={ask.isPending || busy} testId="plan-updates">
-          {ask.isPending ? t("Requesting…") : t("Plan updates")}
-        </Button>
-        <Tag to={`/next/hosts/${host.id}/jobs`}>{t("See all jobs")}</Tag>
-      </Actions>
-    </Card>
+    </Form>
   );
 }
 
@@ -1231,7 +1257,7 @@ function TransactionHistory({ hostId }: { hostId: string }) {
               { key: "by", head: t("By"), minor: true, cell: (job) => job.created_by },
               {
                 key: "job", head: t("Job"), tight: true,
-                cell: (job) => <Tag to={`/next/jobs/${job.id}`} title={job.id}>{job.id.slice(0, 8)}</Tag>,
+                cell: (job) => <Tag to={`/jobs/${job.id}`} title={job.id}>{job.id.slice(0, 8)}</Tag>,
               },
             ]}
           />
@@ -1410,11 +1436,36 @@ function SourceForm({ manager, onIntent }: {
   const ready = id !== "" && url !== "" && (unsigned || key.includes("BEGIN PGP")) && (!apt || suites.trim() !== "");
 
   return (
-    <Card
+    <Form
       title={t("Package source")}
       note={pacman
         ? t("The key travels in the job — it is public, and the plan should show what the host will trust. pacman writes the source as a section of /etc/pacman.conf and signs the key in its keyring; a pacman source carries no password.")
         : t("The key travels in the job — it is public, and the plan should show what the host will trust. The password does not: name a secret and the host fetches its value once, while it writes the file.")}
+      actions={(
+        <Button
+          disabled={!ready}
+          testId="write-source"
+          onClick={() => onIntent({
+            label: t("Write source"),
+            description:
+              t("{id} ({url}) becomes a package source on this host", { id, url }) +
+              (unsigned ? `, ${t("with signature checking off — the host will install whatever comes from that address")}` : "") +
+              (secret ? `, ${t("authenticating as {user} with the value of secret {secret}", { user: username, secret })}` : "") +
+              `. ${t("The host fetches its metadata before the change counts as done, and rolls back if it cannot.")}`,
+            payload: {
+              id, url, enabled: true, allow_unsigned: unsigned,
+              ...(apt ? {
+                suites: suites.split(/[\s,]+/).filter(Boolean),
+                components: components.split(/[\s,]+/).filter(Boolean),
+              } : {}),
+              ...(unsigned ? {} : { gpg_key: key }),
+              ...(secret ? { username, password_secret: { name: secret } } : {}),
+            },
+          })}
+        >
+          {t("Write source")}
+        </Button>
+      )}
     >
       <Fields>
         <Field label={t("Source")}>
@@ -1461,32 +1512,7 @@ function SourceForm({ manager, onIntent }: {
           </Field>
         </Fields>
       )}
-      <Actions>
-        <Button
-          disabled={!ready}
-          testId="write-source"
-          onClick={() => onIntent({
-            label: t("Write source"),
-            description:
-              t("{id} ({url}) becomes a package source on this host", { id, url }) +
-              (unsigned ? `, ${t("with signature checking off — the host will install whatever comes from that address")}` : "") +
-              (secret ? `, ${t("authenticating as {user} with the value of secret {secret}", { user: username, secret })}` : "") +
-              `. ${t("The host fetches its metadata before the change counts as done, and rolls back if it cannot.")}`,
-            payload: {
-              id, url, enabled: true, allow_unsigned: unsigned,
-              ...(apt ? {
-                suites: suites.split(/[\s,]+/).filter(Boolean),
-                components: components.split(/[\s,]+/).filter(Boolean),
-              } : {}),
-              ...(unsigned ? {} : { gpg_key: key }),
-              ...(secret ? { username, password_secret: { name: secret } } : {}),
-            },
-          })}
-        >
-          {t("Write source")}
-        </Button>
-      </Actions>
-    </Card>
+    </Form>
   );
 }
 
@@ -1546,20 +1572,3 @@ function Confirm({ host, label, description, busy, onConfirm, onCancel }: {
     </Modal>
   );
 }
-
-/** The name this screen's arrangement is stored under. */
-export const HOST_PACKAGES_SCREEN = "next_host_packages";
-
-/** The containers this screen can draw, and the shape each ships with. */
-export const HOST_PACKAGES: BoardEntry[] = [
-  { key: "updates", title: "Updates", width: 8, height: 2 },
-  { key: "sources", title: "Sources", width: 4, height: 2 },
-  { key: "plan", title: "Plan updates", width: 4, height: 3 },
-  { key: "change", title: "Install, remove or hold", width: 4, height: 3 },
-  { key: "agent", title: "Agent", width: 4, height: 3 },
-  { key: "removal", title: "Removal plan", width: 12, height: 3 },
-  { key: "installed", title: "Installed packages", width: 12, height: 6 },
-  { key: "repositories", title: "Repositories", width: 12, height: 4 },
-  { key: "sourceform", title: "Package source", width: 12, height: 5 },
-  { key: "history", title: "Transaction history", width: 12, height: 4 },
-];

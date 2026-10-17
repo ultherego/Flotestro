@@ -90,10 +90,10 @@ const allowed = {
   items: [{ action: "packages.list", permission: "packages.read", mutating: false, risk: "low", allowed: true }],
 };
 
-function draw(one: Host = host()) {
+function draw(one: Host = host(), tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}><MemoryRouter initialEntries={[tab ? `/?tab=${tab}` : "/"]}>{children}</MemoryRouter></QueryClientProvider>
   );
   return render(<Vulnerabilities host={one} />, { wrapper });
 }
@@ -121,7 +121,7 @@ describe("what the vendor says about this host", () => {
     expect(row).toHaveTextContent("9.8");
     expect(row).toHaveTextContent("high");
     expect(within(row).getByRole("link", { name: "CVE-2026-1000" }))
-      .toHaveAttribute("href", "/next/vulnerabilities/CVE-2026-1000");
+      .toHaveAttribute("href", "/vulnerabilities/CVE-2026-1000");
   });
 
   it("keeps the tenth of the coverage: 99.7 is not a hundred", async () => {
@@ -129,7 +129,7 @@ describe("what the vendor says about this host", () => {
       "/api/v1/hosts/h1/vulnerabilities": report(),
       "/api/v1/hosts/h1/actions": allowed,
     });
-    draw();
+    draw(host(), "coverage");
     expect(await screen.findByText("99.7% of packages covered")).toBeInTheDocument();
   });
 
@@ -153,6 +153,7 @@ describe("what the vendor says about this host", () => {
     expect(band).toHaveTextContent("—");
     expect(band).toHaveTextContent("critical: not counted");
     expect(screen.getByText(/The list is empty because nothing was checked/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Packages" }));
     expect(screen.getByText(/no package on this host was checked against a feed/)).toBeInTheDocument();
   });
 
@@ -165,7 +166,7 @@ describe("what the vendor says about this host", () => {
     const table = await screen.findByTestId("findings");
     const patch = within(table).getByRole("link", { name: "Patch" });
     const address = patch.getAttribute("href") ?? "";
-    expect(address.startsWith("/next/bulk?")).toBe(true);
+    expect(address.startsWith("/bulk?")).toBe(true);
     expect(decodeURIComponent(address)).toContain("libssl3");
     expect(decodeURIComponent(address)).toContain("packages.upgrade");
     // Nothing is installed from this module: the order is planned and
@@ -275,6 +276,6 @@ describe("the rules this module judges by", () => {
   it("names no package to patch where the vendor published no fix", () => {
     expect(patchAddress({ id: "h1" }, [finding({ vendor_fix: "unavailable" })])).toBeNull();
     const address = patchAddress({ id: "h1", hostname: "agent-deb" }, [finding({})]);
-    expect(address?.startsWith("/next/bulk?")).toBe(true);
+    expect(address?.startsWith("/bulk?")).toBe(true);
   });
 });

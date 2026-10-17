@@ -5,13 +5,11 @@ import { api } from "../../../lib/api";
 import { useAllowed, useModuleAccess } from "../../../lib/actions";
 import { absoluteTime, relativeTime } from "../../../lib/format";
 import type { Host, Job } from "../../../lib/types";
-import { bulkPrefill } from "../../../pages/Bulk";
+import { bulkPrefill } from "../../../lib/orders";
 import { useT } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Actions, Band, Banner, Bars, Bones, Button, Card, Empty, Fact, Facts, Find, HeadActions, Meter,
-  Note, Pill, Problem, Seg, Table, Toolbar, TwoLine, type Segment, type Tone,
+  Actions, Band, Banner, Bars, Bones, Button, C, Card, Empty, Fact, Facts, Find, Grid, HeadActions,
+  Meter, Note, Pill, Problem, Seg, Table, Tabs, Toolbar, useTab, TwoLine, type Segment, type Tone,
 } from "../../kit";
 
 /**
@@ -205,7 +203,7 @@ export function patchAddress(
   const name = packages.length === 1
     ? `Patch ${packages[0]} on ${label}`
     : `Patch ${packages.length} packages on ${label}`;
-  return `/next${bulkPrefill("packages.upgrade", name, { package_upgrade: { packages: packages.sort() } }, undefined, [host.id])}`;
+  return bulkPrefill("packages.upgrade", name, { package_upgrade: { packages: packages.sort() } }, undefined, [host.id]);
 }
 
 /** The reasons an assessment is incomplete - in the operator's language, not codes. */
@@ -269,8 +267,12 @@ function ReadOnlyNotice({ host, actions }: { host: string; actions: string[] }) 
 
 /* ------------------------------------------------------------ the module */
 
+/** The sub-tabs: the findings, the packages they fall on, and how far the assessment reaches. */
+const VULNERABILITY_TABS = ["findings", "packages", "coverage"] as const;
+
 export function Vulnerabilities({ host }: { host: Host }) {
   const t = useT();
+  const [tab, goTab] = useTab(VULNERABILITY_TABS);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<"fixable" | "no-fix" | "unknown">("fixable");
@@ -399,8 +401,11 @@ export function Vulnerabilities({ host }: { host: Host }) {
         </Banner>
       )}
 
-      <Board screen="next_host_vulnerabilities" catalogue={HOST_VULNERABILITIES} drawn={{
-        severity: (
+      {/* The severity band is the measurement and stays above the tabs;
+          the one order the screen places - patch what has a fix - belongs
+          to the screen and stands in its heading. */}
+      <Grid>
+        <C span={12}>
           <Card
             title={t("Affected packages by severity")}
             note={t("As the distribution vendor rates them; a package without a rating is unrated, not harmless.")}
@@ -416,8 +421,22 @@ export function Vulnerabilities({ host }: { host: Host }) {
           >
             {!data ? <Bones rows={2} height={18} /> : <Band segments={bySeverity} testId="by-severity" />}
           </Card>
-        ),
-        coverage: (
+        </C>
+      </Grid>
+
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "findings", label: t("Findings") },
+          { value: "packages", label: t("Packages") },
+          { value: "coverage", label: t("Coverage") },
+        ]}
+      />
+
+      {tab === "coverage" && (
+      <Grid>
+        <C span={4}>
           <Card title={t("Coverage")}>
             <Facts>
               {/* Coverage rounded to a whole number turned 99.7% into "100%" -
@@ -445,8 +464,72 @@ export function Vulnerabilities({ host }: { host: Host }) {
               </Fact>
             </Facts>
           </Card>
-        ),
-        packages: (
+        </C>
+        <C span={8}>
+          <Card title={t("What decided this")}>
+            <Facts>
+              <Fact label={t("Distribution")}>
+                {state?.distribution ? `${state.distribution} ${state.release ?? ""}`.trim() : "—"}
+              </Fact>
+              <Fact label={t("Security data")}>
+                {data?.snapshot ? (
+                  <TwoLine sub={data.snapshot.digest.slice(0, 16)}>
+                    <span title={absoluteTime(data.snapshot.fetched_at)}>
+                      {t("{provider} · {n} advisories · fetched {when}", {
+                        provider: data.snapshot.provider,
+                        n: data.snapshot.advisory_count,
+                        when: relativeTime(data.snapshot.fetched_at),
+                      })}
+                    </span>
+                  </TwoLine>
+                ) : <Pill tone="unknown">{t("none")}</Pill>}
+              </Fact>
+              <Fact label={t("Package list")}>
+                <TwoLine sub={data?.package_state.unavailable_reason || undefined}>
+                  <span title={absoluteTime(data?.package_state.collected_at)}>
+                    {t("{n} packages, read {when}", {
+                      n: data?.package_state.package_count ?? 0,
+                      when: relativeTime(data?.package_state.collected_at),
+                    })}
+                  </span>
+                </TwoLine>
+              </Fact>
+              <Fact label={t("Vendor advisories")}>
+                <TwoLine sub={data?.advisory_state.unavailable_reason ? reason(data.advisory_state.unavailable_reason) : undefined}>
+                  {data?.advisory_state.collected_at
+                    ? (
+                      <span title={absoluteTime(data.advisory_state.collected_at)}>
+                        {t("{n} advisories, read {when}", {
+                          n: data.advisory_state.advisory_count,
+                          when: relativeTime(data.advisory_state.collected_at),
+                        })}
+                      </span>
+                    )
+                    : <Pill tone="unknown">{t("not read yet")}</Pill>}
+                </TwoLine>
+              </Fact>
+              <Fact label={t("Assessed")}>
+                <TwoLine sub={findings[0]?.comparator_version
+                  ? t("version rules: {rules}", { rules: findings[0].comparator_version })
+                  : undefined}
+                >
+                  {state?.evaluated_at
+                    ? <span title={absoluteTime(state.evaluated_at)}>{relativeTime(state.evaluated_at)}</span>
+                    : <Pill tone="unknown">{t("never")}</Pill>}
+                </TwoLine>
+              </Fact>
+            </Facts>
+            <Actions>
+              <Link to={`/hosts/${host.id}/packages`}>{t("The packages on this host")}</Link>
+            </Actions>
+          </Card>
+        </C>
+      </Grid>
+      )}
+
+      {tab === "packages" && (
+      <Grid>
+        <C span={12}>
           <Card title={t("Most affected packages")} note={t("Findings per package; one advisory can touch several.")}>
             {!data ? (
               <Bones rows={4} />
@@ -458,8 +541,13 @@ export function Vulnerabilities({ host }: { host: Host }) {
               <Bars items={packages.map(([name, count]) => ({ label: name, value: count, tone: "warn" as Tone }))} />
             )}
           </Card>
-        ),
-        findings: (
+        </C>
+      </Grid>
+      )}
+
+      {tab === "findings" && (
+      <Grid>
+        <C span={12}>
           <Card
             title={t("Findings")}
             note={assessed ? t("{n} shown", { n: visible.length }) : undefined}
@@ -548,7 +636,7 @@ export function Vulnerabilities({ host }: { host: Host }) {
                         ? one.cve_ids.map((id, position) => (
                             <span key={id}>
                               {position > 0 && ", "}
-                              <Link to={`/next/vulnerabilities/${id}`}>{id}</Link>
+                              <Link to={`/vulnerabilities/${id}`}>{id}</Link>
                             </span>
                           ))
                         : undefined}
@@ -624,79 +712,9 @@ export function Vulnerabilities({ host }: { host: Host }) {
               ]}
             />
           </Card>
-        ),
-        decided: (
-          <Card title={t("What decided this")}>
-            <Facts>
-              <Fact label={t("Distribution")}>
-                {state?.distribution ? `${state.distribution} ${state.release ?? ""}`.trim() : "—"}
-              </Fact>
-              <Fact label={t("Security data")}>
-                {data?.snapshot ? (
-                  <TwoLine sub={data.snapshot.digest.slice(0, 16)}>
-                    <span title={absoluteTime(data.snapshot.fetched_at)}>
-                      {t("{provider} · {n} advisories · fetched {when}", {
-                        provider: data.snapshot.provider,
-                        n: data.snapshot.advisory_count,
-                        when: relativeTime(data.snapshot.fetched_at),
-                      })}
-                    </span>
-                  </TwoLine>
-                ) : <Pill tone="unknown">{t("none")}</Pill>}
-              </Fact>
-              <Fact label={t("Package list")}>
-                <TwoLine sub={data?.package_state.unavailable_reason || undefined}>
-                  <span title={absoluteTime(data?.package_state.collected_at)}>
-                    {t("{n} packages, read {when}", {
-                      n: data?.package_state.package_count ?? 0,
-                      when: relativeTime(data?.package_state.collected_at),
-                    })}
-                  </span>
-                </TwoLine>
-              </Fact>
-              <Fact label={t("Vendor advisories")}>
-                <TwoLine sub={data?.advisory_state.unavailable_reason ? reason(data.advisory_state.unavailable_reason) : undefined}>
-                  {data?.advisory_state.collected_at
-                    ? (
-                      <span title={absoluteTime(data.advisory_state.collected_at)}>
-                        {t("{n} advisories, read {when}", {
-                          n: data.advisory_state.advisory_count,
-                          when: relativeTime(data.advisory_state.collected_at),
-                        })}
-                      </span>
-                    )
-                    : <Pill tone="unknown">{t("not read yet")}</Pill>}
-                </TwoLine>
-              </Fact>
-              <Fact label={t("Assessed")}>
-                <TwoLine sub={findings[0]?.comparator_version
-                  ? t("version rules: {rules}", { rules: findings[0].comparator_version })
-                  : undefined}
-                >
-                  {state?.evaluated_at
-                    ? <span title={absoluteTime(state.evaluated_at)}>{relativeTime(state.evaluated_at)}</span>
-                    : <Pill tone="unknown">{t("never")}</Pill>}
-                </TwoLine>
-              </Fact>
-            </Facts>
-            <Actions>
-              <Link to={`/next/hosts/${host.id}/packages`}>{t("The packages on this host")}</Link>
-            </Actions>
-          </Card>
-        ),
-      }} />
+        </C>
+      </Grid>
+      )}
     </>
   );
 }
-
-/** The containers this module can draw, and the shape each ships with. */
-export const HOST_VULNERABILITIES: BoardEntry[] = [
-  { key: "severity", title: "Affected packages by severity", width: 8, height: 2 },
-  { key: "coverage", title: "Coverage", width: 4, height: 2 },
-  { key: "findings", title: "Findings", width: 12, height: 5 },
-  { key: "packages", title: "Most affected packages", width: 4, height: 2 },
-  { key: "decided", title: "What decided this", width: 8, height: 2 },
-];
-
-/** The name this module's arrangement is stored under. */
-export const HOST_VULNERABILITIES_SCREEN = "next_host_vulnerabilities";

@@ -13,12 +13,12 @@ import {
   STALE_PLAN_CODES, planStatus, unknownPlanHosts,
   type HostPlan, type PackagePlanFacts, type PlanGroup,
 } from "../../components/plan";
-import { stateName } from "../../components/ui";
+import { stateName } from "../../lib/states";
 import {
   bulkPrefill, contractWords, MIN_REASON, reasonValid, REVERSE_OPERATION, reversePayload,
   useOperation, type Operation, type PlanGroups,
-} from "../../pages/Bulk";
-import { describeExpression } from "../../pages/Groups";
+} from "../../lib/orders";
+import { describeExpression } from "../../lib/selectors";
 import type {
   Campaign as CampaignType, CampaignApproval, CampaignReport, CampaignTarget,
   SelectorExpression, TimelineEntry,
@@ -28,7 +28,7 @@ import { useT } from "../../i18n";
 import {
   Band, Banner, Bones, Card, Chart, Check, Empty, Fact, Facts, Feed, FeedRow, Field, Fields, Find,
   Grid, Kpi, Kpis, Meter, Modal, Needs, Note, Pill, Problem, Ring, Screen, Squares, Stack, Table,
-  Tag, Tags, Toolbar, type Segment, type Series, type Tone,
+  Tabs, Tag, Tags, Toolbar, useTab, type Segment, type Series, type Tone,
 } from "../kit";
 import { campaignTone } from "./Campaigns";
 import { ErrorCode, PlanBody, Save } from "./Job";
@@ -256,8 +256,12 @@ export function approvalReasonRequired(risk: string | undefined): boolean {
   return risk === "critical" || risk === "destructive";
 }
 
+/** The sub-tabs of one campaign, in the order a reader wants them. */
+const CAMPAIGN_TABS = ["progress", "hosts", "order", "approval", "timeline"] as const;
+
 export function Campaign() {
   const t = useT();
+  const [tab, go] = useTab(CAMPAIGN_TABS);
   const { id = "" } = useParams();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -354,7 +358,7 @@ export function Campaign() {
       close();
       void queryClient.invalidateQueries({ queryKey: ["campaigns"] });
       void queryClient.invalidateQueries({ queryKey: ["campaign", id] });
-      navigate(`/next/campaigns/${created.id}`);
+      navigate(`/campaigns/${created.id}`);
     },
   });
   // The skip of a host waiting for its connection: the offline canary the
@@ -520,7 +524,7 @@ export function Campaign() {
       label: t("Hosts that failed"),
       value: counted ? failedHosts : undefined,
       tone: "error",
-      to: `/next/jobs?campaign_id=${id}&state=failed`,
+      to: `/jobs?campaign_id=${id}&state=failed`,
     },
     { label: t("Hosts that ended unknown"), value: counted ? unknown : undefined, tone: "warn" },
     {
@@ -635,6 +639,23 @@ export function Campaign() {
         <Kpi label={t("Unknown")} value={counted ? unknown : null} tone="warn" testId="kpi-unknown" />
       </Kpis>
 
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "progress", label: t("Progress") },
+          { value: "hosts", label: t("Hosts"), count: total || undefined },
+          { value: "order", label: t("Order") },
+          { value: "approval", label: t("Approval") },
+          { value: "timeline", label: t("Timeline") },
+        ]}
+      />
+
+      {/* One campaign was thirteen containers on one board until 17.10.
+          How far it got, which hosts, what was ordered, who consented and
+          what happened are five readings, and the reader wants one. */}
+      {tab === "progress" && (
+      <>
       <Grid>
         <Card span={4} title={t("How far it has got")}>
           {/* A share nobody could take draws no arc at all: a campaign with
@@ -764,7 +785,7 @@ export function Campaign() {
                 key: target.host_id,
                 tone: targetTone(target.state),
                 title: `${target.hostname || target.host_id.slice(0, 8)} · ${target.state}`,
-                to: `/next/hosts/${target.host_id}`,
+                to: `/hosts/${target.host_id}`,
               }))}
               tally={[
                 { label: t("succeeded"), value: counted ? succeeded + noChange : "—", tone: "ok" },
@@ -795,7 +816,7 @@ export function Campaign() {
                 key: "host",
                 head: t("Host"),
                 cell: (target) => (
-                  <Link to={`/next/hosts/${target.host_id}/${moduleForAction(data.action_type)}?campaign=${id}`}>
+                  <Link to={`/hosts/${target.host_id}/${moduleForAction(data.action_type)}?campaign=${id}`}>
                     {target.hostname || target.host_id.slice(0, 8)}
                   </Link>
                 ),
@@ -806,12 +827,17 @@ export function Campaign() {
         </Card>
       )}
 
+      </>
+      )}
+
       {/* The order itself, before any decision about it: what runs, with
           what payload, on which hosts as they were named, under which
           rollout. The approver reads this; the fingerprint binds the
           consent to exactly it. */}
-      <Order campaign={data} operation={operation} />
+      {tab === "order" && <Order campaign={data} operation={operation} />}
 
+      {tab === "approval" && (
+      <>
       <Grid>
         <Card span={6} title={t("The record")}>
           <Facts>
@@ -855,7 +881,7 @@ export function Campaign() {
                   ? (
                     <Tags>
                       {links.retried_by.map((other) => (
-                        <Tag key={other.id} to={`/next/campaigns/${other.id}`}>
+                        <Tag key={other.id} to={`/campaigns/${other.id}`}>
                           {other.name} · {t(stateName(other.state))}
                         </Tag>
                       ))}
@@ -935,7 +961,7 @@ export function Campaign() {
                   ? (
                     <Tags>
                       {links.compensated_by.map((other) => (
-                        <Tag key={other.id} to={`/next/campaigns/${other.id}`}>
+                        <Tag key={other.id} to={`/campaigns/${other.id}`}>
                           {other.name} · {t(stateName(other.state))}
                         </Tag>
                       ))}
@@ -948,6 +974,10 @@ export function Campaign() {
         </Card>
       )}
 
+      </>
+      )}
+
+      {tab === "order" && (
       <Card
         title={t("Plans")}
         note={t("One group is one shape of the change and the hosts that get it.")}
@@ -978,10 +1008,12 @@ export function Campaign() {
           </Stack>
         )}
       </Card>
+      )}
 
       {/* The trail is filtered in the browser: it is already loaded whole,
           and one kind of event or one host is what a diagnosis looks for.
           The export is the filtered rows, built here from the same list. */}
+      {tab === "timeline" && (
       <Card
         title={t("Timeline")}
         flush
@@ -1025,13 +1057,16 @@ export function Campaign() {
                   </>
                 }
                 when={<span title={absoluteTime(entry.occurred_at)}>{relativeTime(entry.occurred_at)}</span>}
-                to={entry.payload?.job_id ? `/next/jobs/${entry.payload.job_id}` : undefined}
+                to={entry.payload?.job_id ? `/jobs/${entry.payload.job_id}` : undefined}
               />
             ))}
           </Feed>
         )}
       </Card>
+      )}
 
+      {tab === "hosts" && (
+      <>
       {/* The export is a file, not a screen: a report of ten thousand hosts
           goes to a spreadsheet, streamed from the server page by page. */}
       <Card
@@ -1088,7 +1123,7 @@ export function Campaign() {
               // The host opens on the module of the change, with the way
               // back to this campaign in the address.
               cell: (target) => (
-                <Link to={`/next/hosts/${target.host_id}/${moduleForAction(data.action_type)}?campaign=${id}`}>
+                <Link to={`/hosts/${target.host_id}/${moduleForAction(data.action_type)}?campaign=${id}`}>
                   {target.hostname || target.host_id.slice(0, 8)}
                 </Link>
               ),
@@ -1239,6 +1274,8 @@ export function Campaign() {
             compensation={rowCompensation ? compensationOf([openSteps.hostId]) : undefined}
           />
         </Card>
+      )}
+      </>
       )}
 
       {asking?.kind === "retry" && canRetry && (
@@ -1529,14 +1566,14 @@ function Order({ campaign, operation }: { campaign: CampaignRecord; operation: O
                 undoes, what it runs again, which policy ordered it. */}
             {campaign.compensates_campaign_id && (
               <Fact label={t("Compensates")}>
-                <Link to={`/next/campaigns/${campaign.compensates_campaign_id}`}>
+                <Link to={`/campaigns/${campaign.compensates_campaign_id}`}>
                   {campaign.compensates_campaign_name || campaign.compensates_campaign_id.slice(0, 8)}
                 </Link>
               </Fact>
             )}
             {campaign.retries_campaign_id && (
               <Fact label={t("Retries")}>
-                <Link to={`/next/campaigns/${campaign.retries_campaign_id}`}>
+                <Link to={`/campaigns/${campaign.retries_campaign_id}`}>
                   {campaign.retries_campaign_name || campaign.retries_campaign_id.slice(0, 8)}
                 </Link>
                 {" · "}
@@ -1545,7 +1582,7 @@ function Order({ campaign, operation }: { campaign: CampaignRecord; operation: O
             )}
             {campaign.policy_id && (
               <Fact label={t("Ordered by policy")}>
-                <Link to={`/next/policies/${campaign.policy_id}`}>{campaign.policy_id.slice(0, 8)}</Link>
+                <Link to={`/policies/${campaign.policy_id}`}>{campaign.policy_id.slice(0, 8)}</Link>
                 {campaign.policy_version ? ` · v${campaign.policy_version}` : ""}
               </Fact>
             )}
@@ -1670,7 +1707,7 @@ function HostPlanOf({ jobId }: { jobId: string }) {
   return (
     <Stack>
       <PlanBody plan={plan ?? {}} />
-      <Link to={`/next/jobs/${jobId}`}>{t("Open the planning operation")}</Link>
+      <Link to={`/jobs/${jobId}`}>{t("Open the planning operation")}</Link>
     </Stack>
   );
 }
@@ -1721,7 +1758,7 @@ function TargetSteps({ campaignID, hostID, compensation }: {
           // The task carried the step and opens on its own screen.
           if (!step?.job_id) return null;
           return (
-            <Tag key={key} to={`/next/jobs/${step.job_id}`} title={step.job_id}>
+            <Tag key={key} to={`/jobs/${step.job_id}`} title={step.job_id}>
               {`${t(STEP_NAMES[key] ?? key)} · ${step.job_id.slice(0, 8)}`}
             </Tag>
           );

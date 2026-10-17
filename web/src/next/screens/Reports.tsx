@@ -8,16 +8,16 @@ import {
   coverageSentence, unknownBreakdown, PARTIAL_REASONS, type Coverage,
 } from "../../components/FleetCoverage";
 import type { BoardEntry } from "../../components/board";
-import { FacetList, useFleetFacets } from "../../pages/Bulk";
+import { useFleetFacets } from "../../lib/orders";
+import { FacetList } from "../../components/FacetList";
 import {
   campaignStateLabel, campaignStateTone, duration, FOLDED_ROWS, percent,
   presetRange, PRESETS, reportParams, type Preset, type ReportFilters,
-} from "../../pages/Reports";
+} from "../../lib/reports";
 import { toLocalInput } from "./Audit";
-import { Board } from "../Board";
 import { useT } from "../../i18n";
 import {
-  Band, Bars, Bones, Card, Download, Empty, Fact, Facts, Field, Fields, Note, Pill, Problem, Screen, Seg, Stack, Table, TwoLine, printPage, type Segment, type Tone,
+  Band, Bars, Bones, Card, Download, Empty, Fact, Facts, Field, Fields, Form, Note, Pill, Problem, Screen, Seg, Stack, Table, Tabs, TwoLine, printPage, useTab, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -170,11 +170,13 @@ const CAMPAIGN_STATES = ["completed", "completed_with_issues", "failed", "plan_f
 /** The name the arrangement of this screen is stored under. */
 export const REPORTS_SCREEN = "next_reports";
 
-/** The containers of the board, and the width each ships with. */
+/* The containers this screen used to stand on a board with, kept as the
+   record of what an installation may have arranged, as the host overview
+   kept its own. The screen itself is sub-tabs since 17.10. */
 export const REPORTS: BoardEntry[] = [
-  { key: "patch_status", title: "Patch status", width: 12, height: 6 },
-  { key: "campaigns", title: "Campaigns", width: 12, height: 6 },
-  { key: "compliance", title: "Compliance", width: 12, height: 7 },
+  { key: "patch_status", title: "Patch status", width: 12, height: 11 },
+  { key: "campaigns", title: "Campaigns", width: 12, height: 11 },
+  { key: "compliance", title: "Compliance", width: 12, height: 13 },
 ];
 
 export function Reports() {
@@ -247,6 +249,20 @@ export function Reports() {
     retry: false,
   });
 
+  /* One report at a time, the width of the page, and the choice of window
+     on a tab of its own. Three documents of a thousand rows on one board
+     were read as "blocks somebody scattered round a room", and the sub-tab
+     sits in the address so a colleague can be sent to the one that
+     matters. The reader who may not read campaigns is not offered that
+     one. */
+  const tabs = [
+    { value: "scope" as const, label: t("Scope") },
+    { value: "patching" as const, label: t("Patching") },
+    ...(seesCampaigns ? [{ value: "campaigns" as const, label: t("Campaigns") }] : []),
+    { value: "compliance" as const, label: t("Compliance") },
+  ];
+  const [tab, go] = useTab(tabs.map((one) => one.value));
+
   const scope = [
     site.trim() && t("site {site}", { site: site.trim() }),
     environment.trim() && t("environment {environment}", { environment: environment.trim() }),
@@ -270,69 +286,10 @@ export function Reports() {
         </button>
       }
     >
-      <Card
-        title={t("What the reports cover")}
-        note={t("The period is fixed when you choose it, so the three reports below answer about the same window.")}
-        tools={
-          <Seg
-            value={preset}
-            label={t("Period")}
-            onChange={(next: Preset) => change({ preset: next })}
-            options={PRESETS.map((one) => ({ value: one.key, label: t(one.label) }))}
-          />
-        }
-        foot={
-          ready
-            ? t("{scope}, {from} – {to}.", { scope, from: absoluteTime(range.from), to: absoluteTime(range.to) })
-            : t("Set both ends of the period to read the reports.")
-        }
-      >
-        <Fields>
-          {preset === "custom" && (
-            <>
-              <Field label={t("Since")} hint={t("Local time; both ends are needed before anything is read.")}>
-                <input
-                  type="datetime-local"
-                  value={custom.from}
-                  data-testid="report-from"
-                  onChange={(event) => change({ custom: { ...custom, from: event.target.value } })}
-                />
-              </Field>
-              <Field label={t("Until")} hint={t("Local time; a half period is refused by the server.")}>
-                <input
-                  type="datetime-local"
-                  value={custom.to}
-                  data-testid="report-to"
-                  onChange={(event) => change({ custom: { ...custom, to: event.target.value } })}
-                />
-              </Field>
-            </>
-          )}
-          <Field label={t("Site")} hint={t("Pick one the fleet has, or type any; empty means every site.")}>
-            <input
-              placeholder={t("site: any")}
-              value={site}
-              list="next-report-sites"
-              data-testid="report-site"
-              onChange={(event) => change({ site: event.target.value })}
-            />
-            <FacetList id="next-report-sites" facets={facets.data?.by_site} />
-          </Field>
-          <Field label={t("Environment")} hint={t("Pick one the fleet has, or type any; empty means every environment.")}>
-            <input
-              placeholder={t("environment: any")}
-              value={environment}
-              list="next-report-environments"
-              data-testid="report-environment"
-              onChange={(event) => change({ environment: event.target.value })}
-            />
-            <FacetList id="next-report-environments" facets={facets.data?.by_environment} />
-          </Field>
-        </Fields>
-      </Card>
-
-      {/* What the printed document used to say in its own head: what this
-          is a report of, and who made it when. */}
+      {/* What a copy of this page is a report of. It stands above the
+          sub-tabs because it is true of every one of them: whichever
+          report is open, this says over what period and what part of the
+          fleet it was read. */}
       <Card title={t("This document")} note={t("What a copy of this page is a report of.")}>
         <Facts>
           <Fact label={t("Fleet")}>{window.location.host}</Fact>
@@ -345,31 +302,96 @@ export function Reports() {
         </Facts>
       </Card>
 
-      <Board
-        screen={REPORTS_SCREEN}
-        catalogue={REPORTS}
-        drawn={{
-          patch_status: (
-            <PatchStatusCard
-              report={patchReport}
-              hosts={patchHosts}
-              more={patch.hasNextPage ? () => patch.fetchNextPage() : undefined}
-              loading={patch.isFetchingNextPage}
-              error={patch.error}
-              ready={ready}
-              params={query}
-            />
-          ),
-          // The campaign report needs the right to read campaigns; without
-          // it the container is left off the board rather than drawn empty.
-          campaigns: seesCampaigns && (
-            <CampaignsCard report={campaigns.data} error={campaigns.error} ready={ready} params={query} />
-          ),
-          compliance: (
-            <ComplianceCard report={compliance.data} error={compliance.error} ready={ready} params={query} />
-          ),
-        }}
-      />
+      <Tabs value={tab} onChange={go} tabs={tabs} />
+
+      {/* Choosing the window and the part of the fleet is the one decision
+          this screen offers, so it is a form on a face of its own rather
+          than a container among the three readings it governs. */}
+      {tab === "scope" && (
+        <Form
+          title={t("What the reports cover")}
+          note={t("The period is fixed when you choose it, so the three reports answer about the same window.")}
+          testId="what-the-reports-cover"
+        >
+          <Fields>
+            <Field label={t("Period")}>
+              <Seg
+                value={preset}
+                label={t("Period")}
+                onChange={(next: Preset) => change({ preset: next })}
+                options={PRESETS.map((one) => ({ value: one.key, label: t(one.label) }))}
+              />
+            </Field>
+            {preset === "custom" && (
+              <>
+                <Field label={t("Since")} hint={t("Local time; both ends are needed before anything is read.")}>
+                  <input
+                    type="datetime-local"
+                    value={custom.from}
+                    data-testid="report-from"
+                    onChange={(event) => change({ custom: { ...custom, from: event.target.value } })}
+                  />
+                </Field>
+                <Field label={t("Until")} hint={t("Local time; a half period is refused by the server.")}>
+                  <input
+                    type="datetime-local"
+                    value={custom.to}
+                    data-testid="report-to"
+                    onChange={(event) => change({ custom: { ...custom, to: event.target.value } })}
+                  />
+                </Field>
+              </>
+            )}
+            <Field label={t("Site")} hint={t("Pick one the fleet has, or type any; empty means every site.")}>
+              <input
+                placeholder={t("site: any")}
+                value={site}
+                list="next-report-sites"
+                data-testid="report-site"
+                onChange={(event) => change({ site: event.target.value })}
+              />
+              <FacetList id="next-report-sites" facets={facets.data?.by_site} />
+            </Field>
+            <Field label={t("Environment")} hint={t("Pick one the fleet has, or type any; empty means every environment.")}>
+              <input
+                placeholder={t("environment: any")}
+                value={environment}
+                list="next-report-environments"
+                data-testid="report-environment"
+                onChange={(event) => change({ environment: event.target.value })}
+              />
+              <FacetList id="next-report-environments" facets={facets.data?.by_environment} />
+            </Field>
+          </Fields>
+          <Note>
+            {ready
+              ? t("{scope}, {from} – {to}.", { scope, from: absoluteTime(range.from), to: absoluteTime(range.to) })
+              : t("Set both ends of the period to read the reports.")}
+          </Note>
+        </Form>
+      )}
+
+      {tab === "patching" && (
+        <PatchStatusCard
+          report={patchReport}
+          hosts={patchHosts}
+          more={patch.hasNextPage ? () => patch.fetchNextPage() : undefined}
+          loading={patch.isFetchingNextPage}
+          error={patch.error}
+          ready={ready}
+          params={query}
+        />
+      )}
+
+      {/* The campaign report needs the right to read campaigns; without it
+          the sub-tab is not offered rather than opening on an empty one. */}
+      {tab === "campaigns" && seesCampaigns && (
+        <CampaignsCard report={campaigns.data} error={campaigns.error} ready={ready} params={query} />
+      )}
+
+      {tab === "compliance" && (
+        <ComplianceCard report={compliance.data} error={compliance.error} ready={ready} params={query} />
+      )}
     </Screen>
   );
 }
@@ -477,7 +499,7 @@ function PatchStatusCard({ report, hosts, more, loading, error, ready, params }:
                 {
                   key: "host",
                   head: t("Host"),
-                  cell: (one) => <Link to={`/next/hosts/${one.host_id}`}>{one.hostname}</Link>,
+                  cell: (one) => <Link to={`/hosts/${one.host_id}`}>{one.hostname}</Link>,
                 },
                 { key: "site", head: t("Site"), minor: true, cell: (one) => one.site || <Unknown /> },
                 { key: "environment", head: t("Environment"), minor: true, cell: (one) => one.environment || <Unknown /> },
@@ -662,7 +684,7 @@ function TwoLineCampaign({ row }: { row: CampaignRow }) {
         ? row.by_site.map((group) => `${group.key}: ${group.succeeded}/${group.targets}`).join(" · ")
         : undefined}
     >
-      <Link to={`/next/campaigns/${row.id}`}>{row.name}</Link>
+      <Link to={`/campaigns/${row.id}`}>{row.name}</Link>
     </TwoLine>
   );
 }
@@ -747,7 +769,7 @@ function ComplianceCard({ report, error, ready, params }: {
                       head: t("Policy"),
                       cell: (one) => (
                         <>
-                          <Link to={`/next/policies/${one.id}`}>{one.name}</Link>
+                          <Link to={`/policies/${one.id}`}>{one.name}</Link>
                           {!one.enabled && <Pill tone="unknown" dot={false}>{t("disabled")}</Pill>}
                         </>
                       ),
@@ -785,7 +807,7 @@ function ComplianceCard({ report, error, ready, params }: {
                         {
                           key: "host",
                           head: t("Host"),
-                          cell: (one) => <Link to={`/next/hosts/${one.host_id}/policies`}>{one.hostname}</Link>,
+                          cell: (one) => <Link to={`/hosts/${one.host_id}/policies`}>{one.hostname}</Link>,
                         },
                         { key: "site", head: t("Site"), minor: true, cell: (one) => one.site || <Unknown /> },
                         { key: "environment", head: t("Environment"), minor: true, cell: (one) => one.environment || <Unknown /> },

@@ -8,8 +8,8 @@ import { useToast } from "../../components/Toast";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Band, Bars, Card, Empty, Field, Fields, Find, Kpi, Modal, Note, Problem, Table, Toolbar,
-  type Segment,
+  Band, Bars, Card, Empty, Field, Fields, Find, Kpi, Kpis, Modal, Note, Problem, Table, Tabs, Toolbar,
+  useTab, type Segment,
 } from "../kit";
 
 /**
@@ -49,8 +49,12 @@ export function validTagName(tag: string): boolean {
 /** How long a reason has to be before the trail will take it. */
 export const TAG_REASON_MIN_LENGTH = 8;
 
+/** The sub-tabs: the list, and how the tags are written. */
+const TAG_TABS = ["tags", "keys"] as const;
+
 export function Tags() {
   const t = useT();
+  const [tab, goTab] = useTab(TAG_TABS);
   const [search, setSearch] = useState("");
   const [renaming, setRenaming] = useState(false);
 
@@ -99,40 +103,44 @@ export function Tags() {
   return (
     <>
       {renaming && <RenameTag tags={items} onClose={() => setRenaming(false)} />}
+      <Kpis>
+        <Kpi
+          hero
+          icon="hosts"
+          label={t("Tags")}
+          value={loaded ? items.length : null}
+          note={t("on the hosts you may read")}
+        />
+        <Kpi
+          icon="bulk"
+          label={t("Assignments")}
+          value={loaded ? assignments : null}
+          // A host carrying three tags is counted three times here; it is
+          // the number of labels written, not of hosts labelled.
+          note={t("a host with three tags is counted three times")}
+        />
+        <Kpi
+          icon="overview"
+          label={t("Keys in use")}
+          value={loaded ? new Set(items.map((one) => splitTag(one.tag).key)).size : null}
+          note={t("the words the fleet is divided by")}
+        />
+      </Kpis>
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "tags", label: t("Tags") },
+          { value: "keys", label: t("Keys") },
+        ]}
+      />
       <Board screen={TAGS_SCREEN} catalogue={TAGS} drawn={{
-        count: (
-          <Kpi
-            hero
-            icon="hosts"
-            label={t("Tags")}
-            value={loaded ? items.length : null}
-            note={t("on the hosts you may read")}
-          />
-        ),
-        assignments: (
-          <Kpi
-            icon="bulk"
-            label={t("Assignments")}
-            value={loaded ? assignments : null}
-            // A host carrying three tags is counted three times here; it is
-            // the number of labels written, not of hosts labelled.
-            note={t("a host with three tags is counted three times")}
-          />
-        ),
-        keyed: (
-          <Kpi
-            icon="overview"
-            label={t("Keys in use")}
-            value={loaded ? new Set(items.map((one) => splitTag(one.tag).key)).size : null}
-            note={t("the words the fleet is divided by")}
-          />
-        ),
-        shape: (
+        shape: tab !== "keys" ? undefined : (
           <Card title={t("How the tags are written")} note={t("A plain word, or a key with a value after it.")}>
             <Band segments={shape} testId="tag-shape" />
           </Card>
         ),
-        keys: (
+        keys: tab !== "keys" ? undefined : (
           <Card title={t("By key")} note={t("The keys with the most values.")}>
             {!loaded
               ? <Empty>{t("Reading the catalogue…")}</Empty>
@@ -141,7 +149,7 @@ export function Tags() {
                 : <Bars items={byKey.map(([key, n]) => ({ label: <code>{key}</code>, value: n }))} />}
           </Card>
         ),
-        list: (
+        list: tab !== "tags" ? undefined : (
           <Card
             title={t("Tags")}
             note={loaded ? t("{shown} of {total} tags", { shown: shown.length, total: items.length }) : undefined}
@@ -299,10 +307,7 @@ function RenameTag({ tags, onClose }: { tags: TagCount[]; onClose: () => void })
 export const TAGS_SCREEN = "next_tags";
 
 export const TAGS: BoardEntry[] = [
-  { key: "count", title: "Tags", width: 4, height: 1 },
-  { key: "assignments", title: "Assignments", width: 4, height: 1 },
-  { key: "keyed", title: "Keys in use", width: 4, height: 1 },
-  { key: "shape", title: "How the tags are written", width: 6, height: 1 },
-  { key: "keys", title: "By key", width: 6, height: 2 },
-  { key: "list", title: "Tags", width: 12, height: 5 },
+  { key: "shape", title: "How the tags are written", width: 6, height: 2 },
+  { key: "keys", title: "By key", width: 6, height: 4 },
+  { key: "list", title: "Tags", width: 12, height: 9 },
 ];

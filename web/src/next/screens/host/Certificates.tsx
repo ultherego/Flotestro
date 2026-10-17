@@ -8,11 +8,10 @@ import { absoluteTime, relativeTime } from "../../../lib/format";
 import { changesSummary, planWords, type HostPlan } from "../../../components/plan";
 import type { Host, InventoryFragment, Job } from "../../../lib/types";
 import { useT, type Translate } from "../../../i18n";
-import { Board } from "../../Board";
-import type { BoardEntry } from "../../../components/board";
 import {
-  Band, Banner, Bars, Bones, Button, Card, Empty, Fact, Facts, Field, Fields, HeadActions, Modal,
-  Note, Pill, Problem, Readout, Table, Tags, TwoLine, type Segment, type Tone,
+  Band, Banner, Bars, Bones, Button, C, Card, Empty, Fact, Facts, Field, Fields, Form, Grid,
+  HeadActions, Modal, Note, Pill, Problem, Readout, Table, Tabs, Tags, TwoLine, useTab,
+  type Segment, type Tone,
 } from "../../kit";
 
 /**
@@ -315,7 +314,7 @@ function JobNotice({ job }: { job: Job }) {
   return (
     <Banner tone="info">
       {before}
-      <Link to={`/next/jobs/${job.id}`}>{job.id.slice(0, 8)}</Link>
+      <Link to={`/jobs/${job.id}`}>{job.id.slice(0, 8)}</Link>
       {after}
     </Banner>
   );
@@ -417,7 +416,7 @@ function PlanView({ plan }: { plan: HostPlan }) {
 /* ------------------------------------------------------------ the forms */
 
 /** The watch scope. This changes what the panel looks at, not the host. */
-function WatchCard({ busy, onSave }: {
+function WatchForm({ busy, onSave }: {
   busy: boolean;
   onSave: (body: Record<string, unknown>) => void;
 }) {
@@ -430,10 +429,10 @@ function WatchCard({ busy, onSave }: {
   const [service, setService] = useState("");
 
   return (
-    <Card
+    <Form
       title={t("Watch a path")}
       note={t("This changes what the panel looks at, not the host. The service that reads the file and the address where the result is visible are yours to fill in — the panel does not guess them from a directory name.")}
-      foot={
+      actions={
         <Button
           disabled={!path || busy}
           testId="watch-save"
@@ -485,7 +484,7 @@ function WatchCard({ busy, onSave }: {
           <input value={service} onChange={(event) => setService(event.target.value)} placeholder="httpd" />
         </Field>
       </Fields>
-    </Card>
+    </Form>
   );
 }
 
@@ -494,7 +493,7 @@ function WatchCard({ busy, onSave }: {
  * host plans the swap first: what already lies under the path decides what
  * is replaced, and only the host can read that.
  */
-function DeployCard({ host, targets, planGuard, onIntent }: {
+function DeployForm({ host, targets, planGuard, onIntent }: {
   host: Host;
   targets: Target[];
   planGuard: Allowance;
@@ -514,10 +513,11 @@ function DeployCard({ host, targets, planGuard, onIntent }: {
   const hash = binding && !binding.plan.refusal ? binding.hash : "";
 
   return (
-    <Card
+    <>
+    <Form
       title={t("Deploy a certificate")}
       note={t("Paste the certificate with its chain, leaf first. The private key is not pasted here and never travels in the job: the host fetches it from the secret named on the watched path, once, while it runs the operation.")}
-      foot={
+      actions={
         <>
           <Guarded verdict={planGuard} explain>
             {(disabled, reason) => (
@@ -601,11 +601,15 @@ function DeployCard({ host, targets, planGuard, onIntent }: {
             rows={10}
             value={content}
             onChange={(event) => setContent(event.target.value)}
-            placeholder="-----BEGIN CERTIFICATE-----"
+              placeholder="-----BEGIN CERTIFICATE-----"
             data-testid="deploy-certificate"
           />
         </Field>
       </Fields>
+    </Form>
+
+      {/* What the host answered is a reading of that host, so it stands
+          under the form rather than inside it. */}
       {plan.message && <Problem>{plan.message}</Problem>}
       {refused && (
         <Problem>
@@ -617,7 +621,7 @@ function DeployCard({ host, targets, planGuard, onIntent }: {
         : <Note>{plan.busy
             ? t("The host is planning this deployment…")
             : t("Plan the deployment on the host first: the certificate is replaced only against the plan it answers with.")}</Note>}
-    </Card>
+    </>
   );
 }
 
@@ -663,13 +667,25 @@ function RenewButton({ host, certificate, onIntent }: {
 
 /* ----------------------------------------------------------- the module */
 
+/**
+ * The two parts of this module: what stands on the host and when it
+ * runs out, and the two things that may be done about it.
+ *
+ * Watching a path and deploying a certificate were containers on a
+ * board that appeared between the readings when a button in the heading
+ * was pressed - a form under a measurement's title, which is the fault
+ * the owner named on 17.10. They stand on their own face now, in a
+ * sub-tab that is in the address.
+ */
+const CERTIFICATE_TABS = ["state", "change"] as const;
+
 export function Certificates({ host }: { host: Host }) {
   const t = useT();
   const queryClient = useQueryClient();
+  const [tab, goTab] = useTab(CERTIFICATE_TABS);
   const [intent, setIntent] = useState<Intent | null>(null);
   const [notice, setNotice] = useState("");
   const [problem, setProblem] = useState("");
-  const [form, setForm] = useState<"" | "watch" | "deploy">("");
   const [selected, setSelected] = useState("");
   const [unwatching, setUnwatching] = useState("");
   // The last job ordered from here, linked where its sentence stands.
@@ -712,7 +728,6 @@ export function Certificates({ host }: { host: Host }) {
       setNotice("");
       setProblem("");
       setIntent(null);
-      setForm("");
       void queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
       void queryClient.invalidateQueries({ queryKey: ["certificates", host.id] });
     },
@@ -724,7 +739,6 @@ export function Certificates({ host }: { host: Host }) {
       api.post<Target>(`/api/v1/hosts/${host.id}/certificates/targets`, body),
     onSuccess: (target) => {
       settled(t("The panel now watches {path}. Scan the host to read it.", { path: target.path }));
-      setForm("");
     },
     onError: failed,
   });
@@ -786,12 +800,15 @@ export function Certificates({ host }: { host: Host }) {
       {/* Actions on the whole module stand in the heading beside the
           machine's name, where every other screen puts its own. */}
       <HeadActions>
-        <Button kind="quiet" testId="watch-open" onClick={() => setForm(form === "watch" ? "" : "watch")}>
-          {form === "watch" ? t("Cancel") : t("Watch a path")}
+        {/* Both of these lead to the one place the decisions of this
+            module are made, rather than opening a form in among the
+            readings. */}
+        <Button kind="quiet" testId="watch-open" onClick={() => goTab("change")}>
+          {t("Watch a path")}
         </Button>
         {deployGuard.allowed && (
-          <Button kind="quiet" testId="deploy-open" onClick={() => setForm(form === "deploy" ? "" : "deploy")}>
-            {form === "deploy" ? t("Cancel") : t("Deploy a certificate")}
+          <Button kind="quiet" testId="deploy-open" onClick={() => goTab("change")}>
+            {t("Deploy a certificate")}
           </Button>
         )}
         <Guarded verdict={scanGuard} explain>
@@ -840,16 +857,26 @@ export function Certificates({ host }: { host: Host }) {
       {notice && <Banner tone="info">{notice}</Banner>}
       {ordered && <JobNotice job={ordered} />}
 
-      <Board screen="next_host_certificates" catalogue={HOST_CERTIFICATES} drawn={{
-        deadline: (
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "state", label: t("State") },
+          { value: "change", label: t("Change") },
+        ]}
+      />
+
+      {tab === "state" && (
+        <Grid>
+          <C span={8}>
           <Card
             title={t("By deadline")}
             note={t("How long each certificate has left, as the panel judges it.")}
           >
             <Band segments={deadline} testId="deadline" />
           </Card>
-        ),
-        renewal: (
+          </C>
+          <C span={4}>
           <Card
             title={t("Renewal")}
             note={t("What renews each certificate, and where the panel learnt of it.")}
@@ -872,12 +899,8 @@ export function Certificates({ host }: { host: Host }) {
               </>
             )}
           </Card>
-        ),
-        watch: form === "watch" && <WatchCard busy={watch.isPending} onSave={(body) => watch.mutate(body)} />,
-        deploy: form === "deploy" && deployGuard.allowed && (
-          <DeployCard host={host} targets={targets} planGuard={planGuard} onIntent={setIntent} />
-        ),
-        list: (
+          </C>
+          <C span={12}>
           <Card
             title={t("Certificates")}
             note={list.length > 0
@@ -893,7 +916,7 @@ export function Certificates({ host }: { host: Host }) {
             flush
           >
             {!report.isLoading && list.length === 0 ? (
-              <Empty icon="certificates" action={<Button kind="quiet" onClick={() => setForm("watch")}>{t("Watch a path")}</Button>}>
+              <Empty icon="certificates" action={<Button kind="quiet" onClick={() => goTab("change")}>{t("Watch a path")}</Button>}>
                 {t("No certificate is watched on this host yet. Add a path, or scan the host if certmonger tracks something here.")}
               </Empty>
             ) : (
@@ -1042,9 +1065,10 @@ export function Certificates({ host }: { host: Host }) {
               />
             )}
           </Card>
-        ),
-        certificate: chosen && (
-          <Card title={chosen.path}>
+          </C>
+          {chosen && (
+          <C span={6}>
+          <Card title={t("The certificate under {path}", { path: chosen.path })}>
             <Facts>
               <Fact label={t("Issuer")}>{chosen.issuer || <Pill tone="unknown">{t("unknown")}</Pill>}</Fact>
               <Fact label={t("Serial")}>{chosen.serial ? <code>{chosen.serial}</code> : "—"}</Fact>
@@ -1083,8 +1107,10 @@ export function Certificates({ host }: { host: Host }) {
               <Readout label={t("Fingerprint")} value={chosen.fingerprint_sha256} testId="fingerprint" />
             )}
           </Card>
-        ),
-        deployments: chosen && (
+          </C>
+          )}
+          {chosen && (
+          <C span={6}>
           <Card title={t("Deployments from the panel")} flush>
             <Table
               rows={history.data?.items ?? []}
@@ -1131,8 +1157,10 @@ export function Certificates({ host }: { host: Host }) {
               ]}
             />
           </Card>
-        ),
-        missing: missing.length > 0 && (
+          </C>
+          )}
+          {missing.length > 0 && (
+          <C span={12}>
           <Card
             title={t("Not established")}
             note={t("Facts the host could not collect. Each one is an answer of \"not known\", not a value of zero.")}
@@ -1148,8 +1176,19 @@ export function Certificates({ host }: { host: Host }) {
               ]}
             />
           </Card>
-        ),
-      }} />
+          </C>
+          )}
+        </Grid>
+      )}
+
+      {tab === "change" && (
+        <>
+          <WatchForm busy={watch.isPending} onSave={(body) => watch.mutate(body)} />
+          {deployGuard.allowed && (
+            <DeployForm host={host} targets={targets} planGuard={planGuard} onIntent={setIntent} />
+          )}
+        </>
+      )}
 
       {intent && (
         <Confirm
@@ -1178,18 +1217,3 @@ export function Certificates({ host }: { host: Host }) {
     </>
   );
 }
-
-/** The containers this module can draw, and the shape each ships with. */
-export const HOST_CERTIFICATES: BoardEntry[] = [
-  { key: "deadline", title: "By deadline", width: 8, height: 2 },
-  { key: "renewal", title: "Renewal", width: 4, height: 2 },
-  { key: "watch", title: "Watch a path", width: 12, height: 3 },
-  { key: "deploy", title: "Deploy a certificate", width: 12, height: 4 },
-  { key: "list", title: "Certificates", width: 12, height: 4 },
-  { key: "certificate", title: "The chosen certificate", width: 6, height: 3 },
-  { key: "deployments", title: "Deployments from the panel", width: 6, height: 3 },
-  { key: "missing", title: "Not established", width: 12, height: 2 },
-];
-
-/** The name this module's arrangement is stored under. */
-export const HOST_CERTIFICATES_SCREEN = "next_host_certificates";

@@ -115,18 +115,34 @@ function given(over: Record<string, unknown> = {}) {
   });
 }
 
-function draw() {
+/**
+ * The screen, on the sub-tab asked for.
+ *
+ * Remediation is a sub-tab since 17.10 - a decision is a form of its own
+ * and never a container among the readings - and the sub-tab is in the
+ * address, so a test that fills the form opens the screen where it is.
+ */
+function draw(tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const at = tab === "" ? "/security" : `/security?tab=${tab}`;
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[at]}><ToastProvider>{children}</ToastProvider></MemoryRouter>
+    </QueryClientProvider>
   );
   return render(<Security />, { wrapper });
 }
 
-/** The screen with one check ticked and its plans on screen. */
-async function previewed() {
+/** One check ticked on the checks, then over to the remediation. */
+async function ticked() {
   draw();
   fireEvent.click(await screen.findByTestId("fix-ssh_root_login"));
+  fireEvent.click(screen.getByRole("tab", { name: /Remediation/ }));
+}
+
+/** The screen with one check ticked and its plans on screen. */
+async function previewed() {
+  await ticked();
   fireEvent.click(await screen.findByTestId("remediation-preview"));
   await waitFor(() => expect(screen.getByTestId("remediation-plans")).toBeInTheDocument());
 }
@@ -184,7 +200,7 @@ describe("the hosts behind a check", () => {
     expect(asked.some((one) => one.includes("check=ssh_root_login"))).toBe(true);
 
     const row = screen.getByTestId("failing-h1");
-    expect(within(row).getByRole("link", { name: "web-1" })).toHaveAttribute("href", "/next/hosts/h1/security");
+    expect(within(row).getByRole("link", { name: "web-1" })).toHaveAttribute("href", "/hosts/h1/security");
     expect(row).toHaveTextContent("file.render");
     // An operation nobody named is an em dash, never an empty cell.
     expect(screen.getByTestId("failing-h2")).toHaveTextContent("—");
@@ -261,18 +277,21 @@ describe("the checks", () => {
 describe("the remediation", () => {
   it("appears only once a check is ticked, and names the hosts it would act on", async () => {
     given();
-    draw();
-    await waitFor(() => expect(screen.getByTestId("fix-ssh_root_login")).toBeInTheDocument());
+    draw("remediate");
+    // Nothing ticked is said in as many words, with the way back to the
+    // checks: an empty form on an empty tab reads as a broken screen.
+    await waitFor(() => expect(screen.getByTestId("remediation-none")).toBeInTheDocument());
     expect(screen.queryByTestId("remediation-preview")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("fix-ssh_root_login"));
+    fireEvent.click(screen.getByRole("tab", { name: "Checks" }));
+    fireEvent.click(await screen.findByTestId("fix-ssh_root_login"));
+    fireEvent.click(screen.getByRole("tab", { name: /Remediation/ }));
     await waitFor(() => expect(screen.getByTestId("remediation-preview")).toBeInTheDocument());
     expect(screen.getByTestId("remediation-scope")).toHaveTextContent("hosts with findings (2)");
   });
 
   it("asks the server what the plans would do, with the checks and the hosts in the body", async () => {
     given();
-    draw();
-    fireEvent.click(await screen.findByTestId("fix-ssh_root_login"));
+    await ticked();
     fireEvent.click(await screen.findByTestId("remediation-preview"));
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]).toMatchObject({
@@ -284,8 +303,7 @@ describe("the remediation", () => {
 
   it("shows the plans and the hosts that get none before anything can be ordered", async () => {
     given();
-    draw();
-    fireEvent.click(await screen.findByTestId("fix-ssh_root_login"));
+    await ticked();
     // Nothing can be ordered while nothing has been shown.
     expect(screen.queryByTestId("remediation-order")).not.toBeInTheDocument();
     fireEvent.click(await screen.findByTestId("remediation-preview"));
@@ -332,7 +350,7 @@ describe("the remediation", () => {
         manual_gate: false,
       },
     });
-    await waitFor(() => expect(navigated).toEqual(["/next/campaigns/c-7"]));
+    await waitFor(() => expect(navigated).toEqual(["/campaigns/c-7"]));
   });
 
   it("carries the rollout the operator set, not the one the form opened with", async () => {
@@ -350,8 +368,7 @@ describe("the remediation", () => {
 
   it("sends the filters rather than a host list when the scope is a site", async () => {
     given();
-    draw();
-    fireEvent.click(await screen.findByTestId("fix-ssh_root_login"));
+    await ticked();
     fireEvent.change(await screen.findByTestId("remediation-scope"), { target: { value: "filters" } });
     // Until a site or an environment is named the order reaches nobody, and
     // the panel says so rather than letting the server refuse a fix-all.
@@ -369,8 +386,7 @@ describe("the remediation", () => {
     const { ApiError } = await import("../../lib/api");
     refusals["/api/v1/security/remediation/preview"] =
       new ApiError(400, "no_targets", "the selector matched no hosts");
-    draw();
-    fireEvent.click(await screen.findByTestId("fix-ssh_root_login"));
+    await ticked();
     fireEvent.click(await screen.findByTestId("remediation-preview"));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("the selector matched no hosts"));
     expect(screen.queryByTestId("remediation-order")).not.toBeInTheDocument();

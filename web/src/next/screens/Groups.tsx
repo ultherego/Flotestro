@@ -6,14 +6,15 @@ import { useDebounced } from "../../lib/debounce";
 import { absoluteTime, relativeTime } from "../../lib/format";
 import { REFRESH_INTERVAL } from "../../lib/stream";
 import type { Host, HostGroup, SelectorExpression, Whoami } from "../../lib/types";
+import {
+  buildExpression, describeExpression, RULE_FIELDS, type Rule, type RuleField,
+} from "../../lib/selectors";
 import { useT } from "../../i18n";
 import { useToast } from "../../components/Toast";
-import { Board } from "../Board";
-import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Band, Banner, Bars, Bones, Button, Card, Check, Empty, Fact, Facts, Field, Fields, Find,
-  Grid, Kpi, Kpis, Modal, Note, Pill, Problem, Readout, Screen, Seg, Stack, Table, Tag, Toolbar,
-  TwoLine, type Segment, type Tone,
+  Actions, Band, Banner, Bars, Bones, Button, C, Card, Check, Empty, Fact, Facts, Field, Fields,
+  Find, Form, Grid, Kpi, Kpis, Modal, Note, Pill, Problem, Readout, Screen, Seg, Stack, Table, Tabs,
+  Tag, Toolbar, TwoLine, useTab, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -73,54 +74,27 @@ export function orderGroups<T extends Pick<HostGroup, "name" | "member_count">>(
   });
 }
 
-/** The saved expression in one line, in the shape the server logs it. */
-export function describeSelector(expression?: SelectorExpression | null): string {
-  if (!expression) return "";
-  if (expression.all) return `(${expression.all.map(describeSelector).join(" and ")})`;
-  if (expression.any) return `(${expression.any.map(describeSelector).join(" or ")})`;
-  if (expression.not) return `not ${describeSelector(expression.not)}`;
-  const [field, value] = Object.entries(expression).find(([, one]) => typeof one === "string") ?? ["nothing", ""];
-  return value ? `${field}=${value}` : field;
-}
+/**
+ * The saved expression in one line, in the shape the server logs it. The
+ * name this screen knows it by; the one copy lives in lib/selectors, because
+ * the bulk wizard, the policy editor and the read form print the same line.
+ */
+export const describeSelector = describeExpression;
 
-/** One row of the builder: a fact about a host, its value, and whether it is denied. */
-export type Rule = { field: RuleField; value: string; negated: boolean };
-
-export type RuleField =
-  | "tag" | "group" | "site" | "environment" | "os_family" | "os_version" | "capability"
-  | "connection_state" | "lifecycle_state" | "owner" | "channel"
-  | "security_updates" | "reboot_required" | "failed_units" | "agent_version"
-  | "relay" | "failure_domain";
-
-/** The facts a rule may name, in the order the builder offers them. */
-export const RULE_FIELDS: RuleField[] = [
-  "tag", "group", "site", "environment", "os_family", "os_version", "capability",
-  "connection_state", "lifecycle_state", "owner", "channel",
-  "security_updates", "reboot_required", "failed_units", "agent_version",
-  "relay", "failure_domain",
-];
+/* One row of the builder, the facts it may name, and the two translations
+   between rows and expression are the selector language, shared with the
+   bulk wizard, the policy editor and the read form; they live in
+   lib/selectors and are re-exported under the names this screen uses. */
+export { RULE_FIELDS, type Rule, type RuleField };
 
 /** The facts a host reports as yes or no; a host that never reported is on neither side. */
 const YES_NO_FIELDS: RuleField[] = ["security_updates", "reboot_required", "failed_units"];
 
 /**
- * The rows as the expression the server reads: one leaf per row, a denied
- * row wrapped in `not`, and the rows joined by `all` or `any`. A row with
- * no value is not a rule yet and is left out.
+ * The rows as the expression the server reads. The name this screen knows
+ * `buildExpression` by; one copy, in lib/selectors.
  */
-export function selectorOf(rules: Rule[], combine: "all" | "any"): SelectorExpression | null {
-  const leaves = rules
-    .filter((rule) => rule.value.trim() !== "")
-    .map((rule): SelectorExpression => {
-      // Every leaf the builder offers is a string on the wire; the release
-      // channel is typed narrower in the view, which is what the cast is for.
-      const leaf = { [rule.field]: rule.value.trim() } as SelectorExpression;
-      return rule.negated ? { not: leaf } : leaf;
-    });
-  if (leaves.length === 0) return null;
-  if (leaves.length === 1) return leaves[0];
-  return combine === "all" ? { all: leaves } : { any: leaves };
-}
+export const selectorOf = buildExpression;
 
 /**
  * The saved expression read back as rows of the builder: one leaf per row,
@@ -176,8 +150,8 @@ export function namedBy(usage: GroupUsage | undefined, t: (key: string, vars?: R
 /**
  * The groups, or one of them.
  *
- * The address decides: `/next/groups` is the catalogue, and
- * `/next/groups/<id>` opens that group on its own, so a group somebody
+ * The address decides: `/groups` is the catalogue, and
+ * `/groups/<id>` opens that group on its own, so a group somebody
  * is looking at can be sent to somebody else and reloaded where it was.
  */
 export function Groups() {
@@ -197,7 +171,7 @@ export function campaignAddress(name: string, hostIDs: string[] = []): string {
   const params = new URLSearchParams({ name });
   if (hostIDs.length === 0) params.set("group", name);
   for (const one of hostIDs) params.append("host_id", one);
-  return `/next/bulk?${params}`;
+  return `/bulk?${params}`;
 }
 
 /** What the reader is allowed to do, as the server answers it. */
@@ -212,7 +186,7 @@ function usePermissions(): Set<string> {
 
 /** A new read with this group as its selector, inside the new panel. */
 export function readAddress(name: string): string {
-  return `/next/reads?${new URLSearchParams({ action: "journal.read", group: name })}`;
+  return `/reads?${new URLSearchParams({ action: "journal.read", group: name })}`;
 }
 
 /** How a host's connection reads as a tone; nobody's guess is unknown. */
@@ -223,12 +197,15 @@ export function connectionTone(state?: string): Tone {
   return "unknown";
 }
 
+/** The sub-tabs: the groups, and the form that draws a new one. */
+const GROUP_TABS = ["groups", "new"] as const;
+
 function GroupList() {
   const t = useT();
   const [search, setSearch] = useState("");
   const [order, setOrder] = useState<GroupOrder>("name");
-  const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [tab, go] = useTab(GROUP_TABS);
 
   const groups = useQuery({
     queryKey: ["host-groups"],
@@ -259,50 +236,69 @@ function GroupList() {
   return (
     <>
       {deleting && <DeleteGroup groups={items} onClose={() => setDeleting(false)} />}
-      <Board screen={GROUPS_SCREEN} catalogue={GROUPS} drawn={{
-        kinds: (
+
+      <Tabs
+        value={tab}
+        onChange={go}
+        tabs={[
+          { value: "groups", label: t("Groups") },
+          { value: "new", label: t("New group") },
+        ]}
+      />
+
+      {/* The form has a face of its own and its own heading. It was a
+          container of the board until 17.10, which is the fault the owner
+          named: a form opening under somebody else's title. */}
+      {tab === "new" && (
+        canWrite
+          ? <CreateGroup onDone={() => go("groups")} />
+          : <Card title={t("New group")}><Empty icon="hosts">{t("Only whoever may write the groups can draw one; ask an administrator.")}</Empty></Card>
+      )}
+
+      {tab === "groups" && (
+      <Grid>
+        <C span={5}>
           <Card
             title={t("How the groups answer")}
             note={t("A member list is what somebody wrote down; a selector is asked again every time it is read.")}
           >
             <Band segments={kinds} testId="group-kinds" />
           </Card>
-        ),
-        biggest: (
+        </C>
+        <C span={4}>
           <Card title={t("The biggest groups")} note={uncounted > 0 ? t("{n} groups have no size to show.", { n: uncounted }) : undefined}>
             {biggest.length === 0
               ? <Empty>{loaded ? t("No group has a size to show.") : t("Reading the groups…")}</Empty>
               : (
                 <Bars items={biggest.map((one) => ({
-                  label: <Link to={`/next/groups/${one.id}`}>{one.name}</Link>,
+                  label: <Link to={`/groups/${one.id}`}>{one.name}</Link>,
                   value: one.member_count ?? 0,
                 }))} />
               )}
           </Card>
-        ),
-        broken: (
+        </C>
+        <C span={3}>
           <Card title={t("Selectors that do not resolve")} note={t("A group that names something gone resolves to nobody until it is changed.")}>
             {broken.length === 0
               ? <Empty>{loaded ? t("Every selector resolves.") : t("Reading the groups…")}</Empty>
               : (
                 <Facts>
                   {broken.map((one) => (
-                    <Fact key={one.id} label={<Link to={`/next/groups/${one.id}`}>{one.name}</Link>}>
+                    <Fact key={one.id} label={<Link to={`/groups/${one.id}`}>{one.name}</Link>}>
                       <span className="fl-error">{one.unresolvable}</span>
                     </Fact>
                   ))}
                 </Facts>
               )}
           </Card>
-        ),
-        form: creating && <CreateGroup onDone={() => setCreating(false)} />,
-        list: (
+        </C>
+        <C span={12}>
           <Card
             title={t("Groups")}
             note={loaded ? t("{shown} of {total} groups", { shown: shown.length, total: items.length }) : undefined}
             tools={canWrite && (
               <>
-                <button type="button" onClick={() => setCreating(true)} disabled={creating} data-testid="new-group">
+                <button type="button" onClick={() => go("new")} data-testid="new-group">
                   {t("New group")}
                 </button>
                 <button type="button" className="fl-danger" onClick={() => setDeleting(true)} disabled={items.length === 0} data-testid="delete-a-group">
@@ -335,7 +331,7 @@ function GroupList() {
               columns={[
                 { key: "name", head: t("Group"), cell: (one) => (
                   <TwoLine sub={one.description}>
-                    <Link to={`/next/groups/${one.id}`}>{one.name}</Link>
+                    <Link to={`/groups/${one.id}`}>{one.name}</Link>
                   </TwoLine>
                 ) },
                 { key: "kind", head: t("Kind"), cell: (one) => (
@@ -367,8 +363,9 @@ function GroupList() {
               ]}
             />
           </Card>
-        ),
-      }} />
+        </C>
+      </Grid>
+      )}
     </>
   );
 }
@@ -495,10 +492,11 @@ function CreateGroup({ onDone }: { onDone: () => void }) {
   const ready = name.trim() !== "" && (kind === "static" ? members.size > 0 : selector !== null);
 
   return (
-    <Card
+    <Form
       title={t("New group")}
       note={t("The name is what a campaign selector will use; keep it short and without spaces.")}
-      foot={
+      onSubmit={() => { if (ready && !create.isPending) { setMessage(""); create.mutate(); } }}
+      actions={
         <Actions>
           <button type="button" onClick={() => { setMessage(""); create.mutate(); }} disabled={!ready || create.isPending} data-testid="create-group">
             {create.isPending ? t("Creating…") : t("Create group")}
@@ -535,7 +533,7 @@ function CreateGroup({ onDone }: { onDone: () => void }) {
             <SelectorPreview selector={selector} />
           </>
         )}
-    </Card>
+    </Form>
   );
 }
 
@@ -871,13 +869,12 @@ function EditGroup({ group, etag, onDone }: { group: GroupDetail; etag: string; 
   });
 
   return (
-    <Card
-      span={12}
+    <Form
       title={t("Edit group")}
       note={dynamic
         ? t("The name a selector names it by, the description, and the rule the server compiles.")
         : t("The name a selector names it by and the description; the members are edited on their own.")}
-      foot={
+      actions={
         <Actions>
           <Button
             onClick={() => { setMessage(""); save.mutate(); }}
@@ -962,7 +959,7 @@ function EditGroup({ group, etag, onDone }: { group: GroupDetail; etag: string; 
           ))}
         {dynamic && <SelectorPreview selector={parsed.selector} />}
       </Stack>
-    </Card>
+    </Form>
   );
 }
 
@@ -997,11 +994,10 @@ function EditMembers({ id, chosen, onChosen, onDone }: {
   });
 
   return (
-    <Card
-      span={12}
+    <Form
       title={t("Members")}
       note={t("The list is replaced whole: a host left unticked leaves the group.")}
-      foot={
+      actions={
         <Actions>
           <Button onClick={() => { setMessage(""); save.mutate(); }} disabled={save.isPending} testId="save-members">
             {save.isPending ? t("Saving…") : t("Save members ({n})", { n: chosen.size })}
@@ -1012,7 +1008,7 @@ function EditMembers({ id, chosen, onChosen, onDone }: {
       }
     >
       <MemberChooser chosen={chosen} onChange={onChosen} testId="edit-member-search" />
-    </Card>
+    </Form>
   );
 }
 
@@ -1084,7 +1080,7 @@ function OneGroup({ id }: { id: string }) {
         <Card>
           {missing
             ? (
-              <Empty icon="groups" action={<Link to="/next/groups">{t("All groups")}</Link>}>
+              <Empty icon="groups" action={<Link to="/groups">{t("All groups")}</Link>}>
                 {t("No group with the identifier {id} exists in this installation.", { id })}
               </Empty>
             )
@@ -1110,7 +1106,7 @@ function OneGroup({ id }: { id: string }) {
   const named: NamedBy[] = [
     ...(usage?.campaigns ?? []).map((campaign) => ({
       key: `campaign-${campaign.id}`, kind: t("campaign"), name: campaign.name,
-      state: campaign.state, to: `/next/campaigns/${campaign.id}`,
+      state: campaign.state, to: `/campaigns/${campaign.id}`,
     })),
     ...(usage?.policies ?? []).map((policy) => ({
       key: `policy-${policy.id}`, kind: t("policy"), name: policy.name, state: policy.state,
@@ -1180,7 +1176,7 @@ function OneGroup({ id }: { id: string }) {
               {t("Delete")}
             </Button>
           )}
-          <Button kind="quiet" onClick={() => navigate("/next/groups")} testId="all-groups">
+          <Button kind="quiet" onClick={() => navigate("/groups")} testId="all-groups">
             {t("All groups")}
           </Button>
         </>
@@ -1214,16 +1210,16 @@ function OneGroup({ id }: { id: string }) {
           groups={[one]}
           chosen={one.id}
           onClose={() => setDeleting(false)}
-          onDeleted={() => navigate("/next/groups")}
+          onDeleted={() => navigate("/groups")}
         />
       )}
 
       <Grid>
         {/* The form is rebuilt whenever the version under it moves, so a
             record somebody else changed is never edited from a stale copy. */}
-        {editing && <EditGroup key={etag} group={one} etag={etag} onDone={() => setEditing(false)} />}
+        {editing && <C span={12}><EditGroup key={etag} group={one} etag={etag} onDone={() => setEditing(false)} /></C>}
         {editingMembers && (
-          <EditMembers id={id} chosen={members} onChosen={setMembers} onDone={() => setEditingMembers(false)} />
+          <C span={12}><EditMembers id={id} chosen={members} onChosen={setMembers} onDone={() => setEditingMembers(false)} /></C>
         )}
 
         <Card span={5} title={t("Group")} note={one.description || t("Nobody wrote what it is for.")}>
@@ -1377,7 +1373,7 @@ function OneGroup({ id }: { id: string }) {
                   }] : []),
                   { key: "host", head: t("Host"), cell: (host) => (
                     <TwoLine sub={host.environment ? `${host.site} / ${host.environment}` : host.site}>
-                      <Link to={`/next/hosts/${host.id}`}>{host.hostname}</Link>
+                      <Link to={`/hosts/${host.id}`}>{host.hostname}</Link>
                     </TwoLine>
                   ) },
                   { key: "state", head: t("State"), cell: (host) => (
@@ -1403,13 +1399,3 @@ function OneGroup({ id }: { id: string }) {
     </Screen>
   );
 }
-
-export const GROUPS_SCREEN = "next_groups";
-
-export const GROUPS: BoardEntry[] = [
-  { key: "kinds", title: "How the groups answer", width: 5, height: 1 },
-  { key: "biggest", title: "The biggest groups", width: 4, height: 2 },
-  { key: "broken", title: "Selectors that do not resolve", width: 3, height: 2 },
-  { key: "form", title: "New group", width: 12, height: 4 },
-  { key: "list", title: "Groups", width: 12, height: 5 },
-];

@@ -87,10 +87,10 @@ const listing = (items: unknown[]) => ({
   token_ttl: "5 minutes",
 });
 
-function draw() {
+function draw(tab = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider>
+    <QueryClientProvider client={client}><MemoryRouter initialEntries={[tab ? `/?tab=${tab}` : "/"]}>{children}</MemoryRouter></QueryClientProvider>
   );
   return render(<Support />, { wrapper });
 }
@@ -147,7 +147,7 @@ describe("the helpers the list is read by", () => {
 describe("asking for a bundle", () => {
   it("sends the reason the trail keeps, and not before it is long enough", async () => {
     Object.assign(answers, { "/api/v1/support/bundles": listing([]) });
-    draw();
+    draw("request");
     await screen.findByTestId("ask");
     expect(screen.getByTestId("ask")).toBeDisabled();
 
@@ -165,7 +165,7 @@ describe("asking for a bundle", () => {
 
   it("will not ask for a second while one is being assembled", async () => {
     Object.assign(answers, { "/api/v1/support/bundles": listing([bundle({ state: "pending" })]) });
-    draw();
+    draw("request");
     await screen.findByTestId("ask");
     fireEvent.change(screen.getByTestId("reason"), { target: { value: "ticket OPS-71" } });
     await waitFor(() => expect(screen.getByText(/wait for it before asking for another/)).toBeInTheDocument());
@@ -176,7 +176,7 @@ describe("asking for a bundle", () => {
     refusals["/api/v1/support/bundles"] = {
       status: 401, code: "reauthentication_required", message: "sign in again first",
     };
-    draw();
+    draw("request");
     await screen.findByTestId("ask");
     fireEvent.change(screen.getByTestId("reason"), { target: { value: "ticket OPS-71" } });
     fireEvent.click(screen.getByTestId("ask"));
@@ -185,7 +185,7 @@ describe("asking for a bundle", () => {
 
   it("says who may ask, where the reader may not", async () => {
     Object.assign(answers, { "/api/v1/whoami": whoami(["support.bundle.read"]) });
-    draw();
+    draw("request");
     await waitFor(() => expect(screen.getByText(/support.bundle.create permission/)).toBeInTheDocument());
     expect(screen.queryByTestId("ask")).toBeNull();
   });
@@ -250,7 +250,10 @@ describe("fetching a bundle", () => {
     // Without a reason the download is held back: it is on the trail too.
     expect(screen.getByTestId("download-b1")).toBeDisabled();
 
+    // The reason is written on the request form and serves the download too.
+    fireEvent.click(screen.getByRole("tab", { name: "Request" }));
     fireEvent.change(screen.getByTestId("reason"), { target: { value: "ticket OPS-71" } });
+    fireEvent.click(screen.getByRole("tab", { name: "Bundles" }));
     await waitFor(() => expect(screen.getByTestId("download-b1")).toBeEnabled());
     fireEvent.click(screen.getByTestId("download-b1"));
 
@@ -272,7 +275,9 @@ describe("fetching a bundle", () => {
     };
     draw();
     await waitFor(() => expect(screen.getByTestId("download-b1")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("tab", { name: "Request" }));
     fireEvent.change(screen.getByTestId("reason"), { target: { value: "ticket OPS-71" } });
+    fireEvent.click(screen.getByRole("tab", { name: "Bundles" }));
     fireEvent.click(screen.getByTestId("download-b1"));
     await waitFor(() => expect(screen.getByText("the link was already spent")).toBeInTheDocument());
     expect(fetched).toHaveLength(0);

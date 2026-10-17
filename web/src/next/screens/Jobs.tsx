@@ -4,7 +4,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { api, fetchWithCredentials, loadedItems, type Collection, type Page } from "../../lib/api";
 import { exportAddress, exportFileName } from "../../components/ExportButton";
 import { useToast } from "../../components/Toast";
-import { stateName } from "../../components/ui";
+import { stateName } from "../../lib/states";
 import { useDebounced } from "../../lib/debounce";
 import { absoluteTime, bytes, relativeTime, toInstant } from "../../lib/format";
 import { needsReason } from "../../lib/actions";
@@ -20,7 +20,7 @@ import { useT } from "../../i18n";
 import { Board } from "../Board";
 import type { BoardEntry } from "../../components/board";
 import {
-  Band, Bars, Bones, Button, Card, Chart, Empty, Fact, Facts, Field, Fields, Meter, Modal, Note, PAGE_SIZES, Pill, Presets, Problem, Readout, RowsPerPage, Stack, Table, Tag, Tags, Toolbar, TwoLine, type Segment, type Tone,
+  Band, Bars, Bones, Button, Card, Chart, Empty, Fact, Facts, Field, Fields, Meter, Modal, Note, PAGE_SIZES, Pill, Presets, Problem, Readout, RowsPerPage, Stack, Table, Tabs, Tag, Tags, Toolbar, TwoLine, useTab, type Segment, type Tone,
 } from "../kit";
 
 /**
@@ -79,7 +79,7 @@ export function readFilters(address: URLSearchParams): Filters {
   return out;
 }
 
-/** The address the filters make: only the ones that are set, so an unfiltered screen is a plain /next/jobs. */
+/** The address the filters make: only the ones that are set, so an unfiltered screen is a plain /jobs. */
 export function filterAddress(filters: Filters): URLSearchParams {
   const out = new URLSearchParams();
   for (const key of KEYS) if (filters[key]) out.set(key, filters[key]);
@@ -167,6 +167,7 @@ export function Jobs() {
   // The address carries the filters, so a tile on the dashboard, a link
   // out of a fan-out and a bookmark all land on the same narrowed list.
   const [address, setAddress] = useSearchParams();
+  const [tab, goTab] = useTab(JOB_TABS);
   const [filters, setFilters] = useState<Filters>(() => readFilters(address));
   const set = (key: keyof Filters, value: string) => setFilters((before) => ({ ...before, [key]: value }));
   // The address last written here. It tells a change typed on the screen
@@ -174,12 +175,15 @@ export function Jobs() {
   // instead of chasing each other round.
   const written = useRef(address.toString());
   useEffect(() => {
-    const next = filterAddress(filters).toString();
+    const after = filterAddress(filters);
+    // The open tab is not a filter, and it stays where the link put it.
+    if (address.get("tab")) after.set("tab", address.get("tab")!);
+    const next = after.toString();
     if (next !== written.current) {
       written.current = next;
       setAddress(new URLSearchParams(next), { replace: true });
     }
-  }, [filters, setAddress]);
+  }, [filters, address, setAddress]);
   useEffect(() => {
     const now = address.toString();
     if (now !== written.current) {
@@ -346,13 +350,21 @@ export function Jobs() {
 
   return (
     <>
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "jobs", label: t("Jobs") },
+          { value: "statistics", label: t("Statistics") },
+        ]}
+      />
       <Board screen={JOBS_SCREEN} catalogue={JOBS} drawn={{
-        state: (
+        state: tab !== "statistics" ? undefined : (
           <Card title={t("State")} note={listed}>
             <Band segments={band} testId="job-states" />
           </Card>
         ),
-        activity: (
+        activity: tab !== "statistics" ? undefined : (
           <Card title={t("Operations, last 24 h")} note={t("Finished per hour, by outcome, over the whole fleet.")}>
             {day ? (
               <Chart
@@ -369,7 +381,7 @@ export function Jobs() {
             )}
           </Card>
         ),
-        operations: (
+        operations: tab !== "statistics" ? undefined : (
           <Card
             title={t("By operation")}
             note={listed}
@@ -384,7 +396,7 @@ export function Jobs() {
                 }))} />}
           </Card>
         ),
-        jobs: (
+        jobs: tab !== "jobs" ? undefined : (
           <Card
             title={t("Jobs")}
             flush
@@ -580,13 +592,13 @@ export function Jobs() {
                   tight: true,
                   cell: (job) => (
                     <TwoLine sub={job.campaign_id
-                      ? <Link to={`/next/campaigns/${job.campaign_id}`} title={t("Part of a campaign")}>
+                      ? <Link to={`/campaigns/${job.campaign_id}`} title={t("Part of a campaign")}>
                           {campaignName(job.campaign_id)
                             ? t("campaign {name}", { name: campaignName(job.campaign_id) ?? "" })
                             : t("campaign {id}", { id: job.campaign_id.slice(0, 8) })}
                         </Link>
                       : undefined}>
-                      <Link to={`/next/jobs/${job.id}`}><code title={job.action_type}>{job.action_type}</code></Link>
+                      <Link to={`/jobs/${job.id}`}><code title={job.action_type}>{job.action_type}</code></Link>
                     </TwoLine>
                   ),
                 },
@@ -596,7 +608,7 @@ export function Jobs() {
                   tight: true,
                   optional: true,
                   cell: (job) => (
-                    <Link to={`/next/hosts/${job.host_id}`} className="fl-nowrap">
+                    <Link to={`/hosts/${job.host_id}`} className="fl-nowrap">
                       {job.hostname || job.host_id.slice(0, 8)}
                     </Link>
                   ),
@@ -838,7 +850,7 @@ function Attempts({ job, onClose }: { job: Job; onClose: () => void }) {
       note={t("Every attempt the host made at this job, newest last.")}
       tools={
         <>
-          <Link to={`/next/jobs/${job.id}`} className="fl-quiet fl-small">
+          <Link to={`/jobs/${job.id}`} className="fl-quiet fl-small">
             {t("Open the job: full payload, plan and output")}
           </Link>
           <Button kind="quiet" onClick={onClose} testId="hide-attempts">{t("Hide")}</Button>
@@ -1210,11 +1222,13 @@ function Export({ params }: { params: URLSearchParams }) {
   );
 }
 
+const JOB_TABS = ["jobs", "statistics"] as const;
+
 export const JOBS_SCREEN = "next_jobs";
 
 export const JOBS: BoardEntry[] = [
-  { key: "state", title: "State", width: 12, height: 1 },
-  { key: "activity", title: "Operations, last 24 h", width: 8, height: 3 },
-  { key: "operations", title: "By operation", width: 4, height: 2 },
-  { key: "jobs", title: "Jobs", width: 12, height: 6 },
+  { key: "state", title: "State", width: 12, height: 2 },
+  { key: "activity", title: "Operations, last 24 h", width: 8, height: 5 },
+  { key: "operations", title: "By operation", width: 4, height: 4 },
+  { key: "jobs", title: "Jobs", width: 12, height: 11 },
 ];

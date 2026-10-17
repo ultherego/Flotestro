@@ -2,8 +2,8 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type Collection } from "../lib/api";
 import type { Attempt } from "../lib/types";
-import { bytes } from "../lib/format";
-import { Time } from "./ui";
+import { bytes, absoluteTime, relativeTime } from "../lib/format";
+
 import { useT } from "../i18n";
 
 /**
@@ -502,7 +502,7 @@ export function PlanGroupView({ group, action, stale = [] }: { group: PlanGroup;
         <span className="ui-note">{t("Planner")} <span className="ui-mono">{planner || "—"}</span></span>
         {/* A plan is bound in time as well as by its digest: past the expiry
             the hosts are not started on it and the campaign is planned again. */}
-        <span className="ui-note">{t("Valid until")} <Time value={group.expires_at} /></span>
+        <span className="ui-note">{t("Valid until")} <PlanTime value={group.expires_at} /></span>
         {status === "expired" && <span className="ui-pill ui-error">{t("expired")}</span>}
         {status === "unknown" && <span className="ui-pill ui-error" title={t("The panel cannot read this plan as a declaration of its effects; exclude these hosts with a reason or plan again.")}>{t("unknown plan")}</span>}
         {staleHere.length > 0 && (
@@ -547,4 +547,16 @@ export function JobPlan({ jobId }: { jobId: string }) {
   const attempt = [...(data?.items ?? [])].reverse().find((item) => isHostPlan(item.detail?.kind as string));
   if (!attempt) return <span className="ui-note">—</span>;
   return <PlanSummary plan={(attempt.detail?.plan ?? {}) as HostPlan} />;
+}
+
+/**
+ * A moment, read as how long ago with the exact time under the pointer.
+ *
+ * It came from the panel being replaced, which had one of these for every
+ * screen; this is the only place left that wanted it.
+ */
+function PlanTime({ value }: { value?: string | null }) {
+  const t = useT();
+  if (!value) return <span className="ui-pill ui-unknown">{t("never")}</span>;
+  return <span title={absoluteTime(value)}>{relativeTime(value)}</span>;
 }

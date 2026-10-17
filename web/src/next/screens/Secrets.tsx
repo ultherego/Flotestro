@@ -6,12 +6,10 @@ import { copyToClipboard } from "../../lib/clipboard";
 import { absoluteTime, relativeTime } from "../../lib/format";
 import type { Whoami } from "../../lib/types";
 import { useT } from "../../i18n";
-import { Board } from "../Board";
-import type { BoardEntry } from "../../components/board";
 import {
-  Actions, Banner, Bars, Bones, Band, Button, Card, Check, Empty, Fact, Facts, Field, Fields,
-  Grid, Kpi, Kpis, Modal, Note, Pill, Problem, Readout, Screen, Stack, Table, Toolbar, Find,
-  TwoLine, type Segment,
+  Actions, Banner, Bars, Bones, Band, Button, C, Card, Check, Empty, Fact, Facts, Field, Fields,
+  Form, Grid, Kpi, Kpis, Modal, Note, Pill, Problem, Readout, Screen, Stack, Table, Tabs, Toolbar,
+  Find, TwoLine, useTab, type Segment,
 } from "../kit";
 
 /**
@@ -102,7 +100,7 @@ export function errorText(error: unknown): string {
 
 /** Where a secret's own record is read, inside the new panel. */
 export function secretAddress(name: string): string {
-  return `/next/secrets/${encodeURIComponent(name)}`;
+  return `/secrets/${encodeURIComponent(name)}`;
 }
 
 export function usePermissions(): Set<string> {
@@ -203,6 +201,12 @@ function ValueField({ label, value, onChange, testId }: {
 
 /* ---------------------------------------------------------------- screen */
 
+/** The sub-tabs of the store: what is in it, and what goes into it. */
+const SECRET_TABS = ["secrets", "new"] as const;
+
+/** The sub-tabs of one secret: what it is, and the versions it has had. */
+const ONE_SECRET_TABS = ["secret", "versions"] as const;
+
 /** What the store is doing beside the list; one thing at a time. */
 type Aside =
   | { kind: "create" }
@@ -212,7 +216,7 @@ type Aside =
 /**
  * The store, or one secret in it.
  *
- * `/next/secrets` is the store and `/next/secrets/<name>` is one record,
+ * `/secrets` is the store and `/secrets/<name>` is one record,
  * because the name is the identifier everywhere else - in a job payload,
  * in the trail, in a lease. The value is the identifier of nothing and
  * never appears in an address.
@@ -232,6 +236,7 @@ function SecretStore() {
   const [search, setSearch] = useState("");
   const [aside, setAside] = useState<Aside | null>(null);
   const [notice, setNotice] = useState("");
+  const [tab, go] = useTab(SECRET_TABS);
   const { copied, failed, copy } = useCopy();
 
   const list = useQuery({
@@ -243,6 +248,7 @@ function SecretStore() {
   const settled = (text: string) => {
     setNotice(text);
     setAside(null);
+    go("secrets");
     void queryClient.invalidateQueries({ queryKey: ["secrets"] });
   };
 
@@ -296,7 +302,7 @@ function SecretStore() {
       actions={
         <button
           type="button"
-          onClick={() => setAside({ kind: "create" })}
+          onClick={() => { setAside({ kind: "create" }); go("new"); }}
           disabled={!canWrite || aside !== null}
           title={canWrite ? undefined : denied}
           data-testid="new-secret"
@@ -322,8 +328,26 @@ function SecretStore() {
         />
       )}
 
-      <Board screen={SECRETS_SCREEN} catalogue={SECRETS} drawn={{
-        store: (
+      <Tabs
+        value={tab}
+        onChange={(next) => { if (next === "secrets" && aside?.kind === "create") setAside(null); go(next); }}
+        tabs={[
+          { value: "secrets", label: t("Secrets") },
+          { value: "new", label: t("New secret") },
+        ]}
+      />
+
+      {/* The form stands on its own face, under its own heading, where it
+          was asked for. It was a container of the board until 17.10. */}
+      {tab === "new" && (
+        canWrite
+          ? <NewSecret onDone={settled} onCancel={() => { setAside(null); go("secrets"); }} />
+          : <Card title={t("New secret")}><Empty icon="secrets">{denied}</Empty></Card>
+      )}
+
+      {tab === "secrets" && (
+      <Grid>
+        <C span={8}>
           <Card
             title={t("Store")}
             note={loaded
@@ -332,8 +356,8 @@ function SecretStore() {
           >
             {loaded ? <Band segments={band} testId="secrets-band" /> : <Bones rows={2} />}
           </Card>
-        ),
-        by_creator: (
+        </C>
+        <C span={4}>
           <Card title={t("By creator")} note={t("Who put the secrets in.")}>
             {!loaded ? (
               <Bones rows={3} />
@@ -343,11 +367,8 @@ function SecretStore() {
               <Bars items={byCreator.map(([creator, n]) => ({ label: creator, value: n, tone: "accent" }))} />
             )}
           </Card>
-        ),
-        new_secret: aside?.kind === "create" && canWrite && (
-          <NewSecret onDone={settled} onCancel={() => setAside(null)} />
-        ),
-        list: (
+        </C>
+        <C span={12}>
           <Card
             title={t("Secrets")}
             foot={canWrite ? undefined : <Note>{denied}</Note>}
@@ -464,8 +485,9 @@ function SecretStore() {
               />
             )}
           </Card>
-        ),
-      }} />
+        </C>
+      </Grid>
+      )}
     </Screen>
   );
 }
@@ -505,10 +527,11 @@ function NewSecret({ onDone, onCancel }: { onDone: (notice: string) => void; onC
   const ready = name.trim() !== "" && value !== "" && reasonGiven(reason) && !create.isPending;
 
   return (
-    <Card
+    <Form
       title={t("New secret")}
       note={t("The name is what a job payload references; the value is written once and is never read back out of the panel.")}
-      foot={
+      onSubmit={() => { if (ready) create.mutate(); }}
+      actions={
         <Actions>
           <button type="button" disabled={!ready} onClick={() => create.mutate()} data-testid="secret-create">
             {create.isPending ? t("Creating…") : t("Create")}
@@ -541,7 +564,7 @@ function NewSecret({ onDone, onCancel }: { onDone: (notice: string) => void; onC
         <ReasonField value={reason} onChange={setReason} testId="secret-reason" />
       </Fields>
       {create.error && <Problem>{errorText(create.error)}</Problem>}
-    </Card>
+    </Form>
   );
 }
 
@@ -570,13 +593,14 @@ function RotateSecret({ secret, onDone, onCancel }: {
   const ready = value !== "" && reasonGiven(reason) && !rotate.isPending;
 
   return (
-    <Card
+    <Form
       title={t("Rotate {name}", { name: secret.name })}
       note={t("A new value for {name} becomes version {version}; the jobs already delivered keep the version they were given.", {
         name: secret.name,
         version: secret.current_version + 1,
       })}
-      foot={
+      onSubmit={() => { if (ready) rotate.mutate(); }}
+      actions={
         <Actions>
           <button type="button" disabled={!ready} onClick={() => rotate.mutate()} data-testid="secret-rotate">
             {rotate.isPending ? t("Rotating…") : t("Rotate")}
@@ -592,7 +616,7 @@ function RotateSecret({ secret, onDone, onCancel }: {
         <ReasonField value={reason} onChange={setReason} testId="rotate-reason" />
       </Fields>
       {rotate.error && <Problem>{errorText(rotate.error)}</Problem>}
-    </Card>
+    </Form>
   );
 }
 
@@ -664,6 +688,7 @@ function RetireSecret({ secret, onDone, onClose }: {
  */
 function OneSecret({ name }: { name: string }) {
   const t = useT();
+  const [tab, goTab] = useTab(ONE_SECRET_TABS);
   const queryClient = useQueryClient();
   const permissions = usePermissions();
   const canDestroy = permissions.has(SECRET_DESTROY_PERMISSION);
@@ -702,7 +727,7 @@ function OneSecret({ name }: { name: string }) {
       <Screen title={name} lead={t("Values go in and do not come out.")} icon="secrets" help={<HelpText />}>
         <Card>
           {missing ? (
-            <Empty icon="secrets" action={<Link to="/next/secrets">{t("All secrets")}</Link>}>
+            <Empty icon="secrets" action={<Link to="/secrets">{t("All secrets")}</Link>}>
               {t("No secret named {name} exists in this installation.", { name })}
             </Empty>
           ) : forbidden ? (
@@ -772,7 +797,17 @@ function OneSecret({ name }: { name: string }) {
         />
       </Kpis>
 
+      <Tabs
+        value={tab}
+        onChange={goTab}
+        tabs={[
+          { value: "secret", label: t("Secret") },
+          { value: "versions", label: t("Versions") },
+        ]}
+      />
+
       <Grid>
+        {tab === "secret" && (<>
         <Card
           span={6}
           title={t("Secret")}
@@ -815,6 +850,9 @@ function OneSecret({ name }: { name: string }) {
           </Stack>
         </Card>
 
+        </>)}
+
+        {tab === "versions" && (
         <Card
           span={12}
           title={t("Versions")}
@@ -872,6 +910,7 @@ function OneSecret({ name }: { name: string }) {
             ]}
           />
         </Card>
+        )}
       </Grid>
 
       {pending && (
@@ -940,27 +979,3 @@ function DestroyVersion({ secret, version, busy, error, onClose, onDestroy }: {
     </Modal>
   );
 }
-
-/** The name the store's arrangement is stored under. */
-export const SECRETS_SCREEN = "next_secrets";
-
-/**
- * The containers of the store, and the shape each ships with.
- *
- * The one record of a secret is not on a board: it is one secret read on
- * its own, as it was in the panel this replaces, and there is nothing on
- * it to arrange.
- */
-export const SECRETS: BoardEntry[] = [
-  // A band over three counts of a store that is already counted: one row
-  // holds the title, the sentence under it and the band itself.
-  { key: "store", title: "Store", width: 8, height: 1 },
-  // At most eight creators, one bar each.
-  { key: "by_creator", title: "By creator", width: 4, height: 2 },
-  // A form of four fields, one of which grows into a textarea when the
-  // value is shown: it is filled in, so it is not asked to scroll.
-  { key: "new_secret", title: "New secret", width: 12, height: 3 },
-  // The store itself grows with the installation, and a rotation opens
-  // inside the row it belongs to.
-  { key: "list", title: "Secrets", width: 12, height: 6 },
-];

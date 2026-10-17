@@ -85,15 +85,15 @@ function Where() {
  * one group. They are one component, so both routes lead to it and the
  * parameter is what decides which the reader gets.
  */
-function draw(at = "/next/groups") {
+function draw(at = "/groups") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[at]}>
         <ToastProvider>
           <Routes>
-            <Route path="/next/groups" element={<Groups />} />
-            <Route path="/next/groups/:id" element={<Groups />} />
+            <Route path="/groups" element={<Groups />} />
+            <Route path="/groups/:id" element={<Groups />} />
             {/* Where a button leads out of this screen. The address is
                 what is being checked; the screen there is not drawn. */}
             <Route path="*" element={<span />} />
@@ -124,7 +124,7 @@ describe("the list of groups", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("group-databases")).toBeInTheDocument());
     const row = screen.getByTestId("group-databases");
-    expect(within(row).getByRole("link", { name: "databases" })).toHaveAttribute("href", "/next/groups/g1");
+    expect(within(row).getByRole("link", { name: "databases" })).toHaveAttribute("href", "/groups/g1");
     expect(row).toHaveTextContent("every database host");
     expect(within(row).getByText("selector")).toBeInTheDocument();
     expect(row).toHaveTextContent("tag=role=db");
@@ -196,17 +196,17 @@ describe("one group from the address", () => {
       "/api/v1/host-groups/g1/hosts": { items: [member()], count: 1, total: 1 },
       "/api/v1/whoami": { subject: "t", kind: "user", roles: [], bindings: [], permissions: [] },
     });
-    draw("/next/groups/g1");
+    draw("/groups/g1");
     await waitFor(() => expect(screen.getByTestId("member-db-1")).toBeInTheDocument());
     // What it answers with, said the way the server logs it.
     expect(screen.getByTestId("group-selector")).toHaveTextContent("tag=role=db");
     // What names it elsewhere, with the campaign as a way in.
     expect(within(screen.getByTestId("uses-patch the lab")).getByRole("link", { name: "patch the lab" }))
-      .toHaveAttribute("href", "/next/campaigns/c1");
+      .toHaveAttribute("href", "/campaigns/c1");
     expect(screen.getByTestId("uses-baseline")).toHaveTextContent("policy");
     // And what it resolves to now, each host a way into its own screen.
     expect(within(screen.getByTestId("member-db-1")).getByRole("link", { name: "db-1" }))
-      .toHaveAttribute("href", "/next/hosts/h1");
+      .toHaveAttribute("href", "/hosts/h1");
     expect(screen.getByTestId("kpi-group-hosts")).toHaveTextContent("7");
     // The catalogue is not drawn underneath it.
     expect(screen.queryByTestId("group-search")).not.toBeInTheDocument();
@@ -218,7 +218,7 @@ describe("one group from the address", () => {
       "/api/v1/host-groups/g1": group({ member_count: undefined, unresolvable: "the group it names is gone" }),
       "/api/v1/host-groups/g1/hosts": { items: [], count: 0, total: 0 },
     });
-    draw("/next/groups/g1");
+    draw("/groups/g1");
     await waitFor(() => expect(screen.getByTestId("kpi-group-hosts")).toBeInTheDocument());
     const hosts = screen.getByTestId("kpi-group-hosts");
     expect(hosts).toHaveAttribute("data-state", "unknown");
@@ -232,11 +232,11 @@ describe("one group from the address", () => {
       "/api/v1/host-groups": { items: [group({})], count: 1 },
       "/api/v1/host-groups/ghost": new ApiError(404, "not_found", "no such group"),
     });
-    draw("/next/groups/ghost");
+    draw("/groups/ghost");
     await waitFor(() => expect(screen.getByText(/No group with the identifier ghost/)).toBeInTheDocument());
     // No detail card over nothing, and a way to the list.
     expect(screen.queryByTestId("group-selector")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "All groups" })).toHaveAttribute("href", "/next/groups");
+    expect(screen.getByRole("link", { name: "All groups" })).toHaveAttribute("href", "/groups");
   });
 
   it("puts the group picked from a row in the address", async () => {
@@ -247,17 +247,17 @@ describe("one group from the address", () => {
     });
     draw();
     await waitFor(() => expect(screen.getByTestId("group-databases")).toBeInTheDocument());
-    expect(screen.getByTestId("where")).toHaveTextContent("/next/groups");
+    expect(screen.getByTestId("where")).toHaveTextContent("/groups");
     fireEvent.click(within(screen.getByTestId("group-databases")).getByRole("link", { name: "databases" }));
-    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/next/groups/g1"));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/groups/g1"));
     // And the group itself opens where the catalogue was: one navigation,
     // not a reload of the panel.
     await waitFor(() => expect(screen.getByTestId("group-selector")).toBeInTheDocument());
   });
 
   it("hands the group's name to the workspaces that take one", () => {
-    expect(campaignAddress("databases")).toBe("/next/bulk?name=databases&group=databases");
-    expect(readAddress("databases")).toBe("/next/reads?action=journal.read&group=databases");
+    expect(campaignAddress("databases")).toBe("/bulk?name=databases&group=databases");
+    expect(readAddress("databases")).toBe("/reads?action=journal.read&group=databases");
   });
 
   it("calls a connection nobody could read unknown, not offline", () => {
@@ -297,7 +297,7 @@ describe("changing a group", () => {
 
   it("writes the name, the description and the selector back on the version it was read at", async () => {
     writable();
-    draw("/next/groups/g1");
+    draw("/groups/g1");
     await waitFor(() => expect(screen.getByTestId("edit-group")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("edit-group"));
 
@@ -324,7 +324,7 @@ describe("changing a group", () => {
 
   it("edits a selector too deep for the rows as it was written, and never flattens it", async () => {
     writable({ selector: { all: [{ tag: "role=db" }, { any: [{ site: "waw" }, { site: "kra" }] }] } });
-    draw("/next/groups/g1");
+    draw("/groups/g1");
     await waitFor(() => expect(screen.getByTestId("edit-group")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("edit-group"));
     // The rows cannot hold it, so the form opens on the written selector
@@ -340,7 +340,7 @@ describe("changing a group", () => {
   it("shows the server's refusal of the change instead of closing on it", async () => {
     writable();
     refusals["/api/v1/host-groups/g1"] = new ApiError(400, "invalid_group", "a group that names itself");
-    draw("/next/groups/g1");
+    draw("/groups/g1");
     await waitFor(() => expect(screen.getByTestId("edit-group")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("edit-group"));
     await waitFor(() => expect(screen.getByTestId("save-group")).toBeInTheDocument());
@@ -352,7 +352,7 @@ describe("changing a group", () => {
 
   it("replaces the member list whole, with the hosts that are ticked", async () => {
     writable({ kind: "static", selector: null });
-    draw("/next/groups/g1");
+    draw("/groups/g1");
     // The whole list has to be in hand before it can be replaced whole, so
     // the button waits for the members to arrive.
     await waitFor(() => expect(screen.getByTestId("edit-members")).toBeEnabled());
@@ -377,7 +377,7 @@ describe("changing a group", () => {
     answers["/api/v1/whoami"] = {
       subject: "t", kind: "user", roles: [], bindings: [], permissions: ["host.read", "campaign.read"],
     };
-    draw("/next/groups/g1");
+    draw("/groups/g1");
     await waitFor(() => expect(screen.getByTestId("member-db-1")).toBeInTheDocument());
     expect(screen.queryByTestId("edit-group")).not.toBeInTheDocument();
     expect(screen.queryByTestId("edit-members")).not.toBeInTheDocument();
@@ -388,7 +388,7 @@ describe("changing a group", () => {
     writable({
       used_by: { campaigns: [{ id: "c1", name: "patch the lab", state: "running" }], policies: [] },
     });
-    draw("/next/groups/g1");
+    draw("/groups/g1");
     await waitFor(() => expect(screen.getByTestId("delete-group")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("delete-group"));
     // Nothing has gone yet: the dialog names the group and what stops
@@ -400,7 +400,7 @@ describe("changing a group", () => {
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]).toMatchObject({ method: "DELETE", path: "/api/v1/host-groups/g1" });
     // And the reader is put back where the group used to be listed.
-    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/next/groups"));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/groups"));
   });
 });
 
@@ -426,20 +426,20 @@ describe("the members a campaign is ordered on", () => {
 
   it("hands the hosts picked out of the group by identifier, and leaves the group out of it", async () => {
     withPermissions(["campaign.read"]);
-    draw("/next/groups/g1");
+    draw("/groups/g1");
     await waitFor(() => expect(screen.getByTestId("member-db-1")).toBeInTheDocument());
     fireEvent.click(within(screen.getByTestId("member-db-1")).getByLabelText("Pick db-1"));
     await waitFor(() => expect(screen.getByTestId("members-picked")).toHaveTextContent("1 picked"));
     fireEvent.click(screen.getByTestId("campaign-on-picked"));
     // The hosts go by identifier; naming the group beside them would widen
     // the order back to the whole group.
-    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/next/bulk"));
-    expect(campaignAddress("databases", ["h1"])).toBe("/next/bulk?name=databases&host_id=h1");
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/bulk"));
+    expect(campaignAddress("databases", ["h1"])).toBe("/bulk?name=databases&host_id=h1");
   });
 
   it("offers nothing of the sort to a reader who may not see campaigns", async () => {
     withPermissions(["host.read"]);
-    draw("/next/groups/g1");
+    draw("/groups/g1");
     await waitFor(() => expect(screen.getByTestId("member-db-1")).toBeInTheDocument());
     expect(screen.queryByTestId("pick-all-members")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Pick db-1")).not.toBeInTheDocument();

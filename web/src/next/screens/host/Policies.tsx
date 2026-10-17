@@ -1,13 +1,14 @@
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, type Collection } from "../../../lib/api";
 import { absoluteTime, relativeTime } from "../../../lib/format";
 import { POLICY_VERDICTS, type Host, type PolicyResult, type PolicyVerdict } from "../../../lib/types";
-import { ruleSummary, verdictLabel, verdictTone } from "../../../pages/Policies";
+import { ruleSummary, verdictLabel, verdictTone } from "../../../lib/policies";
 import { useT } from "../../../i18n";
 import { Board } from "../../Board";
 import type { BoardEntry } from "../../../components/board";
 import {
-  Band, Card, Empty, Pill, Problem, Table, type Segment, type Tone,
+  Band, Card, Empty, Pill, Problem, Table, Tabs, useTab, type Segment, type Tone,
 } from "../../kit";
 
 /**
@@ -63,8 +64,12 @@ export function worstVerdict(results: PolicyResult[]): PolicyVerdict | undefined
   return undefined;
 }
 
+/** The sub-tabs: the verdicts counted, the policies, and every rule. */
+const POLICY_TABS = ["verdicts", "policies", "rules"] as const;
+
 export function Policies({ host }: { host: Host }) {
   const t = useT();
+  const [tab, goTab] = useTab(POLICY_TABS);
 
   const results = useQuery({
     queryKey: ["host-policies", host.id],
@@ -87,8 +92,18 @@ export function Policies({ host }: { host: Host }) {
   }));
 
   return (
+    <>
+    <Tabs
+      value={tab}
+      onChange={goTab}
+      tabs={[
+        { value: "verdicts", label: t("Verdicts") },
+        { value: "policies", label: t("Policies"), count: results.data ? groups.length : undefined },
+        { value: "rules", label: t("Rules"), count: results.data ? rows.length : undefined },
+      ]}
+    />
     <Board screen="next_host_policies" catalogue={HOST_POLICIES} drawn={{
-      verdicts: (
+      verdicts: tab !== "verdicts" ? undefined : (
         <Card
           title={t("Verdicts")}
           note={t("What the declared state says about this host, rule by rule.")}
@@ -99,7 +114,7 @@ export function Policies({ host }: { host: Host }) {
           <Band segments={segments} testId="verdicts" />
         </Card>
       ),
-      policies: (
+      policies: tab !== "policies" ? undefined : (
         <Card title={t("Policies that select this host")} flush>
           <Table
             rows={groups}
@@ -115,7 +130,7 @@ export function Policies({ host }: { host: Host }) {
                 cell: (one) => (
                   // The policy's own record is not in the new panel yet, so
                   // the link leaves it rather than landing on nothing.
-                  <a href={`/policies/${one.policyID}`}>{one.name}</a>
+                  <Link to={`/policies/${one.policyID}`}>{one.name}</Link>
                 ),
               },
               {
@@ -150,7 +165,7 @@ export function Policies({ host }: { host: Host }) {
           />
         </Card>
       ),
-      rules: (
+      rules: tab !== "rules" ? undefined : (
         <Card
           title={t("Rules")}
           note={rows.length > 0 ? t("Every rule of every policy that selects this host.") : undefined}
@@ -159,7 +174,7 @@ export function Policies({ host }: { host: Host }) {
           {!results.isLoading && rows.length === 0 ? (
             <Empty
               icon="security"
-              action={<a href="/policies">{t("Open the policies")}</a>}
+              action={<Link className="fl-btn fl-quiet" to="/policies">{t("Open the policies")}</Link>}
             >
               {t("No policy selects this host, or none has been evaluated yet. A policy selects hosts by tag, site or environment and is evaluated on the next inventory.")}
             </Empty>
@@ -174,7 +189,7 @@ export function Policies({ host }: { host: Host }) {
                 {
                   key: "policy",
                   head: t("Policy"),
-                  cell: (one) => <a href={`/policies/${one.policy_id}`}>{one.policy_name || one.policy_id}</a>,
+                  cell: (one) => <Link to={`/policies/${one.policy_id}`}>{one.policy_name || one.policy_id}</Link>,
                 },
                 {
                   key: "rule",
@@ -213,14 +228,23 @@ export function Policies({ host }: { host: Host }) {
         </Card>
       ),
     }} />
+    </>
   );
 }
 
-/** The containers this module can draw, and the shape each ships with. */
+/**
+ * The containers this module can draw, and the shape each ships with.
+ *
+ * Three readings and no decision, so this screen keeps its board - but
+ * the shapes are the ones the content needs rather than the ones the
+ * grid liked: a band of four verdicts is two lines tall whatever width
+ * it is given, and the table of every rule of every policy is the thing
+ * people come here to read.
+ */
 export const HOST_POLICIES: BoardEntry[] = [
-  { key: "verdicts", title: "Verdicts", width: 7, height: 2 },
-  { key: "policies", title: "Policies that select this host", width: 5, height: 2 },
-  { key: "rules", title: "Rules", width: 12, height: 4 },
+  { key: "verdicts", title: "Verdicts", width: 6, height: 3 },
+  { key: "policies", title: "Policies that select this host", width: 6, height: 4 },
+  { key: "rules", title: "Rules", width: 12, height: 8 },
 ];
 
 /** The name this module's arrangement is stored under. */

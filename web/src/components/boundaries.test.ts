@@ -27,14 +27,23 @@ function sources(dir: string): string[] {
 }
 
 describe("the boundaries of the panel", () => {
-  it("has components that do not import a page", () => {
+  /**
+   * A shared component may not reach into a screen.
+   *
+   * Until 17.10 this read "a component may not import a page", and it was
+   * guarding the line between the shared parts and the panel being
+   * replaced. That panel is gone; the line it was drawn along has not
+   * moved, only its far side is now `src/next/screens`. A component that
+   * imports a screen is a component that belongs in that screen.
+   */
+  it("has components that do not reach into a screen", () => {
     const crossings: string[] = [];
     const files = sources(COMPONENTS);
     // A run that found no component at all would pass having checked nothing.
-    expect(files.length).toBeGreaterThan(10);
+    expect(files.length).toBeGreaterThan(5);
     for (const path of files) {
       const text = readFileSync(path, "utf8");
-      for (const match of text.matchAll(/from\s+"([^"]*pages\/[^"]*)"/g)) {
+      for (const match of text.matchAll(/from\s+"([^"]*(?:pages|next\/screens)\/[^"]*)"/g)) {
         crossings.push(`${relative(COMPONENTS, path)} imports ${match[1]}`);
       }
     }

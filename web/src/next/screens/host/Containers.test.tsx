@@ -7,7 +7,9 @@ import "@testing-library/jest-dom/vitest";
 import { ApiError } from "../../../lib/api";
 import { ToastProvider } from "../../../components/Toast";
 import type { Host } from "../../../lib/types";
-import { Containers, engineSuggestions, planVerdict, safePayload } from "./Containers";
+import {
+  Containers, DECLARATION_GROUPS, blocks, engineSuggestions, planVerdict, safePayload,
+} from "./Containers";
 
 /**
  * The summary is cheap and arrives with every inventory cycle; the lists,
@@ -102,11 +104,21 @@ const worker = {
   restart_count: 3,
 };
 
-function draw() {
+/**
+ * The module is three sub-tabs since 17.10, and the address names which
+ * one is open - so a test that reads the object tables or the
+ * declaration asks for that tab, the way a reader following a link
+ * would. The measurements and the notices stand above the tabs and are
+ * there whichever one is open.
+ */
+function draw(tab?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const where = tab ? `/hosts/h1/containers?tab=${tab}` : "/hosts/h1/containers";
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter>
+      <MemoryRouter initialEntries={[where]}>
+        <ToastProvider>{children}</ToastProvider>
+      </MemoryRouter>
     </QueryClientProvider>
   );
   return render(<Containers host={host} />, { wrapper });
@@ -125,7 +137,7 @@ describe("what the containers module says", () => {
       "/api/v1/hosts/h1/inventory/containers.full": fragment("containers.full", { containers: [web, worker] }),
       "/api/v1/hosts/h1/actions": may(EVERY),
     });
-    draw();
+    draw("objects");
     await waitFor(() => expect(screen.getByTestId("container-web")).toBeInTheDocument());
     const row = screen.getByTestId("container-web");
     expect(row).toHaveTextContent("nginx:1.27");
@@ -139,7 +151,7 @@ describe("what the containers module says", () => {
       "/api/v1/hosts/h1/inventory/containers.full": fragment("containers.full", { containers: [worker] }),
       "/api/v1/hosts/h1/actions": may(EVERY),
     });
-    draw();
+    draw("objects");
     await waitFor(() => expect(screen.getByTestId("container-worker")).toBeInTheDocument());
     const row = screen.getByTestId("container-worker");
     expect(within(row).getByText("no check")).toBeInTheDocument();
@@ -162,7 +174,7 @@ describe("what the containers module says", () => {
       }),
       "/api/v1/hosts/h1/actions": may(EVERY),
     });
-    draw();
+    draw("objects");
     await waitFor(() => expect(screen.getByTestId("container-web")).toBeInTheDocument());
     expect(screen.getByTestId("container-web")).toHaveTextContent("shop/front");
     // A container no project declares says nothing rather than borrowing
@@ -182,7 +194,7 @@ describe("what the containers module says", () => {
       "/api/v1/hosts/h1/inventory/containers.full": fragment("containers.full", { containers: [web, worker] }),
       "/api/v1/hosts/h1/actions": may(EVERY),
     });
-    draw();
+    draw("objects");
     await waitFor(() => expect(screen.getByTestId("stop-web")).toBeInTheDocument());
     expect(screen.queryByTestId("start-web")).toBeNull();
     expect(screen.getByTestId("start-worker")).toBeInTheDocument();
@@ -202,7 +214,7 @@ describe("what the containers module says", () => {
       "/api/v1/hosts/h1/inventory/containers.full": fragment("containers.full", { containers: [web] }),
       "/api/v1/hosts/h1/actions": may(EVERY),
     });
-    draw();
+    draw("objects");
     await waitFor(() => expect(screen.getByTestId("remove-web")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("remove-web"));
     expect(screen.getByText(/Data outside volumes is lost/)).toBeInTheDocument();
@@ -233,7 +245,7 @@ describe("what the containers module says", () => {
       }),
       "/api/v1/hosts/h1/actions": may(EVERY),
     });
-    draw();
+    draw("objects");
     await waitFor(() => expect(screen.getByRole("tab", { name: /Volumes/ })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("tab", { name: /Volumes/ }));
     const row = screen.getByTestId("volume-data");
@@ -253,7 +265,7 @@ describe("what the containers module says", () => {
       }),
       "/api/v1/hosts/h1/actions": may(EVERY),
     });
-    draw();
+    draw("objects");
     await waitFor(() => expect(screen.getByRole("tab", { name: /Volumes/ })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("tab", { name: /Volumes/ }));
     fireEvent.click(screen.getByTestId("remove-volume-data"));
@@ -282,7 +294,7 @@ describe("what the containers module says", () => {
       }),
       "/api/v1/hosts/h1/actions": may(EVERY),
     });
-    draw();
+    draw("objects");
     await waitFor(() => expect(screen.getByRole("tab", { name: /Images/ })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("tab", { name: /Images/ }));
     expect(screen.queryByTestId("remove-image-sha256:aaaa")).toBeNull();
@@ -297,9 +309,10 @@ describe("what the containers module says", () => {
       "/api/v1/hosts/h1/inventory/containers.full": fragment("containers.full", { images: [] }),
       "/api/v1/hosts/h1/actions": may(EVERY),
     });
-    draw();
-    await waitFor(() => expect(screen.getByRole("tab", { name: /Images/ })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("tab", { name: /Images/ }));
+    // Pulling an image is a decision, so it lives with the declaration
+    // rather than under the table of images it will join.
+    draw("declaration");
+    await waitFor(() => expect(screen.getByTestId("pull-reference")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("pull-reference"), { target: { value: "not a reference" } });
     expect(screen.getByTestId("pull-image")).toBeDisabled();
     fireEvent.change(screen.getByTestId("pull-reference"), { target: { value: "registry.example.test/team/app:1.4" } });
@@ -320,10 +333,12 @@ describe("what the containers module says", () => {
       "/api/v1/hosts/h1/inventory/containers.full": new ApiError(404, "not_found", "no"),
       "/api/v1/hosts/h1/actions": may(EVERY),
     });
-    draw();
+    draw("objects");
     await waitFor(() => expect(screen.getByText(/This host has not been read yet/)).toBeInTheDocument());
     // The engine's objects are not nought either; they are unknown until
-    // somebody asks the host.
+    // somebody asks the host. That count is read on the state tab, which
+    // is one click away.
+    fireEvent.click(screen.getByRole("tab", { name: "State" }));
     expect(screen.getByText("Known after a read from the host.")).toBeInTheDocument();
   });
 
@@ -379,7 +394,7 @@ describe("what the containers module says", () => {
       "/api/v1/hosts/h1/actions": may(EVERY),
       "/api/v1/jobs/job-1234abcd/attempts": { items: [] },
     });
-    draw();
+    draw("objects");
     await waitFor(() => expect(screen.getByRole("tab", { name: /Events/ })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("tab", { name: /Events/ }));
     expect(screen.getByText(/Events are read on request/)).toBeInTheDocument();
@@ -392,6 +407,55 @@ describe("what the containers module says", () => {
         docker_events: { since_seconds: 3600, follow_seconds: 0, types: ["container"], max_events: 200 },
       },
     });
+  });
+});
+
+describe("the declaration of what this host is to carry", () => {
+  /**
+   * The worst single container in the panel, counted: twenty-seven
+   * fields in one cell of a board. They are the same twenty-seven, in
+   * the same order the registry gives them, under headings that say
+   * where one subject ends and the next begins.
+   */
+  it("asks for the twenty-seven fields under the subjects they belong to", async () => {
+    Object.assign(answers, {
+      "/api/v1/hosts/h1/inventory/containers": fragment("containers", summary),
+      "/api/v1/hosts/h1/inventory/containers.full": fragment("containers.full", { containers: [web] }),
+      "/api/v1/hosts/h1/actions": may(EVERY),
+    });
+    draw("declaration");
+    await waitFor(() => expect(screen.getByTestId("field-name")).toBeInTheDocument());
+    for (const heading of ["The container", "The image and what it runs", "What it is wired to",
+      "Environment and labels", "Runtime limits", "The health check", "Secrets"]) {
+      expect(screen.getByText(heading)).toBeInTheDocument();
+    }
+    // Every field the groups name is on the screen, and nothing the
+    // operator could fill in before has gone missing with the headings.
+    const named = DECLARATION_GROUPS["docker.container.ensure"].flatMap((group) => group.names);
+    expect(named).toHaveLength(29);
+    for (const field of named) {
+      if (field === "force" || field === "health_disable" || field === "read_only_root_filesystem"
+        || field === "stopped") continue;
+      expect(screen.getByTestId(`field-${field}`)).toBeInTheDocument();
+    }
+    // And the declaration says itself what it is about, rather than
+    // taking it from whichever table was open behind it.
+    expect(screen.getByTestId("declare-action")).toBeInTheDocument();
+  });
+
+  it("keeps a form the groups were not written for in one block", () => {
+    const fields = [
+      { name: "name", label: "Volume", kind: "text" as const },
+      { name: "driver", label: "Driver", kind: "text" as const },
+    ];
+    expect(blocks(fields)).toEqual([{ fields }]);
+    expect(blocks(fields, [{ title: "Nothing of this form", names: ["elsewhere"] }]))
+      .toEqual([{ fields }]);
+    // A field no group names keeps its place, before the first heading.
+    expect(blocks(fields, [{ title: "The volume", names: ["name"] }])).toEqual([
+      { fields: [fields[1]] },
+      { title: "The volume", fields: [fields[0]] },
+    ]);
   });
 });
 
