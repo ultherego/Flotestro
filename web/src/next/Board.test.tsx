@@ -221,3 +221,24 @@ describe("a board with no holes in it", () => {
     expect(placed.find((one) => one.key === "below")?.y).toBe(2);
   });
 });
+
+describe("what the hand is holding", () => {
+  it("keeps the cell it was put on rather than rising to the top", () => {
+    // The lift that closes holes is settled first for the held container,
+    // when nothing is placed above it yet - so without this it rose to
+    // row nought and the board threw whatever you grabbed to the top.
+    const placed = settle([
+      { key: "top", x: 0, y: 0, width: 12, height: 2 },
+      { key: "held", x: 0, y: 6, width: 6, height: 2 },
+    ], "held");
+    expect(placed.find((one) => one.key === "held")?.y).toBe(6);
+  });
+
+  it("still lifts the ones it is not holding", () => {
+    const placed = settle([
+      { key: "held", x: 0, y: 0, width: 6, height: 6 },
+      { key: "other", x: 6, y: 9, width: 6, height: 2 },
+    ], "held");
+    expect(placed.find((one) => one.key === "other")?.y).toBe(0);
+  });
+});

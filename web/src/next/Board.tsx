@@ -63,7 +63,12 @@ export function settle(widgets: BoardWidget[], held: string): BoardWidget[] {
     // itself that the next container cannot enter - it starts where its
     // tall neighbour ends. Half a row of empty floor, over and over, is
     // what made a board read as a heap of cards rather than one board.
-    while ((placed.y ?? 0) > 0) {
+    //
+    // Never the one in the hand. It is settled first, so at that moment
+    // the grid is empty above it and it would rise to the very top - the
+    // owner saw exactly that: taking hold of any container threw it to
+    // the top of the screen instead of moving it where it was put.
+    while (one.key !== held && (placed.y ?? 0) > 0) {
       const lifted = { ...placed, y: (placed.y ?? 0) - 1 };
       if (settled.some((other) => over(lifted, other))) break;
       placed.y = lifted.y;
