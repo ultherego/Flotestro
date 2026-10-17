@@ -143,7 +143,7 @@ describe("arranging a screen", () => {
     point(screen.getByTestId("board"), "pointermove", 600, 300 + 6 * 76);
     point(screen.getByTestId("board"), "pointerup", 600, 300 + 6 * 76);
     // Dragged from the height drawn (the box is stubbed), by six rows.
-    const tall = parseInt((screen.getByTestId("held-first").querySelector(".fl-fit") as HTMLElement).style.minHeight, 10);
+    const tall = parseInt((screen.getByTestId("held-first").querySelector(".fl-held-body") as HTMLElement).style.minHeight, 10);
     expect(tall).toBeGreaterThanOrEqual(456);
     expect(tall % 76).toBe(0);
     expect(screen.getByTestId("width-first").textContent).toBe(width);

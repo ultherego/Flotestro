@@ -145,23 +145,18 @@ function fitted(one: BoardWidget): BoardWidget {
  * the one way to let one container stand under another beside a tall third
  * without a library, and it is why a height is a minimum rather than a cell.
  */
-function Fit({ minHeight, children }: { minHeight?: number; children: ReactNode }) {
+function Fit({ sized, onSize, children }: { sized: boolean; onSize: () => void; children: ReactNode }) {
   const box = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
     const element = box.current;
-    const host = element?.parentElement;
-    if (!element || !host) return;
-    const apply = () => {
-      const gap = parseFloat(getComputedStyle(host.parentElement ?? host).columnGap || "20") || 20;
-      host.style.gridRow = `span ${Math.max(1, Math.ceil(element.offsetHeight + gap))}`;
-    };
-    apply();
-    if (typeof ResizeObserver === "undefined") return;
-    const watch = new ResizeObserver(apply);
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(() => onSize());
     watch.observe(element);
     return () => watch.disconnect();
+    // The observer is made once; what it calls is always the latest.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return <div ref={box} className="fl-fit" style={minHeight !== undefined ? { minHeight } : undefined}>{children}</div>;
+  return <div ref={box} className="fl-fit" data-sized={sized ? "" : undefined}>{children}</div>;
 }
 
 export function Board({ screen, catalogue, drawn, notices }: {
@@ -356,7 +351,81 @@ export function Board({ screen, catalogue, drawn, notices }: {
     setEditing([...next, ...current.filter((one) => one.hidden)]);
   };
 
-  const letGo = () => setHold(null);
+  /* ------------------------------------------------------------------
+     Heights.
+
+     Every container takes as many one-pixel rows as it measures. Those
+     standing in one row at the top are then made as tall as the tallest
+     of them, which is what a row of cards is - except one somebody has
+     given a height of its own, because that is the way to put something
+     under it. Measured after the browser has laid the board out, so it is
+     what is drawn that is equalised, not a guess.
+     ------------------------------------------------------------------ */
+  const equalizing = useRef(false);
+  const equalize = () => {
+    const grid = gridRef.current;
+    if (!grid || equalizing.current) return;
+    equalizing.current = true;
+    const fits = [...grid.querySelectorAll<HTMLElement>(".fl-fit")];
+    const block = getComputedStyle(grid).display === "block";
+    const gap = columnGap();
+    const span = () => fits.forEach((fit) => {
+      const host = fit.parentElement;
+      if (host) host.style.gridRow = block ? "" : `span ${Math.max(1, Math.ceil(fit.offsetHeight + gap))}`;
+    });
+    fits.forEach((fit) => fit.style.removeProperty("--fl-fill"));
+    span();
+    if (!block) {
+      // Those whose tops agree to within a few pixels stand in one row.
+      const free = fits.filter((fit) => !fit.hasAttribute("data-sized"))
+        .map((fit) => ({ fit, top: fit.parentElement?.getBoundingClientRect().top ?? 0 }))
+        .sort((p, q) => p.top - q.top);
+      const rows: HTMLElement[][] = [];
+      let from = Number.NEGATIVE_INFINITY;
+      for (const one of free) {
+        if (one.top - from > 4) { rows.push([]); from = one.top; }
+        rows[rows.length - 1].push(one.fit);
+      }
+      for (const row of rows) {
+        if (row.length < 2) continue;
+        const tallest = Math.max(...row.map((fit) => fit.offsetHeight));
+        row.forEach((fit) => fit.style.setProperty("--fl-fill", `${tallest}px`));
+      }
+      span();
+    }
+    equalizing.current = false;
+  };
+  useLayoutEffect(equalize);
+
+  /* Putting a container under another gives the one above the height it
+     has, so it stays that tall instead of being stretched to its row. */
+  const freezeAbove = (key: string) => {
+    const grid = gridRef.current;
+    const mine = grid?.querySelector<HTMLElement>(`[data-held-key="${key}"]`);
+    if (!grid || !mine || editing === null) return;
+    const box = mine.getBoundingClientRect();
+    const frozen = new Map<string, number>();
+    grid.querySelectorAll<HTMLElement>("[data-held-key]").forEach((other) => {
+      const name = other.getAttribute("data-held-key") ?? "";
+      if (name === key) return;
+      const rect = other.getBoundingClientRect();
+      const overlaps = rect.left < box.right - 1 && box.left < rect.right - 1;
+      const directlyAbove = rect.bottom <= box.top + 2 && box.top - rect.bottom <= columnGap() + 4;
+      const fit = other.querySelector<HTMLElement>(".fl-fit");
+      const body = other.querySelector<HTMLElement>(".fl-held-body");
+      if (overlaps && directlyAbove && fit && body && !fit.hasAttribute("data-sized")) {
+        frozen.set(name, Math.max(1, Math.ceil(body.offsetHeight / ROW)));
+      }
+    });
+    if (frozen.size === 0) return;
+    frozen.forEach((_, name) => touched.current.add(name));
+    setEditing(current.map((one) => (frozen.has(one.key) ? { ...one, height: frozen.get(one.key) } : one)));
+  };
+
+  const letGo = () => {
+    if (hold?.mode === "move") freezeAbove(hold.key);
+    setHold(null);
+  };
 
   return (
     <>
@@ -461,7 +530,7 @@ export function Board({ screen, catalogue, drawn, notices }: {
               data-held-key={one.key}
               data-testid={editing !== null ? `held-${one.key}` : undefined}
             >
-              <Fit minHeight={wanted !== undefined ? wanted * ROW : undefined}>
+              <Fit sized={wanted !== undefined} onSize={equalize}>
               {editing !== null && (
                 <div className="fl-grip">
                   <span
@@ -502,7 +571,9 @@ export function Board({ screen, catalogue, drawn, notices }: {
                   </button>
                 </div>
               )}
-              <div className="fl-held-body">{drawn[one.key]}</div>
+              <div className="fl-held-body" style={wanted !== undefined ? { minHeight: wanted * ROW } : undefined}>
+                {drawn[one.key]}
+              </div>
               {editing !== null && (
                 <span
                   className="fl-edge"
