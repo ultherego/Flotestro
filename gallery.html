@@ -81,111 +81,107 @@
 
     <figure class="figure">
       <img src="img/dashboard.png" alt="The fleet dashboard: host availability, problems by kind, operations of the last 24 hours, what needs attention, and the composition of the fleet." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Dashboard.</b> Only what needs a decision. Host availability on the left —
-        four online, nothing stale, offline, unknown, quarantined or in maintenance — and the
-        problems by kind on the right: 13 security findings, 8 failed jobs in 24 hours, 6 checks
-        that came back unknown. Below them, finished operations per hour by outcome; a
-        <i>needs attention</i> block counted in the database, with two hosts carrying failed
-        units, one pending enrollment and four agent certificates expiring within 30 days; and
-        the composition of the fleet by system, agent build, site and environment.</figcaption>
+      <figcaption><b>Dashboard.</b> Only what needs a decision. Four counters across the top — the
+        hosts enrolled, how many answer, what waits on a person, and what the checks found —
+        then the queue itself: campaigns awaiting approval, outcomes nobody has confirmed,
+        security findings, hosts carrying failed units. Under it the composition of the fleet by
+        system, agent build, site and environment, the failures of the last day with the host
+        each belongs to, and the campaigns still running. A count nobody could take is a dash,
+        never a nought.</figcaption>
     </figure>
 
     <figure class="figure">
       <img src="img/hosts.png" alt="The host list with server-side filters and a row per host: state, system, site, environment, domain, updates, failed units, reboot and last seen." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Hosts.</b> The filters are applied server-side: hostname or address, site,
-        environment, owner, tags, then operating system, state, lifecycle, maintenance,
-        capability and release channel. A row carries the state, the system as the host reported
-        it — <code>arch</code>, <code>debian 13</code>, <code>fedora 42</code>,
-        <code>ubuntu 24.04</code> — its site and environment, whether it is in a domain, how many
-        updates wait for it, how many units have failed, whether it wants a reboot, and when it
-        was last seen.</figcaption>
+      <figcaption><b>Hosts.</b> Twenty-three filters, every one of them applied on the server and
+        every one of them in the address, so a link to &ldquo;every Debian host in the lab
+        waiting on a reboot&rdquo; opens on exactly that. A row carries the state, the address
+        and where it came from, the system as the host reported it, its site and environment,
+        whether it is in a domain, how many updates wait for it and when it was last seen. The
+        heading orders the list, the chooser folds a column away and the browser remembers
+        which.</figcaption>
     </figure>
 
     <h3>One host</h3>
 
     <figure class="figure">
       <img src="img/host-overview.png" alt="A host page: the module menu, the adapters available on this host, the system facts and the hardware the agent reported." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Host overview.</b> The left-hand menu is that host&rsquo;s modules: packages,
+      <figcaption><b>Host overview.</b> The rail becomes that host&rsquo;s modules: packages,
         services, processes, schedules, kernel, time, power, network, DNS, firewall, SSH,
-        storage, files, backups, containers, Compose, security, vulnerabilities, certificates.
-        Every page says where its facts came from and when — here
-        <code>agent/os-release+procfs, revision 1dc313f1f045, observed 8m ago</code>. Of the
-        adapters on this host 16 can read and change, 2 are read-only and 5 are unavailable,
-        which is a different answer from zero. Beside the identity and the hardware sits what
-        needs attention on this host alone: no failed units, 36 updates waiting, no security
-        updates.</figcaption>
+        storage, files, backups, containers, Compose, policies, security, vulnerabilities,
+        certificates, accounts, identity, jobs, audit. Every container says where its facts came
+        from and when — the adapter, the revision, how long ago it was observed. Of the adapters
+        this host reports, some can read and change, some only read and some are unavailable
+        with the host&rsquo;s own reason beside them, which is a different answer from zero.</figcaption>
     </figure>
 
     <figure class="figure">
       <img src="img/host-packages.png" alt="The packages page of one host: updates by state, the package sources, the operations an operator may request, and the agent's own version." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Packages of a host.</b> 351 packages up to date, 36 upgradable, none of them
-        security. On the right the sources as the host reports them: 387 installed through
-        <code>apt</code>, a healthy package database, seven repositories of which one has its
-        signatures checked and none is managed by the panel. The operator can plan the updates —
-        counting them changes nothing on the host — or install, hold, unhold and plan a removal.
-        Ordinary upgrades leave the agent alone: replacing it is an operation of its own, and it
-        counts as done only when the host comes back reporting the version that was asked
-        for.</figcaption>
+      <figcaption><b>Packages of a host.</b> Here an Arch machine: 208 packages up to date, 18
+        upgradable, none held, and the security count <i>not counted</i> rather than nought,
+        because pacman upgrades the system at once and cannot say. On the right what manages the
+        software and where it comes from — 226 installed through <code>pacman</code>, a healthy
+        package database, three repositories with their signatures checked. The operator can
+        plan the updates, which changes nothing on the host, or install, hold, unhold and plan a
+        removal. Ordinary upgrades leave the agent alone: replacing it is an operation of its
+        own, and it counts as done only when the host comes back reporting the version that was
+        asked for.</figcaption>
     </figure>
 
     <h3>A change across the fleet</h3>
 
     <figure class="figure">
-      <img src="img/campaign.png" alt="A completed campaign: target counts, canary and wave settings, the approval record, the waves and the plans with their fingerprints." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Campaign.</b> A completed <code>file.ensure</code> campaign over four hosts:
-        one canary and two waves, at most two hosts at a time, a failure threshold of 25% or one
-        host, reboot policy <code>never</code>, offline policy
-        <code>replan_on_reconnect</code>, and the contract of the operation stated on the page —
-        cancel between steps, retry after a new plan, rollback by exact restore, verification by
-        re-checking the plan. The approval record says who approved, on what authentication (an
-        API token, not re-authenticated) and why: <i>change CHG-1042 approved in the weekly
-        review</i>. It is written once and never changed. Below the waves, one row per shape of
-        the change with its plan fingerprint and how long it stays valid — a host whose plan has
-        changed since refuses the change.</figcaption>
+      <img src="img/campaign.png" alt="A campaign: how far it got, what waits on a person, the state of every host it selected, and the rollout wave by wave." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Campaign.</b> A security remediation over three hosts, cancelled before it
+        changed anything — so every host reads <i>skipped</i> and every counter reads nought,
+        which is the truth about a campaign that was stopped. The canary is the first wave and
+        is drawn as one; beside the waves sit what waits on a person, how far the rollout got,
+        and the whole state of every host the campaign selected. The record of who ordered it,
+        who approved it and why is written once and never changed.</figcaption>
     </figure>
 
     <h3>What the panel watches</h3>
 
     <figure class="figure">
       <img src="img/security.png" alt="The security page: findings by state, a table of checks with the expected value, and findings by severity and by host." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Security.</b> Versioned checks judged in the panel over facts the hosts
-        already report: 13 checks across four hosts, 13 findings that need action, 23 passed, 6
-        unknown, 10 not applicable, 6 that the panel can fix. Each row names the check and its
-        identifier — <code>ssh.password-auth</code>, <code>exposure.listening</code>,
-        <code>kernel.rp-filter</code> — and the value it was judged against. One bad setting on
-        a hundred hosts is one problem, and the fix is one campaign with one
-        approval.</figcaption>
+      <figcaption><b>Security.</b> Versioned checks judged in the panel over facts the hosts already
+        report: 21 findings over four hosts, 25 passing, 6 that no host could answer, and 12 the
+        panel can fix from here with one campaign. Each row names the check and its identifier —
+        <code>sudo.root_nopasswd</code>, <code>exposure.listening</code> — the severity, what it
+        was judged against, and where a check has no remediating operation it says so instead of
+        offering a fix that does not exist. One bad setting on a hundred hosts is one problem.</figcaption>
     </figure>
 
     <figure class="figure">
       <img src="img/readiness.png" alt="The readiness page: how many hosts are silent about their adapters, how many operations need one, and what each host said about the ones it does not offer." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Readiness.</b> What the fleet can actually be asked to do, before anybody
-        asks. Four hosts, none silent about its adapters, 114 operations that need one and
-        <b>none orderable nowhere</b> &mdash; and for each adapter a host does not offer, the
-        reason in the host&rsquo;s own words: <i>this host has no Docker socket</i>,
-        <i>network is here and offers no write</i>, <i>this host does not run certmonger</i>,
-        <i>this host has no SELinux to switch</i>. A host of another family is a reason, not a
-        fault, and the page says which is which rather than counting the gap as zero.</figcaption>
+      <figcaption><b>Readiness.</b> What the fleet cannot be asked to do, before anybody asks.
+        Eight requirements are not met everywhere and nothing is orderable nowhere; no host is
+        silent about its adapters, which matters, because a host that said nothing is not a host
+        with nothing missing. For each adapter a host does not offer, the reason in the
+        host&rsquo;s own words — <i>this host has no Docker socket</i>, <i>network is here and
+        offers no write</i>, <i>this host does not run certmonger</i> — and the operations that
+        reason blocks. A host of another family is a reason, not a fault, and the page says
+        which is which rather than counting the gap as zero.</figcaption>
     </figure>
 
     <figure class="figure">
       <img src="img/monitoring.png" alt="The monitoring page: alerts by severity, coverage of the hosts, and the alert rules with their conditions." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Monitoring.</b> Every agent samples its host; the rules on this page turn
-        the samples into alerts, and nothing fires without a rule an operator can read here.
-        Coverage first — four hosts reporting, none silent, five rules enabled — then the
-        rules themselves: <code>filesystem_used_percent &gt; 90%</code> held for ten minutes is
-        a warning over the whole fleet, the same metric past 97% is critical with no waiting
-        at all.</figcaption>
+      <figcaption><b>Monitoring.</b> Every agent samples its host; the rules on this page turn the
+        samples into alerts, and nothing fires without a rule an operator can read here.
+        Coverage first — how many hosts report, how many have gone quiet, how many rules are
+        enabled — then the rules themselves, each with the metric, the threshold, how long it
+        must hold and over which hosts it applies. There is no second system to install and no
+        exporter to keep alive.</figcaption>
     </figure>
 
     <figure class="figure">
       <img src="img/audit.png" alt="The audit page: events per hour by outcome, the outcome and actor summary, filters, and the event table." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Audit.</b> Every success and failure creates an event; so does every denial.
-        Among the hundred listed here: 89 succeeded, 9 failed, 2 were denied, counted by actor —
-        a named operator, the panel itself, and campaigns under their own identifiers. A row
-        carries the time, the actor, the kind, the operation, the target and the result, and
-        under a user&rsquo;s name the authentication the request rested on: the session and the
-        authentication context it was granted with.</figcaption>
+      <figcaption><b>Audit.</b> Every success and failure creates an event; so does every denial. The
+        trail narrows on the server — outcome, actor, operation, target, a window of time — so
+        what is asked for is what is read. Among the hundred listed here, 42 succeeded, 58 were
+        denied and none failed; a row carries the time, the actor, the kind, the operation, the
+        target and the result, and under a user&rsquo;s name the session and the authentication
+        the request rested on. What an approval rested on and which fields a change touched are
+        written under the row, without being asked for.</figcaption>
     </figure>
 
     <ul class="linkrow">
