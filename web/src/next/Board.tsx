@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEve
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import {
-  BOARD_COLUMNS, boardToDraw, placeAll,
+  BOARD_COLUMNS, BOARD_HEIGHTS, boardToDraw, placeAll,
   type BoardEntry, type BoardWidget, type StoredBoard,
 } from "../components/board";
 import { useToast } from "../components/Toast";
@@ -192,7 +192,7 @@ export function Board({ screen, catalogue, drawn, notices }: {
   const [editing, setEditing] = useState<BoardWidget[] | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [hold, setHold] = useState<
-    { key: string; mode: "move" | "size" | "width" | "height"; fromX: number; fromY: number; start: BoardWidget; startPx: number; grabCol: number; grabY: number } | null
+    { key: string; mode: "move" | "size" | "width" | "height"; fromX: number; fromY: number; start: BoardWidget; startPx: number; floorPx: number; grabCol: number; grabY: number } | null
   >(null);
 
   const layout = useQuery({
@@ -271,7 +271,28 @@ export function Board({ screen, catalogue, drawn, notices }: {
     (event.target as Element).setPointerCapture?.(event.pointerId);
     // Where the container is NOW, in pixels: a height is dragged from what
     // is drawn, not from a number the catalogue guessed.
-    const box = (event.currentTarget as HTMLElement).closest("[data-held-key]")?.querySelector(".fl-fit")?.getBoundingClientRect();
+    // The height is dragged from the container's own box - what is drawn
+    // inside the frame, not the bar and the handles round it - and never
+    // below what it holds. The floor is measured with every minimum taken
+    // away for an instant, so a line at the very bottom ("17 other checks
+    // are clear") counts as part of what the container is.
+    const host = (event.currentTarget as HTMLElement).closest<HTMLElement>("[data-held-key]");
+    const fit = host?.querySelector<HTMLElement>(".fl-fit") ?? null;
+    const body = host?.querySelector<HTMLElement>(".fl-held-body") ?? null;
+    let startPx = 0, floorPx = 0;
+    if (fit && body) {
+      startPx = body.offsetHeight;
+      const kept = body.style.minHeight;
+      const inner = body.firstElementChild as HTMLElement | null;
+      const innerFlex = inner?.style.flex ?? "";
+      fit.style.setProperty("--fl-fill", "0px");
+      body.style.minHeight = "0px";
+      if (inner) inner.style.flex = "0 0 auto";
+      floorPx = body.offsetHeight;
+      body.style.minHeight = kept;
+      if (inner) inner.style.flex = innerFlex;
+      fit.style.removeProperty("--fl-fill");
+    }
     const grid = gridRef.current?.getBoundingClientRect();
     const column = columnWidth();
     const gap = columnGap();
@@ -280,7 +301,7 @@ export function Board({ screen, catalogue, drawn, notices }: {
     const grabCol = grid && column > 0 ? Math.floor((event.clientX - grid.left) / (column + gap)) - (start.x ?? 0) : 0;
     setHold({
       key, mode, fromX: event.clientX, fromY: event.clientY, start,
-      startPx: box?.height ?? 0, grabCol, grabY: box ? event.clientY - box.top : 0,
+      startPx, floorPx, grabCol, grabY: fit ? event.clientY - fit.getBoundingClientRect().top : 0,
     });
     event.preventDefault();
   };
@@ -314,7 +335,10 @@ export function Board({ screen, catalogue, drawn, notices }: {
       // changes, so pressing the edge never moves it by the rounding.
       const dy = event.clientY - hold.fromY;
       const moved = heightWanted && Math.abs(dy) >= 8;
-      const rows = Math.max(Math.round((hold.startPx + dy) / ROW), 1);
+      const rows = Math.min(
+        Math.max(Math.round((hold.startPx + dy) / ROW), Math.ceil(hold.floorPx / ROW), 1),
+        BOARD_HEIGHTS.max,
+      );
       if (moved) touched.current.add(hold.key);
       setEditing(current.map((one) => (
         one.key === hold.key ? fitted({ ...one, width, ...(moved ? { height: rows } : {}) }) : one
@@ -377,7 +401,7 @@ export function Board({ screen, catalogue, drawn, notices }: {
     span();
     if (!block) {
       // Those whose tops agree to within a few pixels stand in one row.
-      const free = fits.filter((fit) => !fit.hasAttribute("data-sized"))
+      const free = fits
         .map((fit) => ({ fit, top: fit.parentElement?.getBoundingClientRect().top ?? 0 }))
         .sort((p, q) => p.top - q.top);
       const rows: HTMLElement[][] = [];
@@ -388,8 +412,11 @@ export function Board({ screen, catalogue, drawn, notices }: {
       }
       for (const row of rows) {
         if (row.length < 2) continue;
+        // A container with a height of its own is not stretched, but it
+        // still counts: its neighbours are at least as tall as it is.
         const tallest = Math.max(...row.map((fit) => fit.offsetHeight));
-        row.forEach((fit) => fit.style.setProperty("--fl-fill", `${tallest}px`));
+        row.filter((fit) => !fit.hasAttribute("data-sized"))
+          .forEach((fit) => fit.style.setProperty("--fl-fill", `${tallest}px`));
       }
       span();
     }
