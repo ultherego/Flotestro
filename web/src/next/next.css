@@ -2097,7 +2097,6 @@
   display: grid;
   /* The same measure as a block of facts: a form whose fields run the
      width of a 4K screen is a form nobody can follow down. */
-  max-width: 1120px;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: var(--s4);
 }
@@ -2162,27 +2161,26 @@
      that he did not want to read it. Four columns is as wide as a block
      of detail stays readable; the rest of the card is left over, which
      is what leftover space is for. */
-  max-width: 1120px;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 260px));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   /* A fact that takes two tracks and does not fit in what is left of a
      row would otherwise leave the rest of that row blank, which is the
      scatter again by another route. The short facts behind it fill the
      hole instead. */
   grid-auto-flow: row dense;
-  justify-content: start;
   gap: var(--s4) var(--s5);
   margin: 0;
 }
 
-.fl-app .fl-fact { min-width: 0; max-width: 34ch; }
+.fl-app .fl-fact { min-width: 0; }
 
 /* A value read as one word - a machine id, a boot id, a path - takes two
    tracks rather than being broken across two lines, where a reader has
    no way to tell a wrap from a second value. Narrower than that it ends
    in an ellipsis and carries the whole of itself as its own title. */
-.fl-app .fl-whole { grid-column: span 2; max-width: none; }
+.fl-app .fl-whole { max-width: none; }
 
 .fl-app .fl-whole dd {
+  font-size: 12px;
   display: block;
   line-height: 28px;
   white-space: nowrap;
