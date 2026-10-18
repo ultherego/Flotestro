@@ -86,6 +86,17 @@
     </figure>
 
     <figure class="figure">
+      <img src="../img/dashboard-accent.png" alt="Dashboard floty w pomarańczowym akcencie, narysowany, gdy trzy z czterech hostów się restartowały: widać je jako offline wraz z tym, kiedy ostatnio się odezwały." width="1600" height="847" loading="lazy">
+      <figcaption><b>Ten sam dashboard, w akcencie wybranym przez czytającego.</b> Tutaj
+        pomarańczowy, u kogoś innego zielony lub niebieski; akcent barwi aktywne miejsce,
+        etykiety i podświetlony kafel, a nic, co oznacza stan. Ten zrzut powstał, gdy trzy z
+        czterech hostów laboratorium się restartowały, tak wygląda zła godzina: jeden online,
+        trzy offline, a każdy offline niesie <i>last heard from 3h ago</i>. Host, który przestał
+        mówić, jest narysowany jako taki, który przestał, nigdy jako taki, który jest w
+        porządku.</figcaption>
+    </figure>
+
+    <figure class="figure">
       <img src="../img/hosts.png" alt="Lista hostów z filtrami po stronie serwera i wierszem na host: stan, system, site, środowisko, domena, aktualizacje, nieudane jednostki, restart i ostatni kontakt." width="1600" height="1000" loading="lazy">
       <figcaption><b>Hosty.</b> Dwadzieścia trzy filtry, każdy zawężający po stronie serwera i każdy
         zapisany w adresie, więc odnośnik do &bdquo;wszystkich debianów w labie czekających na
@@ -111,15 +122,15 @@
 
     <figure class="figure">
       <img src="../img/host-packages.png" alt="Strona pakietów jednego hosta: aktualizacje według stanu, źródła pakietów, operacje, o które może poprosić operator, oraz wersja samego agenta." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Pakiety hosta.</b> Tutaj maszyna na Archu: 208 pakietów aktualnych, 18 do
-        aktualizacji, zero wstrzymanych, a liczba aktualizacji bezpieczeństwa to
-        <i>nie policzono</i>, nie zero &mdash; pacman aktualizuje system w całości i nie potrafi
-        jej podać. Po prawej to, co zarządza oprogramowaniem i skąd ono pochodzi: 226
-        zainstalowanych przez <code>pacman</code>, zdrowa baza pakietów, trzy repozytoria ze
-        sprawdzanymi podpisami. Operator może zaplanować aktualizacje, co niczego na hoście nie
-        zmienia, albo zainstalować, wstrzymać, zdjąć wstrzymanie i zaplanować usunięcie. Zwykłe
-        aktualizacje nie ruszają agenta: jego wymiana to osobna operacja i liczy się za wykonaną
-        dopiero wtedy, gdy host wróci, meldując wersję, o którą poproszono.</figcaption>
+      <figcaption><b>Pakiety hosta.</b> Tutaj maszyna z Debianem: 548 pakietów aktualnych, 62 do
+        aktualizacji, w tym dwie bezpieczeństwa, zero wstrzymanych. Pod spodem to, co zarządza
+        oprogramowaniem i skąd ono pochodzi &mdash; 610 zainstalowanych przez <code>apt</code>,
+        zdrowa baza pakietów, osiem repozytoriów, z czego dwa mają sprawdzane podpisy, a sześć
+        nie, co strona mówi na czerwono zamiast to zaokrąglać. Zakładka Change pozwala
+        zaplanować aktualizacje, co niczego na hoście nie zmienia, albo zainstalować, wstrzymać,
+        zdjąć wstrzymanie i zaplanować usunięcie. Zwykłe aktualizacje nie ruszają agenta: jego
+        wymiana to osobna operacja i liczy się za wykonaną dopiero wtedy, gdy host wróci,
+        meldując wersję, o którą poproszono.</figcaption>
     </figure>
 
     <h3>Zmiana w całej flocie</h3>
@@ -174,8 +185,7 @@
       <img src="../img/audit.png" alt="Strona audytu: zdarzenia na godzinę według wyniku, podsumowanie wyników i aktorów, filtry oraz tabela zdarzeń." width="1600" height="1000" loading="lazy">
       <figcaption><b>Audyt.</b> Każde powodzenie i niepowodzenie tworzy zdarzenie; każda odmowa
         również. Ślad zawęża się po stronie serwera &mdash; wynik, aktor, operacja, cel, okno
-        czasu &mdash; więc czytane jest dokładnie to, o co poproszono. Wśród stu wypisanych
-        tutaj 42 się powiodły, 58 zostało odrzuconych, żadne nie zawiodło; wiersz niesie czas,
+        czasu &mdash; więc czytane jest dokładnie to, o co poproszono. Wiersz niesie czas,
         aktora, rodzaj, operację, cel i wynik, a pod nazwą użytkownika sesję i sposób
         uwierzytelnienia, na którym żądanie się opierało. To, na czym opierało się
         zatwierdzenie, i pola, które zmiana ruszyła, stoją pod wierszem, bez pytania.</figcaption>
