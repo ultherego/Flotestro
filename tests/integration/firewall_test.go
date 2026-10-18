@@ -101,10 +101,27 @@ func TestRuleCuttingOffThePanelIsRejected(t *testing.T) {
 
 // TestPanelRuleLifecycle walks the whole path of a rule: creation,
 // connectivity confirmation and removal.
+// hostWithNftables returns the connected host of that family whose firewall
+// adapter is nftables. The debian family holds two adapters - nftables, and
+// ufw where it is installed - and a scenario that asserts the panel's own
+// table must not depend on which host the API lists first.
+func hostWithNftables(t *testing.T, h *harness, family string) (hostView, firewallSnapshot) {
+	t.Helper()
+	for _, host := range h.hosts() {
+		if host.OSFamily != family || host.ConnectionState != "online" {
+			continue
+		}
+		if state := hostFirewallSnapshot(t, h, host.ID); state.Adapter == "nftables" {
+			return host, state
+		}
+	}
+	absent(t, "no connected host of the %s family runs nftables", family)
+	return hostView{}, firewallSnapshot{}
+}
+
 func TestPanelRuleLifecycle(t *testing.T) {
 	h := newHarness(t)
-	host := h.hostByFamily("debian")
-	state := hostFirewallSnapshot(t, h, host.ID)
+	host, state := hostWithNftables(t, h, "debian")
 	if !state.Writable {
 		t.Skip("the host does not allow changing the firewall")
 	}

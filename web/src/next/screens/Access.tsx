@@ -758,6 +758,9 @@ export function Access() {
     { value: "permissions" as const, label: t("Permissions") },
   ];
   const [tab, go] = useTab(tabs.map((one) => one.value));
+  // Somebody the directory knows and the panel does not: the role is granted
+  // in advance, on the form that makes an identity, with who it is already filled in.
+  const [reserve, setReserve] = useState<{ subject: string; name: string } | null>(null);
 
   return (
     <>
@@ -1096,6 +1099,24 @@ export function Access() {
                         return <Pill tone={state.tone}>{state.label}</Pill>;
                       },
                     },
+                    {
+                      key: "grant",
+                      head: "",
+                      tight: true,
+                      // Only for somebody with no record: a record has its own
+                      // tab for roles, behind the name.
+                      cell: (row) => row.id ? null : (
+                        <button
+                          type="button"
+                          className="fl-quiet"
+                          data-testid={`grant-${row.subject}`}
+                          title={t("Give this person a role before they have signed in")}
+                          onClick={() => { close(); setReserve({ subject: row.subject, name: row.name }); go("new"); }}
+                        >
+                          {t("Grant a role")}
+                        </button>
+                      ),
+                    },
                   ]}
                 />
               </Card>
@@ -1125,9 +1146,11 @@ export function Access() {
           pressing it had no idea what had happened. */}
       {tab === "new" && (
         <CreateIdentity
+          key={reserve?.subject ?? "blank"}
+          initial={reserve ?? undefined}
           roles={roleNames}
-          onDone={(token) => { go("people"); if (token) { setIssued(token); setCopied(false); } refresh(); }}
-          onCancel={() => go("people")}
+          onDone={(token) => { setReserve(null); go("people"); if (token) { setIssued(token); setCopied(false); } refresh(); }}
+          onCancel={() => { setReserve(null); go("people"); }}
           onError={onError}
         />
       )}
@@ -1802,15 +1825,17 @@ function PasswordTab({ row, onAsk, onError, onChanged }: {
 type CreatedIdentity = { id: string; subject: string; token?: string; token_expires_at?: string };
 
 /** A new local identity: a person with a token, or a service. */
-function CreateIdentity({ roles, onDone, onCancel, onError }: {
+function CreateIdentity({ roles, initial, onDone, onCancel, onError }: {
   roles: string[];
+  /** Who it is for, when it is opened from a row the panel has no record of. */
+  initial?: { subject: string; name: string };
   onDone: (token: IssuedToken | null) => void;
   onCancel: () => void;
   onError: (error: unknown) => void;
 }) {
   const t = useT();
-  const [subject, setSubject] = useState("");
-  const [name, setName] = useState("");
+  const [subject, setSubject] = useState(initial?.subject ?? "");
+  const [name, setName] = useState(initial?.name ?? "");
   const [kind, setKind] = useState<"user" | "service">("user");
   const [role, setRole] = useState("");
   const [site, setSite] = useState("");

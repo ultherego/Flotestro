@@ -3940,6 +3940,7 @@ export const pl: Record<string, string> = {
   "Everyone ({n})": "Wszyscy ({n})",
   "No group of the directory grants a role here yet. A mapping is what gives one.": "Żadna grupa z katalogu nie nadaje jeszcze tutaj roli. Nadaje ją mapowanie.",
   "Grant a role": "Nadaj rolę",
+  "Give this person a role before they have signed in": "Nadaj tej osobie rolę, zanim się zaloguje",
   "Grant a role to {subject}": "Nadaj rolę: {subject}",
   "Grant the role": "Nadaj rolę",
   "The role is bound to this identity, beside whatever a group grants them.": "Rola zostaje przypisana do tej tożsamości, obok tego, co nadaje grupa.",
