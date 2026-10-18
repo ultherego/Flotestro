@@ -11,6 +11,7 @@ import { fetchWithCredentials } from "../lib/api";
 import { isStringList, useStoredState } from "../lib/storage";
 import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
+import { zoomOf } from "../lib/zoom";
 import type { Tone } from "../lib/tone";
 
 /**
@@ -898,11 +899,16 @@ function useTip() {
     onPointerMove: (event: { clientX: number; clientY: number }) => setAt({ x: event.clientX, y: event.clientY, text }),
     onPointerLeave: () => setAt(null),
   });
+  const zoom = typeof document === "undefined" ? 1 : zoomOf(document.querySelector(".fl-app"));
   const node = at && (
     <div
       className="fl-tip"
       role="tooltip"
-      style={{ left: Math.min(at.x + 14, (typeof window === "undefined" ? 9999 : window.innerWidth) - 240), top: at.y + 16 }}
+      style={{
+        // A pointer is in drawn pixels and this card in laid-out ones.
+        left: Math.min(at.x + 14, (typeof window === "undefined" ? 9999 : window.innerWidth) - 240) / zoom,
+        top: (at.y + 16) / zoom,
+      }}
     >
       {at.text}
     </div>
