@@ -6,6 +6,8 @@ day the tag was published.
 
 ## [Unreleased]
 
+## [0.64.0] - 2026-10-18
+
 ### Added
 
 - **The appearance of the panel was rewritten.** One stylesheet, laid out as
@@ -51,6 +53,24 @@ day the tag was published.
   arrangement the panel ships with.
 
 ### Changed
+
+- **The panel was rebuilt around one rule: a container is for what is read,
+  a form is for what is done.** Every screen has sub-tabs that keep the two
+  apart, so a form never opens inside a container that carries somebody
+  else's title. Settings holds what can be changed - who may sign in, the
+  teams, the notifications and the installation's own values - and what is
+  only read lives under Status. The old panel is gone and the new one is
+  served at the root.
+- **The fleet dashboard is a wall of tiles on a fixed grid.** Every
+  container has exactly the size it was given and stands exactly where it was
+  put, one under another if wanted, and arranging it draws the same grid as
+  reading it, so what is laid out is what is read. Every other screen stands
+  in even rows, and arranging one changes only the order and the width.
+- **A host's head is a strip of facts with copy beside the id and the
+  address,** and facts are read as a table of a label and its value, in the
+  colour of the reader's accent. The platform of a host is four sub-tabs.
+  Charts answer the pointer with the name and the figure of what is pointed
+  at.
 
 - **A row of Settings → Users shows facts and opens a record.** It carried
   seven buttons - Remove, Revoke, Grant role, Issue token, Sessions, Set a
@@ -1093,7 +1113,8 @@ across those five tags.
 
 The first tag. It did not build.
 
-[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.63.1...HEAD
+[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.64.0...HEAD
+[0.64.0]: https://github.com/ultherego/Flotestro/compare/v0.63.1...v0.64.0
 [0.63.1]: https://github.com/ultherego/Flotestro/compare/v0.63.0...v0.63.1
 [0.63.0]: https://github.com/ultherego/Flotestro/compare/v0.62.1...v0.63.0
 [0.62.1]: https://github.com/ultherego/Flotestro/compare/v0.62.0...v0.62.1
