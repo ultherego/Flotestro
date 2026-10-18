@@ -8,6 +8,7 @@ import {
 import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
 import { Icon } from "../components/icons";
+import { zoomOf } from "../lib/zoom";
 import { HeadActions } from "./kit";
 
 /**
@@ -278,10 +279,12 @@ function FixedBoard({ screen, catalogue, drawn, notices }: Props) {
     const grid = gridRef.current;
     if (!grid) return { column: 0, row: 0 };
     const style = getComputedStyle(grid);
-    const gap = parseFloat(style.columnGap || "20") || 20;
-    const rowGap = parseFloat(style.rowGap || "20") || gap;
+    // The pointer is in drawn pixels and the stylesheet in laid-out ones.
+    const zoom = zoomOf(grid);
+    const gap = (parseFloat(style.columnGap || "20") || 20) * zoom;
+    const rowGap = (parseFloat(style.rowGap || "20") || 20) * zoom;
     const column = (grid.getBoundingClientRect().width - gap * (BOARD_COLUMNS - 1)) / BOARD_COLUMNS;
-    return { column: column + gap, row: ROW + rowGap };
+    return { column: column + gap, row: ROW * zoom + rowGap };
   };
 
   const begin = () => a.setEditing([...base, ...a.hidden]);
@@ -407,7 +410,7 @@ function PageBoard({ screen, catalogue, drawn, notices }: Props) {
   const columnWidth = () => {
     const grid = gridRef.current;
     if (!grid) return 0;
-    const gap = parseFloat(getComputedStyle(grid).columnGap || "20") || 20;
+    const gap = (parseFloat(getComputedStyle(grid).columnGap || "20") || 20) * zoomOf(grid);
     return (grid.getBoundingClientRect().width - gap * (BOARD_COLUMNS - 1)) / BOARD_COLUMNS;
   };
 

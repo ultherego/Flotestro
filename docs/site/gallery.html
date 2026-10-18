@@ -91,6 +91,16 @@
     </figure>
 
     <figure class="figure">
+      <img src="img/dashboard-accent.png" alt="The fleet dashboard in the orange accent, drawn while three of the four hosts were restarting: they read offline and say when each was last heard from." width="1600" height="847" loading="lazy">
+      <figcaption><b>The same dashboard, in the reader&rsquo;s own accent.</b> Orange here, green
+        or blue for somebody else; the accent colours the active place, the labels and the
+        tile that is lit, and nothing that means a state. This one was caught while three of the
+        four lab hosts were restarting, which is what a bad hour looks like: one online, three
+        offline, each offline host carrying <i>last heard from 3h ago</i>. A host that stopped
+        talking is drawn as one that stopped, never as one that is fine.</figcaption>
+    </figure>
+
+    <figure class="figure">
       <img src="img/hosts.png" alt="The host list with server-side filters and a row per host: state, system, site, environment, domain, updates, failed units, reboot and last seen." width="1600" height="1000" loading="lazy">
       <figcaption><b>Hosts.</b> Twenty-three filters, every one of them applied on the server and
         every one of them in the address, so a link to &ldquo;every Debian host in the lab
@@ -116,15 +126,15 @@
 
     <figure class="figure">
       <img src="img/host-packages.png" alt="The packages page of one host: updates by state, the package sources, the operations an operator may request, and the agent's own version." width="1600" height="1000" loading="lazy">
-      <figcaption><b>Packages of a host.</b> Here an Arch machine: 208 packages up to date, 18
-        upgradable, none held, and the security count <i>not counted</i> rather than nought,
-        because pacman upgrades the system at once and cannot say. On the right what manages the
-        software and where it comes from — 226 installed through <code>pacman</code>, a healthy
-        package database, three repositories with their signatures checked. The operator can
-        plan the updates, which changes nothing on the host, or install, hold, unhold and plan a
-        removal. Ordinary upgrades leave the agent alone: replacing it is an operation of its
-        own, and it counts as done only when the host comes back reporting the version that was
-        asked for.</figcaption>
+      <figcaption><b>Packages of a host.</b> Here a Debian machine: 548 packages up to date, 62
+        upgradable, two of those security updates, none held. Under it what manages the
+        software and where it comes from &mdash; 610 installed through <code>apt</code>, a healthy
+        package database, eight repositories of which two have their signatures checked and six
+        do not, which the page says in red rather than rounding away. The Change tab lets the
+        operator plan the updates, which changes nothing on the host, or install, hold, unhold
+        and plan a removal. Ordinary upgrades leave the agent alone: replacing it is an
+        operation of its own, and it counts as done only when the host comes back reporting the
+        version that was asked for.</figcaption>
     </figure>
 
     <h3>A change across the fleet</h3>
@@ -177,8 +187,7 @@
       <img src="img/audit.png" alt="The audit page: events per hour by outcome, the outcome and actor summary, filters, and the event table." width="1600" height="1000" loading="lazy">
       <figcaption><b>Audit.</b> Every success and failure creates an event; so does every denial. The
         trail narrows on the server — outcome, actor, operation, target, a window of time — so
-        what is asked for is what is read. Among the hundred listed here, 42 succeeded, 58 were
-        denied and none failed; a row carries the time, the actor, the kind, the operation, the
+        what is asked for is what is read. A row carries the time, the actor, the kind, the operation, the
         target and the result, and under a user&rsquo;s name the session and the authentication
         the request rested on. What an approval rested on and which fields a change touched are
         written under the row, without being asked for.</figcaption>

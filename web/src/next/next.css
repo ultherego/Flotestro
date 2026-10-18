@@ -120,9 +120,15 @@
    out must not scroll away with it.
    ------------------------------------------------------------------ */
 
-.fl-app { min-height: 100vh; background: var(--bg); }
+.fl-app { --fl-zoom: 1; --fl-vh: calc(100vh / var(--fl-zoom)); zoom: var(--fl-zoom); min-height: var(--fl-vh); background: var(--bg); }
 
-.fl-app .fl-shell { min-height: 100vh; }
+/* On a very large screen the whole panel is enlarged, so text that is
+   readable at a desk is readable across a room. Pointer arithmetic that
+   needs the ratio asks for it (lib/zoom.ts). */
+@media (min-width: 2560px) { .fl-app { --fl-zoom: 1.25; } }
+@media (min-width: 3200px) { .fl-app { --fl-zoom: 1.5; } }
+
+.fl-app .fl-shell { min-height: var(--fl-vh); }
 
 .fl-app .fl-skip {
   position: absolute;
@@ -140,7 +146,7 @@
 
 .fl-app .fl-page {
   margin-left: var(--fl-rail);
-  min-height: 100vh;
+  min-height: var(--fl-vh);
   min-width: 0;
   transition: margin-left var(--fl-quick);
 }
@@ -2574,7 +2580,7 @@
    ------------------------------------------------------------------ */
 
 .fl-app .fl-door {
-  min-height: 100vh;
+  min-height: var(--fl-vh);
   display: grid;
   place-items: center;
   padding: var(--s6);
@@ -3986,7 +3992,7 @@
    ------------------------------------------------------------------ */
 
 .fl-app .fl-door {
-  min-height: 100vh;
+  min-height: var(--fl-vh);
   display: grid;
   place-items: center;
   padding: var(--s6);
@@ -4520,4 +4526,22 @@
   background: color-mix(in srgb, var(--text) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
   color: var(--text-muted);
+}
+
+/* A headline tile is lit by what it says: the colour of its state in one
+   corner. The one tile that wears the accent is lit by it, more strongly,
+   and glows behind itself. */
+.fl-app .fl-kpi {
+  background: linear-gradient(145deg,
+    color-mix(in srgb, var(--tone, var(--text)) 11%, var(--fl-card)),
+    var(--fl-card) 62%,
+    color-mix(in srgb, var(--bg-sunken) 40%, var(--fl-card)));
+}
+.fl-app .fl-kpi.fl-hero {
+  background: linear-gradient(145deg,
+    color-mix(in srgb, var(--accent) 34%, var(--fl-card)),
+    color-mix(in srgb, var(--accent) 12%, var(--fl-card)) 60%,
+    var(--fl-card));
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+  box-shadow: var(--fl-lift), 0 0 32px -8px color-mix(in srgb, var(--accent) 45%, transparent);
 }

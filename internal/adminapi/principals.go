@@ -1171,9 +1171,14 @@ func (s *Server) handleDeleteGroupMapping(w http.ResponseWriter, r *http.Request
 		return
 	}
 	mappingID := r.PathValue("id")
-	// The reason at removal is passed as a parameter: a DELETE request has
-	// no body, and the condition is the same as at mapping creation.
-	evidence, ok := s.requireStepUp(w, r, actor, r.URL.Query().Get("reason"),
+	// The reason at removal is read from the parameter or from the body,
+	// like every other change: a client that sends it the way the roles
+	// take it is not answered with "a reason is required".
+	reason, ok := requestReason(w, r, nil)
+	if !ok {
+		return
+	}
+	evidence, ok := s.requireStepUp(w, r, actor, reason,
 		"group_mapping.delete", "group_mapping", mappingID)
 	if !ok {
 		return

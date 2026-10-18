@@ -241,6 +241,29 @@ describe("the scope of the one table", () => {
   });
 });
 
+describe("granting a role to somebody who has not signed in", () => {
+  it("is offered on a row the panel has no record of, and opens the form with who it is for", async () => {
+    given({
+      "/api/v1/access/holders": {
+        items: [holder({ subject: "jkowalska", principal_id: undefined, signed_in: false })],
+        count: 1, directory: { configured: true, read: true },
+      },
+    });
+    draw();
+    await waitFor(() => expect(screen.getByTestId("row-jkowalska")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("grant-jkowalska"));
+    await waitFor(() => expect(screen.getByTestId("new-subject")).toBeInTheDocument());
+    expect(screen.getByTestId("new-subject")).toHaveValue("jkowalska");
+  });
+
+  it("is not offered on a row that has a record, which has its own tab for roles", async () => {
+    given();
+    draw();
+    await waitFor(() => expect(screen.getByTestId("row-tszymanski")).toBeInTheDocument());
+    expect(screen.queryByTestId("grant-tszymanski")).not.toBeInTheDocument();
+  });
+});
+
 describe("the bulk bar", () => {
   it("is not there until something is chosen, and then says how many it acts on", async () => {
     given();

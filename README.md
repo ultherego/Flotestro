@@ -130,6 +130,12 @@ air-gapped installation, backups, upgrades — is in the
     <td>A campaign across the fleet: canary, waves, gates and thresholds.</td>
     <td>The audit trail: the actor, the request and the authentication behind it.</td>
   </tr>
+  <tr>
+    <td colspan="2"><img src="docs/site/img/dashboard-accent.png" alt="The dashboard in the reader's own accent" width="820"></td>
+  </tr>
+  <tr>
+    <td colspan="2">The same dashboard in the accent a reader chose — here while three of four hosts were restarting: each reads offline, with when it was last heard from.</td>
+  </tr>
 </table>
 
 <a href="https://ultherego.github.io/Flotestro/docs/">The rest of the panel, in the documentation →</a>
