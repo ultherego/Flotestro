@@ -325,7 +325,11 @@ func (s *Server) handleRetireCA(w http.ResponseWriter, r *http.Request) {
 	}
 	fingerprint := r.PathValue("fingerprint")
 
-	evidence, ok := s.requireStepUp(w, r, actor, r.URL.Query().Get("reason"),
+	reason, ok := requestReason(w, r, nil)
+	if !ok {
+		return
+	}
+	evidence, ok := s.requireStepUp(w, r, actor, reason,
 		"pki.ca.retire", "pki", fingerprint)
 	if !ok {
 		return
@@ -363,7 +367,7 @@ func (s *Server) handleRetireCA(w http.ResponseWriter, r *http.Request) {
 		Action: "pki.ca.retire", TargetType: "pki", TargetID: fingerprint,
 		RequestID: requestIDOf(r),
 		Detail: withStepUp(map[string]any{
-			"reason": r.URL.Query().Get("reason"), "hosts_using": hostCount,
+			"reason": reason, "hosts_using": hostCount,
 		}, evidence),
 	}, r.URL.Query().Get("idempotency_key"))
 	if !ok {

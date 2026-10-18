@@ -174,3 +174,24 @@ func functionBody(source, name string) (string, bool) {
 	}
 	return rest, true
 }
+
+// TestNoDeleteReadsItsReasonFromOneChannelOnly guards the other half of the
+// same class: a client sends the reason the way the neighbouring route takes
+// it - in the body, as the roles do - and a handler that reads only the query
+// answers "a reason is required" to a request that carried one. The group
+// mapping and the retirement of an authority did exactly that, and it cost an
+// integration run. A handler reads it through requestReason, which takes the
+// body and the query alike, or it does not read a reason at all.
+func TestNoDeleteReadsItsReasonFromOneChannelOnly(t *testing.T) {
+	routes := deleteRoutes(t)
+	source := packageSource(t)
+	for pattern, handler := range routes {
+		body, ok := functionBody(source, handler)
+		if !ok {
+			continue
+		}
+		if strings.Contains(body, `Get("reason")`) && !strings.Contains(body, "requestReason(") {
+			t.Errorf("%s (DELETE %s) reads the reason from the query only; take it through requestReason", handler, pattern)
+		}
+	}
+}
