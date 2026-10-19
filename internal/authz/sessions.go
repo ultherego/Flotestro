@@ -283,6 +283,21 @@ func (s *Store) RevokeSessionsOf(ctx context.Context, principalID, reason string
 	return tag.RowsAffected(), nil
 }
 
+// RevokePasswordSessionsOf ends the sessions an identity's password made, all
+// but the one named (empty names none). A password that was reset or taken away
+// no longer vouches for the sessions it opened; the provider's sessions and the
+// tokens are not its to end.
+func (s *Store) RevokePasswordSessionsOf(ctx context.Context, tx pgx.Tx, principalID, exceptSessionID, reason string) (int64, error) {
+	tag, err := tx.Exec(ctx, `
+		update web_sessions set revoked_at = now(), revocation_reason = $2, refresh_token = null
+		where principal_id = $1 and revoked_at is null and 'pwd' = any(amr)
+		  and ($3 = '' or id::text <> $3)`, principalID, nullable(reason), exceptSessionID)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 // RefreshableSession is a live session whose group snapshot is due for a check
 // with the provider.
 type RefreshableSession struct {
