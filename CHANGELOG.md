@@ -30,6 +30,16 @@ day the tag was published.
 - **Two first writes of a screen's arrangement no longer both stand.** Both
   read revision 0 and the second replaced the first without a conflict; the
   write now succeeds only if the revision it read is still the stored one.
+- **The panel signs the acknowledgement of a task result.** The agent keeps
+  the answer of a finished task until the panel says it holds it, and a relay
+  carrying that message could write the acknowledgement itself and make the host
+  drop the only copy. The acknowledgement now carries the panel's signature over
+  the host, the attempt, the idempotency key, the status and the reason, and a
+  host that trusts a key of the panel frees nothing it cannot verify; the answer
+  is offered again. A host that has not yet been handed a key takes
+  acknowledgements as before. **Upgrade the panel before the agents:** an agent
+  with a trusted key refuses the unsigned acknowledgements of an older panel and
+  keeps offering its results.
 
 ## [0.64.1] - 2026-10-19
 

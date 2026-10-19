@@ -3367,7 +3367,16 @@ type TaskResultAck struct {
 	Status         TaskResultAck_Status `protobuf:"varint,3,opt,name=status,proto3,enum=flotestro.agent.v1.TaskResultAck_Status" json:"status,omitempty"`
 	// The entry of the error guide behind a refusal; empty on a result the
 	// panel took.
-	ReasonCode    string `protobuf:"bytes,4,opt,name=reason_code,json=reasonCode,proto3" json:"reason_code,omitempty"`
+	ReasonCode string `protobuf:"bytes,4,opt,name=reason_code,json=reasonCode,proto3" json:"reason_code,omitempty"`
+	// The panel's signature over this acknowledgement, and the key it was made
+	// with. A relay carries the acknowledgement and could otherwise free the only
+	// durable copy of a result by writing one: the agent frees nothing on the
+	// strength of an acknowledgement it cannot verify against the keys its host
+	// trusts. The signature covers the host, the attempt, the idempotency key,
+	// the status and the reason, so it cannot be moved to another host or
+	// another answer.
+	Signature     []byte `protobuf:"bytes,5,opt,name=signature,proto3" json:"signature,omitempty"`
+	KeyId         string `protobuf:"bytes,6,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3426,6 +3435,20 @@ func (x *TaskResultAck) GetStatus() TaskResultAck_Status {
 func (x *TaskResultAck) GetReasonCode() string {
 	if x != nil {
 		return x.ReasonCode
+	}
+	return ""
+}
+
+func (x *TaskResultAck) GetSignature() []byte {
+	if x != nil {
+		return x.Signature
+	}
+	return nil
+}
+
+func (x *TaskResultAck) GetKeyId() string {
+	if x != nil {
+		return x.KeyId
 	}
 	return ""
 }
@@ -16629,13 +16652,15 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"metricsAck\x12K\n" +
 	"\x0ftask_result_ack\x18\n" +
 	" \x01(\v2!.flotestro.agent.v1.TaskResultAckH\x00R\rtaskResultAckB\t\n" +
-	"\apayload\"\x9b\x02\n" +
+	"\apayload\"\xd0\x02\n" +
 	"\rTaskResultAck\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12'\n" +
 	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12@\n" +
 	"\x06status\x18\x03 \x01(\x0e2(.flotestro.agent.v1.TaskResultAck.StatusR\x06status\x12\x1f\n" +
 	"\vreason_code\x18\x04 \x01(\tR\n" +
-	"reasonCode\"e\n" +
+	"reasonCode\x12\x1c\n" +
+	"\tsignature\x18\x05 \x01(\fR\tsignature\x12\x15\n" +
+	"\x06key_id\x18\x06 \x01(\tR\x05keyId\"e\n" +
 	"\x06Status\x12\x16\n" +
 	"\x12STATUS_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eSTATUS_SETTLED\x10\x01\x12\x14\n" +

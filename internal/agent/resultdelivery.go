@@ -5,11 +5,13 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
+	"github.com/ultherego/flotestro/internal/helpercap"
 )
 
 // resultRetryInterval is how long an answer the panel has not acknowledged
@@ -32,6 +34,10 @@ type resultDelivery struct {
 	// confirmation there is, and holding the answer back past it would only
 	// deliver it a second time at the next session.
 	acknowledged bool
+	// verify checks that an acknowledgement is the panel's. Nil takes every
+	// acknowledgement as it comes, which is what a host with no key of the
+	// panel can do and what a test that is not about signatures does.
+	verify func(*agentv1.TaskResultAck) error
 	// retryEvery is how often this session offers again what the panel has not
 	// answered; zero is resultRetryInterval, and a test sets it shorter.
 	retryEvery time.Duration
@@ -192,6 +198,16 @@ func (d *resultDelivery) acknowledge(ack *agentv1.TaskResultAck) {
 	if d.spool == nil || ack == nil || ack.GetTaskId() == "" {
 		return
 	}
+	// A relay carries the acknowledgement and can write one. The copy on disk
+	// is the only one there is, so what cannot be checked frees nothing and the
+	// result is offered again; the idempotency key makes that harmless.
+	if d.verify != nil {
+		if err := d.verify(ack); err != nil {
+			d.log.Warn("an acknowledgement of a result was not the panel's; the result is kept for a resend",
+				"task_id", ack.GetTaskId(), "err", err)
+			return
+		}
+	}
 	switch ack.GetStatus() {
 	case agentv1.TaskResultAck_STATUS_REJECTED_STALE:
 		// The work was done on the host and the panel will never record it. The
@@ -225,4 +241,34 @@ func (d *resultDelivery) acknowledge(ack *agentv1.TaskResultAck) {
 		return
 	}
 	d.forgetSent(ack.GetTaskId())
+}
+
+// resultAckVerifier checks acknowledgements against the keys this host trusts,
+// read each time so that a key the panel has just introduced counts at once.
+//
+// A host that holds no key of the panel yet has nothing to check against and
+// takes the acknowledgement as it comes, as it did before the signature
+// existed. Once the panel has handed it a trust bundle the signature is
+// required, and a key that cannot be read does not mean "no key".
+func resultAckVerifier(hostID, trustDir string, log *slog.Logger) func(*agentv1.TaskResultAck) error {
+	// The packaged directory has to be root's; a test names its own and is not.
+	requireRoot := trustDir == ""
+	if requireRoot {
+		trustDir = helpercap.DefaultTrustDir
+	}
+	store := helpercap.TrustStore{Dir: trustDir, RequireRoot: requireRoot}
+	var warned sync.Once
+	return func(ack *agentv1.TaskResultAck) error {
+		ring, _, err := store.Keyring()
+		if err != nil {
+			return fmt.Errorf("the keys of the panel could not be read: %w", err)
+		}
+		if len(ring.IDs()) == 0 {
+			warned.Do(func() {
+				log.Warn("this host holds no key of the panel yet; acknowledgements of results are taken unchecked until it does")
+			})
+			return nil
+		}
+		return helpercap.VerifyResultAck(ring, hostID, ack)
+	}
 }
