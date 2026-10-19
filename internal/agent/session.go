@@ -75,6 +75,10 @@ type SessionOptions struct {
 	// made the host discard the only durable copy of work it had already done.
 	// False - the default - keeps the answer until the panel says it holds it.
 	ReleaseResultOnSend bool
+	// ResultAckTrustDir is where the keys this host trusts the panel with are
+	// kept, for checking the signature of an acknowledgement. Empty is the
+	// packaged place; a test names its own.
+	ResultAckTrustDir string
 
 	// gatewayURL is the gateway chosen for this one session.
 	gatewayURL string
@@ -560,6 +564,7 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	// broken session would leave the job running for ever with the change made.
 	results := &resultDelivery{
 		send: send, log: opts.Log,
+		verify: resultAckVerifier(opts.Identity.HostID, opts.ResultAckTrustDir, opts.Log),
 		acknowledged: keepsResultsUntilAcknowledged(
 			sessionConfig.GetTaskResultsAcknowledged(), opts.ReleaseResultOnSend),
 	}

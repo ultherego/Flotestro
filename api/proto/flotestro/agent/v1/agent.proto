@@ -418,6 +418,15 @@ message TaskResultAck {
   // The entry of the error guide behind a refusal; empty on a result the
   // panel took.
   string reason_code = 4;
+  // The panel's signature over this acknowledgement, and the key it was made
+  // with. A relay carries the acknowledgement and could otherwise free the only
+  // durable copy of a result by writing one: the agent frees nothing on the
+  // strength of an acknowledgement it cannot verify against the keys its host
+  // trusts. The signature covers the host, the attempt, the idempotency key,
+  // the status and the reason, so it cannot be moved to another host or
+  // another answer.
+  bytes signature = 5;
+  string key_id = 6;
 }
 
 // MetricsAck answers one resource sample, named by the identity the agent

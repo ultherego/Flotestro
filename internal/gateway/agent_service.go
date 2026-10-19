@@ -816,13 +816,19 @@ func (s *AgentService) ackResult(hostID string, session *Session, result *agentv
 	if session == nil || result.GetTaskId() == "" {
 		return
 	}
+	ack := &agentv1.TaskResultAck{
+		TaskId:         result.GetTaskId(),
+		IdempotencyKey: result.GetIdempotencyKey(),
+		Status:         status,
+		ReasonCode:     reason,
+	}
+	// A relay carries this and could write one; the host frees nothing it
+	// cannot check against the keys it trusts.
+	if s.helperSigner != nil {
+		s.helperSigner.SignResultAck(hostID, ack)
+	}
 	err := session.Send(&agentv1.ServerMessage{
-		Payload: &agentv1.ServerMessage_TaskResultAck{TaskResultAck: &agentv1.TaskResultAck{
-			TaskId:         result.GetTaskId(),
-			IdempotencyKey: result.GetIdempotencyKey(),
-			Status:         status,
-			ReasonCode:     reason,
-		}},
+		Payload: &agentv1.ServerMessage_TaskResultAck{TaskResultAck: ack},
 	}, ackSendTimeout)
 	if err != nil {
 		s.log.Warn("the acknowledgement of a task result was not sent; the host will offer it again",

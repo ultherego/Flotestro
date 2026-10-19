@@ -22,6 +22,16 @@ day the tag was published.
   authentication time of a provider session over its old ACR; it now answers
   `409 reauthentication_not_by_password`, and only a session the password made
   is renewed.
+- **The panel signs the acknowledgement of a task result.** The agent keeps
+  the answer of a finished task until the panel says it holds it, and a relay
+  carrying that message could write the acknowledgement itself and make the host
+  drop the only copy. The acknowledgement now carries the panel's signature over
+  the host, the attempt, the idempotency key, the status and the reason, and a
+  host that trusts a key of the panel frees nothing it cannot verify; the answer
+  is offered again. A host that has not yet been handed a key takes
+  acknowledgements as before. **Upgrade the panel before the agents:** an agent
+  with a trusted key refuses the unsigned acknowledgements of an older panel and
+  keeps offering its results.
 
 ## [0.64.1] - 2026-10-19
 
