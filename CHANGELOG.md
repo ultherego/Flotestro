@@ -6,6 +6,44 @@ day the tag was published.
 
 ## [Unreleased]
 
+## [0.64.1] - 2026-10-19
+
+### Added
+
+- **A person of the directory can be given a role before they have signed
+  in.** A row of "Who may sign in" that the panel has no record of carries
+  "Grant a role", which opens the form that makes an identity with who it is
+  for already filled in. A row with a record has its own tab for roles and
+  does not carry the button.
+- **On a screen of 2560 pixels or more the panel is enlarged as a whole,**
+  by a quarter and from 3200 pixels by a half, so what is readable at a desk
+  is readable across a room. Dragging a container and the card that follows a
+  pointer over a chart were taught the ratio, and both were measured at 3840.
+
+### Changed
+
+- **Charts answer the pointer.** Bars, the band of states, the ring, the pie
+  and the sparkline show a card at the pointer with the name and the figure of
+  what is pointed at, and the rest steps back.
+- **Headline tiles are lit by what they say.** The colour of the tile's state
+  falls across it from one corner, and the one tile that wears the reader's
+  accent is lit more strongly and glows behind itself.
+- **The facts of a host and of a container are a table:** a label in the
+  reader's accent and its value on one line, one fact to a row, with a head
+  for the host that is a strip of facts and a copy button beside the id and the
+  address. The platform of a host is four sub-tabs.
+
+### Fixed
+
+- **A group mapping and an authority are removed with a reason from the body
+  or from the query.** The two routes read only the query, so a client that
+  sent the reason the way the roles take it was answered "a reason is
+  required" although it had sent one. A test now refuses any DELETE route that
+  reads the reason from one channel only.
+- **The site and the README show the panel as it is,** with a dashboard in the
+  reader's own accent beside the others, and the captions follow what the
+  pictures now say.
+
 ## [0.64.0] - 2026-10-18
 
 ### Added
@@ -1113,7 +1151,8 @@ across those five tags.
 
 The first tag. It did not build.
 
-[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.64.0...HEAD
+[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.64.1...HEAD
+[0.64.1]: https://github.com/ultherego/Flotestro/compare/v0.64.0...v0.64.1
 [0.64.0]: https://github.com/ultherego/Flotestro/compare/v0.63.1...v0.64.0
 [0.63.1]: https://github.com/ultherego/Flotestro/compare/v0.63.0...v0.63.1
 [0.63.0]: https://github.com/ultherego/Flotestro/compare/v0.62.1...v0.63.0
