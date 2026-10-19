@@ -110,6 +110,9 @@ const (
 		    updated_by = excluded.updated_by,
 		    revision   = screen_layout.revision + 1,
 		    reason     = excluded.reason
+		  -- The revision the writer read has to still be the one stored: two first
+		  -- writes both read 0, and only the first may become revision 1.
+		  where screen_layout.revision = $5
 		returning updated_at, revision`
 	// The arrangement being replaced is kept before it is gone, and only
 	// the last few are kept: this is an undo, not an archive.
@@ -299,7 +302,12 @@ func (s *Server) handleSetDashboardLayout(w http.ResponseWriter, r *http.Request
 		updatedAt time.Time
 		revision  int64
 	)
-	if err := tx.QueryRow(r.Context(), dashboardWrite, screen, raw, principal.Subject, reason).Scan(&updatedAt, &revision); err != nil {
+	if err := tx.QueryRow(r.Context(), dashboardWrite, screen, raw, principal.Subject, reason, *body.Revision).Scan(&updatedAt, &revision); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			problem(w, http.StatusConflict, "layout_changed",
+				"somebody else arranged this screen while this one was being edited; read it again and put the change on top of what is there now")
+			return
+		}
 		s.fail(w, err)
 		return
 	}

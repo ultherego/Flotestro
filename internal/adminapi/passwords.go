@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 )
@@ -64,13 +66,18 @@ func (s *Server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	ended, err := s.endPasswordSessions(r, tx, actor, target.ID, "the password was reset by an administrator")
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorType: audit.ActorUser, ActorID: actor.Subject,
 		Action: "principal.password.set", TargetType: "principal", TargetID: target.ID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		// The password itself appears nowhere, here least of all.
 		Detail: withStepUp(map[string]any{
-			"subject": target.Subject, "must_change": mustChange,
+			"subject": target.Subject, "must_change": mustChange, "sessions_ended": ended,
 		}, evidence),
 	}); err != nil {
 		s.fail(w, err)
@@ -121,11 +128,16 @@ func (s *Server) handleClearPassword(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusNotFound, "no_password", "this identity signs in with no password here")
 		return
 	}
+	ended, err := s.endPasswordSessions(r, tx, actor, target.ID, "the password was removed by an administrator")
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorType: audit.ActorUser, ActorID: actor.Subject,
 		Action: "principal.password.clear", TargetType: "principal", TargetID: target.ID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
-		Detail: withStepUp(map[string]any{"subject": target.Subject}, evidence),
+		Detail: withStepUp(map[string]any{"subject": target.Subject, "sessions_ended": ended}, evidence),
 	}); err != nil {
 		s.fail(w, err)
 		return
@@ -185,11 +197,23 @@ func (s *Server) handleChangeOwnPassword(w http.ResponseWriter, r *http.Request)
 		s.fail(w, err)
 		return
 	}
+	// The person's other password sessions end with the old password; this
+	// one, which just proved it, stays.
+	current := ""
+	if session, ok := authz.SessionFromContext(r.Context()); ok && session != nil {
+		current = session.ID
+	}
+	ended, err := s.authz.RevokePasswordSessionsOf(r.Context(), tx, principal.ID, current,
+		"the password was changed")
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "principal.password.change", TargetType: "principal", TargetID: principal.ID,
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{"by": "the owner"},
+		Detail: map[string]any{"by": "the owner", "other_sessions_ended": ended},
 	}); err != nil {
 		s.fail(w, err)
 		return
@@ -199,4 +223,17 @@ func (s *Server) handleChangeOwnPassword(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"changed": true})
+}
+
+// endPasswordSessions ends the password sessions of the identity whose password
+// an administrator just set or removed. An administrator changing their own
+// password keeps the session they are acting from.
+func (s *Server) endPasswordSessions(r *http.Request, tx pgx.Tx, actor authz.Principal, targetID, reason string) (int64, error) {
+	keep := ""
+	if actor.ID == targetID {
+		if session, ok := authz.SessionFromContext(r.Context()); ok && session != nil {
+			keep = session.ID
+		}
+	}
+	return s.authz.RevokePasswordSessionsOf(r.Context(), tx, targetID, keep, reason)
 }

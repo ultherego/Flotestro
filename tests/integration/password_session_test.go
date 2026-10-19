@@ -7,8 +7,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 
@@ -193,5 +195,99 @@ func TestWrongGuessesMadeAtOnceAllCount(t *testing.T) {
 	if response.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("ten wrong guesses at once, then the right password: status %d, expected 429 (locked)",
 			response.StatusCode)
+	}
+}
+
+// A password that was reset or taken away no longer vouches for the sessions it
+// opened, and one the person changes themselves ends the others and keeps the
+// one that proved it.
+func TestAResetOrRemovedPasswordEndsThePasswordSessionsItOpened(t *testing.T) {
+	h := newHarness(t)
+	id, subject, password := passwordIdentity(h, false)
+
+	first := signInByPassword(h, subject, password)
+	second := signInByPassword(h, subject, password)
+	if status, _ := first.call(http.MethodGet, "/api/v1/whoami", nil); status != http.StatusOK {
+		t.Fatalf("a fresh session answers %d", status)
+	}
+
+	// The person changes it from the second: the first ends, the second stays.
+	if status, body := second.call(http.MethodPost, "/api/v1/profile/password", map[string]any{
+		"current": password, "new": "a different long passphrase",
+	}); status != http.StatusNoContent && status != http.StatusOK {
+		t.Fatalf("the change: status %d, %s", status, body)
+	}
+	if status, _ := first.call(http.MethodGet, "/api/v1/whoami", nil); status != http.StatusUnauthorized {
+		t.Errorf("the other session after the change answers %d, expected 401", status)
+	}
+	if status, _ := second.call(http.MethodGet, "/api/v1/whoami", nil); status != http.StatusOK {
+		t.Errorf("the session that changed it answers %d, expected 200", status)
+	}
+
+	// An administrator resets it: nothing the old one opened stays open.
+	h.do(http.MethodPut, "/api/v1/principals/"+id+"/password", map[string]any{
+		"password": "a third long passphrase", "must_change": false,
+		"reason": "the integration suite resets the password",
+	}, nil, http.StatusOK)
+	if status, _ := second.call(http.MethodGet, "/api/v1/whoami", nil); status != http.StatusUnauthorized {
+		t.Errorf("a session after an administrator's reset answers %d, expected 401", status)
+	}
+
+	// And removing it ends the sessions the reset's password opened.
+	third := signInByPassword(h, subject, "a third long passphrase")
+	h.do(http.MethodDelete, "/api/v1/principals/"+id+"/password?reason=the+suite+removes+the+password",
+		nil, nil, http.StatusNoContent)
+	if status, _ := third.call(http.MethodGet, "/api/v1/whoami", nil); status != http.StatusUnauthorized {
+		t.Errorf("a session after the password was removed answers %d, expected 401", status)
+	}
+}
+
+// Two first writes of a screen's arrangement both read revision 0; only one of
+// them may become revision 1.
+func TestTwoFirstWritesOfAScreenLayoutCannotBothStand(t *testing.T) {
+	h := newHarness(t)
+	screen := "race" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
+	t.Cleanup(func() {
+		h.do(http.MethodDelete, "/api/v1/settings/layout/"+screen+"?reason=the+suite+clears+its+screen", nil, nil, 0)
+	})
+
+	const writers = 8
+	statuses := make(chan int, writers)
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			encoded, _ := json.Marshal(map[string]any{
+				"revision": 0,
+				"widgets":  []map[string]any{{"key": fmt.Sprintf("writer_%d", i), "width": 4}},
+			})
+			request, _ := http.NewRequest(http.MethodPut, h.api+"/api/v1/settings/layout/"+screen, bytes.NewReader(encoded))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Authorization", "Bearer "+h.token)
+			response, err := h.client.Do(request)
+			if err != nil {
+				statuses <- 0
+				return
+			}
+			_ = response.Body.Close()
+			statuses <- response.StatusCode
+		}(i)
+	}
+	wg.Wait()
+	close(statuses)
+	var stood, refused int
+	for status := range statuses {
+		switch status {
+		case http.StatusOK:
+			stood++
+		case http.StatusConflict:
+			refused++
+		default:
+			t.Errorf("a first write answered %d", status)
+		}
+	}
+	if stood != 1 || refused != writers-1 {
+		t.Fatalf("%d first writes stood and %d were refused; exactly one may stand", stood, refused)
 	}
 }
