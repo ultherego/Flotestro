@@ -6,6 +6,23 @@ day the tag was published.
 
 ## [Unreleased]
 
+### Security
+
+- **Wrong passwords made at the same moment all count.** The count of failed
+  sign-ins was read, raised and written back by the panel, so ten guesses at
+  once could leave the account at nine and unlocked. The database adds one per
+  guess in a single statement, and no more than eight password hashes run at a
+  time.
+- **A password somebody else chose now confines the session in the API, not
+  only in the page.** Until its owner replaces it, a password session may read
+  who it is, change the password and sign out, and every other request answers
+  `403 password_change_required`.
+- **A password no longer renews a session the identity provider made.** Asking
+  for a fresh authentication with the local password used to move the
+  authentication time of a provider session over its old ACR; it now answers
+  `409 reauthentication_not_by_password`, and only a session the password made
+  is renewed.
+
 ## [0.64.1] - 2026-10-19
 
 ### Added

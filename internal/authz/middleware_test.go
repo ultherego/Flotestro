@@ -195,3 +195,41 @@ func TestMergeBindingsRemovesDuplicates(t *testing.T) {
 		t.Fatalf("merged %d assignments, expected 2", len(merged))
 	}
 }
+
+type stubMustChange struct{}
+
+func (stubMustChange) AuthenticateSession(context.Context, string) (*Principal, *Session, error) {
+	return &Principal{ID: "p", Subject: "newcomer"}, &Session{ID: "s", PrincipalID: "p", MustChangePassword: true}, nil
+}
+
+// A session whose owner has to replace the password reaches the change, who it
+// is and the way out, and nothing else - the rule is the API's, not the page's.
+func TestASessionOnAPasswordToBeReplacedReachesOnlyTheChange(t *testing.T) {
+	authenticator := Authenticator{Sessions: stubMustChange{}}
+	var captured Principal
+	handler := authenticator.Middleware(handlerCapturing(&captured))
+
+	for _, c := range []struct {
+		method, path string
+		want         int
+	}{
+		{http.MethodGet, "/api/v1/whoami", http.StatusOK},
+		{http.MethodGet, "/api/v1/me/preferences", http.StatusOK},
+		{http.MethodPost, "/api/v1/profile/password", http.StatusOK},
+		{http.MethodPost, "/auth/logout", http.StatusOK},
+		{http.MethodGet, "/api/v1/hosts", http.StatusForbidden},
+		{http.MethodPost, "/api/v1/roles", http.StatusForbidden},
+		{http.MethodPut, "/api/v1/me/preferences", http.StatusForbidden},
+		{http.MethodPost, "/auth/password/reauthenticate", http.StatusForbidden},
+	} {
+		request := httptest.NewRequest(c.method, c.path, nil)
+		request.AddCookie(&http.Cookie{Name: SessionCookie, Value: "flts_x"})
+		request.AddCookie(&http.Cookie{Name: CSRFCookie, Value: "t"})
+		request.Header.Set(CSRFHeader, "t")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != c.want {
+			t.Errorf("%s %s = %d, expected %d", c.method, c.path, recorder.Code, c.want)
+		}
+	}
+}

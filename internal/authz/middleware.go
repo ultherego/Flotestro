@@ -56,6 +56,10 @@ func (a Authenticator) Middleware(next http.Handler) http.Handler {
 					writeCSRFError(w)
 					return
 				}
+				if session.MustChangePassword && !allowedBeforePasswordChange(r) {
+					writePasswordChangeRequired(w)
+					return
+				}
 				principal = *authenticated
 				ctx = ContextWithSession(ctx, session)
 				// The trail keeps the actor as it is now: a later rename
@@ -136,4 +140,22 @@ func bearerToken(r *http.Request) string {
 		return ""
 	}
 	return strings.TrimSpace(token)
+}
+
+// allowedBeforePasswordChange is everything a session may do while its owner
+// still has to replace the password: look at who they are, change it, leave.
+func allowedBeforePasswordChange(r *http.Request) bool {
+	switch r.Method + " " + r.URL.Path {
+	case "POST /api/v1/profile/password", "POST /auth/logout",
+		"GET /api/v1/whoami", "GET /api/v1/capabilities":
+		return true
+	}
+	return r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/me/")
+}
+
+func writePasswordChangeRequired(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write([]byte(`{"type":"about:blank","title":"Forbidden","status":403,` +
+		`"code":"password_change_required","detail":"the password was set by somebody else; change it before anything else"}`))
 }
