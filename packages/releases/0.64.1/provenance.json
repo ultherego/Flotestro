@@ -1,0 +1,25 @@
+{
+  "version": "0.64.1",
+  "tag": "v0.64.1",
+  "commit": "5c3fc8917ff9c1f50abe221f3214a0c35ae14a99",
+  "description": "gate-5c3fc8917ff9c1f50abe221f3214a0c35ae14a99",
+  "repository": "ultherego/Flotestro",
+  "workflow": "Release",
+  "run_id": "39239382455",
+  "run_attempt": "1",
+  "run_url": "https://github.com/ultherego/Flotestro/actions/runs/39239382455",
+  "builder": "Linux/X64 ubuntu24 (GitHub-hosted)",
+  "toolchain": "go version go1.26.9 linux/amd64",
+  "node": "v22.23.3",
+  "flags": "-trimpath -ldflags '-s -w' CGO_ENABLED=0",
+  "sbom_format": "CycloneDX 1.5",
+  "sbom": [
+    "flotestro-agent-helper_0.64.1_amd64.cdx.json",
+    "flotestro-agent-helper_0.64.1_arm64.cdx.json",
+    "flotestro-agent_0.64.1_amd64.cdx.json",
+    "flotestro-agent_0.64.1_arm64.cdx.json",
+    "flotestro-agentctl_0.64.1_amd64.cdx.json",
+    "flotestro-agentctl_0.64.1_arm64.cdx.json"
+  ],
+  "built_at": "2026-10-19T11:01:19Z"
+}
