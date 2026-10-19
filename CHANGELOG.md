@@ -22,6 +22,14 @@ day the tag was published.
   authentication time of a provider session over its old ACR; it now answers
   `409 reauthentication_not_by_password`, and only a session the password made
   is renewed.
+- **A password that was reset or removed ends the sessions it opened.** When
+  an administrator sets or takes away a password, the identity's password
+  sessions end with it; a person who changes their own password ends their
+  other sessions and keeps the one that proved the old password. Sessions made
+  by the identity provider and API tokens are not touched.
+- **Two first writes of a screen's arrangement no longer both stand.** Both
+  read revision 0 and the second replaced the first without a conflict; the
+  write now succeeds only if the revision it read is still the stored one.
 - **The panel signs the acknowledgement of a task result.** The agent keeps
   the answer of a finished task until the panel says it holds it, and a relay
   carrying that message could write the acknowledgement itself and make the host
