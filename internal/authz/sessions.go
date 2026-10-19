@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -55,6 +56,10 @@ type Session struct {
 	IDToken      string
 	// Auth describes the authentication that created this session.
 	Auth Authentication
+	// MustChangePassword is set on a password session whose owner has to
+	// replace the password somebody else chose; the middleware then lets
+	// through only what that takes.
+	MustChangePassword bool
 }
 
 // CreateSession creates a session and returns the cookie value. The value is
@@ -111,9 +116,11 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 		select w.id, w.token_hash, w.principal_id, w.groups,
 		       coalesce(w.refresh_token, ''), coalesce(w.id_token, ''),
 		       w.authenticated_at, coalesce(w.acr, ''), w.amr,
-		       p.subject, p.display_name, p.kind, coalesce(p.issuer, '')
+		       p.subject, p.display_name, p.kind, coalesce(p.issuer, ''),
+		       coalesce(c.must_change, false)
 		from web_sessions w
 		join principals p on p.id = w.principal_id
+		left join local_credentials c on c.principal_id = w.principal_id
 		where w.token_hash = $1
 		  and w.revoked_at is null
 		  and w.absolute_expires_at > now()
@@ -126,12 +133,13 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 		storedHash []byte
 		principal  Principal
 		issuer     string
+		mustChange bool
 	)
 	var authenticatedAt *time.Time
 	err := s.pool.QueryRow(ctx, query, hash[:]).Scan(&session.ID, &storedHash,
 		&session.PrincipalID, &session.Groups, &session.RefreshToken, &session.IDToken,
 		&authenticatedAt, &session.Auth.ACR, &session.Auth.AMR,
-		&principal.Subject, &principal.DisplayName, &principal.Kind, &issuer)
+		&principal.Subject, &principal.DisplayName, &principal.Kind, &issuer, &mustChange)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, ErrSessionInvalid
 	}
@@ -145,6 +153,9 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 		session.Auth.At = *authenticatedAt
 	}
 	principal.ID = session.PrincipalID
+	// Only a session the password made is held to the password's rule: one
+	// from the identity provider never typed it.
+	session.MustChangePassword = mustChange && slices.Contains(session.Auth.AMR, "pwd")
 
 	bindings, err := s.bindingsOf(ctx, principal.ID)
 	if err != nil {
@@ -170,17 +181,22 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 	return &principal, &session, nil
 }
 
-// RefreshAuthentication moves a session's authentication time to now.
+// RefreshAuthentication moves the authentication time of a session the
+// password made to now, and says whether it did.
 //
-// What re-authentication means for a local identity: there is no provider to
-// be sent back to, so the password is asked for again and this records that
-// it was given. A step-up reads the same field whichever way the session was
-// made.
-func (s *Store) RefreshAuthentication(ctx context.Context, sessionID string) error {
-	_, err := s.pool.Exec(ctx, `
+// A local identity has no provider to be sent back to, so the password is
+// asked for again and this records that it was given. A session the provider
+// made keeps its time, its ACR and its AMR: a password is not the
+// authentication that session was made by, and refreshing the time over the
+// old ACR would let the weaker one stand in for the stronger.
+func (s *Store) RefreshAuthentication(ctx context.Context, sessionID string) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
 		update web_sessions set authenticated_at = now()
-		where id = $1 and revoked_at is null`, sessionID)
-	return err
+		where id = $1 and revoked_at is null and 'pwd' = any(amr)`, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // RevokeSession ends a session.

@@ -144,8 +144,14 @@ func (s *Server) handlePasswordReauthenticate(w http.ResponseWriter, r *http.Req
 		s.refusePasswordSignIn(w, r, principal.Subject, err)
 		return
 	}
-	if err := s.authz.RefreshAuthentication(r.Context(), session.ID); err != nil {
+	refreshed, err := s.authz.RefreshAuthentication(r.Context(), session.ID)
+	if err != nil {
 		s.fail(w, err)
+		return
+	}
+	if !refreshed {
+		problem(w, http.StatusConflict, "reauthentication_not_by_password",
+			"this session was made by the identity provider; a password cannot renew it - sign in through the provider again")
 		return
 	}
 	s.audit.Record(r.Context(), audit.Event{

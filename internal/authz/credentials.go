@@ -132,6 +132,23 @@ type LocalSignIn struct {
 	MustChange bool
 }
 
+// hashSlots bounds the password hashes running at once: each takes tens of
+// megabytes, and a flood of guesses for names nobody has is not counted by
+// any account.
+var hashSlots = make(chan struct{}, 8)
+
+// verifyBounded is VerifyPassword that waits its turn; a request that gives up
+// while waiting counts as no match and the caller reads ctx.Err().
+func (s *Store) verifyBounded(ctx context.Context, hash, password string) bool {
+	select {
+	case hashSlots <- struct{}{}:
+		defer func() { <-hashSlots }()
+	case <-ctx.Done():
+		return false
+	}
+	return VerifyPassword(hash, password)
+}
+
 // SignInWithPassword decides a password sign-in and records what it cost.
 //
 // The counting is the point. A wrong password raises the count and, at the
@@ -153,7 +170,7 @@ func (s *Store) SignInWithPassword(ctx context.Context, subject, password string
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Hash something anyway: an answer that comes back faster for a name
 		// nobody has is a list of the names somebody does have.
-		_ = VerifyPassword("$argon2id$v=19$m=65536,t=3,p=4$"+
+		_ = s.verifyBounded(ctx, "$argon2id$v=19$m=65536,t=3,p=4$"+
 			"AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", password)
 		return nil, ErrNoSuchLocalIdentity
 	}
@@ -164,19 +181,23 @@ func (s *Store) SignInWithPassword(ctx context.Context, subject, password string
 		return nil, fmt.Errorf("%w: until %s", ErrAccountLocked, lockedUntil.UTC().Format(time.RFC3339))
 	}
 
-	if !VerifyPassword(hash, password) {
-		failed++
-		var until *time.Time
-		if failed >= MaxFailedSignIns {
-			moment := time.Now().Add(LockWindow)
-			until = &moment
-		}
-		if _, err := s.pool.Exec(ctx, `
-			update local_credentials set failed_attempts = $2, locked_until = $3
-			where principal_id = $1`, principalID, failed, until); err != nil {
+	if !s.verifyBounded(ctx, hash, password) {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if until != nil {
+		// Counted by the database in one statement, so parallel wrong
+		// guesses each add one instead of all writing the same number.
+		var until *time.Time
+		if err := s.pool.QueryRow(ctx, `
+			update local_credentials
+			   set failed_attempts = failed_attempts + 1,
+			       locked_until = case when failed_attempts + 1 >= $2 then $3 else locked_until end
+			 where principal_id = $1
+			returning locked_until`, principalID, MaxFailedSignIns, time.Now().Add(LockWindow)).
+			Scan(&until); err != nil {
+			return nil, err
+		}
+		if until != nil && time.Now().Before(*until) {
 			return nil, fmt.Errorf("%w: until %s", ErrAccountLocked, until.UTC().Format(time.RFC3339))
 		}
 		return nil, ErrWrongPassword
