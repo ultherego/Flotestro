@@ -1,45 +1,55 @@
+import { lazy, Suspense, type ComponentType } from "react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { usePreferences } from "../lib/preferences";
 import { Shell } from "./Shell";
-import { Dashboard } from "./screens/Dashboard";
-import { Hosts } from "./screens/Hosts";
-import { Access } from "./screens/Access";
-import { Teams } from "./screens/Teams";
-import { Tags } from "./screens/Tags";
-import { Groups } from "./screens/Groups";
-import { Relays } from "./screens/Relays";
-import { Audit } from "./screens/Audit";
-import { Profile } from "./screens/Profile";
-import { Reads } from "./screens/Reads";
-import { Readiness } from "./screens/Readiness";
-import { Monitoring } from "./screens/Monitoring";
-import { Backups } from "./screens/Backups";
-import { Certificates } from "./screens/Certificates";
-import { Vulnerabilities } from "./screens/Vulnerabilities";
-import { Unresolved } from "./screens/Unresolved";
-import { Jobs } from "./screens/Jobs";
-import { HostWorkspace } from "./screens/host/Workspace";
-import { Campaigns } from "./screens/Campaigns";
-import { Security } from "./screens/Security";
-import { Notifications } from "./screens/Notifications";
-import { Budgets } from "./screens/Budgets";
-import { Policies } from "./screens/Policies";
-import { Schedules } from "./screens/Schedules";
-import { Setup } from "./screens/Setup";
-import { AddHost } from "./screens/AddHost";
-import { Bulk } from "./screens/Bulk";
-import { Campaign } from "./screens/Campaign";
-import { Directory } from "./screens/Directory";
-import { Job } from "./screens/Job";
-import { Reports } from "./screens/Reports";
-import { Secrets } from "./screens/Secrets";
-import { Settings } from "./screens/Settings";
-import { Status } from "./screens/Status";
-import { Support } from "./screens/Support";
 import { Empty, Head, HeadSlot, Screen, ShellHead } from "./kit";
 import { ABOUT } from "./screens/about";
 import { LookProvider, type Look } from "./look";
 import { useT } from "../i18n";
+
+/**
+ * A screen is fetched when it is first opened, not with the shell: the whole
+ * panel in one file was 2.5 MB, most of it screens nobody opens on a given day.
+ */
+function screen<K extends string>(load: () => Promise<Record<K, ComponentType>>, name: K) {
+  return lazy(() => load().then((module) => ({ default: module[name] })));
+}
+
+const Dashboard = screen(() => import("./screens/Dashboard"), "Dashboard");
+const Hosts = screen(() => import("./screens/Hosts"), "Hosts");
+const Access = screen(() => import("./screens/Access"), "Access");
+const Teams = screen(() => import("./screens/Teams"), "Teams");
+const Tags = screen(() => import("./screens/Tags"), "Tags");
+const Groups = screen(() => import("./screens/Groups"), "Groups");
+const Relays = screen(() => import("./screens/Relays"), "Relays");
+const Audit = screen(() => import("./screens/Audit"), "Audit");
+const Profile = screen(() => import("./screens/Profile"), "Profile");
+const Reads = screen(() => import("./screens/Reads"), "Reads");
+const Readiness = screen(() => import("./screens/Readiness"), "Readiness");
+const Monitoring = screen(() => import("./screens/Monitoring"), "Monitoring");
+const Backups = screen(() => import("./screens/Backups"), "Backups");
+const Certificates = screen(() => import("./screens/Certificates"), "Certificates");
+const Vulnerabilities = screen(() => import("./screens/Vulnerabilities"), "Vulnerabilities");
+const Unresolved = screen(() => import("./screens/Unresolved"), "Unresolved");
+const Jobs = screen(() => import("./screens/Jobs"), "Jobs");
+const HostWorkspace = screen(() => import("./screens/host/Workspace"), "HostWorkspace");
+const Campaigns = screen(() => import("./screens/Campaigns"), "Campaigns");
+const Security = screen(() => import("./screens/Security"), "Security");
+const Notifications = screen(() => import("./screens/Notifications"), "Notifications");
+const Budgets = screen(() => import("./screens/Budgets"), "Budgets");
+const Policies = screen(() => import("./screens/Policies"), "Policies");
+const Schedules = screen(() => import("./screens/Schedules"), "Schedules");
+const Setup = screen(() => import("./screens/Setup"), "Setup");
+const AddHost = screen(() => import("./screens/AddHost"), "AddHost");
+const Bulk = screen(() => import("./screens/Bulk"), "Bulk");
+const Campaign = screen(() => import("./screens/Campaign"), "Campaign");
+const Directory = screen(() => import("./screens/Directory"), "Directory");
+const Job = screen(() => import("./screens/Job"), "Job");
+const Reports = screen(() => import("./screens/Reports"), "Reports");
+const Secrets = screen(() => import("./screens/Secrets"), "Secrets");
+const Settings = screen(() => import("./screens/Settings"), "Settings");
+const Status = screen(() => import("./screens/Status"), "Status");
+const Support = screen(() => import("./screens/Support"), "Support");
 
 /**
  * The panel.
@@ -75,10 +85,12 @@ export function NextPanel({ look }: { look: Look }) {
   if (/^\/hosts\/(?!new$)[^/]+/.test(location.pathname)) {
     return (
       <LookProvider look={look}>
+      <Suspense fallback={<Waiting />}>
       <Routes>
         <Route path="/hosts/:id" element={<HostWorkspace />} />
         <Route path="/hosts/:id/:module" element={<HostWorkspace />} />
       </Routes>
+      </Suspense>
       </LookProvider>
     );
   }
@@ -115,6 +127,7 @@ export function NextPanel({ look }: { look: Look }) {
           actions={<HeadSlot />}
         />
       )}
+      <Suspense fallback={<Waiting />}>
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/dashboard" element={<Dashboard />} />
@@ -174,6 +187,7 @@ export function NextPanel({ look }: { look: Look }) {
         <Route path="/access" element={<Access />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
+      </Suspense>
       </ShellHead.Provider>
     </Shell>
     </LookProvider>
@@ -212,4 +226,9 @@ function Landing() {
   const { preferences, settled } = usePreferences();
   if (!settled) return null;
   return <Navigate to={preferences.landing_page || "/dashboard"} replace />;
+}
+
+/** What stands where a screen is still being fetched: a bone, never a word. */
+function Waiting() {
+  return <div className="fl-bone" style={{ height: 160 }} aria-hidden="true" />;
 }
