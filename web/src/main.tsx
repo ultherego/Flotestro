@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./App";
 import { ApiError } from "./lib/api";
-import { I18nProvider } from "./i18n";
+import { I18nProvider, currentLanguage, loadCatalogue } from "./i18n";
 import "./styles.css";
 import "./next/next.css";
 
@@ -29,7 +29,9 @@ const queryClient = new QueryClient({
   },
 });
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
+// The language is fetched before the first draw, so a Polish reader never sees
+// the English sentence for a moment.
+void loadCatalogue(currentLanguage()).then(() => ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <I18nProvider>
       <QueryClientProvider client={queryClient}>
@@ -39,4 +41,4 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       </QueryClientProvider>
     </I18nProvider>
   </React.StrictMode>,
-);
+));

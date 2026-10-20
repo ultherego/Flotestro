@@ -69,6 +69,10 @@ day the tag was published.
   advice and can never be finished, but it was counted among the steps, so a
   list with every required step done still read "5 of 6". The meter and the
   headline now count the steps that can be done.
+- **The panel loads in a fifth of the size.** The whole interface used to arrive
+  as one 2.5 MB file (759 kB compressed). A screen is now fetched when it is
+  first opened, and the Polish catalogue only when Polish is the language, so
+  the file the first page needs is 405 kB (128 kB compressed).
 
 ## [0.64.1] - 2026-10-19
 

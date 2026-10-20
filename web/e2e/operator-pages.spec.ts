@@ -526,7 +526,10 @@ test.describe("setup", () => {
     await page.goto("/setup");
     await expect(head(page, "First run")).toBeVisible();
     // The summary container says how far the list has got.
-    await expect(card(page, checklist.complete ? "Every required step is done" : `${checklist.done} of ${checklist.total} required steps done`)).toBeVisible();
+    // The screen counts the steps that can be done: a warning is advice and never
+    // finishes, so it is not one of the steps left (20.10).
+    const required = checklist.total - checklist.steps.filter((step) => step.state === "warning").length;
+    await expect(card(page, checklist.complete ? "Every required step is done" : `${checklist.done} of ${required} required steps done`)).toBeVisible();
     // The steps are rows of one table, in order, each with its state in a
     // word; twelve containers were not a list a reader could take in.
     const rows = page.getByTestId("setup-steps").locator("tbody tr");

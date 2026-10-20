@@ -1,5 +1,4 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { pl } from "./pl";
 
 /**
  * The interface language.
@@ -13,7 +12,19 @@ export const LOCALES: { code: Locale; label: string }[] = [
 
 const STORAGE_KEY = "flotestro.locale";
 
-const catalogues: Record<Locale, Record<string, string>> = { en: {}, pl };
+// The Polish catalogue is most of a megabyte of source, and a reader who works in
+// English never needs it: it is fetched when Polish is chosen (loadCatalogue),
+// and the panel waits for it before it draws, so no sentence flashes in English.
+const catalogues: Record<Locale, Record<string, string>> = { en: {}, pl: {} };
+let polishLoaded = false;
+
+/** Makes the catalogue of a language available; English has none to fetch. */
+export async function loadCatalogue(locale: Locale): Promise<void> {
+  if (locale !== "pl" || polishLoaded) return;
+  const module = await import("./pl");
+  catalogues.pl = module.pl;
+  polishLoaded = true;
+}
 
 type Params = Record<string, string | number>;
 
@@ -60,13 +71,15 @@ const LocaleContext = createContext<Context>({ locale: currentLocale, setLocale:
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(currentLocale);
   const setLocale = useCallback((next: Locale) => {
-    currentLocale = next;
-    try {
-      window.localStorage.setItem(STORAGE_KEY, next);
-    } catch {
-      // A locale that cannot be remembered still applies to this session.
-    }
-    setLocaleState(next);
+    void loadCatalogue(next).then(() => {
+      currentLocale = next;
+      try {
+        window.localStorage.setItem(STORAGE_KEY, next);
+      } catch {
+        // A locale that cannot be remembered still applies to this session.
+      }
+      setLocaleState(next);
+    });
   }, []);
   // The document language follows the choice: screen readers, spell
   // checking and hyphenation read it from the root element.
