@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -41,24 +42,15 @@ func TestAnIdentityATestMakesIsDisabledWhenThatTestEnds(t *testing.T) {
 		}
 	})
 
-	// Its test has ended, and so has the cleanup.
-	var disabled struct {
-		Items []struct {
-			Subject string `json:"subject"`
-		} `json:"items"`
+	// Its test has ended, and so has the cleanup. Read from the database: the
+	// listing of disabled identities does not filter by name.
+	var disabled bool
+	if err := h.database(context.Background()).QueryRow(context.Background(),
+		`select disabled_at is not null from principals where id = $1`, created.ID).Scan(&disabled); err != nil {
+		t.Fatal(err)
 	}
-	h.get("/api/v1/principals?disabled=true&q="+subject, &disabled)
-	if len(disabled.Items) != 1 {
-		t.Fatalf("the identity a finished test made is not disabled: %d rows among the disabled", len(disabled.Items))
-	}
-	var enabled struct {
-		Items []struct {
-			Subject string `json:"subject"`
-		} `json:"items"`
-	}
-	h.get("/api/v1/principals?q="+subject, &enabled)
-	if len(enabled.Items) != 0 {
-		t.Errorf("the identity a finished test made is still enabled")
+	if !disabled {
+		t.Fatal("the identity a finished test made is still enabled")
 	}
 
 	// A fixture that is meant to stay is not taken: no generated suffix.
