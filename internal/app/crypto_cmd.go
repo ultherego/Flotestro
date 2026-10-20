@@ -249,9 +249,10 @@ func printCryptoStatus(out io.Writer, report cryptoStatusReport) {
 	fmt.Fprintf(out, "live_versions: %d\n", live)
 	fmt.Fprintf(out, "pending_migration: %d\n", report.Pending)
 	if report.Pending > 0 {
-		fmt.Fprintf(out, "note: %d live secret versions are in the first form or on another key; "+
-			"the rewrap of a running panel moves them onto %s\n", report.Pending,
-			orNone(report.ActiveKeyID))
+		fmt.Fprintf(out, "note: %d live secret versions are on another key or in the first form; "+
+			"the rewrap of a running panel moves the first onto %s, and a version of the first "+
+			"form is refused at start by a release from 0.64.2 - run 0.64.1 over it first\n",
+			report.Pending, orNone(report.ActiveKeyID))
 	}
 	// The question a release asks of an installation, in two numbers and one
 	// answer. Said whichever way it comes out: "second_form_complete: yes" is

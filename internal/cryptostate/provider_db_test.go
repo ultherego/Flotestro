@@ -339,8 +339,8 @@ func TestASecondReplicaTakesTheKeyThatIsAlreadyThere(t *testing.T) {
 	if got := len(store.rows); got != 1 {
 		t.Errorf("the database holds %d rows for one key", got)
 	}
-	if _, ok := second.LegacyCipher(); !ok {
-		t.Error("the replica that lost the race does not hold the key")
+	if err := second.RequireKey(ctx, "legacy"); err != nil {
+		t.Errorf("the replica that lost the race does not hold the key: %v", err)
 	}
 
 	// Different material under a taken name is a collision, and is refused on

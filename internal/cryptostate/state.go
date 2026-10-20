@@ -23,6 +23,11 @@ const (
 	// CodeSecretsKeyUnavailable: the installation has secrets, or a record naming
 	// a key, and that key is not there or does not open the sentinel.
 	CodeSecretsKeyUnavailable = "secrets_key_unavailable"
+	// CodeSecretsFirstFormRemoved: the database holds secret versions sealed the
+	// first way, directly under the installation's key, which this release no
+	// longer opens. The way forward is to start the installation once on a release
+	// that does, so the rewrap seals them in envelopes.
+	CodeSecretsFirstFormRemoved = "secrets_first_form_removed"
 	// CodeIssuerKeyUnavailable: the certificate of the fleet CA is there
 	// and its private key is not.
 	CodeIssuerKeyUnavailable = "issuer_key_unavailable"
@@ -85,14 +90,13 @@ type Options struct {
 	// LegacyKeyPath is where an installation from before the provider
 	// kept its one key. Empty means nowhere to look.
 	LegacyKeyPath string
-	// SecretProbe asks the secret store whether the key offered for the
-	// versions of the first form is the key they were sealed with. It takes
-	// the material and not the provider, so that asking changes nothing at
-	// all: the key is tried before the installation is committed to it. It is
-	// a hook rather than a call, because which forms there are and how each
-	// one opens belongs to internal/secrets and must not be told twice. Nil
-	// skips the question, which is what the startup table does where the store
-	// is not part of the case.
+	// SecretProbe asks the secret store whether the installation being adopted
+	// holds versions of the first form, which this release does not open. It
+	// takes the material and not the provider, so that asking changes nothing at
+	// all: the question is put before the installation is committed to the key. It
+	// is a hook rather than a call, because which forms there are belongs to
+	// internal/secrets and must not be told twice. Nil skips the question, which
+	// is what the startup table does where the store is not part of the case.
 	SecretProbe func(ctx context.Context, legacyKey []byte) error
 	// RotateTo names a key to switch the store to at this start; empty leaves the
 	// active key alone.
@@ -381,6 +385,9 @@ func (r *Runtime) establish(ctx context.Context, o Options) error {
 		// about.
 		if o.SecretProbe != nil && facts.SecretVersions > 0 {
 			if err := o.SecretProbe(ctx, legacyKey); err != nil {
+				if errors.Is(err, secrets.ErrFirstFormRemoved) {
+					return fatal(CodeSecretsFirstFormRemoved, err.Error(), err)
+				}
 				return fatal(CodeSecretsKeyUnavailable, fmt.Sprintf(
 					"the database holds %d secret versions sealed the first way and %s does not open them: "+
 						"it is not the key of this installation",
@@ -863,10 +870,9 @@ func (r *Runtime) Rewrap(ctx context.Context) {
 	if store == nil {
 		return
 	}
-	total, unbound, unreadable := 0, 0, 0
+	total, unreadable := 0, 0
 	for {
-		moved, remaining, loose, err := r.rewrapBatch(ctx, store)
-		unbound += loose
+		moved, remaining, err := r.rewrapBatch(ctx, store)
 		if err != nil {
 			if ctx.Err() == nil {
 				r.log.Error("rewrapping the secret store stopped; it resumes at the next start", "err", err, "moved", total)
@@ -911,13 +917,6 @@ func (r *Runtime) Rewrap(ctx context.Context) {
 	if total > 0 {
 		r.log.Info("the secret store was rewrapped onto the active key", "versions", total)
 	}
-	if unbound > 0 {
-		// These are the rows written before the ciphertext was bound to its
-		// row. They are bound now, and a reader no longer has to accept a
-		// value that could have come from another row.
-		r.log.Warn("versions sealed before the row key was bound into them were rewritten bound",
-			"versions", unbound)
-	}
 }
 
 // noteUnreadable records how many live versions the last full pass of the
@@ -941,7 +940,7 @@ func (r *Runtime) noteUnreadable(count int) {
 // again after every restart, because the next pass reads the same row. The
 // shape is checked before the key sees it, so this is the net under that
 // check, not a substitute for it.
-func (r *Runtime) rewrapBatch(ctx context.Context, store *secrets.Store) (moved, remaining, unbound int, err error) {
+func (r *Runtime) rewrapBatch(ctx context.Context, store *secrets.Store) (moved, remaining int, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("rewrapping a batch of the secret store panicked: %v", recovered)

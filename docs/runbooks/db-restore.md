@@ -48,8 +48,8 @@ the host that runs the panel needs no PostgreSQL client of its own.
 - `GET /api/v1/status`, block `crypto`: `ok` with `installation_id`, `active_key_id`, `issuer_id`,
   `keys` and `pending_rewrap`; the block repeats the self-test of the start on every read.
 - A start that stops with `the control plane refuses to start: the cryptographic state of the
-  installation is not usable` and a `code` of `secrets_key_unavailable`, `issuer_key_unavailable`,
-  `pki_state_mismatch` or `crypto_state_ambiguous`: see "Cryptographic state at start" below.
+  installation is not usable` and a `code` of `secrets_key_unavailable`, `secrets_first_form_removed`,
+  `issuer_key_unavailable`, `pki_state_mismatch` or `crypto_state_ambiguous`: see "Cryptographic state at start" below.
 - The log line "the database schema is current" at start; `GET /api/v1/settings` (permission
   `settings.read`) reports the highest applied row of `schema_migrations`.
 - After a restore to an older point: attempts closed as `lease_expired`, results answered with
@@ -72,6 +72,7 @@ directory against it. What it finds decides what happens:
 | CA certificate present, `ca.key` missing | Stops: `issuer_key_unavailable`. Nothing is generated. |
 | `ca.key` without `ca.pem`, a key that does not match the certificate, a CA other than the recorded one, an unreadable file | Stops: `pki_state_mismatch`. |
 | No row, database with secrets, no `secrets.key` | Stops: `secrets_key_unavailable`. |
+| A database with secret versions still sealed the first way (adopted or not) | Stops: `secrets_first_form_removed`, with the count. Nothing is written. Run 0.64.1 over it first (below). |
 | No row, database with hosts, no CA at all; or several keys under `keys/` and nothing says which is active | Stops: `crypto_state_ambiguous`. |
 | The state directory names one installation and the database another, or one names none while the other has a history | Stops: `installation_state_mismatch`. The log names which of the two is the stranger. |
 | A second panel of the same installation starting at the same time | Waits on the lock, then reads the row the first one wrote. Two panels never make two installations. |
@@ -82,6 +83,9 @@ guide (`GET /api/v1/errors`, stage `startup`).
 
 What to do, by code:
 
+- `secrets_first_form_removed`: the database holds versions of the first form. Start it once on
+  0.64.1, check `crypto status` for `legacy_envelopes: 0` and `crypto verify-secrets`, take a new
+  backup pair, then update; nothing was written by the refusal.
 - `secrets_key_unavailable`: put the key back from the backup of the state directory - the
   file named in the reason (`keys/<key-id>.key`, or `secrets.key` for an installation from
   before the upgrade), owned by the service user, mode 0600. Do not generate a key: a fresh
@@ -146,17 +150,23 @@ rewrap is still working through, and deliberately so - one clears itself at the 
 other never does. The row is left exactly as it was, so a restore of that one secret's version is
 the repair.
 
-A wrong `secrets.key` is refused before any of this. The first start of an adopted installation
-tries the key against the rows of the first form it is about to be trusted with, and stops with
-`secrets_key_unavailable` naming the file when they do not open: nothing is written, nothing is
-resealed, and the right key still opens everything when it is found. The check before it existed
-was the sentinel - which, at an adoption, is sealed under the very key being adopted and so
-proves nothing about it.
+A database that still holds versions of the first form is refused at every start, adopted or
+not, with `secrets_first_form_removed` and the number of versions behind it. The first form is a
+value sealed under `secrets.key` directly, with no envelope of its own; every release from 0.60.0
+to 0.64.1 seals a new version in an envelope and rewraps the old ones as it starts, so a database
+that still holds any belongs to an installation that never ran one of them - or to a backup taken
+before it did. This release no longer opens them, and the way forward is the one below.
 
-`legacy/v1` is the first form - the value sealed under `secrets.key` directly, with no envelope
-of its own. It is counted apart from `legacy`, because a version wrapped under the key named
-`legacy` is already an envelope and a version of the first form is not, and the rewrap has work
-to do on the second even while that key is the active one.
+`legacy/v1` in `crypto status` is the count of those versions, apart from `legacy`: a version
+wrapped under the key named `legacy` is already an envelope, and a version of the first form is
+not. `legacy_envelopes: 0` and `second_form_complete: yes` are what an installation says when
+nothing of the first form is left.
+
+**Restoring a backup that holds the first form.** Restore it on 0.64.1 (or any release from
+0.60.0), let it start once so the rewrap seals every version in an envelope, check with
+`crypto verify-secrets` that every version opens and that `crypto status` says
+`legacy_envelopes: 0`, take a new backup pair, and only then update. Nothing is written by the
+refusal: the database and `secrets.key` are as they were, and 0.64.1 opens them.
 
 ### Rotating the key of the secret store
 

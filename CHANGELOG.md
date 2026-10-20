@@ -49,6 +49,20 @@ day the tag was published.
   with a trusted key refuses the unsigned acknowledgements of an older panel and
   keeps offering its results.
 
+### Removed
+
+- **The first form of a stored secret is no longer opened.** Every release from
+  0.60.0 to 0.64.1 seals a new secret in an envelope and rewraps the old ones as it
+  starts, so a version still sealed directly under the installation's key belongs
+  to an installation that never ran one of them - or to a backup taken before it
+  did. This release refuses such an installation at start with
+  `secrets_first_form_removed` and the number of versions behind it, writes nothing,
+  and no longer carries the code that opened them without the row key. **To bring an
+  installation or a backup forward:** start it once on 0.64.1, check that
+  `crypto status` says `legacy_envelopes: 0` and that `crypto verify-secrets` opens
+  every version, take a new backup pair, then update. The runbook
+  (`db-restore.md`) says the same.
+
 ### Changed
 
 - **The setup meter reads full when only warnings are left.** A warning is

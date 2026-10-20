@@ -275,15 +275,6 @@ func (p *LocalSealedProvider) Health(ctx context.Context) error {
 	return nil
 }
 
-// LegacyCipher implements secrets.LegacyOpener: the key adopted from
-// before the envelope opens the rows of the first form directly.
-func (p *LocalSealedProvider) LegacyCipher() (*secrets.Cipher, bool) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	cipher, ok := p.keys[secrets.LegacyKeyID]
-	return cipher, ok
-}
-
 // Generate implements Provider.
 func (p *LocalSealedProvider) Generate(ctx context.Context) (string, error) {
 	suffix := make([]byte, 6)

@@ -36,12 +36,6 @@ type KeyProvider interface {
 	Health(ctx context.Context) error
 }
 
-// LegacyOpener is a provider that also holds the key the rows of the first
-// form were sealed under.
-type LegacyOpener interface {
-	LegacyCipher() (*Cipher, bool)
-}
-
 // ErrKeyUnavailable means the provider does not hold the key an envelope
 // names.
 var ErrKeyUnavailable = errors.New("secrets_key_unavailable")
