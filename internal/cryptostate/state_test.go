@@ -238,13 +238,6 @@ func (f *fakeProvider) Health(ctx context.Context) error {
 	return f.RequireKey(ctx, id)
 }
 
-func (f *fakeProvider) LegacyCipher() (*secrets.Cipher, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	cipher, ok := f.keys[secrets.LegacyKeyID]
-	return cipher, ok
-}
-
 // forget takes a key away, as a deleted file would.
 func (f *fakeProvider) forget(id string) {
 	f.mu.Lock()
@@ -480,10 +473,7 @@ func TestAnExistingInstallationIsAdopted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	nonce, ciphertext, err := old.Encrypt([]byte("old value"), "secret-a", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	_ = old
 	l.storage.facts = Facts{SecretVersions: 1, Hosts: 4, Certificates: 4}
 	before, err := pki.Open(l.dir)
 	if err != nil {
@@ -501,12 +491,8 @@ func TestAnExistingInstallationIsAdopted(t *testing.T) {
 	if report := runtime.Report(context.Background()); !report.Adopted || report.Err != nil {
 		t.Errorf("report = %+v", report)
 	}
-	legacy, ok := l.provider.LegacyCipher()
-	if !ok {
-		t.Fatal("the legacy key is not registered")
-	}
-	if value, err := legacy.Decrypt(nonce, ciphertext, "secret-a", 1); err != nil || string(value) != "old value" {
-		t.Fatalf("a value sealed the old way: %q, %v", value, err)
+	if err := l.provider.RequireKey(context.Background(), secrets.LegacyKeyID); err != nil {
+		t.Fatalf("the legacy key is not registered: %v", err)
 	}
 	// A new envelope goes under the same key, and the second start verifies
 	// rather than adopts again.
@@ -916,7 +902,7 @@ func TestTheActivationHookDoesNotUndoAKeyRotation(t *testing.T) {
 // the database and somebody else's secrets.key was adopted, the record was
 // written, the sentinel was resealed, and every secret of the installation was
 // unreadable with one line in the log to say so.
-func TestAKeyThatDoesNotOpenTheFirstFormIsNotAdopted(t *testing.T) {
+func TestAnInstallationStillHoldingTheFirstFormIsNotAdopted(t *testing.T) {
 	l := newLab(t)
 	if _, err := pki.Init(l.dir); err != nil {
 		t.Fatal(err)
@@ -933,24 +919,20 @@ func TestAKeyThatDoesNotOpenTheFirstFormIsNotAdopted(t *testing.T) {
 		if !bytes.Equal(key, before) {
 			return fmt.Errorf("the probe was asked about %d bytes that are not the key file's", len(key))
 		}
-		return fmt.Errorf("%w: secret-a version 1 does not open under the key offered for the first form",
-			secrets.ErrFirstFormUnreadable)
+		return fmt.Errorf("%w: 3 secret versions are still sealed the first way", secrets.ErrFirstFormRemoved)
 	}
 
-	fatal := l.openFatal(t, CodeSecretsKeyUnavailable)
-	// The operator has to read which file is wrong and how much is behind it;
-	// "the key is unavailable" sends them looking for a missing file.
-	if !strings.Contains(fatal.Reason, l.legacy) {
-		t.Errorf("the refusal does not name the key file: %s", fatal.Reason)
-	}
+	fatal := l.openFatal(t, CodeSecretsFirstFormRemoved)
+	// The operator has to read what is wrong and how much is behind it, and what
+	// to do - not be sent looking for a key file that is the right one.
 	if !strings.Contains(fatal.Reason, "3 secret versions") {
 		t.Errorf("the refusal does not say how many versions are behind it: %s", fatal.Reason)
 	}
-	if !errors.Is(fatal, secrets.ErrFirstFormUnreadable) {
+	if !errors.Is(fatal, secrets.ErrFirstFormRemoved) {
 		t.Errorf("the refusal does not carry what the store said: %v", fatal)
 	}
 	if l.storage.record != nil {
-		t.Fatal("a record was written for an installation whose secrets the key does not open")
+		t.Fatal("a record was written for an installation this release cannot open")
 	}
 	// The key was tried, not kept. A refusal that had already adopted left
 	// keys/legacy.key holding the key it refused, and the next start - with the

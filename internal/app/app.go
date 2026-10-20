@@ -75,12 +75,6 @@ import (
 	ubuntusource "github.com/ultherego/flotestro/internal/vuln/sources/ubuntu"
 )
 
-// firstFormProbeRows bounds the versions of the first form an adoption tries
-// its key against. One that opens settles it; a damaged row settles nothing and
-// the walk goes on, so there is more than one - and a few is enough, because an
-// installation whose every first row is damaged has a different problem.
-const firstFormProbeRows = 20
-
 const staleCheckInterval = 30 * time.Second
 
 // sessionAbsolute ends a panel session a day after the login whatever the
@@ -683,16 +677,20 @@ func Run() error {
 		LegacyKeyPath: legacyKeyPath,
 		RotateTo:      *secretsKeyRotateTo,
 		Log:           log,
-		SecretProbe: func(ctx context.Context, legacyKey []byte) error {
-			cipher, err := secrets.NewCipher(legacyKey)
-			if err != nil {
-				return err
-			}
-			return secrets.NewStore(pool, nil).CheckFirstForm(ctx, cipher, firstFormProbeRows)
+		// Asked before an adoption is committed to: a database that still holds
+		// versions of the first form is refused with the way forward, not adopted.
+		SecretProbe: func(ctx context.Context, _ []byte) error {
+			return secrets.NewStore(pool, nil).RefuseFirstForm(ctx)
 		},
 	})
 	if err != nil {
 		return refuseCryptoStart(log, err)
+	}
+	// And at every start, adopted or not: a version of the first form is a secret
+	// this release cannot open, and the panel does not come up to find out later.
+	if err := secrets.NewStore(pool, nil).RefuseFirstForm(ctx); err != nil {
+		return refuseCryptoStart(log, &cryptostate.FatalError{
+			Code: cryptostate.CodeSecretsFirstFormRemoved, Reason: err.Error(), Err: err})
 	}
 	trust := cryptoRuntime.Trust()
 

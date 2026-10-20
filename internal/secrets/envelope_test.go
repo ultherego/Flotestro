@@ -68,11 +68,6 @@ func (m *memoryKeys) Unwrap(_ context.Context, keyID string, wrapped []byte) ([]
 
 func (m *memoryKeys) Health(context.Context) error { return nil }
 
-func (m *memoryKeys) LegacyCipher() (*Cipher, bool) {
-	cipher, ok := m.keys[LegacyKeyID]
-	return cipher, ok
-}
-
 // An envelope opens only in the row it was written for, and only with the
 // key that wrapped its data key.
 func TestAnEnvelopeIsBoundToItsRowAndItsKey(t *testing.T) {

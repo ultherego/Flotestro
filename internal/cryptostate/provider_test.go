@@ -103,8 +103,8 @@ func TestAdoptionIsRepeatableAndRefusesDifferentMaterial(t *testing.T) {
 	if err := provider.Adopt(ctx, secrets.LegacyKeyID, other); err == nil {
 		t.Fatal("different material was adopted under a taken name")
 	}
-	if _, ok := provider.LegacyCipher(); !ok {
-		t.Fatal("the legacy key is not offered for the rows of the first form")
+	if err := provider.RequireKey(ctx, secrets.LegacyKeyID); err != nil {
+		t.Fatalf("the adopted key is not held: %v", err)
 	}
 	if err := provider.Adopt(ctx, "Not A Key", key); err == nil {
 		t.Fatal("an invalid key name was accepted")
@@ -164,15 +164,15 @@ func TestAnOfferedKeyOpensWithoutBecomingAFileOfTheDirectory(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, secrets.LegacyKeyID+".key")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("the offered key was written as a file of the directory")
 	}
-	cipher, ok := provider.LegacyCipher()
-	if !ok {
-		t.Fatal("the offered key is not the one the first form opens with")
+	if err := provider.RequireKey(context.Background(), secrets.LegacyKeyID); err != nil {
+		t.Fatalf("the offered key is not registered: %v", err)
 	}
-	nonce, ciphertext, err := cipher.Encrypt([]byte("value"), "secret-a", 1)
+	wrapped, err := provider.Wrap(context.Background(), secrets.LegacyKeyID, []byte("a data key of 32 bytes.........."))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value, err := cipher.Decrypt(nonce, ciphertext, "secret-a", 1); err != nil || string(value) != "value" {
+	if value, err := provider.Unwrap(context.Background(), secrets.LegacyKeyID, wrapped); err != nil ||
+		string(value) != "a data key of 32 bytes.........." {
 		t.Fatalf("the offered key does not open what it sealed: %q, %v", value, err)
 	}
 	// One step outside: the same name with other material is a contradiction
@@ -220,7 +220,7 @@ func TestAKeyOfferedAndThenAdoptedReachesTheDisk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := again.LegacyCipher(); !ok {
-		t.Fatal("a provider built again over the directory does not hold the adopted key")
+	if err := again.RequireKey(context.Background(), secrets.LegacyKeyID); err != nil {
+		t.Fatalf("a provider built again over the directory does not hold the adopted key: %v", err)
 	}
 }

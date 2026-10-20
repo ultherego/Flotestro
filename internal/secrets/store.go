@@ -454,15 +454,7 @@ func (s *Store) open(ctx context.Context, q querier, secretID string, version in
 		return nil, ErrDestroyed
 	}
 	if envelopeVersion < EnvelopeVersion {
-		legacy, ok := s.keys.(LegacyOpener)
-		if !ok {
-			return nil, fmt.Errorf("%w: the provider holds no legacy key for a version of the first form", ErrKeyUnavailable)
-		}
-		cipher, ok := legacy.LegacyCipher()
-		if !ok {
-			return nil, fmt.Errorf("%w: the legacy key is not registered", ErrKeyUnavailable)
-		}
-		return cipher.Decrypt(nonce, ciphertext, secretID, version)
+		return nil, fmt.Errorf("%w: %s version %d", ErrFirstFormRemoved, secretID, version)
 	}
 	envelope := Envelope{Version: envelopeVersion, Nonce: nonce, Ciphertext: ciphertext, WrappedDEK: wrapped}
 	if keyID != nil {
@@ -502,14 +494,14 @@ func (s *Store) VersionsByKey(ctx context.Context) (map[string]int, error) {
 
 // RewrapBatch moves up to limit live versions onto the active key and says how
 // many remain and how many of them were still unbound to their row.
-func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining, unbound int, err error) {
+func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining int, err error) {
 	active, err := s.keys.ActiveKeyID(ctx)
 	if err != nil {
-		return 0, 0, unbound, err
+		return 0, 0, err
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return 0, 0, unbound, err
+		return 0, 0, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -517,12 +509,12 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining, u
 		select secret_id, version, nonce, ciphertext, envelope_version, key_id, wrapped_dek
 		  from secret_versions
 		 where destroyed_at is null
-		   and (envelope_version < $1 or key_id is distinct from $2)
+		   and envelope_version >= $1 and key_id is distinct from $2
 		 order by secret_id, version
 		 limit $3
 		   for update skip locked`, EnvelopeVersion, active, limit)
 	if err != nil {
-		return 0, 0, unbound, err
+		return 0, 0, err
 	}
 	type pending struct {
 		secretID string
@@ -536,7 +528,7 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining, u
 		if err := rows.Scan(&row.secretID, &row.version, &row.envelope.Nonce, &row.envelope.Ciphertext,
 			&row.envelope.Version, &keyID, &row.envelope.WrappedDEK); err != nil {
 			rows.Close()
-			return 0, 0, unbound, err
+			return 0, 0, err
 		}
 		if keyID != nil {
 			row.envelope.KeyID = *keyID
@@ -545,7 +537,7 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining, u
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return 0, 0, unbound, err
+		return 0, 0, err
 	}
 
 	// damaged counts the rows no key can take: the pass steps over them and
@@ -555,78 +547,45 @@ func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining, u
 	// pass may do and which it undoes by resealing them bound.
 	damaged := 0
 	for _, row := range batch {
-		var fresh Envelope
-		associated := AssociatedData(row.secretID, row.version, kindSecret, EnvelopeVersion)
-		if row.envelope.Version < EnvelopeVersion {
-			legacy, ok := s.keys.(LegacyOpener)
-			if !ok {
-				return moved, 0, unbound, fmt.Errorf("%w: a version of the first form cannot be rewrapped without the legacy key", ErrKeyUnavailable)
-			}
-			cipher, ok := legacy.LegacyCipher()
-			if !ok {
-				return moved, 0, unbound, fmt.Errorf("%w: the legacy key is not registered", ErrKeyUnavailable)
-			}
-			value, err := cipher.Decrypt(row.envelope.Nonce, row.envelope.Ciphertext, row.secretID, row.version)
-			if errors.Is(err, ErrVersionNotBound) {
-				// The one place a version written before the binding may be
-				// opened: it is resealed below with the row key in the
-				// associated data, so it is read unbound exactly once.
-				unbound++
-				value, err = cipher.DecryptUnbound(row.envelope.Nonce, row.envelope.Ciphertext,
-					row.secretID, row.version)
-			}
-			if errors.Is(err, ErrCorruptedVersion) {
-				// A row this key cannot take is left where it is and counted as
-				// still owed. Stopping the batch on it would hold the rotation
-				// of every other secret hostage to one damaged row, and the
-				// rotation is what makes a withdrawn key stop opening anything.
-				damaged++
-				continue
-			}
-			if err != nil {
-				return moved, 0, unbound, fmt.Errorf("secret %s version %d: %w", row.secretID, row.version, err)
-			}
-			fresh, err = SealWith(ctx, s.keys, active, value, associated)
-			if err != nil {
-				return moved, 0, unbound, err
-			}
-		} else {
-			fresh, err = row.envelope.Rewrap(ctx, s.keys, active)
-			if errors.Is(err, ErrCorruptedVersion) {
-				damaged++
-				continue
-			}
-			if err != nil {
-				return moved, 0, unbound, fmt.Errorf("secret %s version %d: %w", row.secretID, row.version, err)
-			}
+		fresh, err := row.envelope.Rewrap(ctx, s.keys, active)
+		if errors.Is(err, ErrCorruptedVersion) {
+			// A row this key cannot take is left where it is and counted as
+			// still owed. Stopping the batch on it would hold the rotation of
+			// every other secret hostage to one damaged row, and the rotation is
+			// what makes a withdrawn key stop opening anything.
+			damaged++
+			continue
+		}
+		if err != nil {
+			return moved, 0, fmt.Errorf("secret %s version %d: %w", row.secretID, row.version, err)
 		}
 		if _, err := tx.Exec(ctx, `
 			update secret_versions
 			   set nonce = $3, ciphertext = $4, envelope_version = $5, key_id = $6, wrapped_dek = $7
 			 where secret_id = $1 and version = $2`,
 			row.secretID, row.version, fresh.Nonce, fresh.Ciphertext, fresh.Version, fresh.KeyID, fresh.WrappedDEK); err != nil {
-			return moved, 0, unbound, err
+			return moved, 0, err
 		}
 		moved++
 	}
 	if err := tx.QueryRow(ctx, `
 		select count(*) from secret_versions
 		 where destroyed_at is null
-		   and (envelope_version < $1 or key_id is distinct from $2)`, EnvelopeVersion, active).
+		   and envelope_version >= $1 and key_id is distinct from $2`, EnvelopeVersion, active).
 		Scan(&remaining); err != nil {
-		return moved, 0, unbound, err
+		return moved, 0, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return 0, 0, unbound, err
+		return 0, 0, err
 	}
 	if damaged > 0 {
 		// Reported as an error with what was done in it: the caller has moved
 		// what it could and still has to say that some rows cannot be moved at
 		// all. The pass is not repeated over them for ever, because remaining
 		// counts them and the caller stops when nothing moves.
-		return moved, remaining, unbound, &CorruptedBatch{Count: damaged}
+		return moved, remaining, &CorruptedBatch{Count: damaged}
 	}
-	return moved, remaining, unbound, nil
+	return moved, remaining, nil
 }
 
 // VersionCheck is what opening one stored version said.
@@ -697,76 +656,28 @@ func (s *Store) Verify(ctx context.Context) ([]VersionCheck, error) {
 	return checks, nil
 }
 
-// ErrFirstFormUnreadable means the key offered for the versions of the first
-// form does not open them: it is not the key they were sealed with.
-var ErrFirstFormUnreadable = errors.New("secrets_first_form_unreadable")
+// ErrFirstFormRemoved means a stored version sealed the first way - directly
+// under the installation's key, with no envelope of its own. This release does
+// not open them: every release since the envelope was introduced seals a new
+// version in one and rewraps the old ones as it starts, so a version still in the
+// first form belongs to an installation that never ran such a release.
+var ErrFirstFormRemoved = errors.New("secrets_first_form_removed")
 
-// CheckFirstForm asks whether the given key is the one the versions of the
-// first form in this database were sealed with.
-//
-// An installation being adopted has no sentinel yet - the sentinel is sealed
-// under the key being adopted - so nothing else compares the key with the data
-// it is about to be trusted with. Without this, a restore that brought the
-// database and somebody else's secrets.key was adopted, the record was written,
-// and every secret of the installation became unreadable with only a line in
-// the log to say so.
-//
-// It refuses only on a key that is demonstrably not theirs. A version written
-// before the ciphertext was bound to its row opens unbound, and a damaged
-// version decides nothing: the key may be right and the row wrong, so the walk
-// goes on to the next one. Nothing decided means nothing is said.
-// The key comes in as the primitive over it rather than through the provider,
-// because the one caller asks before the installation has been committed to the
-// key: registering it to ask would be the start already deciding.
-func (s *Store) CheckFirstForm(ctx context.Context, cipher *Cipher, limit int) error {
-	if cipher == nil {
+// RefuseFirstForm refuses an installation that still holds versions of the first
+// form, and says how to bring it forward.
+func (s *Store) RefuseFirstForm(ctx context.Context) error {
+	var count int
+	if err := s.pool.QueryRow(ctx, `
+		select count(*) from secret_versions
+		 where destroyed_at is null and length(ciphertext) > 0 and envelope_version < $1`,
+		EnvelopeVersion).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
 		return nil
 	}
-	rows, err := s.pool.Query(ctx, `
-		select secret_id, version, nonce, ciphertext
-		  from secret_versions
-		 where destroyed_at is null and length(ciphertext) > 0 and envelope_version < $1
-		 order by secret_id, version
-		 limit $2`, EnvelopeVersion, limit)
-	if err != nil {
-		return err
-	}
-	type candidate struct {
-		secretID   string
-		version    int
-		nonce      []byte
-		ciphertext []byte
-	}
-	var candidates []candidate
-	for rows.Next() {
-		var row candidate
-		if err := rows.Scan(&row.secretID, &row.version, &row.nonce, &row.ciphertext); err != nil {
-			rows.Close()
-			return err
-		}
-		candidates = append(candidates, row)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	for _, row := range candidates {
-		_, err := cipher.Decrypt(row.nonce, row.ciphertext, row.secretID, row.version)
-		if errors.Is(err, ErrVersionNotBound) {
-			// Written before the binding existed. The rewrap writes it back
-			// bound; here it only has to say whether the key is the right one.
-			_, err = cipher.DecryptUnbound(row.nonce, row.ciphertext, row.secretID, row.version)
-		}
-		switch {
-		case err == nil:
-			return nil
-		case errors.Is(err, ErrCorruptedVersion):
-			continue
-		default:
-			return fmt.Errorf("%w: %s version %d does not open under the key offered for the first form",
-				ErrFirstFormUnreadable, row.secretID, row.version)
-		}
-	}
-	return nil
+	return fmt.Errorf("%w: %d secret versions are still sealed the first way, which this release no longer opens; "+
+		"start the installation once on 0.64.1 or earlier so they are sealed in envelopes, verify them with "+
+		"`crypto verify-secrets`, take a new backup, then update (docs/runbooks/key-encryption-key.md)",
+		ErrFirstFormRemoved, count)
 }

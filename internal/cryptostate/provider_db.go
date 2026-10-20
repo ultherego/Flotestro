@@ -240,11 +240,6 @@ func (p *DBSealedProvider) Health(ctx context.Context) error {
 	return nil
 }
 
-// LegacyCipher implements secrets.LegacyOpener.
-func (p *DBSealedProvider) LegacyCipher() (*secrets.Cipher, bool) {
-	return p.cipher(secrets.LegacyKeyID)
-}
-
 // Generate implements Provider.
 func (p *DBSealedProvider) Generate(ctx context.Context) (string, error) {
 	suffix := make([]byte, 6)

@@ -146,17 +146,23 @@ rewrap is still working through, and deliberately so - one clears itself at the 
 other never does. The row is left exactly as it was, so a restore of that one secret's version is
 the repair.
 
-A wrong `secrets.key` is refused before any of this. The first start of an adopted installation
-tries the key against the rows of the first form it is about to be trusted with, and stops with
-`secrets_key_unavailable` naming the file when they do not open: nothing is written, nothing is
-resealed, and the right key still opens everything when it is found. The check before it existed
-was the sentinel - which, at an adoption, is sealed under the very key being adopted and so
-proves nothing about it.
+A database that still holds versions of the first form is refused at every start, adopted or
+not, with `secrets_first_form_removed` and the number of versions behind it. The first form is a
+value sealed under `secrets.key` directly, with no envelope of its own; every release from 0.60.0
+to 0.64.1 seals a new version in an envelope and rewraps the old ones as it starts, so a database
+that still holds any belongs to an installation that never ran one of them - or to a backup taken
+before it did. This release no longer opens them, and the way forward is the one below.
 
-`legacy/v1` is the first form - the value sealed under `secrets.key` directly, with no envelope
-of its own. It is counted apart from `legacy`, because a version wrapped under the key named
-`legacy` is already an envelope and a version of the first form is not, and the rewrap has work
-to do on the second even while that key is the active one.
+`legacy/v1` in `crypto status` is the count of those versions, apart from `legacy`: a version
+wrapped under the key named `legacy` is already an envelope, and a version of the first form is
+not. `legacy_envelopes: 0` and `second_form_complete: yes` are what an installation says when
+nothing of the first form is left.
+
+**Restoring a backup that holds the first form.** Restore it on 0.64.1 (or any release from
+0.60.0), let it start once so the rewrap seals every version in an envelope, check with
+`crypto verify-secrets` that every version opens and that `crypto status` says
+`legacy_envelopes: 0`, take a new backup pair, and only then update. Nothing is written by the
+refusal: the database and `secrets.key` are as they were, and 0.64.1 opens them.
 
 ### Rotating the key of the secret store
 
