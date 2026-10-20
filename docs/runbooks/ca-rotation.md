@@ -103,7 +103,8 @@ read on `/certificates` ("covered" means `hosts >= hosts_total` and `hosts_unkno
 
 ## Related codes
 
-`incomplete_coverage` (materialize, retry after change) is the only entry in the error guide
-(`GET /api/v1/errors`). The PKI routes answer with their own problem codes, not in the guide:
+`incomplete_coverage` (materialize) and `reauthentication_required` (approval), both "retry after
+change", are the entries in the error guide (`GET /api/v1/errors`). The PKI routes answer with
+their own problem codes, not in the guide:
 `pki_unavailable` (501), `prepare_failed`, `no_pending_ca`, `hosts_missing_ca`, `activate_failed`,
-`ca_in_use` (all 409), `invalid_body` (400), `reason_required` (400), `reauthentication_required` (401).
+`ca_in_use` (all 409), `invalid_body` (400), `reason_required` (400).

@@ -251,7 +251,7 @@ scales a second control plane with a state volume of its own against one databas
    directory is adopted the way a first start is (see above).
 5. Let the scheduler settle the in-flight work. Nothing is done by hand here:
    - Every 30 seconds `ReclaimExpiredLeases` closes attempts whose `lease_expires_at` has passed
-     (the execution lease is 5 minutes, fixed in `cmd/control-plane`) as `lease_expired`, returns the
+     (the execution lease is 5 minutes, fixed in `internal/app`) as `lease_expired`, returns the
      job to `queued`, and releases its budget tokens. After a restore this catches every job the
      snapshot shows as `leased`, `dispatched` or `running`.
    - A result that arrives for an attempt already closed as `lease_expired` is accepted and

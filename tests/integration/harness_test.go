@@ -18,6 +18,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -211,6 +212,7 @@ func (h *harness) do(method, path string, body any, out any, wantStatus int) {
 	defer response.Body.Close()
 
 	raw, _ := io.ReadAll(response.Body)
+	h.disableIdentityOnCleanup(method, path, body, response.StatusCode, raw)
 	if wantStatus == 0 {
 		return
 	}
@@ -771,4 +773,38 @@ func (h *harness) cancelJob(jobID string) {
 	h.t.Helper()
 	h.do(http.MethodPost, "/api/v1/jobs/"+jobID+"/cancel",
 		map[string]any{"reason": "end of the test"}, nil, 0)
+}
+
+// generatedSubject is the name a suite gives an identity of its own: a random
+// suffix, hex or digits, optionally followed by an index.
+var generatedSubject = regexp.MustCompile(`-[0-9a-f]{6,}(-[0-9]+)?$|-[0-9]{4,}$`)
+
+// disableIdentityOnCleanup disables an identity the test just made, when the test
+// ends. Nothing did: by 20.10 the laboratory held 2638 enabled users from the
+// suites, and every list of identities in the panel paged through them. Only a name
+// that carries a generated suffix is taken, so a fixture that is meant to stay
+// (the second persons of the storage tests) is left to the laboratory.
+func (h *harness) disableIdentityOnCleanup(method, path string, body any, status int, raw []byte) {
+	if method != http.MethodPost || path != "/api/v1/principals" || status != http.StatusCreated {
+		return
+	}
+	request, ok := body.(map[string]any)
+	if !ok {
+		return
+	}
+	subject, _ := request["subject"].(string)
+	if !generatedSubject.MatchString(subject) {
+		return
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(raw, &created) != nil || created.ID == "" {
+		return
+	}
+	h.t.Cleanup(func() {
+		// Whether it is still enabled is not this test's to find out: a test of
+		// disabling has already done it, and the answer then is a refusal.
+		h.do(http.MethodDelete, "/api/v1/principals/"+created.ID+"?reason=the+integration+suite+removes+an+identity+it+made", nil, nil, 0)
+	})
 }

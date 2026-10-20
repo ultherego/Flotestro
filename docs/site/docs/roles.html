@@ -132,8 +132,9 @@
     in the database, so nobody &mdash; no administrator, no script, nobody with
     the database password &mdash; can change what one of them carries; the panel
     refuses an edit with <code class="refusal">built_in_role</code>. A role is a
-    list of permissions, not a rank: the lists overlap, but none of them
-    contains another.</p>
+    list of permissions, not a rank: the lists overlap, and one of them,
+    <code>platform_admin</code>, carries everything the other five do. Between
+    those five none contains another.</p>
 
     <p>An installation adds roles of its own beside them, described under
     <a href="#own-roles">A role of your own</a>. Whichever kind it is, a request

@@ -205,7 +205,8 @@ asks six questions, refusing on the first "no":
 6. the warning about what stops working is printed before anything is removed.
 
 ```fish
-flotestro-control-plane crypto forget-files --dry-run --backup-to /var/backups/flotestro
+flotestro-control-plane crypto forget-files --dry-run --backup-to /var/backups/flotestro \
+    -expect-revision <revision> -confirm-installation <installation-id>
 flotestro-control-plane crypto forget-files --backup-to /var/backups/flotestro \
     -expect-revision <revision> -confirm-installation <installation-id>
 ```
