@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -38,7 +37,18 @@ type Authentication struct {
 	At  time.Time
 	ACR string
 	AMR []string
+	// Source is which door made the session. It is not read off the AMR: an
+	// identity provider that authenticated a person with a password reports
+	// "pwd" too, and a rule about the local password has to be about the
+	// session the local password made. Empty is the provider's.
+	Source string
 }
+
+// The doors a session can be made through.
+const (
+	SourceProvider = "provider"
+	SourcePassword = "password"
+)
 
 // SessionLimits describes the lifetimes of a session.
 type SessionLimits struct {
@@ -90,16 +100,20 @@ func (s *Store) CreateSession(ctx context.Context, tx pgx.Tx, principalID string
 	if amr == nil {
 		amr = []string{}
 	}
+	source := SourceProvider
+	if auth.Source == SourcePassword {
+		source = SourcePassword
+	}
 	const query = `
 		insert into web_sessions (id, token_hash, principal_id, groups, refresh_token, id_token,
 		                          access_expires_at, absolute_expires_at, idle_expires_at,
-		                          user_agent, remote_addr, authenticated_at, acr, amr)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
+		                          user_agent, remote_addr, authenticated_at, acr, amr, auth_source)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
 	if _, err := tx.Exec(ctx, query, sessionID, hash[:], principalID, groups,
 		nullable(tokens.RefreshToken), nullable(tokens.IDToken),
 		nullableTime(tokens.AccessExpiresAt), now.Add(limits.Absolute), now.Add(limits.Idle),
 		nullable(userAgent), nullable(remoteAddr),
-		nullableTime(auth.At), nullable(auth.ACR), amr); err != nil {
+		nullableTime(auth.At), nullable(auth.ACR), amr, source); err != nil {
 		return "", "", fmt.Errorf("saving the session: %w", err)
 	}
 	return sessionID, cookieValue, nil
@@ -115,7 +129,7 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 	const query = `
 		select w.id, w.token_hash, w.principal_id, w.groups,
 		       coalesce(w.refresh_token, ''), coalesce(w.id_token, ''),
-		       w.authenticated_at, coalesce(w.acr, ''), w.amr,
+		       w.authenticated_at, coalesce(w.acr, ''), w.amr, w.auth_source,
 		       p.subject, p.display_name, p.kind, coalesce(p.issuer, ''),
 		       coalesce(c.must_change, false)
 		from web_sessions w
@@ -138,7 +152,7 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 	var authenticatedAt *time.Time
 	err := s.pool.QueryRow(ctx, query, hash[:]).Scan(&session.ID, &storedHash,
 		&session.PrincipalID, &session.Groups, &session.RefreshToken, &session.IDToken,
-		&authenticatedAt, &session.Auth.ACR, &session.Auth.AMR,
+		&authenticatedAt, &session.Auth.ACR, &session.Auth.AMR, &session.Auth.Source,
 		&principal.Subject, &principal.DisplayName, &principal.Kind, &issuer, &mustChange)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, ErrSessionInvalid
@@ -153,9 +167,9 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 		session.Auth.At = *authenticatedAt
 	}
 	principal.ID = session.PrincipalID
-	// Only a session the password made is held to the password's rule: one
-	// from the identity provider never typed it.
-	session.MustChangePassword = mustChange && slices.Contains(session.Auth.AMR, "pwd")
+	// Only a session the password door made is held to the password's rule: one
+	// from the identity provider never typed it, whatever its AMR says.
+	session.MustChangePassword = mustChange && session.Auth.Source == SourcePassword
 
 	bindings, err := s.bindingsOf(ctx, principal.ID)
 	if err != nil {
@@ -192,7 +206,7 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 func (s *Store) RefreshAuthentication(ctx context.Context, sessionID string) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `
 		update web_sessions set authenticated_at = now()
-		where id = $1 and revoked_at is null and 'pwd' = any(amr)`, sessionID)
+		where id = $1 and revoked_at is null and auth_source = 'password'`, sessionID)
 	if err != nil {
 		return false, err
 	}
@@ -290,7 +304,7 @@ func (s *Store) RevokeSessionsOf(ctx context.Context, principalID, reason string
 func (s *Store) RevokePasswordSessionsOf(ctx context.Context, tx pgx.Tx, principalID, exceptSessionID, reason string) (int64, error) {
 	tag, err := tx.Exec(ctx, `
 		update web_sessions set revoked_at = now(), revocation_reason = $2, refresh_token = null
-		where principal_id = $1 and revoked_at is null and 'pwd' = any(amr)
+		where principal_id = $1 and revoked_at is null and auth_source = 'password'
 		  and ($3 = '' or id::text <> $3)`, principalID, nullable(reason), exceptSessionID)
 	if err != nil {
 		return 0, err

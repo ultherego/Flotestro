@@ -143,26 +143,52 @@ func TestAPasswordRenewsOnlyASessionThePasswordMade(t *testing.T) {
 		t.Fatalf("a password session renewing itself: status %d, %s", status, body)
 	}
 
-	// The same session, as the provider would have made it.
+	// The same session, as the provider would have made it: first by a method
+	// the local password has nothing to do with, then by the one that is hardest
+	// to tell apart - a provider that authenticated the person with a password
+	// says "pwd" in the same claim.
+	digest := sha256.Sum256([]byte(b.session))
+	for name, amr := range map[string]string{"an MFA session": "{mfa}", "a provider session that says pwd": "{pwd,otp}"} {
+		if _, err := h.database(context.Background()).Exec(context.Background(), `
+			update web_sessions set amr = $2, acr = 'audit:mfa', auth_source = 'provider',
+			       authenticated_at = now() - interval '1 hour'
+			 where token_hash = $1`, digest[:], amr); err != nil {
+			t.Fatalf("making it %s: %v", name, err)
+		}
+		if status, body := b.call(http.MethodPost, "/auth/password/reauthenticate",
+			map[string]any{"password": password}); status != http.StatusConflict {
+			t.Fatalf("a password renewing %s: status %d, %s", name, status, body)
+		}
+		var stale bool
+		if err := h.database(context.Background()).QueryRow(context.Background(),
+			`select authenticated_at < now() - interval '30 minutes' from web_sessions where token_hash = $1`,
+			digest[:]).Scan(&stale); err != nil {
+			t.Fatal(err)
+		}
+		if !stale {
+			t.Errorf("the refused renewal moved the authentication time of %s", name)
+		}
+	}
+}
+
+// A session of the identity provider is not held to the rule about replacing a
+// password it never typed, whatever its AMR says.
+func TestAProviderSessionIsNotHeldToThePasswordRule(t *testing.T) {
+	h := newHarness(t)
+	_, subject, password := passwordIdentity(h, true)
+	b := signInByPassword(h, subject, password)
+
+	if status, _ := b.call(http.MethodGet, "/api/v1/hosts", nil); status != http.StatusForbidden {
+		t.Fatalf("the password session before the change answers %d, expected 403", status)
+	}
 	digest := sha256.Sum256([]byte(b.session))
 	if _, err := h.database(context.Background()).Exec(context.Background(), `
-		update web_sessions set amr = '{mfa}', acr = 'audit:mfa',
-		       authenticated_at = now() - interval '1 hour'
+		update web_sessions set amr = '{pwd,otp}', auth_source = 'provider'
 		 where token_hash = $1`, digest[:]); err != nil {
-		t.Fatalf("making it a provider session: %v", err)
-	}
-	if status, body := b.call(http.MethodPost, "/auth/password/reauthenticate",
-		map[string]any{"password": password}); status != http.StatusConflict {
-		t.Fatalf("a password renewing a provider session: status %d, %s", status, body)
-	}
-	var stale bool
-	if err := h.database(context.Background()).QueryRow(context.Background(),
-		`select authenticated_at < now() - interval '30 minutes' from web_sessions where token_hash = $1`,
-		digest[:]).Scan(&stale); err != nil {
 		t.Fatal(err)
 	}
-	if !stale {
-		t.Error("the refused renewal moved the authentication time of a provider session")
+	if status, body := b.call(http.MethodGet, "/api/v1/hosts", nil); status != http.StatusOK {
+		t.Fatalf("a provider session that says pwd answers %d, %s", status, truncate([]byte(body), 200))
 	}
 }
 
