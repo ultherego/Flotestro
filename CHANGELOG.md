@@ -22,6 +22,14 @@ day the tag was published.
   authentication time of a provider session over its old ACR; it now answers
   `409 reauthentication_not_by_password`, and only a session the password made
   is renewed.
+- **A session of the identity provider is no longer mistaken for one the password
+  made.** The rules about the local password read the session's AMR for `pwd`,
+  and a provider that authenticated a person with a password reports that too:
+  such a session could be renewed by typing the local password over the ACR the
+  provider gave it, and was held to the rule about replacing a password it never
+  typed. The door that made a session is now recorded (`auth_source`), and both
+  rules read it. A session that is not known to be the password door's is the
+  provider's.
 - **A password that was reset or removed ends the sessions it opened.** When
   an administrator sets or takes away a password, the identity's password
   sessions end with it; a person who changes their own password ends their

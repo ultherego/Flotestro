@@ -58,7 +58,7 @@ func (s *Server) handlePasswordSignIn(w http.ResponseWriter, r *http.Request) {
 	// about later.
 	_, cookieValue, err := s.authz.CreateSession(r.Context(), tx, signIn.Principal.ID,
 		nil, authz.SessionTokens{}, authz.Authentication{
-			At: time.Now(), AMR: []string{"pwd"},
+			At: time.Now(), AMR: []string{"pwd"}, Source: authz.SourcePassword,
 		}, s.sessionLimits, r.UserAgent(), r.RemoteAddr)
 	if err != nil {
 		s.fail(w, err)
