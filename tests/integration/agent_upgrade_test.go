@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -39,7 +40,33 @@ func TestAnAgentUpgradeWithAWrongPackageDigestIsRefusedAndTheAgentKeepsRunning(t
 	h := newHarness(t)
 	// A Debian-family host: the digest of a .deb is what its package manager
 	// hands the helper, so the comparison is reachable here.
-	host := h.hostByFamily("debian")
+	wrongDigestIsRefused(t, h, h.hostByFamily("debian"))
+}
+
+// TestTheCandidateAgentRefusesAWrongPackageDigestToo is the same refusal made by
+// the agent being released. agent-ubuntu runs the candidate while agent-debian
+// is kept a version behind, so the first test measures the previous release's
+// comparison and this one measures the one about to ship. A host that is not on
+// the candidate means the laboratory is not prepared, and says so rather than
+// measuring the old agent a second time under a new name.
+func TestTheCandidateAgentRefusesAWrongPackageDigestToo(t *testing.T) {
+	defer replacingAgent()()
+	h := newHarness(t)
+	host := h.hostByName("agent-ubuntu")
+	if candidate := os.Getenv("FLOTESTRO_TEST_AGENT_VERSION"); candidate != "" {
+		var running agentHostView
+		h.get("/api/v1/hosts/"+host.ID, &running)
+		if running.AgentVersion != candidate {
+			t.Fatalf("agent-ubuntu runs %q, the candidate is %q: the laboratory is not prepared",
+				running.AgentVersion, candidate)
+		}
+	}
+	wrongDigestIsRefused(t, h, host)
+}
+
+func wrongDigestIsRefused(t *testing.T, h *harness, host hostView) {
+	t.Helper()
+	t.Logf("agent upgrade with a wrong digest on %s", host.Hostname)
 
 	var before agentHostView
 	h.get("/api/v1/hosts/"+host.ID, &before)
