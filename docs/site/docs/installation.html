@@ -345,7 +345,7 @@ curl -fsS http://127.0.0.1:8080/readyz</code></pre>
         <tr><td>Webhook HMAC key</td><td><code>FLOTESTRO_WEBHOOK_SECRET_FILE</code></td><td><code>/run/secrets/webhook_secret</code></td><td>a bind mount you add</td></tr>
         <tr><td>NVD API key</td><td><code>FLOTESTRO_VULN_NVD_KEY_FILE</code></td><td><code>/run/secrets/nvd_key</code></td><td>a bind mount you add</td></tr>
         <tr><td>Key encryption key</td><td><code>FLOTESTRO_KEK_FILE</code> (already a path)</td><td><code>/run/flotestro/kek</code></td><td><code>init</code>, from <code>./secrets/kek</code></td></tr>
-        <tr><td>Key encryption key a rotation moves to</td><td>named on the command line</td><td><code>/run/flotestro/kek-next</code></td><td><code>init</code>, from <code>./secrets/kek-next</code></td></tr>
+        <tr><td>Key encryption key a rotation moves to</td><td><code>FLOTESTRO_KEK_NEXT_FILE</code> / <code>-kek-next-file</code>; named on the command line for <code>crypto rewrap-kek</code></td><td><code>/run/flotestro/kek-next</code></td><td><code>init</code>, from <code>./secrets/kek-next</code></td></tr>
         <tr><td>FreeIPA keytab</td><td><code>FLOTESTRO_IPA_KEYTAB</code> (already a path)</td><td><code>/run/secrets/ipa.keytab</code></td><td>a bind mount you add</td></tr>
       </tbody>
     </table>
@@ -486,12 +486,9 @@ curl -fsS http://127.0.0.1:8080/readyz</code></pre>
     the state directory then holds nothing that cannot be made again (see
     <a href="#kek">the key encryption key</a>).</p>
 
-    <p class="filename">Once, before the first backup</p>
+    <p class="filename">The backup, with the control plane stopped - or at least with the CA and key rotation held</p>
 <pre><code># ./backups is made and given to the right account by the init service.
 docker compose --profile tools run --rm admin-tools backup</code></pre>
-
-    <p class="filename">The backup itself, with the control plane stopped - or at least with the CA and key rotation held</p>
-<pre><code>docker compose --profile tools run --rm admin-tools backup</code></pre>
 
     <p>It writes <code>./backups/&lt;backup-id&gt;/</code> and nothing outside
     it:</p>
@@ -647,7 +644,7 @@ podman start flotestro_control-plane_1</code></pre>
     <h3>Refusals</h3>
 
     <p>A start with the keys in the database refuses, and changes nothing, in
-    five ways. A wrong key is not a rollback situation: mount the right one.</p>
+    seven ways. A wrong key is not a rollback situation: mount the right one.</p>
 
     <div class="table-scroll">
     <table>

@@ -205,7 +205,7 @@ code `lease_expired`.
 
 ## Related codes
 
-The error guide has no relay entries; a relay incident shows on jobs as `lease_expired`,
+A relay incident shows on jobs as `lease_expired`,
 `superseded_by_result` (reconcile) and `expired` (dispatch). Relay-side codes come from
 `flotestro-relayctl diagnose` (`relay_buffer_high`, `relay_buffer_dropping`,
 `relay_upstream_unreached`, `relay_upstream_stale`, `state_dir_low_space`, `state_dir_unwritable`,

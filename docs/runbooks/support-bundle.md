@@ -100,7 +100,7 @@ support request is closed - it holds the journal of a service and the addresses 
 
 ## Codes
 
-`bundle_private_key_found`, `bundle_bearer_token_found`, `bundle_password_in_url_found`,
+`bundle_private_key_found`, `bundle_api_token_found`, `bundle_bearer_token_found`, `bundle_password_in_url_found`,
 `bundle_enrollment_token_found` refuse the bundle outright. `bundle_file_unparsable` withholds
 one file. `bundle_field_not_collected`, `bundle_field_redacted` and `bundle_field_pattern_only`
 say in the manifest which layer kept a field out: never read at all, dropped because it was

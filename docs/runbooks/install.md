@@ -177,5 +177,5 @@ itself is "Removing an installation" in `docker/README.md`.
 `installation_state_mismatch` and `gateway_id_in_use` refuse a control plane pointed at a
 database that belongs to another installation, or a second instance claiming a gateway
 identity that is already held. `machine_already_enrolled` refuses an enrollment on a host
-that still holds an identity. The enrollment refusals and the agent's own codes are in the
-error guide (`GET /api/v1/errors`).
+that still holds an identity. It is written by the agent (`internal/agent/enroll.go`) and is not
+in the error guide (`GET /api/v1/errors`).

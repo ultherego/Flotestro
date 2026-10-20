@@ -36,4 +36,4 @@ route or command for a step, the runbook says so rather than describing one.
   and its credential file, the Ansible alternative, what a clone does to the fleet.
 
 The checks a change has to pass before it reaches `main`, what each one proves and
-what to do when one of them fails, are in [the continuous integration reference](../ci.md).
+what to do when one of them fails, are the continuous integration jobs of the repository.
