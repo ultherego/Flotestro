@@ -24,6 +24,9 @@ route or command for a step, the runbook says so rather than describing one.
   raising a budget under `If-Match`; pausing and cancelling a campaign.
 - [Relay buffer full and relay disk full](relay-disk-full.md): the in-memory buffer and
   `buffer_max_bytes`, what is dropped, `flotestro-relayctl`, re-enrollment of a relay.
+- [Taking a deployed certificate off a host](certificate-removal.md): the manual procedure for
+  what the product has no operation for - find the deployment, remove the reference and the
+  files, stop the panel watching the path, verify, and what stays behind.
 - [Samples stop arriving, or a chart has a hole](metrics-gap.md): the agent's spool, a
   delivery refused as too late, a rollup that has stopped, the lease of the alert
   evaluator, the daily partitions of the raw samples.
