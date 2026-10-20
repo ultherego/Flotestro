@@ -240,4 +240,4 @@ installation without a backup of those files.
 ## Codes
 
 `kek_file_missing`, `kek_file_unsafe`, `kek_file_malformed`, `kek_mismatch`, `kek_rotated`,
-`wrapped_key_installation_mismatch`, `wrapped_key_unreadable`, `secrets_key_unavailable`.
+`wrapped_key_installation_mismatch`, `wrapped_key_unreadable`, `secrets_key_unavailable`, `secrets_first_form_removed`.

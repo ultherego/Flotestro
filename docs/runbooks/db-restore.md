@@ -48,8 +48,8 @@ the host that runs the panel needs no PostgreSQL client of its own.
 - `GET /api/v1/status`, block `crypto`: `ok` with `installation_id`, `active_key_id`, `issuer_id`,
   `keys` and `pending_rewrap`; the block repeats the self-test of the start on every read.
 - A start that stops with `the control plane refuses to start: the cryptographic state of the
-  installation is not usable` and a `code` of `secrets_key_unavailable`, `issuer_key_unavailable`,
-  `pki_state_mismatch` or `crypto_state_ambiguous`: see "Cryptographic state at start" below.
+  installation is not usable` and a `code` of `secrets_key_unavailable`, `secrets_first_form_removed`,
+  `issuer_key_unavailable`, `pki_state_mismatch` or `crypto_state_ambiguous`: see "Cryptographic state at start" below.
 - The log line "the database schema is current" at start; `GET /api/v1/settings` (permission
   `settings.read`) reports the highest applied row of `schema_migrations`.
 - After a restore to an older point: attempts closed as `lease_expired`, results answered with
@@ -72,6 +72,7 @@ directory against it. What it finds decides what happens:
 | CA certificate present, `ca.key` missing | Stops: `issuer_key_unavailable`. Nothing is generated. |
 | `ca.key` without `ca.pem`, a key that does not match the certificate, a CA other than the recorded one, an unreadable file | Stops: `pki_state_mismatch`. |
 | No row, database with secrets, no `secrets.key` | Stops: `secrets_key_unavailable`. |
+| A database with secret versions still sealed the first way (adopted or not) | Stops: `secrets_first_form_removed`, with the count. Nothing is written. Run 0.64.1 over it first (below). |
 | No row, database with hosts, no CA at all; or several keys under `keys/` and nothing says which is active | Stops: `crypto_state_ambiguous`. |
 | The state directory names one installation and the database another, or one names none while the other has a history | Stops: `installation_state_mismatch`. The log names which of the two is the stranger. |
 | A second panel of the same installation starting at the same time | Waits on the lock, then reads the row the first one wrote. Two panels never make two installations. |
@@ -82,6 +83,9 @@ guide (`GET /api/v1/errors`, stage `startup`).
 
 What to do, by code:
 
+- `secrets_first_form_removed`: the database holds versions of the first form. Start it once on
+  0.64.1, check `crypto status` for `legacy_envelopes: 0` and `crypto verify-secrets`, take a new
+  backup pair, then update; nothing was written by the refusal.
 - `secrets_key_unavailable`: put the key back from the backup of the state directory - the
   file named in the reason (`keys/<key-id>.key`, or `secrets.key` for an installation from
   before the upgrade), owned by the service user, mode 0600. Do not generate a key: a fresh
