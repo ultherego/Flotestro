@@ -41,6 +41,13 @@ day the tag was published.
   with a trusted key refuses the unsigned acknowledgements of an older panel and
   keeps offering its results.
 
+### Changed
+
+- **The setup meter reads full when only warnings are left.** A warning is
+  advice and can never be finished, but it was counted among the steps, so a
+  list with every required step done still read "5 of 6". The meter and the
+  headline now count the steps that can be done.
+
 ## [0.64.1] - 2026-10-19
 
 ### Added

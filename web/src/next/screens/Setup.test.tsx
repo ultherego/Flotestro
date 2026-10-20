@@ -123,6 +123,25 @@ describe("where a step leads", () => {
   });
 });
 
+describe("a complete list with a warning", () => {
+  it("reads as full: the warning is advice, so the meter does not count it as a step left", async () => {
+    Object.assign(answers, base({
+      "/api/v1/setup": checklist({
+        steps: [
+          step({ key: "identity_provider", state: "done", detail: "Issuer https://id.example.org.", path: "/settings" }),
+          step({ key: "hosts", state: "done", detail: "Hosts are enrolled.", path: "/hosts/new" }),
+          step({ key: "installation_keys", state: "warning", detail: "The keys are files.", path: "/status" }),
+        ],
+        done: 2, total: 3, complete: true,
+      }),
+    }));
+    draw();
+    await waitFor(() => expect(screen.getByText("Every required step is done")).toBeInTheDocument());
+    expect(screen.getByText("2 of 2")).toBeInTheDocument();
+    expect(screen.queryByText("2 of 3")).toBeNull();
+  });
+});
+
 describe("the first run", () => {
   it("draws nothing it has not read yet, and never the word Loading", () => {
     Object.assign(answers, base());

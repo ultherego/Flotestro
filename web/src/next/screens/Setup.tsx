@@ -69,6 +69,9 @@ export function Setup() {
 
   const list = checklist.data;
   const current = list ? firstUndone(list.steps) : undefined;
+  // A warning is counted by the panel and never finished, and it is advice: the
+  // meter counts the steps that can be done, so a complete list reads as full.
+  const required = list ? list.total - list.steps.filter((step) => step.state === "warning").length : 0;
   // The words for every step and every state. The server names the state
   // and the path; the words are shared with the dashboard card so one
   // step is named one way wherever it is read.
@@ -169,15 +172,15 @@ export function Setup() {
       <Card
         title={list.complete
           ? t("Every required step is done")
-          : t("{done} of {total} required steps done", { done: list.done, total: list.total })}
+          : t("{done} of {total} required steps done", { done: list.done, total: required })}
         note={list.complete
           ? t("The warnings and the optional steps below are advice, not blockers.")
           : t("The first step left is marked; the optional ones can wait.")}
       >
         <Meter
-          share={list.done / Math.max(list.total, 1)}
+          share={list.done / Math.max(required, 1)}
           tone={list.complete ? "ok" : "info"}
-          text={t("{done} of {total}", { done: list.done, total: list.total })}
+          text={t("{done} of {total}", { done: list.done, total: required })}
         />
       </Card>
 
