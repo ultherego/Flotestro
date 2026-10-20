@@ -243,6 +243,13 @@ var fullRunStages = []string{
 	// another day that answered and was registered. A report without this stage
 	// is a report that never established what it tested.
 	"identity",
+	// crypto runs the two trials of the installation's keys that touch nothing
+	// of the laboratory's own: a copy of an installation from before the
+	// envelope adopted and migrated by the candidate, and the backup pair of a
+	// key-in-the-database installation restored into a database of its own. Both
+	// had been measured by hand on different days; a gate that never asked them
+	// reported a product whose secrets nobody had tried to bring back.
+	"crypto",
 	"fixtures", "preflight", stageIntegration, stagePlaywright,
 	// unchanged asks the same question as tree, after everything has been built
 	// from the tree rather than before. tree proves what the working tree held
