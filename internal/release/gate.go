@@ -250,6 +250,10 @@ var fullRunStages = []string{
 	// had been measured by hand on different days; a gate that never asked them
 	// reported a product whose secrets nobody had tried to bring back.
 	"crypto",
+	// first-run tries what a customer gets on the first day - the defaults the
+	// laboratory's own panel does not run, because its suites need the explicit
+	// exception to the step-up default - on an installation of its own.
+	"first-run",
 	"fixtures", "preflight", stageIntegration, stagePlaywright,
 	// unchanged asks the same question as tree, after everything has been built
 	// from the tree rather than before. tree proves what the working tree held

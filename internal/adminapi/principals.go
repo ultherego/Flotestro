@@ -1113,7 +1113,18 @@ func (s *Server) handleCreateGroupMapping(w http.ResponseWriter, r *http.Request
 	if request.Issuer == "" && s.oidc != nil {
 		request.Issuer = s.oidc.Issuer()
 	}
-	if _, ok := s.resolveRole(w, r, authz.Role(request.Role)); !ok {
+	carried, ok := s.resolveRole(w, r, authz.Role(request.Role))
+	if !ok {
+		return
+	}
+	// A mapping hands the role to everybody the group holds, so it is a grant like
+	// any other and is held to the same rule: nobody gives a role wider than the one
+	// they hold. It was asked only whether the role existed, and an identity whose
+	// role carried principal.manage and nothing else could map a group to
+	// platform_admin.
+	placement := authz.PlacementWithin(request.Site, request.Environment, request.Owners, request.Tags)
+	if err := mayGrant(actor, authz.Role(request.Role), carried, placement); err != nil {
+		s.refuseEscalation(w, r, actor, "group_mapping.create", request.GroupName, err)
 		return
 	}
 
@@ -1136,9 +1147,7 @@ func (s *Server) handleCreateGroupMapping(w http.ResponseWriter, r *http.Request
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
 	mapping, err := s.authz.CreateGroupMapping(r.Context(), tx, request.Issuer, request.GroupName,
-		authz.Role(request.Role),
-		authz.PlacementWithin(request.Site, request.Environment, request.Owners, request.Tags),
-		actor.Subject)
+		authz.Role(request.Role), placement, actor.Subject)
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_mapping", err.Error())
 		return

@@ -901,7 +901,7 @@ func (r *Runtime) Rewrap(ctx context.Context) {
 				unreadable = corrupted.Count
 			}
 			if moved == 0 {
-				r.noteUnreadable(unreadable)
+				r.noteUnreadable(r.mostUnreadable(ctx, store, unreadable))
 				return
 			}
 			// A batch that moved something and still reported a problem - rows
@@ -913,10 +913,33 @@ func (r *Runtime) Rewrap(ctx context.Context) {
 			break
 		}
 	}
-	r.noteUnreadable(unreadable)
+	r.noteUnreadable(r.mostUnreadable(ctx, store, unreadable))
 	if total > 0 {
 		r.log.Info("the secret store was rewrapped onto the active key", "versions", total)
 	}
+}
+
+// mostUnreadable is the larger of what the rewrap found and what opening every
+// live version finds. The rewrap reads the data key of a version and nothing
+// else, so a value whose own bytes are damaged but whose key is fine - on the
+// active key already, where there is nothing to move - passes it unseen; only
+// opening the value says so. The cost is one decryption per live version at each
+// pass, which a secret store of this size pays without noticing.
+func (r *Runtime) mostUnreadable(ctx context.Context, store *secrets.Store, found int) int {
+	checks, err := store.Verify(ctx)
+	if err != nil {
+		return found
+	}
+	opened := 0
+	for _, check := range checks {
+		if check.Err != nil && !check.Destroyed {
+			opened++
+		}
+	}
+	if opened > found {
+		return opened
+	}
+	return found
 }
 
 // noteUnreadable records how many live versions the last full pass of the

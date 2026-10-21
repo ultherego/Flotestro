@@ -125,7 +125,7 @@ TOKEN=$(docker compose exec -T control-plane cat /var/lib/flotestro/bootstrap-to
 
 <div class="note">
   <p class="note__title">Token to nie sesja</p>
-  <p>Oba poświadczenia sięgają tych samych uprawnień, ale sesja przeglądarki jest ograniczona w czasie, nosi nagłówek CSRF i da się ją uwierzytelnić ponownie; tokena nie. Ma to znaczenie przy tych kilku operacjach, które wymagają świeżego uwierzytelnienia, a <code>FLOTESTRO_STEPUP_TOKENS=refuse</code> jest sposobem, w jaki instalacja mówi, że token nigdy nie może ich zamówić. Zob. <a href="api.html#stepup">step-up</a>.</p>
+  <p>Oba poświadczenia sięgają tych samych uprawnień, ale sesja przeglądarki jest ograniczona w czasie, nosi nagłówek CSRF i da się ją uwierzytelnić ponownie; tokena nie. Ma to znaczenie przy tych kilku operacjach, które wymagają świeżego uwierzytelnienia, a <code>FLOTESTRO_STEPUP_TOKENS=refuse</code> - domyślne - jest sposobem, w jaki instalacja mówi, że token nie może ich zamówić (<code>allow</code> to wybór instalacji, a ślad audytu mówi o tym przy każdej takiej zmianie). Zob. <a href="api.html#stepup">step-up</a>.</p>
 </div>
 
 <h2 id="first">Pierwsze wywołanie i kształt listy</h2>

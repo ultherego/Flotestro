@@ -402,6 +402,18 @@ services:
       # against it, and the panel refuses such an enrollment rather than
       # issuing a certificate that would not match. Change it for a real fleet.
       FLOTESTRO_ADVERTISE: ${FLOTESTRO_ADVERTISE:-127.0.0.1}
+      # The operations that change who may do what - an identity, a role, a secret,
+      # a CA - need fresh authentication, which a browser session can give and an
+      # API token cannot. refuse (the default) turns a token away from them, apart
+      # from the handover: the bootstrap token may make the first administrator,
+      # their password and the first group mapping, until somebody else has signed
+      # in with the administrator role. allow lets tokens carry them out, and every
+      # such change is marked in the audit trail as made without fresh authentication.
+      FLOTESTRO_STEPUP_TOKENS: ${FLOTESTRO_STEPUP_TOKENS:-refuse}
+      # How recent the authentication of a session has to be for those operations,
+      # and, if the installation names one, the authentication level it has to carry.
+      FLOTESTRO_STEPUP_MAX_AGE: ${FLOTESTRO_STEPUP_MAX_AGE:-5m}
+      FLOTESTRO_STEPUP_ACR: ${FLOTESTRO_STEPUP_ACR:-}
       # The address the operator sees. The OIDC redirect and the Secure flag
       # of the session cookies follow from it.
       FLOTESTRO_PUBLIC_URL: ${FLOTESTRO_PUBLIC_URL:-http://localhost:8080}
