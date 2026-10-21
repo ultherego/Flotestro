@@ -8,6 +8,9 @@ day the tag was published.
 
 ### Security
 
+- **Built with Go 1.26.10.** The standard library of 1.26.9 carried GO-2026-6809 (`crypto/x509` did not
+  distrust compromised intermediate certificates), which the identity store reaches when it verifies a
+  certificate chain; 1.26.10 has the fix.
 - **Tokens are turned away from the operations that need fresh authentication, by
   default.** `FLOTESTRO_STEPUP_TOKENS` now defaults to `refuse` (it was `allow`): an API
   token, whatever role it carries, can no longer define a role, make an identity, set a
