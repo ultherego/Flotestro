@@ -511,14 +511,12 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	// not stop the acceptance of tasks.
 	inventory := newCollector()
 	go func() {
-		collectScope := func(ctx context.Context, modules []string) (Facts, error) {
-			if len(modules) == 0 {
-				return collect(ctx)
-			}
-			// A partial refresh enters the previous picture: a module outside the
-			// scope is to stay as it was and not disappear.
-			return CollectModules(ctx, localAddress, currentFacts(), modules)
-		}
+		collectScope := scopedCollection(opts.CollectFacts != nil, collect,
+			func(ctx context.Context, modules []string) (Facts, error) {
+				// A partial refresh enters the previous picture: a module outside the
+				// scope is to stay as it was and not disappear.
+				return CollectModules(ctx, localAddress, currentFacts(), modules)
+			})
 		accept := func(fresh Facts, modules []string) (Refresh, error) {
 			previous := ""
 			if rev, _, err := currentFacts().Revision(); err == nil {
@@ -1045,4 +1043,18 @@ func executeTask(ctx context.Context, executor *TaskExecutor, task *agentv1.Task
 func valueDigest(value []byte) string {
 	sum := sha256.Sum256(value)
 	return hex.EncodeToString(sum[:])
+}
+
+// scopedCollection chooses how a collection limited to some modules is made.
+// Substituted facts stand for the whole host: a partial read of the machine the
+// process runs on would put its real hostname and kernel into a picture that is
+// meant to be someone else's.
+func scopedCollection(substituted bool, whole func(context.Context) (Facts, error),
+	partial func(context.Context, []string) (Facts, error)) func(context.Context, []string) (Facts, error) {
+	return func(ctx context.Context, modules []string) (Facts, error) {
+		if len(modules) == 0 || substituted {
+			return whole(ctx)
+		}
+		return partial(ctx, modules)
+	}
 }
