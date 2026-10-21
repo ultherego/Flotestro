@@ -130,7 +130,7 @@ TOKEN=$(docker compose exec -T control-plane cat /var/lib/flotestro/bootstrap-to
 
 <div class="note">
   <p class="note__title">A token is not a session</p>
-  <p>Both credentials reach the same permissions, but a browser session is bounded, carries a CSRF header and can be re-authenticated; a token cannot. That matters for the few operations that demand fresh authentication, and <code>FLOTESTRO_STEPUP_TOKENS=refuse</code> is how an installation says a token may never order them. See <a href="api.html#stepup">step-up</a>.</p>
+  <p>Both credentials reach the same permissions, but a browser session is bounded, carries a CSRF header and can be re-authenticated; a token cannot. That matters for the few operations that demand fresh authentication, and <code>FLOTESTRO_STEPUP_TOKENS=refuse</code> - the default - is how an installation says a token may not order them (<code>allow</code> is the installation choosing otherwise, and the audit trail says so on every such change). See <a href="api.html#stepup">step-up</a>.</p>
 </div>
 
 <h2 id="first">The first call, and the shape of a list</h2>
