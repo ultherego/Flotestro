@@ -104,19 +104,50 @@ func (s *Store) CreateSession(ctx context.Context, tx pgx.Tx, principalID string
 	if auth.Source == SourcePassword {
 		source = SourcePassword
 	}
+	sealedRefresh, err := s.sealed(ctx, sessionID, "refresh", tokens.RefreshToken)
+	if err != nil {
+		return "", "", err
+	}
+	sealedID, err := s.sealed(ctx, sessionID, "id", tokens.IDToken)
+	if err != nil {
+		return "", "", err
+	}
 	const query = `
 		insert into web_sessions (id, token_hash, principal_id, groups, refresh_token, id_token,
 		                          access_expires_at, absolute_expires_at, idle_expires_at,
 		                          user_agent, remote_addr, authenticated_at, acr, amr, auth_source)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
 	if _, err := tx.Exec(ctx, query, sessionID, hash[:], principalID, groups,
-		nullable(tokens.RefreshToken), nullable(tokens.IDToken),
+		nullable(sealedRefresh), nullable(sealedID),
 		nullableTime(tokens.AccessExpiresAt), now.Add(limits.Absolute), now.Add(limits.Idle),
 		nullable(userAgent), nullable(remoteAddr),
 		nullableTime(auth.At), nullable(auth.ACR), amr, source); err != nil {
 		return "", "", fmt.Errorf("saving the session: %w", err)
 	}
 	return sessionID, cookieValue, nil
+}
+
+// sealed answers the stored form of a provider token of a session; with no sealer
+// connected the token is stored as it came.
+func (s *Store) sealed(ctx context.Context, sessionID, kind, token string) (string, error) {
+	if s.sealer == nil {
+		return token, nil
+	}
+	return s.sealer.Seal(ctx, sessionID, kind, token)
+}
+
+// unsealed is its other half. A token that does not open is not handed on: the
+// session simply has none, which is what a provider that has to be asked again
+// looks like, and the person signs in once more.
+func (s *Store) unsealed(ctx context.Context, sessionID, kind, stored string) string {
+	if s.sealer == nil || stored == "" {
+		return stored
+	}
+	token, err := s.sealer.Open(ctx, sessionID, kind, stored)
+	if err != nil {
+		return ""
+	}
+	return token
 }
 
 // AuthenticateSession turns a cookie into an identity together with its roles.
@@ -163,6 +194,8 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 	if subtle.ConstantTimeCompare(storedHash, hash[:]) != 1 {
 		return nil, nil, ErrSessionInvalid
 	}
+	session.RefreshToken = s.unsealed(ctx, session.ID, "refresh", session.RefreshToken)
+	session.IDToken = s.unsealed(ctx, session.ID, "id", session.IDToken)
 	if authenticatedAt != nil {
 		session.Auth.At = *authenticatedAt
 	}
@@ -353,6 +386,7 @@ func (s *Store) StaleGroupSnapshots(ctx context.Context, before time.Time, limit
 			&session.Groups, &session.RefreshToken); err != nil {
 			return nil, err
 		}
+		session.RefreshToken = s.unsealed(ctx, session.ID, "refresh", session.RefreshToken)
 		sessions = append(sessions, session)
 	}
 	return sessions, rows.Err()
@@ -365,7 +399,15 @@ func (s *Store) RecordGroupRefresh(ctx context.Context, sessionID string,
 	if groups == nil {
 		groups = []string{}
 	}
-	_, err := s.pool.Exec(ctx, `
+	refresh, err := s.sealed(ctx, sessionID, "refresh", tokens.RefreshToken)
+	if err != nil {
+		return err
+	}
+	identity, err := s.sealed(ctx, sessionID, "id", tokens.IDToken)
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `
 		update web_sessions set
 			groups = $2,
 			refresh_token = coalesce(nullif($3, ''), refresh_token),
@@ -373,7 +415,7 @@ func (s *Store) RecordGroupRefresh(ctx context.Context, sessionID string,
 			access_expires_at = coalesce($5, access_expires_at),
 			groups_refreshed_at = now()
 		where id = $1 and revoked_at is null`,
-		sessionID, groups, tokens.RefreshToken, tokens.IDToken, nullableTime(tokens.AccessExpiresAt))
+		sessionID, groups, refresh, identity, nullableTime(tokens.AccessExpiresAt))
 	return err
 }
 
@@ -387,13 +429,21 @@ func (s *Store) RecordGroupRefresh(ctx context.Context, sessionID string,
 // removed from an administrative group kept it for as long as the session
 // lived.
 func (s *Store) RecordTokens(ctx context.Context, sessionID string, tokens SessionTokens) error {
-	_, err := s.pool.Exec(ctx, `
+	refresh, err := s.sealed(ctx, sessionID, "refresh", tokens.RefreshToken)
+	if err != nil {
+		return err
+	}
+	identity, err := s.sealed(ctx, sessionID, "id", tokens.IDToken)
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `
 		update web_sessions set
 			refresh_token = coalesce(nullif($2, ''), refresh_token),
 			id_token = coalesce(nullif($3, ''), id_token),
 			access_expires_at = coalesce($4, access_expires_at)
 		where id = $1 and revoked_at is null`,
-		sessionID, tokens.RefreshToken, tokens.IDToken, nullableTime(tokens.AccessExpiresAt))
+		sessionID, refresh, identity, nullableTime(tokens.AccessExpiresAt))
 	return err
 }
 

@@ -332,7 +332,7 @@ func Run() error {
 		config.Env("FLOTESTRO_CAMPAIGN_PREVIEW", ""),
 		"how a campaign order is held to its preview: observe, prefer (the default) or enforce")
 	stepUpTokens := flag.String("stepup-tokens",
-		config.Env("FLOTESTRO_STEPUP_TOKENS", "allow"),
+		config.Env("FLOTESTRO_STEPUP_TOKENS", "refuse"),
 		"whether an API token may carry out the operations of the greatest impact: allow or refuse")
 	// The rollout stage of the root helper's signed capability on the panel's
 	// side: observe and prefer dispatch to every host, prefer reports a host
@@ -776,6 +776,9 @@ func Run() error {
 	tokenStore := enrollment.NewTokenStore(pool)
 	relayStore := relays.NewStore(pool)
 	authzStore := authz.NewStore(pool)
+	// What the identity provider hands a session is a credential at the provider:
+	// it is sealed under the installation's key and not kept as it came.
+	authzStore.SetTokenSealer(authz.NewTokenSealer(keyProvider))
 	recorder := audit.NewRecorder(pool, log)
 	clientVerifier = gateway.NewClientVerifier(trust.Pool, hostStore, recorder, log)
 	registry := gateway.NewRegistry()

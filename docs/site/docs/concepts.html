@@ -252,8 +252,8 @@
     <code>destructive</code> operation: the session has to be younger than
     <code>FLOTESTRO_STEPUP_MAX_AGE</code> (5m) and, if the installation set one,
     at <code>FLOTESTRO_STEPUP_ACR</code>. With
-    <code>FLOTESTRO_STEPUP_TOKENS=refuse</code>, an API token cannot carry such
-    an operation at all and gets
+    <code>FLOTESTRO_STEPUP_TOKENS=refuse</code> - the default - an API token cannot
+    carry such an operation at all and gets
     <code class="refusal">reauthentication_required</code>. On the step-up routes
     - the CA rotation, the lifecycle of a host, the monitoring settings, the
     notification channels - the reason is not optional: fewer than eight

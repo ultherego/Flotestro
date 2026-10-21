@@ -8,6 +8,27 @@ day the tag was published.
 
 ### Security
 
+- **Tokens are turned away from the operations that need fresh authentication, by
+  default.** `FLOTESTRO_STEPUP_TOKENS` now defaults to `refuse` (it was `allow`): an API
+  token, whatever role it carries, can no longer define a role, make an identity, set a
+  password, handle a secret or rotate a CA, because nobody stands behind it to authenticate.
+  What has to work on a first day still does: the **bootstrap token** may make the first
+  administrator, give that person a password or a token, and map the first group, until
+  somebody else has signed in with the administrator role; after that it is refused like any
+  other token. An installation that chooses `allow` keeps today's behaviour, and every change
+  made that way is marked in the audit trail (`step_up_waived`, `policy: allow`). **To keep
+  what you have:** set `FLOTESTRO_STEPUP_TOKENS=allow` in `.env` before updating; to take the
+  new default, issue the first administrator a password and use a session for these changes.
+- **A group can no longer be mapped to a role wider than the mapper's own.** The mapping route
+  asked only whether the role existed, so an identity whose role carried `principal.manage`
+  and nothing else could map a group to `platform_admin`. It is now held to the rule a direct
+  grant already had and answers `403 scope_escalation`.
+- **The identity provider's tokens of a session are sealed.** A session kept the provider's
+  refresh and ID tokens in the database as they came, and whoever could read the database
+  could renew the session at the provider. They are now sealed under the installation's key and
+  bound to the session and to which of the two they are. A session from before the update keeps
+  working until it ends.
+
 - **Wrong passwords made at the same moment all count.** The count of failed
   sign-ins was read, raised and written back by the panel, so ten guesses at
   once could leave the account at nine and unlocked. The database adds one per
@@ -65,6 +86,13 @@ day the tag was published.
 
 ### Changed
 
+- **A session that has to replace its password is taken to the form for it.** The server confines
+  such a session to the change; every other screen used to show a bare 403. The panel now sends the
+  reader to `/profile?change_password=1`.
+- **The status screen counts a damaged value on the active key.** The rewrap reads the data key of a
+  version and nothing else, so a value whose own bytes were damaged passed it unseen and only
+  `crypto verify-secrets` named it. Each pass now also opens every live version, and the crypto block
+  says how many cannot be opened.
 - **The setup meter reads full when only warnings are left.** A warning is
   advice and can never be finished, but it was counted among the steps, so a
   list with every required step done still read "5 of 6". The meter and the

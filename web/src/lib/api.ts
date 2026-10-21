@@ -90,6 +90,12 @@ async function requestWithMeta<T>(
   }
 
   if (!response.ok) {
+    // A session whose owner has to replace the password may do nothing else: the
+    // server answers every other request with this code, and the way out is the
+    // form for the change, not an error on whatever screen was open.
+    if (response.status === 403 && payload?.code === "password_change_required") {
+      sendToThePasswordChange();
+    }
     throw new ApiError(
       response.status,
       payload?.code ?? "unknown",
@@ -97,6 +103,14 @@ async function requestWithMeta<T>(
     );
   }
   return { data: payload as T, etag };
+}
+
+/** The profile screen opens on the form for the change; it is the one place this session may use. */
+export const PASSWORD_CHANGE_PATH = "/profile?change_password=1";
+
+function sendToThePasswordChange() {
+  if (window.location.pathname === "/profile") return;
+  window.location.assign(PASSWORD_CHANGE_PATH);
 }
 
 async function request<T>(

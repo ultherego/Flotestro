@@ -19,9 +19,10 @@ operation under `pki.rotate`, held by `platform_admin` only.
 
 ## Preconditions
 
-- A session or token with `pki.read` and `pki.rotate`. If `FLOTESTRO_STEPUP_TOKENS=refuse`, an
-  API token gets `reauthentication_required`; use a browser session younger than
-  `FLOTESTRO_STEPUP_MAX_AGE` (default `5m`) and, if set, at `FLOTESTRO_STEPUP_ACR`.
+- A browser session with `pki.read` and `pki.rotate`, younger than `FLOTESTRO_STEPUP_MAX_AGE`
+  (default `5m`) and, if set, at `FLOTESTRO_STEPUP_ACR`. By default (`FLOTESTRO_STEPUP_TOKENS=refuse`)
+  an API token gets `reauthentication_required`; an installation that chose `allow` lets a token do it,
+  and the audit entry says it was done without fresh authentication.
 - Every `reason` is at least 8 characters, or the request is refused with `reason_required`.
 - The CA files live in `FLOTESTRO_STATE_DIR` (default `/var/lib/flotestro`): `ca.pem`, `ca.key`,
   `ca-pending.pem`, `ca-pending.key`, `ca-pending.at`, `ca-retired/<serial>.pem`. Back the

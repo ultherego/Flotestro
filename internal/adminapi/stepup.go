@@ -58,9 +58,13 @@ func (p stepUpPolicy) evaluate(reason string, session *authz.Session) (map[strin
 			}
 		}
 		// An automated identity cannot re-authenticate: there is no human behind it.
+		// The installation has said so out loud (FLOTESTRO_STEPUP_TOKENS=allow), and
+		// the trail says it too: this was done by a token, without fresh
+		// authentication, under that setting.
 		return map[string]any{
 			"high_impact": true, "purpose": reason,
 			"authentication": "api_token", "reauthenticated": false,
+			"step_up_waived": true, "policy": "allow",
 		}, nil
 	}
 
@@ -103,13 +107,50 @@ func (p stepUpPolicy) evaluate(reason string, session *authz.Session) (map[strin
 	}, nil
 }
 
+// bootstrapActions are the only operations the bootstrap token may carry out under
+// a policy that refuses tokens, and only until somebody else has taken the
+// installation over: making the first administrator, giving that person a password
+// or a token, and the first mapping of a group at the identity provider. Everything
+// else the first administrator does from a session of their own.
+var bootstrapActions = map[string]bool{
+	"principal.create":       true,
+	"principal.password.set": true,
+	"principal.role.grant":   true,
+	"principal.token.issue":  true,
+	"group_mapping.create":   true,
+}
+
+// bootstrapMayCarryOut is the rule for that exception, apart from the questions
+// that need the database: the identity has to be the bootstrap one, the operation
+// one of the handover, and nobody else may have got in with the administrator role.
+func bootstrapMayCarryOut(subject, action string, live, takenOver bool) bool {
+	return subject == authz.BootstrapSubject && bootstrapActions[action] && live && !takenOver
+}
+
 // requireStepUp applies the rule and returns the authentication evidence to
 // record in the audit entry of the operation itself.
 func (s *Server) requireStepUp(w http.ResponseWriter, r *http.Request,
 	principal authz.Principal, reason, action, targetType, targetID string) (map[string]any, bool) {
 	session, _ := authz.SessionFromContext(r.Context())
 
-	evidence, denial := s.stepUp.evaluate(reason, session)
+	policy := s.stepUp
+	handover := false
+	if session == nil && policy.RefuseTokens && bootstrapActions[action] && principal.Subject == authz.BootstrapSubject {
+		live, _, err := s.authz.BootstrapTokenState(r.Context())
+		taken := true
+		if err == nil {
+			taken, err = s.authz.BootstrapTakenOver(r.Context())
+		}
+		if err == nil && bootstrapMayCarryOut(principal.Subject, action, live, taken) {
+			policy.RefuseTokens = false
+			handover = true
+		}
+	}
+	evidence, denial := policy.evaluate(reason, session)
+	if handover && denial == nil {
+		evidence["authentication"] = "bootstrap_token"
+		evidence["policy"] = "bootstrap_handover"
+	}
 	if denial != nil {
 		denial.Detail["reason"] = denial.Code
 		denial.Detail["action"] = action

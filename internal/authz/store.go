@@ -40,6 +40,9 @@ type Store struct {
 	// authorization of work nobody is watching. Nil means no directory is
 	// configured, and then a group mapping grants nothing in the background.
 	groups *GroupDirectory
+	// sealer seals the identity provider's tokens kept with a session. Nil keeps
+	// them as they come, which is what a test that is not about them does.
+	sealer *TokenSealer
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
@@ -50,6 +53,9 @@ func NewStore(pool *pgxpool.Pool) *Store {
 func (s *Store) SetSessionIdle(idle time.Duration) {
 	s.sessionIdle = idle
 }
+
+// SetTokenSealer connects the key the provider tokens of sessions are sealed under.
+func (s *Store) SetTokenSealer(sealer *TokenSealer) { s.sealer = sealer }
 
 // SetGroupDirectory connects the resolver that reads group membership from the
 // directories themselves.
@@ -380,6 +386,25 @@ func (s *Store) BootstrapTokenState(ctx context.Context) (live, otherAdmins bool
 			  and (b.valid_until is null or b.valid_until > now()))`
 	err = s.pool.QueryRow(ctx, query, BootstrapSubject, string(RolePlatformAdmin)).Scan(&live, &otherAdmins)
 	return live, otherAdmins, err
+}
+
+// BootstrapTakenOver says whether somebody other than the bootstrap identity holds
+// the platform administrator role and has actually got in with it: a session of
+// theirs exists, or a token of theirs has been used. Holding the role is not enough -
+// the role is written before the person has signed in once, and the bootstrap
+// token is what finishes that handover.
+func (s *Store) BootstrapTakenOver(ctx context.Context) (bool, error) {
+	const query = `
+		select exists (
+			select 1 from role_bindings b
+			join principals p on p.id = b.principal_id
+			where b.role = $2 and p.subject <> $1 and p.disabled_at is null
+			  and (b.valid_until is null or b.valid_until > now())
+			  and (exists (select 1 from web_sessions w where w.principal_id = p.id)
+			    or exists (select 1 from api_tokens t where t.principal_id = p.id and t.last_used_at is not null)))`
+	var taken bool
+	err := s.pool.QueryRow(ctx, query, BootstrapSubject, string(RolePlatformAdmin)).Scan(&taken)
+	return taken, err
 }
 
 // Authenticate turns a token into an identity together with its roles.
