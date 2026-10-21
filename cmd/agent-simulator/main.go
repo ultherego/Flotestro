@@ -34,6 +34,8 @@ type stats struct {
 	connected atomic.Int64
 	failed    atomic.Int64
 	reconnect atomic.Int64
+	// throttled counts the times the enrollment door asked an agent to wait.
+	throttled atomic.Int64
 	// raised counts the sessions started since the last storm dropped the
 	// fleet; it is the numerator of the reconnect rate.
 	raised atomic.Int64
@@ -51,7 +53,44 @@ type simulation struct {
 	storm     bool
 	stormRamp time.Duration
 	fleet     *fleet
+	// working is how many hosts, from the first, carry out the changes they are
+	// ordered; the rest only keep their sessions. latency is how long a change takes.
+	working int
+	latency time.Duration
 }
+
+// maxThrottledTries bounds how often an agent knocks again after the enrollment
+// door asked it to wait; a real agent knocks again as well, a minute later.
+const maxThrottledTries = 20
+
+// throttled says whether the enrollment door asked the client to wait.
+func throttled(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "too many enrollment attempts")
+}
+
+// enrollWithRetry enrols, and when the door's limit per source address turns
+// the attempt away, waits a jittered while and tries again. The limit counts the
+// attempts in flight from one address, so a runner holding thousands of agents
+// meets it where a fleet of separate machines never would.
+func enrollWithRetry(ctx context.Context, counters *stats, request agent.IdentityRequest) (*agent.Identity, error) {
+	for try := 1; ; try++ {
+		identity, err := agent.EnsureIdentityFor(ctx, request)
+		if !throttled(err) || try >= maxThrottledTries {
+			return identity, err
+		}
+		counters.throttled.Add(1)
+		wait := 3*time.Second + time.Duration(rand.Int64N(int64(20*time.Second)))
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(wait):
+		}
+	}
+}
+
+// works says whether the agent of this index carries out the changes ordered to
+// it: the first of every batch do, so the same hosts work on every run.
+func (s simulation) works(index int) bool { return index < s.working }
 
 // fleet holds the live sessions so a storm can cut all of them at once.
 type fleet struct {
@@ -138,6 +177,10 @@ func run() error {
 			"the time the fleet's return after a storm is spread over; zero takes the ramp-up")
 		stormSettle = flag.Duration("storm-settle", 30*time.Second,
 			"how long past the ramp the fleet is given to come back before the round is reported")
+		working = flag.Int("working", 0,
+			"how many of the agents carry out kernel setting changes ordered to them; the rest only keep sessions")
+		latency = flag.Duration("work-latency", 200*time.Millisecond,
+			"how long one change takes on a working agent")
 		metricsURL = flag.String("metrics-url", config.Env("FLOTESTRO_METRICS_URL", ""),
 			"the panel's exposition, read after every storm")
 		metricsToken = flag.String("metrics-token", config.Env("FLOTESTRO_METRICS_TOKEN", ""),
@@ -179,6 +222,7 @@ func run() error {
 	sim := simulation{
 		prefix: *prefix, stateDir: *stateDir, enrollmentURL: *enrollmentURL,
 		gatewayURL: *gatewayURL, token: *token, caFile: *caFile, fleet: newFleet(),
+		working: *working, latency: *latency,
 	}
 	if *stormEvery > 0 {
 		ramp := *stormRamp
@@ -236,7 +280,7 @@ func simulate(ctx context.Context, index int, sim simulation, counters *stats, l
 	sum := sha256.Sum256([]byte(hostname))
 	machineID := hex.EncodeToString(sum[:16])
 
-	identity, err := agent.EnsureIdentityFor(ctx, agent.IdentityRequest{
+	identity, err := enrollWithRetry(ctx, counters, agent.IdentityRequest{
 		StateDir:        sim.stateDir + "/" + hostname,
 		EnrollmentURL:   sim.enrollmentURL,
 		Token:           sim.token,
@@ -249,13 +293,27 @@ func simulate(ctx context.Context, index int, sim simulation, counters *stats, l
 	})
 	if err != nil {
 		counters.failed.Add(1)
-		log.Error("the enrollment of a simulated agent failed",
+		// To the default logger, not the agents': a failure nobody can read
+		// is a plateau nobody can explain.
+		slog.Warn("the enrollment of a simulated agent failed",
 			"hostname", hostname, "err", err)
 		return
 	}
 	counters.enrolled.Add(1)
 
-	facts := syntheticFacts(hostname, machineID)
+	facts := agent.SimulatedFacts(hostname, machineID, sim.works(index))
+	var executor *agent.TaskExecutor
+	if sim.works(index) {
+		// A working agent runs the real executor over a machine of its own, and
+		// the changes ordered to the fleet differ from host to host.
+		executor, err = agent.NewSimulatedExecutor(&agent.SimulatedHost{Latency: sim.latency},
+			sim.stateDir+"/"+hostname+"/journal", func() agent.Facts { return facts }, log)
+		if err != nil {
+			counters.failed.Add(1)
+			log.Error("the executor of a simulated agent failed", "hostname", hostname, "err", err)
+			return
+		}
+	}
 	for ctx.Err() == nil {
 		round := sim.fleet.round.Load()
 		sessionCtx, cancel := context.WithCancel(ctx)
@@ -265,8 +323,9 @@ func simulate(ctx context.Context, index int, sim simulation, counters *stats, l
 			GatewayURLs:  []string{sim.gatewayURL},
 			Identity:     identity,
 			CollectFacts: func(context.Context) (agent.Facts, error) { return facts, nil },
-			// A simulated agent carries out no mutating jobs; the goal is to
-			// measure the cost of the sessions and the inventory alone.
+			// Only the working agents carry out changes; the others measure the
+			// cost of the sessions and the inventory alone.
+			Executor:           executor,
 			InventoryInterval:  30 * time.Minute,
 			MaxConcurrentTasks: 1,
 			Log:                log,
@@ -437,43 +496,6 @@ func readPanelMetrics(ctx context.Context, url, token string) (map[string]float6
 	return values, scanner.Err()
 }
 
-// syntheticFacts builds believable but different facts for every agent.
-func syntheticFacts(hostname, machineID string) agent.Facts {
-	sum := sha256.Sum256([]byte(machineID))
-	seed := int(sum[0])<<8 | int(sum[1])
-
-	installed := uint32(400 + seed%600)
-	upgradable := uint32(seed % 40)
-	return agent.Facts{
-		Hostname:  hostname,
-		MachineID: machineID,
-		BootID:    hex.EncodeToString(sum[16:]),
-		OS: agent.OSInfo{
-			Family: "debian", Distribution: "debian", Version: "13",
-			Kernel: "6.12.0-sim", Architecture: runtime.GOARCH,
-			PrettyName: "Debian GNU/Linux 13 (simulation)",
-		},
-		Hardware: agent.Hardware{
-			CPUCores:       uint32(2 + seed%6),
-			MemoryBytes:    uint64(2+seed%14) << 30,
-			RootFSBytes:    40 << 30,
-			RootFSFreeByte: uint64(10+seed%25) << 30,
-			Virtualization: "flotestro-simulator",
-		},
-		Packages: agent.Packages{
-			Manager: "apt", Installed: &installed, Upgradable: &upgradable,
-		},
-		Capabilities: agent.Capabilities{
-			{Name: agent.CapSystemd, Version: 1, Available: true},
-			{Name: agent.CapAPT, Version: 1, Available: true, Features: map[string]bool{"repair": true}},
-			{Name: agent.CapJournald, Version: 1, Available: true},
-		},
-		FailedUnitsKnown: true,
-		Interfaces:       []string{"eth0"},
-		CollectedAt:      time.Now().UTC(),
-	}
-}
-
 func reportLoop(ctx context.Context, counters *stats, target int, interval time.Duration) {
 	if interval <= 0 {
 		return
@@ -486,9 +508,9 @@ func reportLoop(ctx context.Context, counters *stats, target int, interval time.
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			fmt.Printf("connected %d/%d | enrolled %d | errors %d | reconnects %d | goroutines %d | simulator RSS %s\n",
+			fmt.Printf("connected %d/%d | enrolled %d | errors %d | throttled %d | reconnects %d | goroutines %d | simulator RSS %s\n",
 				counters.connected.Load(), target, counters.enrolled.Load(),
-				counters.failed.Load(), counters.reconnect.Load(),
+				counters.failed.Load(), counters.throttled.Load(), counters.reconnect.Load(),
 				runtime.NumGoroutine(), residentSet())
 		}
 	}

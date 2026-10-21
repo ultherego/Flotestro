@@ -17,6 +17,9 @@ import (
 // other way to root privileges.
 type HelperClient struct {
 	socketPath string
+	// dial replaces the unix socket where the host has no helper to dial: the
+	// simulated fleet answers the requests in the process.
+	dial func(ctx context.Context) (net.Conn, error)
 
 	// capabilities holds, by task, the panel's authorization of the task in
 	// flight: the capability, its signature and the canonical payload.
@@ -36,6 +39,11 @@ type taskCapability struct {
 
 func NewHelperClient(socketPath string) *HelperClient {
 	return &HelperClient{socketPath: socketPath}
+}
+
+// newHelperClientWithDial builds a client that reaches its helper through dial.
+func newHelperClientWithDial(dial func(ctx context.Context) (net.Conn, error)) *HelperClient {
+	return &HelperClient{dial: dial}
 }
 
 // Attach remembers the capability of a task for the requests made on its
@@ -110,8 +118,14 @@ func (c *HelperClient) Call(ctx context.Context, request *helperv1.HelperRequest
 // reports along the way.
 func (c *HelperClient) CallWithProgress(ctx context.Context, request *helperv1.HelperRequest,
 	timeout time.Duration, progress func(*helperv1.TaskProgress)) (*helperv1.HelperResponse, error) {
-	dialer := net.Dialer{Timeout: 10 * time.Second}
-	conn, err := dialer.DialContext(ctx, "unix", c.socketPath)
+	var conn net.Conn
+	var err error
+	if c.dial != nil {
+		conn, err = c.dial(ctx)
+	} else {
+		dialer := net.Dialer{Timeout: 10 * time.Second}
+		conn, err = dialer.DialContext(ctx, "unix", c.socketPath)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("connecting to the helper: %w", err)
 	}

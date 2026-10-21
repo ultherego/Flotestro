@@ -6,6 +6,25 @@ day the tag was published.
 
 ## [Unreleased]
 
+### Added
+
+- **The simulated agents of the load tool can carry out orders.** The agent's own executor runs over
+  a machine held in memory (`agent.NewSimulatedExecutor`): an order goes through the same checks,
+  claims, journal and verification as on a host, and only the root helper is replaced. The
+  simulator takes `--working=N` (how many agents of a batch carry out kernel setting changes) and
+  `--work-latency`; an integration test enrols a few such agents against the panel and orders each a
+  different key.
+
+### Fixed
+
+- The simulator names the reason an enrollment failed instead of counting it silently, asks again
+  when the enrollment door tells it to wait (the limit per source address meets a runner holding
+  thousands of agents), and the scale measurement spreads the fleet over all the machines it is given.
+- An agent running on substituted facts no longer refreshes a module from the machine it runs on: after
+  a change it reported that machine's hostname and the panel renamed the host.
+
+## [0.64.2] - 2026-10-21
+
 ### Security
 
 - **Built with Go 1.26.10.** The standard library of 1.26.9 carried GO-2026-6809 (`crypto/x509` did not
@@ -1250,7 +1269,8 @@ across those five tags.
 
 The first tag. It did not build.
 
-[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.64.1...HEAD
+[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.64.2...HEAD
+[0.64.2]: https://github.com/ultherego/Flotestro/compare/v0.64.1...v0.64.2
 [0.64.1]: https://github.com/ultherego/Flotestro/compare/v0.64.0...v0.64.1
 [0.64.0]: https://github.com/ultherego/Flotestro/compare/v0.63.1...v0.64.0
 [0.63.1]: https://github.com/ultherego/Flotestro/compare/v0.63.0...v0.63.1
