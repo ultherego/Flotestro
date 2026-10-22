@@ -48,6 +48,7 @@ func goodReport() map[string]any {
 			"identity":    map[string]any{"result": "pass", "seconds": 18},
 			"crypto":      map[string]any{"result": "pass", "seconds": 110},
 			"first-run":   map[string]any{"result": "pass", "seconds": 20},
+			"scale":       map[string]any{"result": "pass", "seconds": 400},
 			"fixtures":    map[string]any{"result": "pass", "seconds": 40},
 			"preflight":   map[string]any{"result": "pass", "seconds": 57},
 			"integration": map[string]any{"result": "pass", "seconds": 2100},
@@ -590,6 +591,26 @@ func TestAReportWithoutTheFirstRunStageIsNotAFullRun(t *testing.T) {
 		t.Fatalf("a report with no first-run stage reached %q", verdict)
 	}
 	if !strings.Contains(strings.Join(reasons, "; "), "first-run") {
+		t.Fatalf("the refusal does not name the stage: %v", reasons)
+	}
+}
+
+// The panel under a fleet is as required as the suite: a report without it has not tried
+// the one thing a thousand hosts change.
+func TestAReportWithoutTheScaleStageIsNotAFullRun(t *testing.T) {
+	report := goodReport()
+	stages := report["stages"].(map[string]any)
+	delete(stages, "scale")
+	report["verdict"] = "fail"
+	parsed, err := ParseGateReport(encode(t, report))
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, reasons := parsed.ComputeVerdict()
+	if verdict != VerdictFail {
+		t.Fatalf("a report with no scale stage reached %q", verdict)
+	}
+	if !strings.Contains(strings.Join(reasons, "; "), "scale") {
 		t.Fatalf("the refusal does not name the stage: %v", reasons)
 	}
 }
