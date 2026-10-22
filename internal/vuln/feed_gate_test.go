@@ -128,3 +128,45 @@ func TestAnImpossibleShareFallsBackToTheDefault(t *testing.T) {
 		}
 	}
 }
+
+// The releases come from the fleet. A release nobody asks about any more is not
+// a release the feed lost: the last host of it was retired, and holding every
+// later fetch back for that froze the provider into feed_stale.
+func TestAReleaseTheFleetStoppedAskingAboutIsNotALostRelease(t *testing.T) {
+	inForce := Snapshot{AdvisoryCount: 100000, Releases: []string{"12", "trixie"}}
+	perRelease := map[string]int{"12": 40000, "trixie": 60000}
+
+	narrowed := narrowActive(inForce, perRelease, []string{"trixie"})
+	if got := feedRefusal(narrowed, 60100, []string{"trixie"}, 0); got != "" {
+		t.Fatalf("the retirement of the last host of a release froze the feed: %q", got)
+	}
+	// The count that is compared is the one of the releases still asked for: the
+	// 40 000 findings of the retired release leaving is not a shrink of 40 %.
+	if narrowed.AdvisoryCount != 60000 {
+		t.Fatalf("the comparison counts %d findings, want the 60000 of the releases asked for", narrowed.AdvisoryCount)
+	}
+}
+
+// A release that is still asked for and does not come back is a loss, as before.
+func TestARequestedReleaseTheFeedDroppedIsStillALostRelease(t *testing.T) {
+	inForce := Snapshot{AdvisoryCount: 100000, Releases: []string{"jammy", "noble"}}
+	perRelease := map[string]int{"jammy": 40000, "noble": 60000}
+
+	narrowed := narrowActive(inForce, perRelease, []string{"jammy", "noble"})
+	if got := feedRefusal(narrowed, 60000, []string{"noble"}, 0); got != ReasonFeedReleaseMissing {
+		t.Fatalf("a feed that dropped a release the fleet needs reached %q", got)
+	}
+}
+
+// A snapshot written before the per-release counts keeps its total: unknown is
+// not zero, and the shrink check still has something to compare with.
+func TestASnapshotWithoutReleaseCountsKeepsItsTotal(t *testing.T) {
+	inForce := Snapshot{AdvisoryCount: 5000, Releases: []string{"trixie"}}
+	narrowed := narrowActive(inForce, nil, []string{"trixie"})
+	if narrowed.AdvisoryCount != 5000 {
+		t.Fatalf("the total of a snapshot with no counts became %d", narrowed.AdvisoryCount)
+	}
+	if got := feedRefusal(narrowed, 1000, []string{"trixie"}, 0); got != ReasonFeedShrank {
+		t.Fatalf("a real shrink went unnoticed: %q", got)
+	}
+}

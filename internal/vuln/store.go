@@ -56,9 +56,15 @@ func (s *Store) SaveSnapshot(ctx context.Context, snapshot Snapshot,
 	// A snapshot that lost its findings does not replace one that had them.
 	var active Snapshot
 	err = tx.QueryRow(ctx,
-		`select advisory_count, releases from vuln_snapshots where provider = $1 and active`,
-		snapshot.Provider).Scan(&active.AdvisoryCount, &active.Releases)
+		`select id::text, advisory_count, releases from vuln_snapshots where provider = $1 and active`,
+		snapshot.Provider).Scan(&active.ID, &active.AdvisoryCount, &active.Releases)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+	// The gate compares like with like: what the fleet stopped asking about is not
+	// something the feed lost.
+	active, err = narrowToRequested(ctx, tx, active, snapshot.Requested)
+	if err != nil {
 		return "", err
 	}
 
@@ -872,4 +878,61 @@ func (s *Store) HostStates(ctx context.Context, hostIDs []string) (map[string]Ho
 		result[state.HostID] = state
 	}
 	return result, rows.Err()
+}
+
+// narrowToRequested restricts the snapshot in force to the releases this fetch
+// was asked about. The list of releases comes from the fleet: when the last host
+// of a release is retired the next fetch does not name it, and without this the
+// gate read that as a feed that lost the release, held every later fetch of the
+// provider back and let the whole provider age into feed_stale. A release the
+// fetch asked for and did not get is still a loss. Requested empty means nobody
+// said, and nothing is narrowed.
+func narrowToRequested(ctx context.Context, tx pgx.Tx, active Snapshot, requested []string) (Snapshot, error) {
+	if active.ID == "" || len(requested) == 0 || len(active.Releases) == 0 {
+		return active, nil
+	}
+	perRelease := map[string]int{}
+	rows, err := tx.Query(ctx,
+		`select release, sum(advisories)::int from vuln_release_digests
+		 where snapshot_id = $1::uuid group by release`, active.ID)
+	if err != nil {
+		return active, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var release string
+		var count int
+		if err := rows.Scan(&release, &count); err != nil {
+			return active, err
+		}
+		perRelease[release] = count
+	}
+	if err := rows.Err(); err != nil {
+		return active, err
+	}
+	return narrowActive(active, perRelease, requested), nil
+}
+
+// narrowActive is narrowToRequested over the counts it read. A snapshot written
+// before the per-release counts existed keeps its total: unknown is not zero.
+func narrowActive(active Snapshot, perRelease map[string]int, requested []string) Snapshot {
+	asked := make(map[string]bool, len(requested))
+	for _, release := range requested {
+		asked[release] = true
+	}
+	var kept []string
+	count, counted := 0, len(perRelease) > 0
+	for _, release := range active.Releases {
+		if !asked[release] {
+			continue
+		}
+		kept = append(kept, release)
+		count += perRelease[release]
+	}
+	narrowed := active
+	narrowed.Releases = kept
+	if counted {
+		narrowed.AdvisoryCount = count
+	}
+	return narrowed
 }

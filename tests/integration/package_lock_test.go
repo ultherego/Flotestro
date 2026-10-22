@@ -199,15 +199,34 @@ func unitKnownToHost(t *testing.T, h *harness, host hostView, unit string) bool 
 // the list the panel serves.
 func installedVersionOf(t *testing.T, h *harness, hostID, name string) string {
 	t.Helper()
-	if job, attempts := h.runOperation(hostID, map[string]any{
+	job, attempts := h.runOperation(hostID, map[string]any{
 		"action": "packages.list", "reason": "what the host has installed of one package",
-	}, 5*time.Minute); job.State != "succeeded" {
+	}, 5*time.Minute)
+	if job.State != "succeeded" {
 		t.Fatalf("reading the package list: %s %s", job.State, lastMessage(attempts))
 	}
+	// The job is settled before the list it read is written, so the list served the
+	// instant the job succeeds can still be the one before: on 22.10 a run under load
+	// read "not installed" over a package the same order had just installed. The list
+	// is waited for by the job that made it, not by a pause.
 	var list struct {
 		Items []listedPackage `json:"items"`
+		State struct {
+			JobID string `json:"job_id"`
+		} `json:"state"`
 	}
-	h.get("/api/v1/hosts/"+hostID+"/packages", &list)
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		h.get("/api/v1/hosts/"+hostID+"/packages", &list)
+		if list.State.JobID == job.ID {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the list served for %s is the one of job %s, not of the read %s that was just made",
+				hostID, list.State.JobID, job.ID)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 	for _, pkg := range list.Items {
 		if pkg.Name == name {
 			return pkg.Version
