@@ -15,6 +15,13 @@ day the tag was published.
   `--work-latency`; an integration test enrols a few such agents against the panel and orders each a
   different key.
 
+### Changed
+
+- `SECURITY.md` names write access to the control plane's database as out of scope: the panel
+  acts on what it reads there, so whoever can write to it can order work on the fleet. The
+  boundary is who holds the credentials; a way to write through the API without the permission
+  stays in scope.
+
 ### Fixed
 
 - The simulator names the reason an enrollment failed instead of counting it silently, asks again

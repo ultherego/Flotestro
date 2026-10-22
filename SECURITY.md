@@ -124,6 +124,14 @@ than incidental properties:
 - **A principal doing what their role permits.** Permissions are the boundary,
   and an installation that grants a broad role has made that decision. A way
   *around* a permission is very much in scope.
+- **Write access to the control plane's database, already held.** The panel acts on
+  what it reads there: a row of `jobs` is dispatched under a capability the panel
+  signs, with the rights of the creator the row names, and the roles of the people
+  are rows too. Whoever can write to that database can therefore order work on the
+  fleet, and the boundary is who holds its credentials, not a check inside the
+  panel. Keep the runtime role apart from the migrator and the database off every
+  network but the panel's (`docker/README.md`); a way to write to it *through the
+  API* without the permission is in scope.
 - **Root on a managed host, already held.** The agent is unprivileged and the
   helper answers only the agent's uid, but neither defends a host against its
   own root, and nothing could.

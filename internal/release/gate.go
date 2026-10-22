@@ -254,6 +254,13 @@ var fullRunStages = []string{
 	// laboratory's own panel does not run, because its suites need the explicit
 	// exception to the step-up default - on an installation of its own.
 	"first-run",
+	// scale keeps a thousand simulated hosts against the panel, orders each of forty
+	// a different change and counts the answer: the fleet online, every order
+	// succeeded, the reads an operator makes inside their limits, nothing renamed
+	// or left behind. The ten-thousand measurement had been taken by hand, and a
+	// plateau at seven thousand read as the panel's limit for a day when it was
+	// the simulator's own; a gate that never asked left both unmeasured.
+	"scale",
 	"fixtures", "preflight", stageIntegration, stagePlaywright,
 	// unchanged asks the same question as tree, after everything has been built
 	// from the tree rather than before. tree proves what the working tree held
