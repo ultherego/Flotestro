@@ -272,7 +272,10 @@ type Snapshot struct {
 	CandidateAt     *time.Time `json:"candidate_at,omitempty"`
 	// Releases lists the releases covered by this snapshot. That is where
 	// the answer "the feed does not cover this release" comes from.
-	Releases      []string  `json:"releases,omitempty"`
+	Releases []string `json:"releases,omitempty"`
+	// Requested are the releases the fetch was asked about - the fleet's. It is
+	// not stored; empty means the question was not recorded.
+	Requested     []string  `json:"-"`
 	AdvisoryCount int       `json:"advisory_count"`
 	FetchedAt     time.Time `json:"fetched_at"`
 	// CheckedAt says when the panel last confirmed that these data are still

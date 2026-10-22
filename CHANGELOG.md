@@ -26,6 +26,12 @@ day the tag was published.
 
 ### Fixed
 
+- **Retiring the last host of a release no longer freezes the vulnerability feed of its family.** The
+  releases a feed is fetched for come from the fleet, and the sanity gate read a release the fleet
+  stopped asking about as a release the feed lost: every later fetch was held back as a candidate and
+  the snapshot in force aged into `feed_stale` for every host of that family until somebody accepted
+  one by hand. The gate now compares the snapshot in force with the same releases the fetch asked
+  about, counts and all; a release that was asked for and did not come back is still a loss.
 - The simulator names the reason an enrollment failed instead of counting it silently, asks again
   when the enrollment door tells it to wait (the limit per source address meets a runner holding
   thousands of agents), and the scale measurement spreads the fleet over all the machines it is given.

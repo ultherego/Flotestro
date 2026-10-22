@@ -469,6 +469,7 @@ func (h *Scheduler) Synchronize(ctx context.Context, descriptions []HostDescript
 			_ = h.store.SaveFetchError(ctx, source.Name(), err.Error())
 			continue
 		}
+		snapshot.Requested = list
 		_, err = h.store.SaveSnapshot(ctx, snapshot, advisories, h.settings.ShrinkShare)
 		var refusal *FeedRefusal
 		if errors.As(err, &refusal) {
