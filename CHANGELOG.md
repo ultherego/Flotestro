@@ -6,6 +6,8 @@ day the tag was published.
 
 ## [Unreleased]
 
+## [0.64.3] - 2026-10-23
+
 ### Added
 
 - **The simulated agents of the load tool can carry out orders.** The agent's own executor runs over
@@ -1276,7 +1278,8 @@ across those five tags.
 
 The first tag. It did not build.
 
-[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.64.2...HEAD
+[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.64.3...HEAD
+[0.64.3]: https://github.com/ultherego/Flotestro/compare/v0.64.2...v0.64.3
 [0.64.2]: https://github.com/ultherego/Flotestro/compare/v0.64.1...v0.64.2
 [0.64.1]: https://github.com/ultherego/Flotestro/compare/v0.64.0...v0.64.1
 [0.64.0]: https://github.com/ultherego/Flotestro/compare/v0.63.1...v0.64.0
