@@ -112,10 +112,39 @@ var ErrOversized = errors.New("the inventory report exceeds the size limit")
 
 type Store struct {
 	pool *pgxpool.Pool
+	// refreshAfter says how long a module that has not changed may keep the mark
+	// of its last observation before a report of it moves the mark.
+	refreshAfter func(module string) time.Duration
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
+}
+
+// ObservationRefresh is how stale the mark of the last observation of an
+// unchanged module may become before a report of it rewrites the row. A host
+// that reconnects reports everything again, and rewriting thousands of rows
+// that say what they said a minute ago is most of what a return of the fleet
+// costs the database. The mark is evidence of freshness, so the window is the
+// width of the lag it adds: a quarter of what the policy tolerates for the
+// module, at most this long (SetRefreshWindow).
+const ObservationRefresh = 15 * time.Minute
+
+// SetRefreshWindow replaces the window per module. The panel gives it the
+// freshness the policy requires of each module, so that skipping a write can
+// never be what makes a fact too old to rest a verdict on.
+func (s *Store) SetRefreshWindow(window func(module string) time.Duration) {
+	s.refreshAfter = window
+}
+
+// window is the lag the mark of an unchanged module may carry.
+func (s *Store) window(module string) time.Duration {
+	if s != nil && s.refreshAfter != nil {
+		if window := s.refreshAfter(module); window > 0 && window < ObservationRefresh {
+			return window
+		}
+	}
+	return ObservationRefresh
 }
 
 // Save writes a revision and normalises the fields used in the selectors.
@@ -176,12 +205,12 @@ func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored 
 	}
 
 	if report.LocalAccounts != nil {
-		if err := replaceLocalAccounts(ctx, tx, hostID, report.LocalAccounts); err != nil {
+		if err := replaceLocalAccounts(ctx, tx, hostID, report.LocalAccounts, s.window("accounts")); err != nil {
 			return false, err
 		}
 	}
 
-	if err := saveFragments(ctx, tx, hostID, report.Fragments); err != nil {
+	if err := s.saveFragments(ctx, tx, hostID, report.Fragments); err != nil {
 		return false, err
 	}
 
@@ -209,7 +238,8 @@ func pruneRevisions(ctx context.Context, tx pgx.Tx, hostID string) error {
 }
 
 // replaceLocalAccounts swaps the observation of the accounts of a host.
-func replaceLocalAccounts(ctx context.Context, tx pgx.Tx, hostID string, accounts []LocalAccount) error {
+func replaceLocalAccounts(ctx context.Context, tx pgx.Tx, hostID string, accounts []LocalAccount,
+	window time.Duration) error {
 	names := make([]string, 0, len(accounts))
 	for _, account := range accounts {
 		names = append(names, account.Name)
@@ -221,7 +251,7 @@ func replaceLocalAccounts(ctx context.Context, tx pgx.Tx, hostID string, account
 
 	batch := &pgx.Batch{}
 	for _, account := range accounts {
-		queueLocalAccount(batch, hostID, account)
+		queueLocalAccount(batch, hostID, account, window)
 	}
 	results := tx.SendBatch(ctx, batch)
 	defer results.Close()
@@ -234,7 +264,7 @@ func replaceLocalAccounts(ctx context.Context, tx pgx.Tx, hostID string, account
 }
 
 // queueLocalAccount adds the write of an account observation to the batch.
-func queueLocalAccount(batch *pgx.Batch, hostID string, account LocalAccount) {
+func queueLocalAccount(batch *pgx.Batch, hostID string, account LocalAccount, window time.Duration) {
 	const upsert = `
 		insert into host_local_accounts
 			(host_id, name, uid, gid, home, shell, gecos, source, groups,
@@ -248,7 +278,19 @@ func queueLocalAccount(batch *pgx.Batch, hostID string, account LocalAccount) {
 			ssh_keys = excluded.ssh_keys,
 			unavailable_reason = excluded.unavailable_reason,
 			expires_at = excluded.expires_at,
-			observed_at = now()`
+			observed_at = now()
+		-- An account that says what it said, recently, is not written again: the
+		-- row would only get a new mark, and a return of the fleet is thousands.
+		where (host_local_accounts.uid, host_local_accounts.gid, host_local_accounts.home,
+		       host_local_accounts.shell, host_local_accounts.gecos, host_local_accounts.source,
+		       host_local_accounts.groups, host_local_accounts.locked,
+		       host_local_accounts.password_set, host_local_accounts.ssh_keys,
+		       host_local_accounts.unavailable_reason, host_local_accounts.expires_at)
+		      is distinct from
+		      (excluded.uid, excluded.gid, excluded.home, excluded.shell, excluded.gecos,
+		       excluded.source, excluded.groups, excluded.locked, excluded.password_set,
+		       excluded.ssh_keys, excluded.unavailable_reason, excluded.expires_at)
+		   or host_local_accounts.observed_at <= now() - make_interval(secs => $15)`
 	keys := account.SSHKeys
 	if len(keys) == 0 {
 		keys = json.RawMessage("[]")
@@ -259,7 +301,8 @@ func queueLocalAccount(batch *pgx.Batch, hostID string, account LocalAccount) {
 	}
 	batch.Queue(upsert, hostID, account.Name, account.UID, account.GID,
 		account.Home, account.Shell, account.Gecos, account.Source, groups,
-		account.Locked, account.PasswordSet, keys, account.UnavailableReason, account.ExpiresAt)
+		account.Locked, account.PasswordSet, keys, account.UnavailableReason, account.ExpiresAt,
+		window.Seconds())
 }
 
 // DeleteLocalAccount removes the observation of an account the host no longer
@@ -273,7 +316,7 @@ func (s *Store) DeleteLocalAccount(ctx context.Context, hostID, name string) err
 // UpsertLocalAccount writes the observation of a single account.
 func (s *Store) UpsertLocalAccount(ctx context.Context, hostID string, account LocalAccount) error {
 	batch := &pgx.Batch{}
-	queueLocalAccount(batch, hostID, account)
+	queueLocalAccount(batch, hostID, account, 0)
 	results := s.pool.SendBatch(ctx, batch)
 	defer results.Close()
 	_, err := results.Exec()
@@ -331,7 +374,7 @@ func (s *Store) Latest(ctx context.Context, hostID string) (*Revision, error) {
 }
 
 // saveFragments writes the modules that have changed.
-func saveFragments(ctx context.Context, tx pgx.Tx, hostID string, fragments []Fragment) error {
+func (s *Store) saveFragments(ctx context.Context, tx pgx.Tx, hostID string, fragments []Fragment) error {
 	const query = `
 		insert into host_module_inventory
 			(host_id, module, revision, source, payload, unavailable_reason, observed_at, updated_at)
@@ -346,7 +389,14 @@ func saveFragments(ctx context.Context, tx pgx.Tx, hostID string, fragments []Fr
 				when host_module_inventory.revision = excluded.revision
 				then host_module_inventory.updated_at
 				else now()
-			end`
+			end
+		-- A module that says what it said, observed not long before, is not written
+		-- again; the mark moves once it is older than the window of the module.
+		where (host_module_inventory.revision, host_module_inventory.source,
+		       host_module_inventory.payload, host_module_inventory.unavailable_reason)
+		      is distinct from
+		      (excluded.revision, excluded.source, excluded.payload, excluded.unavailable_reason)
+		   or host_module_inventory.observed_at <= excluded.observed_at - make_interval(secs => $8)`
 	for _, fragment := range fragments {
 		if fragment.Module == "" || fragment.Revision == "" {
 			continue
@@ -356,7 +406,8 @@ func saveFragments(ctx context.Context, tx pgx.Tx, hostID string, fragments []Fr
 			observed = time.Now().UTC()
 		}
 		if _, err := tx.Exec(ctx, query, hostID, fragment.Module, fragment.Revision,
-			fragment.Source, fragment.Payload, fragment.UnavailableReason, observed); err != nil {
+			fragment.Source, fragment.Payload, fragment.UnavailableReason, observed,
+			s.window(fragment.Module).Seconds()); err != nil {
 			return fmt.Errorf("writing the module %s: %w", fragment.Module, err)
 		}
 	}
@@ -370,7 +421,7 @@ func (s *Store) SaveFragment(ctx context.Context, hostID string, fragment Fragme
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := saveFragments(ctx, tx, hostID, []Fragment{fragment}); err != nil {
+	if err := s.saveFragments(ctx, tx, hostID, []Fragment{fragment}); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

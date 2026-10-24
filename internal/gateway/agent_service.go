@@ -1261,6 +1261,17 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 		errorMessage = "the change was made and the result carries no read of the host afterwards"
 	}
 
+	// The full package list goes into tables of its own: the vulnerability
+	// assessment is computed from it, so rows for joins are needed rather than a
+	// blob in the inventory. It is written in the transaction that settles the job:
+	// a job that reads the list is not succeeded until the list is there, and a
+	// write that fails is a redelivery of the answer, which the host still holds.
+	var image *packageImage
+	if list := result.GetInstalledPackagesResult(); list != nil &&
+		result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED {
+		image = s.preparePackageList(hostID, jobID, list)
+	}
+
 	accepted, err := s.jobs.RecordResult(ctx, jobID, attemptID, jobs.Result{
 		Status:          statusName,
 		ExitCode:        result.GetExitCode(),
@@ -1281,7 +1292,7 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 		// The trail of a change carried out as root commits with the settlement:
 		// a mutation nothing recorded cannot be accounted for afterwards, and the
 		// host still holds the result, so a failure here is a redelivery.
-		return s.audit.RecordTx(ctx, tx, audit.Event{
+		if err := s.audit.RecordTx(ctx, tx, audit.Event{
 			ActorType: audit.ActorAgent, ActorID: hostID,
 			Action: "job.result", TargetType: "job", TargetID: jobID, Outcome: resultOutcome(state),
 			Detail: map[string]any{
@@ -1290,7 +1301,14 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 				"replayed": result.GetReplayed(), "applied": true,
 				"after_lease_expiry": attemptStatus == jobs.AttemptStatusLeaseExpired,
 			},
-		})
+		}); err != nil {
+			return err
+		}
+		if image == nil {
+			return nil
+		}
+		return s.pkgs.ReplaceImageTx(ctx, tx, image.hostID, image.packages, image.state,
+			image.advisories, image.advisoryState)
 	})
 	if errors.Is(err, jobs.ErrStaleFence) {
 		// The database refused the settlement: the host was claimed by a newer
@@ -1361,12 +1379,9 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 		}
 	}
 
-	// The full package list goes into a table of its own: the vulnerability
-	// assessment is computed from it, so rows for joins are needed rather than a
-	// blob in the inventory.
-	if list := result.GetInstalledPackagesResult(); list != nil &&
-		result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED {
-		s.savePackageList(ctx, hostID, jobID, list)
+	// The list was written with the settlement; what follows it follows the commit.
+	if image != nil {
+		s.packageListWritten(image)
 	}
 
 	// A backup run is recorded also when it failed: "the backup did not work" is
@@ -4114,9 +4129,21 @@ func countFromBytes(value *uint64) *int64 {
 	return &count
 }
 
-// savePackageList writes the full package list of a host.
-func (s *AgentService) savePackageList(ctx context.Context, hostID, jobID string,
-	result *agentv1.InstalledPackagesResult) {
+// packageImage is the package list of a host as it is written, prepared before
+// the result that carries it is settled.
+type packageImage struct {
+	hostID        string
+	packages      []packagestore.InstalledPackage
+	state         vuln.PackageListState
+	advisories    []vuln.HostAdvisory
+	advisoryState vuln.AdvisoryState
+}
+
+// preparePackageList reads the package list out of a result. Nil means there is
+// nothing to write: the list could not be recognised, which is logged and does
+// not hold the settlement of the job back.
+func (s *AgentService) preparePackageList(hostID, jobID string,
+	result *agentv1.InstalledPackagesResult) *packageImage {
 	state := vuln.PackageListState{
 		HostID: hostID, Digest: result.GetDigest(),
 		PackageCount: int(result.GetCount()), JobID: jobID,
@@ -4129,7 +4156,7 @@ func (s *AgentService) savePackageList(ctx context.Context, hostID, jobID string
 	if len(result.GetPackages()) > 0 {
 		if err := json.Unmarshal(result.GetPackages(), &pkgs); err != nil {
 			s.log.Error("the package list was not recognised", "host_id", hostID, "err", err)
-			return
+			return nil
 		}
 	}
 	if state.UnavailableReason != "" {
@@ -4152,17 +4179,19 @@ func (s *AgentService) savePackageList(ctx context.Context, hostID, jobID string
 		advisories = nil
 		advisoryState.AdvisoryCount = 0
 	}
+	return &packageImage{hostID: hostID, packages: pkgs, state: state,
+		advisories: advisories, advisoryState: advisoryState}
+}
 
-	if err := s.pkgs.ReplaceImage(ctx, hostID, pkgs, state, advisories, advisoryState); err != nil {
-		s.log.Error("the image of the packages was not written", "host_id", hostID, "err", err)
-		return
-	}
-	s.log.Info("the package list was written", "host_id", hostID,
-		"packages", len(pkgs), "findings", len(advisories), "digest", state.Digest)
+// packageListWritten is what follows the commit of a list written with the
+// settlement of its job.
+func (s *AgentService) packageListWritten(image *packageImage) {
+	s.log.Info("the package list was written", "host_id", image.hostID,
+		"packages", len(image.packages), "findings", len(image.advisories), "digest", image.state.Digest)
 
 	// The assessment is to keep up with what settles it.
 	if s.refreshAssessment != nil {
-		s.refreshAssessment(hostID)
+		s.refreshAssessment(image.hostID)
 	}
 }
 

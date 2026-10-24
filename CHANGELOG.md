@@ -6,6 +6,27 @@ day the tag was published.
 
 ## [Unreleased]
 
+### Added
+
+- **The acknowledgement of a task result names the content it was made for.** `TaskResultAck` carries
+  `result_digest`, the SHA-256 of the deterministic encoding of the result the panel took, and the
+  signature covers it. The host frees its copy only when the digest is the one of the answer it
+  holds, so a relay that altered a result on its way cannot have the host forget the original. A
+  panel from before the field sends none, and the host takes the acknowledgement as it did. Panels
+  first, as always: an agent newer than its panel encodes results the panel cannot reproduce.
+
+### Changed
+
+- **A host that reconnects no longer rewrites what it said a few minutes ago.** The rows of the
+  adapter registry, the local accounts and the inventory modules that say what they said are not
+  written again until the mark of their last observation is older than a window: a quarter of what
+  the policy tolerates for the module, at most 15 minutes. A return of the whole fleet cost about
+  270 KB of WAL per host; most of it was the same rows with a new timestamp.
+- **A job that reads the package list is settled together with the list.** The list is written in the
+  transaction that settles the job, so a reader that comes in right after the job succeeded sees its
+  list, and a write that fails leaves the job unsettled while the host keeps the answer and offers it
+  again.
+
 ## [0.64.3] - 2026-10-23
 
 ### Added

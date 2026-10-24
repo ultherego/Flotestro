@@ -62,7 +62,17 @@ func (m *PackageStore) ReplaceImage(ctx context.Context, hostID string,
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := m.ReplaceImageTx(ctx, tx, hostID, pkgs, state, advisories, advisoryState); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
 
+// ReplaceImageTx swaps the image inside a transaction the caller owns, so that it
+// can commit with something else: the settlement of the job that read the list.
+func (m *PackageStore) ReplaceImageTx(ctx context.Context, tx pgx.Tx, hostID string,
+	pkgs []packages.InstalledPackage, state PackageListState,
+	advisories []HostAdvisory, advisoryState AdvisoryState) error {
 	if _, err := tx.Exec(ctx, `delete from host_packages where host_id = $1`, hostID); err != nil {
 		return err
 	}
@@ -132,7 +142,7 @@ func (m *PackageStore) ReplaceImage(ctx context.Context, hostID string,
 		advisoryState.UnavailableReason); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 // AdvisoriesDigest computes the digest of the set of findings known to a host.

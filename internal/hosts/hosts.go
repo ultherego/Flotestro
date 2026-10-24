@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -865,6 +866,17 @@ func (s *Store) ApplyHello(ctx context.Context, hostID, agentVersion, bootID str
 	// host no longer has.
 	if _, err := tx.Exec(ctx, hostQuery, hostID, agentVersion, bootID); err != nil {
 		return fmt.Errorf("updating the host: %w", err)
+	}
+
+	// A host that comes back with the registry it left, not long ago, leaves the
+	// rows as they are: replacing them would only give them a new mark, and a
+	// return of the fleet does it thousands of times.
+	same, err := registryUnchanged(ctx, tx, hostID, caps, time.Now())
+	if err != nil {
+		return err
+	}
+	if same {
+		return tx.Commit(ctx)
 	}
 
 	// The registry is replaced in full: an adapter the host no longer reports has
@@ -2394,4 +2406,64 @@ func (s *Store) SystemHistory(ctx context.Context, hostID string) ([]SystemHisto
 		result = append(result, entry)
 	}
 	return result, rows.Err()
+}
+
+// RegistryRefresh is how old the observation mark of an unchanged registry may be
+// before a session writes it again.
+const RegistryRefresh = 15 * time.Minute
+
+// registryUnchanged says whether the rows of the host are the registry the host
+// reports now, observed within RegistryRefresh. Anything it cannot establish is a
+// change: the rows are replaced.
+func registryUnchanged(ctx context.Context, tx pgx.Tx, hostID string, reported Capabilities, now time.Time) (bool, error) {
+	rows, err := tx.Query(ctx, `
+		select name, version, available, read_only, coalesce(reason, ''), features, observed_at
+		  from host_capability_registry where host_id = $1 order by name`, hostID)
+	if err != nil {
+		return false, fmt.Errorf("reading the adapter registry: %w", err)
+	}
+	defer rows.Close()
+	var held Capabilities
+	var oldest time.Time
+	for rows.Next() {
+		var capability Capability
+		var features []byte
+		var observed time.Time
+		if err := rows.Scan(&capability.Name, &capability.Version, &capability.Available,
+			&capability.ReadOnly, &capability.Reason, &features, &observed); err != nil {
+			return false, fmt.Errorf("reading the adapter registry: %w", err)
+		}
+		if len(features) > 0 {
+			if err := json.Unmarshal(features, &capability.Features); err != nil {
+				return false, nil
+			}
+		}
+		if len(held) == 0 || observed.Before(oldest) {
+			oldest = observed
+		}
+		held = append(held, capability)
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("reading the adapter registry: %w", err)
+	}
+	return sameRegistry(held, reported) && now.Sub(oldest) < RegistryRefresh, nil
+}
+
+// sameRegistry compares two registries as the database keeps them: by name, with
+// no features and empty features the same thing.
+func sameRegistry(held, reported Capabilities) bool {
+	if len(held) == 0 || len(held) != len(reported) {
+		return false
+	}
+	normal := func(list Capabilities) Capabilities {
+		out := append(Capabilities(nil), list...)
+		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+		for i := range out {
+			if len(out[i].Features) == 0 {
+				out[i].Features = nil
+			}
+		}
+		return out
+	}
+	return reflect.DeepEqual(normal(held), normal(reported))
 }
