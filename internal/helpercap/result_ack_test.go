@@ -76,44 +76,83 @@ func TestAResultAckAltered_Moved_OrInvented_IsRefused(t *testing.T) {
 	}
 }
 
-// The digest of the content is part of what is signed once it is there, so a relay
-// can neither strip it and keep the signature nor add one to an acknowledgement
-// that never had it.
+// legacyResultAckSigningBytes is the function an agent from before the digest runs
+// over an acknowledgement: it knows the host, the attempt, the key, the status and
+// the reason, and no digest. It is written out here, and not called, so that the
+// test stays true to that agent if the real function ever grows.
+func legacyResultAckSigningBytes(hostID string, ack *agentv1.TaskResultAck) []byte {
+	out := []byte("flotestro/result-ack/v1\x00")
+	out = appendBytes(out, []byte(hostID))
+	out = appendBytes(out, []byte(ack.GetTaskId()))
+	out = appendBytes(out, []byte(ack.GetIdempotencyKey()))
+	out = appendUint(out, uint64(ack.GetStatus()))
+	out = appendBytes(out, []byte(ack.GetReasonCode()))
+	return out
+}
+
+// An agent from before the digest verifies the acknowledgement of a panel that
+// sends one: the signature it checks is over the bytes it always was. This is the
+// order "panels first" depends on - the first form of the digest was folded into
+// that signature and no older agent would have released a result again.
+func TestAnAgentFromBeforeTheDigestStillVerifiesAnAcknowledgementThatHasOne(t *testing.T) {
+	signer, _ := ackSignerAndRing(t)
+	ack := settled()
+	ack.ResultDigest = ResultDigest(&agentv1.TaskResult{TaskId: "attempt-1", Message: "done"})
+	signer.SignResultAck("host-1", ack)
+
+	if !ed25519.Verify(signer.PublicKey(), legacyResultAckSigningBytes("host-1", ack), ack.GetSignature()) {
+		t.Fatal("an agent that does not know the digest cannot verify the acknowledgement")
+	}
+}
+
+// With the digest, the new check: the digest has a signature of its own, and
+// neither the digest nor the signature can be added, taken off or swapped alone.
 func TestTheDigestOfAResultIsSignedWithTheAcknowledgement(t *testing.T) {
 	signer, ring := ackSignerAndRing(t)
 	digest := ResultDigest(&agentv1.TaskResult{TaskId: "attempt-1", Message: "done"})
 	if len(digest) != 32 {
 		t.Fatalf("the digest of a result is %d bytes", len(digest))
 	}
+	signed := func() *agentv1.TaskResultAck {
+		ack := settled()
+		ack.ResultDigest = digest
+		signer.SignResultAck("host-1", ack)
+		return ack
+	}
 
-	with := settled()
-	with.ResultDigest = digest
-	signer.SignResultAck("host-1", with)
-	if err := VerifyResultAck(ring, "host-1", with); err != nil {
+	if err := VerifyResultAck(ring, "host-1", signed()); err != nil {
 		t.Fatalf("an acknowledgement with its digest was refused: %v", err)
 	}
 
-	stripped := settled()
-	stripped.ResultDigest = digest
-	signer.SignResultAck("host-1", stripped)
-	stripped.ResultDigest = nil
-	if err := VerifyResultAck(ring, "host-1", stripped); !errors.Is(err, ErrResultAckInvalid) {
-		t.Errorf("an acknowledgement with its digest taken off: %v", err)
+	for name, tamper := range map[string]func(*agentv1.TaskResultAck){
+		"another digest": func(a *agentv1.TaskResultAck) {
+			a.ResultDigest = ResultDigest(&agentv1.TaskResult{TaskId: "attempt-1", Message: "other"})
+		},
+		"the digest taken off, its signature left": func(a *agentv1.TaskResultAck) { a.ResultDigest = nil },
+		"the signature of the digest wiped":        func(a *agentv1.TaskResultAck) { a.DigestSignature = nil },
+		"the signature of the digest cut":          func(a *agentv1.TaskResultAck) { a.DigestSignature = a.DigestSignature[:10] },
+		"the signature of the acknowledgement used": func(a *agentv1.TaskResultAck) {
+			a.DigestSignature = a.Signature
+		},
+	} {
+		ack := signed()
+		tamper(ack)
+		if err := VerifyResultAck(ring, "host-1", ack); !errors.Is(err, ErrResultAckInvalid) {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 
-	swapped := settled()
-	swapped.ResultDigest = digest
-	signer.SignResultAck("host-1", swapped)
-	swapped.ResultDigest = ResultDigest(&agentv1.TaskResult{TaskId: "attempt-1", Message: "other"})
-	if err := VerifyResultAck(ring, "host-1", swapped); !errors.Is(err, ErrResultAckInvalid) {
-		t.Errorf("an acknowledgement with another digest: %v", err)
-	}
-
+	// A digest written into an acknowledgement that never had one.
 	added := settled()
 	signer.SignResultAck("host-1", added)
 	added.ResultDigest = digest
 	if err := VerifyResultAck(ring, "host-1", added); !errors.Is(err, ErrResultAckInvalid) {
 		t.Errorf("a digest written into an acknowledgement that had none: %v", err)
+	}
+
+	// Moved to another host, the digest goes with the rest.
+	if err := VerifyResultAck(ring, "host-2", signed()); !errors.Is(err, ErrResultAckInvalid) {
+		t.Errorf("an acknowledgement with a digest moved to another host: %v", err)
 	}
 
 	// A panel from before the field signs as it always did, and that still verifies.

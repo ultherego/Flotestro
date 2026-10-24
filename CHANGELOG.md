@@ -6,14 +6,20 @@ day the tag was published.
 
 ## [Unreleased]
 
+## [0.64.4] - 2026-10-24
+
 ### Added
 
 - **The acknowledgement of a task result names the content it was made for.** `TaskResultAck` carries
-  `result_digest`, the SHA-256 of the deterministic encoding of the result the panel took, and the
-  signature covers it. The host frees its copy only when the digest is the one of the answer it
-  holds, so a relay that altered a result on its way cannot have the host forget the original. A
-  panel from before the field sends none, and the host takes the acknowledgement as it did. Panels
-  first, as always: an agent newer than its panel encodes results the panel cannot reproduce.
+  `result_digest`, the SHA-256 of the deterministic encoding of the result the panel took, and
+  `digest_signature`, a signature of its own over the digest and the rest of the acknowledgement. The
+  signature agents have always verified is made over the bytes it always was, so an agent from before
+  the digest still releases its results: panels first, as always. A host with the digest frees its copy
+  only when it is the one of the answer it holds, so a relay that altered a result on its way cannot
+  have the host forget the original. A digest without its signature, or the signature without the
+  digest, is invalid; a relay that removes both is taken for a panel from before the field. An agent
+  newer than its panel encodes results the panel cannot reproduce and keeps the copy until the spool
+  gives it up.
 
 ### Changed
 
@@ -21,11 +27,15 @@ day the tag was published.
   adapter registry, the local accounts and the inventory modules that say what they said are not
   written again until the mark of their last observation is older than a window: a quarter of what
   the policy tolerates for the module, at most 15 minutes. A return of the whole fleet cost about
-  270 KB of WAL per host; most of it was the same rows with a new timestamp.
+  270 KB of WAL per host; most of it was the same rows with a new timestamp. The answer to an order
+  (a scan, a unit listing, a read of containers) is always written, because the view of an order
+  shows a snapshot only if it is not older than the order.
 - **A job that reads the package list is settled together with the list.** The list is written in the
   transaction that settles the job, so a reader that comes in right after the job succeeded sees its
-  list, and a write that fails leaves the job unsettled while the host keeps the answer and offers it
-  again.
+  list, and a write that fails for a reason that passes leaves the job unsettled while the host keeps
+  the answer and offers it again. A list the database refuses for what is in it - which the same list
+  would meet at every attempt - settles the job without it and says so in the log; a package listed
+  twice no longer makes that happen.
 
 ## [0.64.3] - 2026-10-23
 
@@ -1305,7 +1315,8 @@ across those five tags.
 
 The first tag. It did not build.
 
-[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.64.3...HEAD
+[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.64.4...HEAD
+[0.64.4]: https://github.com/ultherego/Flotestro/compare/v0.64.3...v0.64.4
 [0.64.3]: https://github.com/ultherego/Flotestro/compare/v0.64.2...v0.64.3
 [0.64.2]: https://github.com/ultherego/Flotestro/compare/v0.64.1...v0.64.2
 [0.64.1]: https://github.com/ultherego/Flotestro/compare/v0.64.0...v0.64.1

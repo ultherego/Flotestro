@@ -112,6 +112,19 @@ func TestAnUnchangedReportIsNotWrittenAgainWithinTheWindow(t *testing.T) {
 		t.Error("an account inside its window was written again")
 	}
 
+	// The answer to an order is written whatever the mark says: the view of an order
+	// shows a snapshot only if it is not older than the order.
+	servicesV = module("services")
+	if err := store.SaveFragment(ctx, host.ID, inventory.Fragment{
+		Module: "services", Revision: "s1", Source: "agent/systemctl",
+		Payload: json.RawMessage(`{"units":1}`), ObservedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if module("services") == servicesV {
+		t.Error("the answer to an order, with nothing changed, kept the mark of an earlier read")
+	}
+
 	// Twenty minutes: everything is older than its window and is observed again.
 	age(20)
 	accountV, servicesV, kernelV = account(), module("services"), module("kernel")

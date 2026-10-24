@@ -25,13 +25,22 @@ func ResultAckSigningBytes(hostID string, ack *agentv1.TaskResultAck) []byte {
 	out = appendBytes(out, []byte(ack.GetIdempotencyKey()))
 	out = appendUint(out, uint64(ack.GetStatus()))
 	out = appendBytes(out, []byte(ack.GetReasonCode()))
-	// An acknowledgement that names the content it was made for is signed with
-	// it, so a relay cannot strip the digest and keep the signature; one that does
-	// not (a panel from before the field) is signed as it always was.
-	if digest := ack.GetResultDigest(); len(digest) > 0 {
-		out = appendBytes(out, digest)
-	}
 	return out
+}
+
+// resultAckDigestPrefix keeps the signature of a digest from being read as the
+// signature of the acknowledgement it travels with.
+const resultAckDigestPrefix = "flotestro/result-ack-digest/v1\x00"
+
+// ResultAckDigestSigningBytes is what the signature of the digest covers: the
+// acknowledgement as it was always signed and the digest of the result with it.
+// It is a signature of its own because an agent from before the digest verifies
+// the first one over the bytes it knows, and an acknowledgement it cannot verify
+// frees nothing - the order "panels first" would have stopped every older agent
+// from ever releasing a result.
+func ResultAckDigestSigningBytes(hostID string, ack *agentv1.TaskResultAck) []byte {
+	out := append([]byte(resultAckDigestPrefix), ResultAckSigningBytes(hostID, ack)...)
+	return appendBytes(out, ack.GetResultDigest())
 }
 
 // ResultDigest is the SHA-256 of the deterministic encoding of a task result:
@@ -49,10 +58,16 @@ func ResultDigest(result *agentv1.TaskResult) []byte {
 	return sum[:]
 }
 
-// SignResultAck signs the acknowledgement for the host in place.
+// SignResultAck signs the acknowledgement for the host in place: the signature
+// every agent verifies, and, when the acknowledgement names the content of the
+// result, the signature of the digest for the agents that know it.
 func (s *Signer) SignResultAck(hostID string, ack *agentv1.TaskResultAck) {
 	ack.KeyId = s.keyID
 	ack.Signature = ed25519.Sign(s.key, ResultAckSigningBytes(hostID, ack))
+	ack.DigestSignature = nil
+	if len(ack.GetResultDigest()) > 0 {
+		ack.DigestSignature = ed25519.Sign(s.key, ResultAckDigestSigningBytes(hostID, ack))
+	}
 }
 
 // Errors of a result acknowledgement the host will not act on.
@@ -73,6 +88,17 @@ func VerifyResultAck(ring *Keyring, hostID string, ack *agentv1.TaskResultAck) e
 	}
 	if len(ack.GetSignature()) != ed25519.SignatureSize ||
 		!ed25519.Verify(public, ResultAckSigningBytes(hostID, ack), ack.GetSignature()) {
+		return ErrResultAckInvalid
+	}
+	// The content it names is signed too, or it is not named: a digest nobody
+	// signed, and a signature of a digest that is not there, are both somebody's
+	// work on the way.
+	digest, signature := ack.GetResultDigest(), ack.GetDigestSignature()
+	if len(digest) == 0 && len(signature) == 0 {
+		return nil
+	}
+	if len(digest) == 0 || len(signature) != ed25519.SignatureSize ||
+		!ed25519.Verify(public, ResultAckDigestSigningBytes(hostID, ack), signature) {
 		return ErrResultAckInvalid
 	}
 	return nil
