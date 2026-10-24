@@ -770,6 +770,12 @@ func Run() error {
 
 	hostStore := hosts.NewStore(pool)
 	inventoryStore := inventory.NewStore(pool)
+	// An unchanged module keeps the mark of its last observation for a quarter of
+	// what the policy tolerates before it calls a fact too old, so that not writing
+	// a row again can never be what ages a verdict out.
+	inventoryStore.SetRefreshWindow(func(module string) time.Duration {
+		return policy.MaxFactAge(module) / 4
+	})
 	jobStore := jobs.NewStore(pool)
 	campaignStore := campaigns.NewStore(pool)
 	budgetStore := budgets.NewStore(pool, log)

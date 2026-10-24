@@ -38,3 +38,26 @@ func TestEveryAcknowledgementOfAResultIsSignedForItsHost(t *testing.T) {
 		}
 	}
 }
+
+// The acknowledgement says which content it was made for: the host compares it with
+// the answer it holds.
+func TestTheAcknowledgementCarriesTheDigestOfTheResultItAnswers(t *testing.T) {
+	signer, _, err := helpercap.LoadOrGenerateSigner(filepath.Join(t.TempDir(), "helper-signing.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ring := helpercap.NewKeyring(signer.PublicKey())
+	service := &AgentService{helperSigner: signer}
+	session := NewSession("s", "host-1", "0.64.2", "boot", "127.0.0.1", 4)
+	result := &agentv1.TaskResult{TaskId: "attempt-1", IdempotencyKey: "job:attempt-1", Stdout: []byte("output")}
+
+	service.ackResult("host-1", session, result, agentv1.TaskResultAck_STATUS_SETTLED, "")
+	ack := (<-session.outbound).GetTaskResultAck()
+	if string(ack.GetResultDigest()) != string(helpercap.ResultDigest(result)) || len(ack.GetResultDigest()) == 0 {
+		t.Fatalf("the acknowledgement names the digest %x, the result has %x",
+			ack.GetResultDigest(), helpercap.ResultDigest(result))
+	}
+	if err := helpercap.VerifyResultAck(ring, "host-1", ack); err != nil {
+		t.Fatalf("the acknowledgement with its digest is not the panel's: %v", err)
+	}
+}

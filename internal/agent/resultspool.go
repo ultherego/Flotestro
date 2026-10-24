@@ -10,6 +10,7 @@ package agent
 // next session that works, the same way the resource samples are.
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
+	"github.com/ultherego/flotestro/internal/helpercap"
 )
 
 const (
@@ -342,6 +344,22 @@ func (s *ResultSpool) Acknowledge(ack *agentv1.TaskResultAck) error {
 				"the answer held for the attempt %s was performed under %s and the "+
 					"acknowledgement names %s",
 				entry.taskID, entry.idempotencyKey, named)
+		}
+		// An acknowledgement that names the content it was made for frees the
+		// answer only when that is the answer held. A relay can change a result on
+		// its way; the panel then acknowledges what it took, and the host keeps the
+		// original for a resend instead of believing the two the same. An
+		// acknowledgement from a panel that sends no digest is taken as it was.
+		if digest := ack.GetResultDigest(); len(digest) > 0 {
+			held, err := s.read(entry.file)
+			if err != nil {
+				return fmt.Errorf("the answer held for the attempt %s could not be read back to compare: %w",
+					entry.taskID, err)
+			}
+			if !bytes.Equal(helpercap.ResultDigest(held), digest) {
+				return fmt.Errorf("the acknowledgement of the attempt %s names other content than "+
+					"the answer held for it", entry.taskID)
+			}
 		}
 		s.forget(entry.taskID)
 		return nil

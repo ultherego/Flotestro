@@ -14,6 +14,7 @@ import (
 	"time"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
+	"github.com/ultherego/flotestro/internal/helpercap"
 )
 
 // fakePanel stands in for the far end of the session: it counts the results it
@@ -299,5 +300,57 @@ func TestEverySessionOfAProcessSharesOneResultSpool(t *testing.T) {
 	pending := second.Pending(time.Now())
 	if len(pending) != 1 || pending[0].GetTaskId() != "task-after-the-reconnect" {
 		t.Fatalf("the session that followed offers %d results: %+v", len(pending), pending)
+	}
+}
+
+// A relay can change a result on its way. The panel acknowledges what it took and
+// says which content that was; an acknowledgement of other content than the answer
+// held frees nothing, and the original is offered again.
+func TestAnAcknowledgementOfOtherContentFreesNothing(t *testing.T) {
+	spool := openResultSpool(t, t.TempDir(), ResultSpoolSize, ResultSpoolBytes)
+	result := finishedTask("attempt-1")
+	if err := spool.Enqueue(result); err != nil {
+		t.Fatal(err)
+	}
+
+	changed := finishedTask("attempt-1")
+	changed.Message = "the unit was left alone"
+	wrong := &agentv1.TaskResultAck{
+		TaskId: "attempt-1", IdempotencyKey: result.GetIdempotencyKey(),
+		Status: agentv1.TaskResultAck_STATUS_SETTLED, ResultDigest: helpercap.ResultDigest(changed),
+	}
+	if err := spool.Acknowledge(wrong); err == nil {
+		t.Fatal("an acknowledgement of other content freed the answer")
+	}
+	if spool.Len() != 1 {
+		t.Fatalf("the answer was lost: the spool holds %d", spool.Len())
+	}
+
+	right := &agentv1.TaskResultAck{
+		TaskId: "attempt-1", IdempotencyKey: result.GetIdempotencyKey(),
+		Status: agentv1.TaskResultAck_STATUS_SETTLED, ResultDigest: helpercap.ResultDigest(result),
+	}
+	if err := spool.Acknowledge(right); err != nil {
+		t.Fatalf("the acknowledgement of the answer held was refused: %v", err)
+	}
+	if spool.Len() != 0 {
+		t.Fatalf("the answer was not freed: the spool holds %d", spool.Len())
+	}
+}
+
+// A panel from before the digest acknowledges as it did, and the host believes it
+// as it did.
+func TestAnAcknowledgementWithoutADigestStillFreesTheAnswer(t *testing.T) {
+	spool := openResultSpool(t, t.TempDir(), ResultSpoolSize, ResultSpoolBytes)
+	result := finishedTask("attempt-1")
+	if err := spool.Enqueue(result); err != nil {
+		t.Fatal(err)
+	}
+	ack := &agentv1.TaskResultAck{
+		TaskId: "attempt-1", IdempotencyKey: result.GetIdempotencyKey(),
+		Status: agentv1.TaskResultAck_STATUS_SETTLED,
+	}
+	if err := spool.Acknowledge(ack); err != nil || spool.Len() != 0 {
+		t.Fatalf("an acknowledgement without a digest: err %v, spool %d", err, spool.Len())
 	}
 }

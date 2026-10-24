@@ -2,7 +2,10 @@ package helpercap
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
 	"errors"
+
+	"google.golang.org/protobuf/proto"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 )
@@ -22,7 +25,28 @@ func ResultAckSigningBytes(hostID string, ack *agentv1.TaskResultAck) []byte {
 	out = appendBytes(out, []byte(ack.GetIdempotencyKey()))
 	out = appendUint(out, uint64(ack.GetStatus()))
 	out = appendBytes(out, []byte(ack.GetReasonCode()))
+	// An acknowledgement that names the content it was made for is signed with
+	// it, so a relay cannot strip the digest and keep the signature; one that does
+	// not (a panel from before the field) is signed as it always was.
+	if digest := ack.GetResultDigest(); len(digest) > 0 {
+		out = appendBytes(out, digest)
+	}
 	return out
+}
+
+// ResultDigest is the SHA-256 of the deterministic encoding of a task result:
+// the same bytes on every computation of the same result, on the agent that
+// sent it and on the panel that took it. Nil when the result cannot be encoded.
+func ResultDigest(result *agentv1.TaskResult) []byte {
+	if result == nil {
+		return nil
+	}
+	encoded, err := proto.MarshalOptions{Deterministic: true}.Marshal(result)
+	if err != nil {
+		return nil
+	}
+	sum := sha256.Sum256(encoded)
+	return sum[:]
 }
 
 // SignResultAck signs the acknowledgement for the host in place.

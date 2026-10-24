@@ -75,3 +75,66 @@ func TestAResultAckAltered_Moved_OrInvented_IsRefused(t *testing.T) {
 		t.Errorf("an unsigned acknowledgement: %v", err)
 	}
 }
+
+// The digest of the content is part of what is signed once it is there, so a relay
+// can neither strip it and keep the signature nor add one to an acknowledgement
+// that never had it.
+func TestTheDigestOfAResultIsSignedWithTheAcknowledgement(t *testing.T) {
+	signer, ring := ackSignerAndRing(t)
+	digest := ResultDigest(&agentv1.TaskResult{TaskId: "attempt-1", Message: "done"})
+	if len(digest) != 32 {
+		t.Fatalf("the digest of a result is %d bytes", len(digest))
+	}
+
+	with := settled()
+	with.ResultDigest = digest
+	signer.SignResultAck("host-1", with)
+	if err := VerifyResultAck(ring, "host-1", with); err != nil {
+		t.Fatalf("an acknowledgement with its digest was refused: %v", err)
+	}
+
+	stripped := settled()
+	stripped.ResultDigest = digest
+	signer.SignResultAck("host-1", stripped)
+	stripped.ResultDigest = nil
+	if err := VerifyResultAck(ring, "host-1", stripped); !errors.Is(err, ErrResultAckInvalid) {
+		t.Errorf("an acknowledgement with its digest taken off: %v", err)
+	}
+
+	swapped := settled()
+	swapped.ResultDigest = digest
+	signer.SignResultAck("host-1", swapped)
+	swapped.ResultDigest = ResultDigest(&agentv1.TaskResult{TaskId: "attempt-1", Message: "other"})
+	if err := VerifyResultAck(ring, "host-1", swapped); !errors.Is(err, ErrResultAckInvalid) {
+		t.Errorf("an acknowledgement with another digest: %v", err)
+	}
+
+	added := settled()
+	signer.SignResultAck("host-1", added)
+	added.ResultDigest = digest
+	if err := VerifyResultAck(ring, "host-1", added); !errors.Is(err, ErrResultAckInvalid) {
+		t.Errorf("a digest written into an acknowledgement that had none: %v", err)
+	}
+
+	// A panel from before the field signs as it always did, and that still verifies.
+	old := settled()
+	signer.SignResultAck("host-1", old)
+	if err := VerifyResultAck(ring, "host-1", old); err != nil {
+		t.Errorf("an acknowledgement without a digest was refused: %v", err)
+	}
+}
+
+func TestTheDigestOfAResultFollowsItsContent(t *testing.T) {
+	a := &agentv1.TaskResult{TaskId: "t", Message: "one", Stdout: []byte("x")}
+	b := &agentv1.TaskResult{TaskId: "t", Message: "one", Stdout: []byte("x")}
+	if string(ResultDigest(a)) != string(ResultDigest(b)) {
+		t.Error("two equal results have two digests")
+	}
+	b.Stdout = []byte("y")
+	if string(ResultDigest(a)) == string(ResultDigest(b)) {
+		t.Error("two different results have one digest")
+	}
+	if ResultDigest(nil) != nil {
+		t.Error("nothing has a digest")
+	}
+}

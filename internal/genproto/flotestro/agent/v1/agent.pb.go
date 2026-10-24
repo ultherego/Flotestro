@@ -3375,8 +3375,15 @@ type TaskResultAck struct {
 	// trusts. The signature covers the host, the attempt, the idempotency key,
 	// the status and the reason, so it cannot be moved to another host or
 	// another answer.
-	Signature     []byte `protobuf:"bytes,5,opt,name=signature,proto3" json:"signature,omitempty"`
-	KeyId         string `protobuf:"bytes,6,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
+	Signature []byte `protobuf:"bytes,5,opt,name=signature,proto3" json:"signature,omitempty"`
+	KeyId     string `protobuf:"bytes,6,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
+	// The SHA-256 of the deterministic encoding of the TaskResult the panel took
+	// this acknowledgement for, and part of what the signature covers when it is
+	// present. The agent compares it with the result it holds: an acknowledgement
+	// that names other content frees nothing, so a relay that altered the answer on
+	// its way cannot have the host forget the original. Empty from a panel that
+	// does not send it, which the agent takes as it did before.
+	ResultDigest  []byte `protobuf:"bytes,7,opt,name=result_digest,json=resultDigest,proto3" json:"result_digest,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3451,6 +3458,13 @@ func (x *TaskResultAck) GetKeyId() string {
 		return x.KeyId
 	}
 	return ""
+}
+
+func (x *TaskResultAck) GetResultDigest() []byte {
+	if x != nil {
+		return x.ResultDigest
+	}
+	return nil
 }
 
 // MetricsAck answers one resource sample, named by the identity the agent
@@ -16652,7 +16666,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"metricsAck\x12K\n" +
 	"\x0ftask_result_ack\x18\n" +
 	" \x01(\v2!.flotestro.agent.v1.TaskResultAckH\x00R\rtaskResultAckB\t\n" +
-	"\apayload\"\xd0\x02\n" +
+	"\apayload\"\xf5\x02\n" +
 	"\rTaskResultAck\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12'\n" +
 	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12@\n" +
@@ -16660,7 +16674,8 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\vreason_code\x18\x04 \x01(\tR\n" +
 	"reasonCode\x12\x1c\n" +
 	"\tsignature\x18\x05 \x01(\fR\tsignature\x12\x15\n" +
-	"\x06key_id\x18\x06 \x01(\tR\x05keyId\"e\n" +
+	"\x06key_id\x18\x06 \x01(\tR\x05keyId\x12#\n" +
+	"\rresult_digest\x18\a \x01(\fR\fresultDigest\"e\n" +
 	"\x06Status\x12\x16\n" +
 	"\x12STATUS_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eSTATUS_SETTLED\x10\x01\x12\x14\n" +
