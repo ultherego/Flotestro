@@ -821,6 +821,9 @@ func (s *AgentService) ackResult(hostID string, session *Session, result *agentv
 		IdempotencyKey: result.GetIdempotencyKey(),
 		Status:         status,
 		ReasonCode:     reason,
+		// What the panel took this acknowledgement for, so that the host can tell
+		// its own answer from one a relay changed on the way.
+		ResultDigest: helpercap.ResultDigest(result),
 	}
 	// A relay carries this and could write one; the host frees nothing it
 	// cannot check against the keys it trusts.
