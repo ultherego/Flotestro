@@ -210,7 +210,7 @@ func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored 
 		}
 	}
 
-	if err := s.saveFragments(ctx, tx, hostID, report.Fragments); err != nil {
+	if err := s.saveFragments(ctx, tx, hostID, report.Fragments, false); err != nil {
 		return false, err
 	}
 
@@ -374,7 +374,8 @@ func (s *Store) Latest(ctx context.Context, hostID string) (*Revision, error) {
 }
 
 // saveFragments writes the modules that have changed.
-func (s *Store) saveFragments(ctx context.Context, tx pgx.Tx, hostID string, fragments []Fragment) error {
+func (s *Store) saveFragments(ctx context.Context, tx pgx.Tx, hostID string, fragments []Fragment,
+	force bool) error {
 	const query = `
 		insert into host_module_inventory
 			(host_id, module, revision, source, payload, unavailable_reason, observed_at, updated_at)
@@ -405,9 +406,13 @@ func (s *Store) saveFragments(ctx context.Context, tx pgx.Tx, hostID string, fra
 		if observed.IsZero() {
 			observed = time.Now().UTC()
 		}
+		window := s.window(fragment.Module)
+		if force {
+			window = 0
+		}
 		if _, err := tx.Exec(ctx, query, hostID, fragment.Module, fragment.Revision,
 			fragment.Source, fragment.Payload, fragment.UnavailableReason, observed,
-			s.window(fragment.Module).Seconds()); err != nil {
+			window.Seconds()); err != nil {
 			return fmt.Errorf("writing the module %s: %w", fragment.Module, err)
 		}
 	}
@@ -421,7 +426,10 @@ func (s *Store) SaveFragment(ctx context.Context, hostID string, fragment Fragme
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := s.saveFragments(ctx, tx, hostID, []Fragment{fragment}); err != nil {
+	// The answer to an order is always written: it is what the view of that order
+	// compares with the moment the order was made (adminapi/reads.go), and a mark
+	// left from an earlier read would pass for a snapshot older than the order.
+	if err := s.saveFragments(ctx, tx, hostID, []Fragment{fragment}, true); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

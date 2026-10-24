@@ -1307,8 +1307,28 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 		if image == nil {
 			return nil
 		}
-		return s.pkgs.ReplaceImageTx(ctx, tx, image.hostID, image.packages, image.state,
-			image.advisories, image.advisoryState)
+		// In a savepoint of its own: a list the database refuses for what is in it
+		// would be refused at every redelivery, and a job that never settles over a
+		// list is worse than a job that settled with the previous one in place - which
+		// is what happened before the list went into this transaction. A refusal that
+		// passes (the database, a connection) is the panel's trouble and stays a
+		// redelivery.
+		sub, err := tx.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		if err := s.pkgs.ReplaceImageTx(ctx, sub, image.hostID, image.packages, image.state,
+			image.advisories, image.advisoryState); err != nil {
+			_ = sub.Rollback(ctx)
+			if !listRefusedByItsData(err) {
+				return err
+			}
+			s.log.Error("the package list was refused for its content; the job settles and the previous list stays",
+				"host_id", hostID, "job_id", jobID, "packages", len(image.packages), "err", err)
+			image = nil
+			return nil
+		}
+		return sub.Commit(ctx)
 	})
 	if errors.Is(err, jobs.ErrStaleFence) {
 		// The database refused the settlement: the host was claimed by a newer
@@ -4179,8 +4199,54 @@ func (s *AgentService) preparePackageList(hostID, jobID string,
 		advisories = nil
 		advisoryState.AdvisoryCount = 0
 	}
-	return &packageImage{hostID: hostID, packages: pkgs, state: state,
-		advisories: advisories, advisoryState: advisoryState}
+	return &packageImage{hostID: hostID, packages: dedupePackages(pkgs), state: state,
+		advisories: dedupeAdvisories(advisories), advisoryState: advisoryState}
+}
+
+// dedupePackages keeps the first of the entries that share the key of the table
+// (name, architecture, version, release): the host listed one package twice - a
+// package database does that - and the second entry would have refused the whole
+// list. Which of two equal keys is kept is of no consequence; the rest of a row is
+// what the host said about the same package.
+func dedupePackages(list []packagestore.InstalledPackage) []packagestore.InstalledPackage {
+	seen := make(map[[4]string]bool, len(list))
+	kept := list[:0:0]
+	for _, pkg := range list {
+		key := [4]string{pkg.Name, pkg.Architecture, pkg.Version, pkg.Release}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		kept = append(kept, pkg)
+	}
+	return kept
+}
+
+// dedupeAdvisories does the same for the findings, whose key is the advisory, the
+// package and its architecture.
+func dedupeAdvisories(list []vuln.HostAdvisory) []vuln.HostAdvisory {
+	seen := make(map[[3]string]bool, len(list))
+	kept := list[:0:0]
+	for _, advisory := range list {
+		key := [3]string{advisory.AdvisoryID, advisory.PackageName, advisory.Architecture}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		kept = append(kept, advisory)
+	}
+	return kept
+}
+
+// listRefusedByItsData says whether the database refused a package list for what
+// is in it - an integrity or a data error, which the same list will meet again at
+// every attempt - and not for a reason that passes, such as a connection.
+func listRefusedByItsData(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	return strings.HasPrefix(pgErr.Code, "22") || strings.HasPrefix(pgErr.Code, "23")
 }
 
 // packageListWritten is what follows the commit of a list written with the

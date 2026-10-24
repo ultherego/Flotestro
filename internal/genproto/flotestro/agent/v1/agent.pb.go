@@ -3378,14 +3378,20 @@ type TaskResultAck struct {
 	Signature []byte `protobuf:"bytes,5,opt,name=signature,proto3" json:"signature,omitempty"`
 	KeyId     string `protobuf:"bytes,6,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
 	// The SHA-256 of the deterministic encoding of the TaskResult the panel took
-	// this acknowledgement for, and part of what the signature covers when it is
-	// present. The agent compares it with the result it holds: an acknowledgement
-	// that names other content frees nothing, so a relay that altered the answer on
-	// its way cannot have the host forget the original. Empty from a panel that
-	// does not send it, which the agent takes as it did before.
-	ResultDigest  []byte `protobuf:"bytes,7,opt,name=result_digest,json=resultDigest,proto3" json:"result_digest,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// this acknowledgement for. The agent compares it with the result it holds: an
+	// acknowledgement that names other content frees nothing, so a relay that
+	// altered the answer on its way cannot have the host forget the original.
+	// Empty from a panel that does not send it, which the agent takes as it did
+	// before.
+	ResultDigest []byte `protobuf:"bytes,7,opt,name=result_digest,json=resultDigest,proto3" json:"result_digest,omitempty"`
+	// The panel's signature over the digest together with everything the signature
+	// above covers. It is a signature of its own, and the one above is made over the
+	// bytes it always was, so that an agent from before the digest - which knows
+	// neither field - still verifies the acknowledgement it is sent. A digest
+	// without this signature, or this signature without a digest, is invalid.
+	DigestSignature []byte `protobuf:"bytes,8,opt,name=digest_signature,json=digestSignature,proto3" json:"digest_signature,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *TaskResultAck) Reset() {
@@ -3463,6 +3469,13 @@ func (x *TaskResultAck) GetKeyId() string {
 func (x *TaskResultAck) GetResultDigest() []byte {
 	if x != nil {
 		return x.ResultDigest
+	}
+	return nil
+}
+
+func (x *TaskResultAck) GetDigestSignature() []byte {
+	if x != nil {
+		return x.DigestSignature
 	}
 	return nil
 }
@@ -16666,7 +16679,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"metricsAck\x12K\n" +
 	"\x0ftask_result_ack\x18\n" +
 	" \x01(\v2!.flotestro.agent.v1.TaskResultAckH\x00R\rtaskResultAckB\t\n" +
-	"\apayload\"\xf5\x02\n" +
+	"\apayload\"\xa0\x03\n" +
 	"\rTaskResultAck\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12'\n" +
 	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12@\n" +
@@ -16675,7 +16688,8 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"reasonCode\x12\x1c\n" +
 	"\tsignature\x18\x05 \x01(\fR\tsignature\x12\x15\n" +
 	"\x06key_id\x18\x06 \x01(\tR\x05keyId\x12#\n" +
-	"\rresult_digest\x18\a \x01(\fR\fresultDigest\"e\n" +
+	"\rresult_digest\x18\a \x01(\fR\fresultDigest\x12)\n" +
+	"\x10digest_signature\x18\b \x01(\fR\x0fdigestSignature\"e\n" +
 	"\x06Status\x12\x16\n" +
 	"\x12STATUS_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eSTATUS_SETTLED\x10\x01\x12\x14\n" +

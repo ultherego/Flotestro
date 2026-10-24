@@ -428,12 +428,18 @@ message TaskResultAck {
   bytes signature = 5;
   string key_id = 6;
   // The SHA-256 of the deterministic encoding of the TaskResult the panel took
-  // this acknowledgement for, and part of what the signature covers when it is
-  // present. The agent compares it with the result it holds: an acknowledgement
-  // that names other content frees nothing, so a relay that altered the answer on
-  // its way cannot have the host forget the original. Empty from a panel that
-  // does not send it, which the agent takes as it did before.
+  // this acknowledgement for. The agent compares it with the result it holds: an
+  // acknowledgement that names other content frees nothing, so a relay that
+  // altered the answer on its way cannot have the host forget the original.
+  // Empty from a panel that does not send it, which the agent takes as it did
+  // before.
   bytes result_digest = 7;
+  // The panel's signature over the digest together with everything the signature
+  // above covers. It is a signature of its own, and the one above is made over the
+  // bytes it always was, so that an agent from before the digest - which knows
+  // neither field - still verifies the acknowledgement it is sent. A digest
+  // without this signature, or this signature without a digest, is invalid.
+  bytes digest_signature = 8;
 }
 
 // MetricsAck answers one resource sample, named by the identity the agent

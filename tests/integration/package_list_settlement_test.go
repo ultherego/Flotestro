@@ -23,27 +23,7 @@ func TestAJobThatReadsThePackageListIsNotSucceededWithoutTheList(t *testing.T) {
 	host := h.hostByFamily("debian")
 	pool := h.database(ctx)
 
-	trigger := "refuse_list_" + strings.ReplaceAll(host.ID[:8], "-", "")
-	if _, err := pool.Exec(ctx, fmt.Sprintf(`
-		create or replace function %[1]s() returns trigger language plpgsql as $$
-		begin
-			if new.host_id = '%[2]s'::uuid then
-				raise exception 'the laboratory refuses the package list of this host';
-			end if;
-			return new;
-		end $$`, trigger, host.ID)); err != nil {
-		t.Fatalf("preparing the refusal: %v", err)
-	}
-	drop := func() {
-		_, _ = pool.Exec(context.Background(), fmt.Sprintf(
-			`drop trigger if exists %[1]s on host_package_state; drop function if exists %[1]s()`, trigger))
-	}
-	t.Cleanup(drop)
-	if _, err := pool.Exec(ctx, fmt.Sprintf(`
-		create trigger %[1]s before insert or update on host_package_state
-		for each row execute function %[1]s()`, trigger)); err != nil {
-		t.Fatalf("installing the refusal: %v", err)
-	}
+	drop := refusePackageList(t, h, host.ID, "P0001")
 
 	job := h.createOperation(host.ID, map[string]any{
 		"action": "packages.list", "reason": "the list is written with the settlement",
@@ -74,5 +54,66 @@ func TestAJobThatReadsThePackageListIsNotSucceededWithoutTheList(t *testing.T) {
 	}
 	if written != job.ID {
 		t.Fatalf("the list stored is the one of job %q, not of the job that settled, %s", written, job.ID)
+	}
+}
+
+// refusePackageList makes the database refuse the write of the package list of one
+// host with the SQLSTATE given, and returns the function that ends the refusal. The
+// trigger is removed when the test ends whatever happens.
+func refusePackageList(t *testing.T, h *harness, hostID, sqlstate string) func() {
+	t.Helper()
+	ctx := context.Background()
+	pool := h.database(ctx)
+	trigger := "refuse_list_" + strings.ReplaceAll(hostID[:8], "-", "") + "_" + strings.ToLower(sqlstate)
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		create or replace function %[1]s() returns trigger language plpgsql as $$
+		begin
+			if new.host_id = '%[2]s'::uuid then
+				raise exception 'the laboratory refuses the package list of this host' using errcode = '%[3]s';
+			end if;
+			return new;
+		end $$`, trigger, hostID, sqlstate)); err != nil {
+		t.Fatalf("preparing the refusal: %v", err)
+	}
+	drop := func() {
+		_, _ = pool.Exec(context.Background(), fmt.Sprintf(
+			`drop trigger if exists %[1]s on host_package_state; drop function if exists %[1]s()`, trigger))
+	}
+	t.Cleanup(drop)
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		create trigger %[1]s before insert or update on host_package_state
+		for each row execute function %[1]s()`, trigger)); err != nil {
+		t.Fatalf("installing the refusal: %v", err)
+	}
+	return drop
+}
+
+// A list the database refuses for what is in it (an integrity error) would be
+// refused at every redelivery, so the job settles without it and the list stored
+// before stays: a job that never settles over a list is worse than that.
+func TestAPackageListRefusedForItsContentDoesNotHoldTheJobBack(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	host := h.hostByFamily("debian")
+	pool := h.database(ctx)
+
+	var before string
+	_ = pool.QueryRow(ctx, `select coalesce(job_id::text, '') from host_package_state where host_id = $1::uuid`,
+		host.ID).Scan(&before)
+
+	refusePackageList(t, h, host.ID, "23505")
+	final, _ := h.runOperation(host.ID, map[string]any{
+		"action": "packages.list", "reason": "a list the database refuses for its content",
+	}, 2*time.Minute)
+	if final.State != "succeeded" {
+		t.Fatalf("a list refused for its content held the job at %s", final.State)
+	}
+	var after string
+	if err := pool.QueryRow(ctx, `select coalesce(job_id::text, '') from host_package_state where host_id = $1::uuid`,
+		host.ID).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("the list of the host changed to the one of job %q though the database refused it", after)
 	}
 }
