@@ -1655,6 +1655,8 @@ func dockerEnvelope(action opspec.ActionType, payload opspec.Payload) *agentv1.D
 	if container := payload.DockerContainer; container != nil {
 		envelope.ContainerId = container.ContainerID
 		envelope.ContainerName = container.Name
+		envelope.ConfirmName = container.ConfirmName
+		envelope.ExpectedImage = container.ExpectedImage
 		envelope.TimeoutSeconds = container.TimeoutSeconds
 		envelope.RemoveVolumes = container.RemoveVolumes
 	}

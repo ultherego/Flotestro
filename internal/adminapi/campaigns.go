@@ -329,6 +329,16 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 		RetriesCampaignID:        retriesID,
 	}
 
+	// A container named and not numbered is settled on each host; the canary goes first
+	// to a host the panel has seen it on.
+	if name := containerOrderName(action, payload); name != "" {
+		evidence, err := s.containerPresence(r.Context(), assessment.Ready, name)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		assessment.Ready = evidence.ordered()
+	}
 	targets := assessment.Targets()
 
 	tx, err := s.campaigns.Pool().Begin(r.Context())
@@ -979,6 +989,18 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 	response["campaign_mode"] = string(action.CampaignMode())
 	response["requires_plan"] = opspec.CampaignPlans(action)
 	response["distribution"] = distribution(assessment.Ready, action)
+	// A container named in the order: the capability says a host can run the
+	// operation and says nothing of whether the container is there. What the last full
+	// reads of the hosts say of it is shown apart from the eligible count.
+	if name := query.Get("container_name"); name != "" && containerOrderName(action,
+		opspec.Payload{DockerContainer: &opspec.DockerContainerPayload{Name: name}}) != "" {
+		evidence, err := s.containerPresence(r.Context(), assessment.Ready, name)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		response["container"] = evidence.summary(name)
+	}
 	// An order the panel splits host by host needs every ready host in view
 	// before the order, not a sample: the mapping names them by identifier, and
 	// the wizard shows a host it does not name as ineligible before anything is.

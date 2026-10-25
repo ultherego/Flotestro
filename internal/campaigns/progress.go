@@ -235,6 +235,11 @@ func targetOutcome(verdict jobVerdict) (TargetState, string) {
 		return TargetUnknown, CancelAckTimeoutCode
 	case verdict.State == jobs.StateCanceled:
 		return TargetCanceled, string(jobs.StateCanceled)
+	case verdict.ErrorCode == ContainerNotFoundCode:
+		// The campaign named a container by its name and this host, whose engine
+		// answered, does not run it: a host the order does not concern, which the
+		// report counts as skipped and the failure threshold does not see.
+		return TargetSkipped, ContainerNotFoundCode
 	default:
 		return TargetFailed, orDefault(verdict.ErrorCode, string(verdict.State))
 	}

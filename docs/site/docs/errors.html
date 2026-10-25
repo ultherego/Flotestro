@@ -122,7 +122,7 @@
 
   <main class="content">
 <h1>7. Errors and refusals</h1>
-<p class="lede">Every refusal, failure and skip the panel, the agent and the helper can put on a task, a campaign target or a request carries a stable code. A code answers two questions: what happened, and what can safely be done next. This page is the whole guide, 326 entries, transcribed from <code>internal/opspec/errors.go</code>; the panel serves the same list at <code>GET /api/v1/errors</code>.</p>
+<p class="lede">Every refusal, failure and skip the panel, the agent and the helper can put on a task, a campaign target or a request carries a stable code. A code answers two questions: what happened, and what can safely be done next. This page is the whole guide, 329 entries, transcribed from <code>internal/opspec/errors.go</code>; the panel serves the same list at <code>GET /api/v1/errors</code>.</p>
 <div class="note"><p class="note__title">The wording is the panel&rsquo;s own</p><p>The meaning and the action are quoted exactly as the panel shows them, so a code searched for here reads the same as the one on the screen. An unknown code gets no guide at all: the panel shows the code as it came rather than inventing advice.</p></div>
 <h2 id="retry">The retry policy</h2>
 <p>Every entry carries a retry policy. It is the answer to &ldquo;may this be repeated&rdquo; when the outcome is a failure or unknown.</p>
@@ -176,7 +176,7 @@
 <tr><td><a href="#stage-approval"><code>approval</code></a></td><td>9</td></tr>
 <tr><td><a href="#stage-dispatch"><code>dispatch</code></a></td><td>25</td></tr>
 <tr><td><a href="#stage-agent"><code>agent</code></a></td><td>29</td></tr>
-<tr><td><a href="#stage-helper"><code>helper</code></a></td><td>105</td></tr>
+<tr><td><a href="#stage-helper"><code>helper</code></a></td><td>108</td></tr>
 <tr><td><a href="#stage-verify"><code>verify</code></a></td><td>10</td></tr>
 <tr><td><a href="#stage-reconcile"><code>reconcile</code></a></td><td>18</td></tr>
 <tr><td><a href="#stage-cancel"><code>cancel</code></a></td><td>3</td></tr>
@@ -275,6 +275,9 @@
 <tr><td><a href="#err-docker-object-conflict"><code class="refusal">docker_object_conflict</code></a></td><td>planning</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
 <tr><td><a href="#err-docker-object-in-use"><code class="refusal">docker_object_in_use</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
 <tr><td><a href="#err-docker-object-missing"><code class="refusal">docker_object_missing</code></a></td><td>helper</td><td><span class="badge retry-never">never</span></td><td>yes</td></tr>
+<tr><td><a href="#err-container-not-found"><code class="refusal">container_not_found</code></a></td><td>helper</td><td><span class="badge retry-never">never</span></td><td>no</td></tr>
+<tr><td><a href="#err-docker-engine-unreadable"><code class="refusal">docker_engine_unreadable</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
+<tr><td><a href="#err-container-identity-mismatch"><code class="refusal">container_identity_mismatch</code></a></td><td>helper</td><td><span class="badge retry-never">never</span></td><td>yes</td></tr>
 <tr><td><a href="#err-effects-partial"><code class="refusal">effects_partial</code></a></td><td>helper</td><td><span class="badge retry-read-state">read_state</span></td><td>yes</td></tr>
 <tr><td><a href="#err-enroll-failed"><code class="refusal">enroll_failed</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
 <tr><td><a href="#err-envelope-rejected"><code class="refusal">envelope_rejected</code></a></td><td>dispatch</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
@@ -793,7 +796,7 @@
 <dd><p>The agent does not know this operation.</p><p><span class="label">What to do</span> Update the agent on the host.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
 </dl>
 <h2 id="stage-helper">Stage: helper</h2>
-<p>105 codes.</p>
+<p>108 codes.</p>
 <dl class="kv">
 <dt id="err-account-exists"><code class="refusal">account_exists</code></dt>
 <dd><p>The account the order creates is already on the host. Nothing was written: a create does not adopt an account somebody else made, because its groups, its shell and its keys are not the ones the order describes.</p><p><span class="label">What to do</span> Read the account in the inventory and order the change you meant - the groups, a lock, the keys - or remove it on the host first if it is to be created anew.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
@@ -857,10 +860,16 @@
 <dd><p>The capability authorizes another operation than the request the agent made.</p><p><span class="label">What to do</span> The agent on the host asks for something the panel did not approve; inspect the host before ordering anything else on it.</p><p><span class="badge retry-never">retry: never</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
 <dt id="err-capability-wrong-host"><code class="refusal">capability_wrong_host</code></dt>
 <dd><p>The capability names another host than the one the helper's own identity names, or the helper has no identity yet because the panel's trust bundle has not reached it.</p><p><span class="label">What to do</span> Check that the agent connects and hands the bundle over (the helper journal says); a host that was cloned or re-enrolled needs the bundle of its new identity.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
+<dt id="err-container-identity-mismatch"><code class="refusal">container_identity_mismatch</code></dt>
+<dd><p>The removal of a container by name found a container with that name that runs another image than the order expects, so nothing was removed: the name may belong to something else than when the order was written.</p><p><span class="label">What to do</span> Read the container on the host. Remove it by its identifier if it is the one to go, or correct the expected image in the order.</p><p><span class="badge retry-never">retry: never</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
+<dt id="err-container-not-found"><code class="refusal">container_not_found</code></dt>
+<dd><p>The order names a container by its exact name and the engine of this host, which answered, has no container with that name. The host is skipped, not failed: a campaign over many hosts names the container once and not every host runs it.</p><p><span class="label">What to do</span> Nothing to do when the container is not meant for this host. Otherwise check the name against the Containers screen of the host, or start the container, and order again.</p><p><span class="badge retry-never">retry: never</span> <span class="badge not-failure">not a failure</span></p></dd>
 <dt id="err-disk-changed"><code class="refusal">disk_changed</code></dt>
 <dd><p>The device under the path is not the one the plan was computed for: the by-id link, the WWN, the serial or the filesystem UUID differ. A disk of the same size with another WWN is another disk.</p><p><span class="label">What to do</span> Read the host's storage again, find the disk the operator meant by its serial or WWN, and plan the operation once more against it.</p><p><span class="badge retry-after-replan">retry: after_replan</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
 <dt id="err-disk-in-use"><code class="refusal">disk_in_use</code></dt>
 <dd><p>The device carries the root filesystem, has a mounted partition or swap under it, or is held by a volume group, an array or an encrypted container. Nothing was written.</p><p><span class="label">What to do</span> Unmount what stands on the device, remove it from the volume group or array, and plan again; the root disk is never formatted by the panel.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
+<dt id="err-docker-engine-unreadable"><code class="refusal">docker_engine_unreadable</code></dt>
+<dd><p>The container engine of the host could not be read, so it is not known whether the container the order names is there. This is never taken for its absence.</p><p><span class="label">What to do</span> Check that the engine runs on the host and answers its socket, then order again.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
 <dt id="err-docker-object-in-use"><code class="refusal">docker_object_in_use</code></dt>
 <dd><p>Something on the host still holds the object: containers are attached to the network, or a container - running or stopped - references the volume. Nothing was removed and nothing was recreated.</p><p><span class="label">What to do</span> Read which containers the plan lists. Remove or redeclare them first, or order again with force, which disconnects the containers named in the plan and leaves them running without that network.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge counts-failure">counts as a failure</span></p></dd>
 <dt id="err-docker-object-missing"><code class="refusal">docker_object_missing</code></dt>

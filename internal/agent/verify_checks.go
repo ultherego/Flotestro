@@ -2343,10 +2343,15 @@ func keyFingerprints(keys []opspec.SSHKeyInput) ([]string, error) {
 // stopped or gone as the verb asked.
 func verifyContainerState(ctx context.Context, readers *hostReaders, in verifyInput) observation {
 	payload := in.payload.DockerContainer
-	if payload == nil || payload.ContainerID == "" {
+	if payload == nil || (payload.ContainerID == "" && payload.Name == "") {
 		return unreadable("a container state", "the order names no container")
 	}
+	// An order that names the container and not its identifier is read back by the
+	// name: the identifier is the host's own and the order never held it.
 	short := shortDigest(payload.ContainerID)
+	if payload.ContainerID == "" {
+		short = payload.Name
+	}
 	expected := "container " + short + " running"
 	switch in.action {
 	case opspec.ActionDockerStop:
@@ -2367,7 +2372,10 @@ func verifyContainerState(ctx context.Context, readers *hostReaders, in verifyIn
 	state := ""
 	found := false
 	for i := range snapshot.Containers {
-		if snapshot.Containers[i].ID != payload.ContainerID {
+		if payload.ContainerID != "" && snapshot.Containers[i].ID != payload.ContainerID {
+			continue
+		}
+		if payload.ContainerID == "" && snapshot.Containers[i].Name != payload.Name {
 			continue
 		}
 		found = true

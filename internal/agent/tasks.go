@@ -1771,6 +1771,8 @@ func dockerAction(action *agentv1.DockerAction) (opspec.ActionType, opspec.Paylo
 	container := &opspec.DockerContainerPayload{
 		ContainerID:    action.GetContainerId(),
 		Name:           action.GetContainerName(),
+		ConfirmName:    action.GetConfirmName(),
+		ExpectedImage:  action.GetExpectedImage(),
 		TimeoutSeconds: action.GetTimeoutSeconds(),
 		RemoveVolumes:  action.GetRemoveVolumes(),
 	}

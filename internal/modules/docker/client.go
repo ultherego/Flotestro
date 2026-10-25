@@ -13,13 +13,16 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
 // SocketPaths are the places where the engine socket is looked for.
 var SocketPaths = []string{"/run/docker.sock", "/var/run/docker.sock"}
 
-// apiVersion is pinned deliberately.
+// apiVersion is the API the module was written against. It is pinned
+// deliberately and raised only to the oldest version a newer engine still
+// accepts (see apiPrefix).
 const apiVersion = "v1.41"
 
 // ErrUnavailable means an engine that cannot be queried.
@@ -30,6 +33,9 @@ var ErrUnavailable = errors.New("the container engine is unavailable")
 type Client struct {
 	http   *http.Client
 	socket string
+
+	mu     sync.Mutex
+	prefix string
 }
 
 // New creates a client for the first socket found.
@@ -63,6 +69,49 @@ func NewAt(socket string) *Client {
 	}
 }
 
+// baseURL is the engine address with the API version in it. The version is
+// the pinned one unless the engine's oldest supported version is newer.
+func (c *Client) baseURL(ctx context.Context) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.prefix == "" {
+		c.prefix = apiVersion
+		var result struct {
+			Min string `json:"MinAPIVersion"`
+		}
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker/version", nil)
+		if err != nil {
+			return "http://docker/" + c.prefix
+		}
+		response, err := c.http.Do(request)
+		if err != nil {
+			// Not remembered: the next call asks again.
+			prefix := c.prefix
+			c.prefix = ""
+			return "http://docker/" + prefix
+		}
+		defer response.Body.Close()
+		if response.StatusCode == http.StatusOK &&
+			json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&result) == nil &&
+			versionLess(apiVersion, "v"+result.Min) {
+			c.prefix = "v" + result.Min
+		}
+	}
+	return "http://docker/" + c.prefix
+}
+
+// versionLess compares "vMAJOR.MINOR" strings; an unparsable one is never greater.
+func versionLess(a, b string) bool {
+	var am, an, bm, bn int
+	if _, err := fmt.Sscanf(a, "v%d.%d", &am, &an); err != nil {
+		return false
+	}
+	if _, err := fmt.Sscanf(b, "v%d.%d", &bm, &bn); err != nil {
+		return false
+	}
+	return am < bm || (am == bm && an < bn)
+}
+
 // Version returns the engine version and its API version.
 func (c *Client) Version(ctx context.Context) (engine, api string, err error) {
 	var result struct {
@@ -90,7 +139,7 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, out any
 // running container before finding out there was no image to make the new one
 // from.
 func (c *Client) postReportingStream(ctx context.Context, path string, query url.Values) error {
-	target := "http://docker/" + apiVersion + path
+	target := c.baseURL(ctx) + path
 	if len(query) > 0 {
 		target += "?" + query.Encode()
 	}
@@ -139,7 +188,7 @@ func (c *Client) postReportingStream(ctx context.Context, path string, query url
 }
 
 func (c *Client) call(ctx context.Context, method, path string, query url.Values, out any) error {
-	target := "http://docker/" + apiVersion + path
+	target := c.baseURL(ctx) + path
 	if len(query) > 0 {
 		target += "?" + query.Encode()
 	}
@@ -175,7 +224,7 @@ var errSizeLimit = errors.New("the read size limit was reached")
 // stream reads the response line by line and hands each to the callback.
 func (c *Client) stream(ctx context.Context, path string, query url.Values,
 	next func(line []byte) bool, byteLimit int64) error {
-	target := "http://docker/" + apiVersion + path
+	target := c.baseURL(ctx) + path
 	if len(query) > 0 {
 		target += "?" + query.Encode()
 	}

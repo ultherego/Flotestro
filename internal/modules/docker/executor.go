@@ -122,6 +122,27 @@ func (c *Client) ContainerByID(ctx context.Context, id string) *Container {
 	return nil
 }
 
+// ContainerByName finds the container with exactly this name. The engine that
+// cannot be read is an error of its own and never an absence: a host whose engine
+// does not answer has not been shown to lack the container.
+func (c *Client) ContainerByName(ctx context.Context, name string) (*Container, error) {
+	containers, err := c.Containers(ctx, true)
+	if err != nil {
+		return nil, fmt.Errorf("the containers of the engine could not be listed: %w", err)
+	}
+	for i := range containers {
+		if containers[i].Name == name {
+			container := containers[i]
+			if health, restarts, err := c.Inspect(ctx, container.ID); err == nil {
+				container.Health = health
+				container.RestartCount = restarts
+			}
+			return &container, nil
+		}
+	}
+	return nil, fmt.Errorf("no container is named %q: %w", name, ErrNotFound)
+}
+
 // post performs an operation changing the engine state.
 func (c *Client) post(ctx context.Context, path string, query url.Values) error {
 	return c.call(ctx, http.MethodPost, path, query, nil)

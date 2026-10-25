@@ -27,7 +27,7 @@ import {
   loadDraft, matchedState, MIN_REASON, orderForm, orderTargets, parseUnits, prefilledOrder,
   previewTokenOf, reasonValid, saveDraft, scheduleBody, scheduleProblem, selectorNames,
   startingPayloadText, useFleetFacets, useOperations, windowProblem, wizardOperations,
-  type Operation, type PreviewToken, type ScheduleChoice, type TargetMode, type WindowProblem,
+  type ContainerEvidence, type Operation, type PreviewToken, type ScheduleChoice, type TargetMode, type WindowProblem,
 } from "../../lib/orders";
 import { FacetList } from "../../components/FacetList";
 import { useT, type Translate } from "../../i18n";
@@ -62,6 +62,8 @@ type Preview = {
   count: number;
   limit: number;
   eligible?: number;
+  // Present when the order names a container and not its identifier.
+  container?: ContainerEvidence;
   sample?: string[];
   excluded?: Group[];
   notes?: Group[];
@@ -179,6 +181,10 @@ export function Bulk() {
   for (const hostID of order.exclude) params.append("exclude", hostID);
   if (order.excludeReason.trim()) params.set("exclude_reason", order.excludeReason.trim());
   if (order.action) params.set("action", order.action);
+  // A container named and not numbered: the server says on how many hosts it has seen
+  // the container, apart from how many can run the operation.
+  const container = orderPayload(order)?.docker_container as { container_id?: string; name?: string } | undefined;
+  if (container && !container.container_id && container.name) params.set("container_name", container.name);
   // A compensation previews against its original: the server names the
   // hosts that changed and refuses the rest, before anything is created.
   if (order.compensates) params.set("compensates", order.compensates);
@@ -1493,8 +1499,25 @@ function EligibilityStep({ order, preview, checking, nav }: {
     ? (preview?.hosts ?? []).filter((host) => (order.mapping[host.id] ?? "").trim() !== "")
       .slice(0, 12).map((host) => host.hostname)
     : preview?.sample ?? [];
+  // The capability makes a host eligible; it does not put the container on it. What the
+  // last full reads of the hosts say is shown as three buckets of the eligible ones.
+  const evidence = preview?.container;
   const buckets: Bucket[] = [
     { key: "eligible", mark: <Pill tone="ok">{t("eligible")}</Pill>, count: eligible, sample },
+    ...(evidence ? [
+      {
+        key: "container:present", count: evidence.present.count, sample: evidence.present.sample,
+        mark: <Pill tone="ok">{t("container seen")}</Pill>,
+      },
+      {
+        key: "container:unknown", count: evidence.unknown.count, sample: evidence.unknown.sample,
+        mark: <Pill tone="warn">{t("container not confirmed")}</Pill>,
+      },
+      {
+        key: "container:absent", count: evidence.absent.count, sample: evidence.absent.sample,
+        mark: <Pill tone="warn">{t("container not seen")}</Pill>,
+      },
+    ] : []),
     ...excluded.map((group): Bucket => ({
       key: `excluded:${group.reason}`,
       mark: <Pill tone="error">{reasonName(t, group.reason)}</Pill>,
@@ -1518,6 +1541,11 @@ function EligibilityStep({ order, preview, checking, nav }: {
       foot={
         <Stack>
           {!excluded.length && !notes.length && <Note>{t("Every matched host can run this operation.")}</Note>}
+          {evidence && (
+            <Note>
+              {t("The capability says a host can run the operation, not that it has the container {name}. The three container buckets read the last full read of each host (not older than a day); a host not confirmed is settled on the host when the order arrives, and a host without the container is skipped with the reason container_not_found, not failed. Read the containers of the hosts first to confirm.", { name: evidence.name })}
+            </Note>
+          )}
           {nav}
         </Stack>
       }

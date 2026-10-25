@@ -17,22 +17,28 @@ const containerField: OperationField = {
   name: "container_id",
   label: "Container",
   kind: "text",
-  hint: "The engine's identifier, as the container list shows it. A name may point at a different container by the time the change runs.",
+  hint: "The engine's identifier, as the container list shows it; it belongs to this host alone. Leave it empty to name the container instead.",
   placeholder: "3f2a9c1b4d55",
 };
 
 const nameField: OperationField = {
   name: "name",
-  label: "Name it had",
+  label: "Name",
   kind: "text",
-  hint: "What the container was called when the order was made; it serves the record alone and changes nothing.",
+  hint: "The exact name of the container. Without an identifier the order addresses the container by it, resolved on each host when the order arrives: a campaign names it once, and a host without it is skipped. With an identifier it is only the label the record keeps.",
 };
+
+/** A container name as the engine holds it. */
+const CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 
 function containerCheck(form: FormValue): FormProblem[] {
   const problems: FormProblem[] = [];
-  if (required(problems, form, "container_id", "Name the container this acts on.")) {
+  if (text(form, "container_id")) {
     shaped(problems, form, "container_id", CONTAINER_ID,
       "A container identifier is twelve to sixty-four hexadecimal characters.");
+  } else if (required(problems, form, "name", "Name the container this acts on: its identifier, or its exact name.")) {
+    shaped(problems, form, "name", CONTAINER_NAME,
+      "A container name is letters, digits, dots, dashes and underscores, and starts with a letter or a digit.");
   }
   bounded(problems, form, "timeout_seconds", 1, 3600, "The time to shut down lies between 1 and 3600 seconds.");
   return problems;

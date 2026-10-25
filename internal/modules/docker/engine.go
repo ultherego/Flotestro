@@ -23,7 +23,7 @@ func (c *Client) callJSON(ctx context.Context, method, path string, query url.Va
 	if err != nil {
 		return err
 	}
-	target := "http://docker/" + apiVersion + path
+	target := c.baseURL(ctx) + path
 	if len(query) > 0 {
 		target += "?" + query.Encode()
 	}

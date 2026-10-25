@@ -748,6 +748,11 @@ const ConnectivityLostCode = "lease_expired"
 // the end of.
 const OutcomeUnknownCode = "outcome_unknown"
 
+// ContainerNotFoundCode is what a host answers when the container the order names by
+// its exact name is not on it. The engine was read and has no such container, which
+// is a fact about the host and not a failure of the change: the host is skipped.
+const ContainerNotFoundCode = "container_not_found"
+
 // CancelAckTimeoutCode is the error code of a host whose cancel request got no
 // answer within the operation's timeout (jobs.
 const CancelAckTimeoutCode = "cancel_ack_timeout"

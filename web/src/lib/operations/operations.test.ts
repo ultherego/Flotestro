@@ -282,6 +282,33 @@ describe("what the entries refuse", () => {
   });
 });
 
+describe("a container named and not numbered", () => {
+  const restart = operationForm("docker.container.restart");
+  const filled = (values: FormValue): FormValue => ({ ...emptyForm(restart as OperationEntry), ...values });
+  const container = (values: FormValue) =>
+    (restart?.toPayload(filled(values)).docker_container ?? {}) as Record<string, unknown>;
+
+  it("is addressed by its name when no identifier is given", () => {
+    expect(restart).toBeTruthy();
+    expect(restart?.validate(filled({ name: "web" }))).toEqual([]);
+    expect(container({ name: "web" })).toMatchObject({ name: "web" });
+    expect(container({ name: "web" }).container_id ?? "").toBe("");
+  });
+
+  it("keeps the identifier as the address and the name as a label when both are given", () => {
+    const form = filled({ container_id: "3f2a9c1b4d55", name: "web" });
+    expect(restart?.validate(form)).toEqual([]);
+    expect(container({ container_id: "3f2a9c1b4d55", name: "web" }))
+      .toMatchObject({ container_id: "3f2a9c1b4d55", name: "web" });
+  });
+
+  it("refuses an order that names no container, and one that names it wrongly", () => {
+    expect(restart?.validate(filled({})).length).toBeGreaterThan(0);
+    expect(restart?.validate(filled({ name: "web server" })).length).toBeGreaterThan(0);
+    expect(restart?.validate(filled({ container_id: "not-hex" })).length).toBeGreaterThan(0);
+  });
+});
+
 describe("the operations still typed as JSON", () => {
   it("covers every operation the catalogue opens to the fleet", () => {
     const missing = campaignActions().filter((action) => !operationForm(action));

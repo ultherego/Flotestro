@@ -54,6 +54,13 @@ const (
 	ErrorDockerInUse         = "docker_object_in_use"
 	ErrorDockerPredefined    = "docker_network_predefined"
 	ErrorDockerObjectMissing = "docker_object_missing"
+	// Refusals of a container addressed by its name: no container has the name
+	// (a fact, and the only one that means absence), the engine could not be
+	// read (which is not that fact), and a container that is not the one the order
+	// expects to remove.
+	ErrorContainerNotFound      = "container_not_found"
+	ErrorDockerEngineUnreadable = "docker_engine_unreadable"
+	ErrorContainerIdentity      = "container_identity_mismatch"
 )
 
 // WriteMessage writes a message preceded by a 4-byte length.

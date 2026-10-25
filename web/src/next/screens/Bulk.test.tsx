@@ -253,6 +253,35 @@ describe("the bulk workspace", () => {
     expect(table).toHaveTextContent("agent-debian");
   });
 
+  it("says how many of the eligible hosts are known to run a container the order names", async () => {
+    base();
+    answers["/api/v1/campaigns/preview"] = preview({
+      eligible: 3,
+      container: {
+        name: "web",
+        present: { count: 1, sample: ["agent-debian"] },
+        unknown: { count: 1, sample: ["agent-ubuntu"] },
+        absent: { count: 1, sample: ["agent-arch"] },
+        evidence_max_age_seconds: 86400,
+      },
+    });
+    draw(ORDER);
+    await waitFor(() => expect(screen.getByTestId("step-next")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("step-next"));
+    fireEvent.change(screen.getByTestId("target-site"), { target: { value: "lab" } });
+    await waitFor(() => expect(screen.getByTestId("matched")).toHaveTextContent("matches 3 hosts"));
+    fireEvent.click(screen.getByTestId("step-next"));
+    const table = await screen.findByTestId("eligibility");
+    // The capability made three hosts eligible; the container is on one the panel has seen it on.
+    expect(table).toHaveTextContent("container seen");
+    expect(table).toHaveTextContent("agent-debian");
+    expect(table).toHaveTextContent("container not confirmed");
+    expect(table).toHaveTextContent("agent-ubuntu");
+    expect(table).toHaveTextContent("container not seen");
+    expect(table).toHaveTextContent("agent-arch");
+    expect(screen.getByText(/not that it has the container web/)).toBeInTheDocument();
+  });
+
   it("sends the order the screen showed, with the preview it was placed from named in it", async () => {
     base();
     answers["/api/v1/campaigns"] = campaign();

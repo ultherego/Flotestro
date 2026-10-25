@@ -10899,6 +10899,11 @@ type DockerAction struct {
 	// the payload, so it must reach the agent - otherwise the plan hash stops
 	// matching and the operation is rejected as swapped.
 	ContainerName string `protobuf:"bytes,9,opt,name=container_name,json=containerName,proto3" json:"container_name,omitempty"`
+	// The removal of a container addressed by name only (container_id empty): the
+	// name typed again, and the image the container is expected to run. The
+	// helper of the host refuses to remove a container that is not that one.
+	ConfirmName   string `protobuf:"bytes,10,opt,name=confirm_name,json=confirmName,proto3" json:"confirm_name,omitempty"`
+	ExpectedImage string `protobuf:"bytes,11,opt,name=expected_image,json=expectedImage,proto3" json:"expected_image,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -10992,6 +10997,20 @@ func (x *DockerAction) GetNetworkIds() []string {
 func (x *DockerAction) GetContainerName() string {
 	if x != nil {
 		return x.ContainerName
+	}
+	return ""
+}
+
+func (x *DockerAction) GetConfirmName() string {
+	if x != nil {
+		return x.ConfirmName
+	}
+	return ""
+}
+
+func (x *DockerAction) GetExpectedImage() string {
+	if x != nil {
+		return x.ExpectedImage
 	}
 	return ""
 }
@@ -17416,7 +17435,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x0efollow_seconds\x18\x02 \x01(\rR\rfollowSeconds\x12\x14\n" +
 	"\x05types\x18\x03 \x03(\tR\x05types\x12\x1d\n" +
 	"\n" +
-	"max_events\x18\x04 \x01(\rR\tmaxEvents\"\xaa\x04\n" +
+	"max_events\x18\x04 \x01(\rR\tmaxEvents\"\xf4\x04\n" +
 	"\fDockerAction\x12H\n" +
 	"\toperation\x18\x01 \x01(\x0e2*.flotestro.agent.v1.DockerAction.OperationR\toperation\x12!\n" +
 	"\fcontainer_id\x18\x02 \x01(\tR\vcontainerId\x12'\n" +
@@ -17427,7 +17446,10 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\fvolume_names\x18\a \x03(\tR\vvolumeNames\x12\x1f\n" +
 	"\vnetwork_ids\x18\b \x03(\tR\n" +
 	"networkIds\x12%\n" +
-	"\x0econtainer_name\x18\t \x01(\tR\rcontainerName\"\xab\x01\n" +
+	"\x0econtainer_name\x18\t \x01(\tR\rcontainerName\x12!\n" +
+	"\fconfirm_name\x18\n" +
+	" \x01(\tR\vconfirmName\x12%\n" +
+	"\x0eexpected_image\x18\v \x01(\tR\rexpectedImage\"\xab\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fOPERATION_START\x10\x01\x12\x12\n" +

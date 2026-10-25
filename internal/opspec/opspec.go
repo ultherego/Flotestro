@@ -1580,6 +1580,44 @@ func validContainerIdentifier(id string) bool {
 	return containerIdentifier.MatchString(id)
 }
 
+// containerName is the pattern the engine itself holds a container name to.
+var containerName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,127}$`)
+
+// validateContainerAddress checks how an operation names its container: by the
+// identifier of the engine, or by an exact name and nothing else.
+func validateContainerAddress(action ActionType, container *DockerContainerPayload) error {
+	if container.ContainerID != "" {
+		if !validContainerIdentifier(container.ContainerID) {
+			return fmt.Errorf("invalid container identifier %q", container.ContainerID)
+		}
+		if container.ConfirmName != "" || container.ExpectedImage != "" {
+			return fmt.Errorf("a confirmation and an expected image belong to the removal of a container by name, not to an identifier")
+		}
+		return nil
+	}
+	if container.Name == "" {
+		return fmt.Errorf("the operation %s names no container: give the identifier or the exact name", action)
+	}
+	if !containerName.MatchString(container.Name) {
+		return fmt.Errorf("invalid container name %q", container.Name)
+	}
+	if action != ActionDockerRemove {
+		if container.ConfirmName != "" || container.ExpectedImage != "" {
+			return fmt.Errorf("a confirmation and an expected image belong to the removal of a container")
+		}
+		return nil
+	}
+	// A container removed by name is removed on the word of a name alone, on every
+	// host the order reaches: the name is typed again and the image is named.
+	if container.ConfirmName != container.Name {
+		return fmt.Errorf("the removal of the container %q by name has to be confirmed by typing its name again", container.Name)
+	}
+	if err := validImageReference(container.ExpectedImage); err != nil {
+		return fmt.Errorf("the removal of a container by name names the image it is expected to run: %w", err)
+	}
+	return nil
+}
+
 // imageReference allows a repository name with an optional registry, tag or
 // digest.
 var imageReference = regexp.MustCompile(
@@ -2639,19 +2677,39 @@ type ComposePayload struct {
 	ImageDigests map[string]string `json:"image_digests,omitempty"`
 }
 
-// DockerContainerPayload names the container of an operation. The target is an
-// identifier, not a name.
+// DockerContainerPayload names the container of an operation, by the identifier of
+// the engine or by its exact name.
+//
+// The identifier is the engine's own and differs on every host, so an order meant
+// for many hosts names the container by Name (ContainerID left empty): the helper of
+// each host resolves the name to its container at the moment of the operation.
+// With an identifier, Name stays what it always was - the name the operator saw in
+// the dialog, for confirmation and the audit trail.
+//
+// The identifier is never omitted: agents that predate the name hash it as it is.
 type DockerContainerPayload struct {
 	ContainerID string `json:"container_id"`
-	// Name serves confirmation and the audit trail only: the operator has the
-	// name in the dialog, and what they saw stays in the trail.
+	// Name is the exact name of the container. Without ContainerID it addresses.
 	Name string `json:"name,omitempty"`
+	// ConfirmName and ExpectedImage belong to the removal of a container by name,
+	// which cannot be undone and is not aimed at an identifier the operator saw:
+	// the name is typed again, and the image the container is expected to run is
+	// named, so that a container that took the name over is not removed in its
+	// place.
+	ConfirmName   string `json:"confirm_name,omitempty"`
+	ExpectedImage string `json:"expected_image,omitempty"`
 	// TimeoutSeconds gives the container time to shut down before being
 	// killed.
 	TimeoutSeconds uint32 `json:"timeout_seconds,omitempty"`
 	// RemoveVolumes concerns removal only and is off by default: a volume
 	// outlives its container precisely so that the data outlives it.
 	RemoveVolumes bool `json:"remove_volumes,omitempty"`
+}
+
+// AddressedByName says whether the order names the container and leaves the
+// identifier to the host.
+func (p *DockerContainerPayload) AddressedByName() bool {
+	return p != nil && p.ContainerID == "" && p.Name != ""
 }
 
 // DockerImagePayload describes the image to pull.
@@ -3054,9 +3112,8 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.DockerContainer == nil {
 			return fmt.Errorf("the operation %s requires a docker_container payload", action)
 		}
-		if !validContainerIdentifier(payload.DockerContainer.ContainerID) {
-			return fmt.Errorf("invalid container identifier %q",
-				payload.DockerContainer.ContainerID)
+		if err := validateContainerAddress(action, payload.DockerContainer); err != nil {
+			return err
 		}
 		if payload.DockerContainer.TimeoutSeconds > 3600 {
 			return fmt.Errorf("the time given to shut the container down is too long")

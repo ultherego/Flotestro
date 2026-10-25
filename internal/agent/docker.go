@@ -141,6 +141,9 @@ func (e *TaskExecutor) applyDocker(ctx context.Context, task *agentv1.TaskEnvelo
 			DockerAction: &helperv1.DockerActionRequest{
 				Operation:      helperDockerOperation(action.GetOperation()),
 				ContainerId:    action.GetContainerId(),
+				ContainerName:  action.GetContainerName(),
+				ConfirmName:    action.GetConfirmName(),
+				ExpectedImage:  action.GetExpectedImage(),
 				TimeoutSeconds: action.GetTimeoutSeconds(),
 				RemoveVolumes:  action.GetRemoveVolumes(),
 				ImageReference: action.GetImageReference(),
