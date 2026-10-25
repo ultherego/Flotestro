@@ -144,7 +144,10 @@ describe("the list of groups", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("group-uncounted")).toBeInTheDocument());
     expect(within(screen.getByTestId("group-uncounted")).getByText("unknown")).toBeInTheDocument();
-    expect(screen.getByTestId("group-uncounted")).not.toHaveTextContent("0");
+    // Not a substring of the row: the row also says how long ago the group changed,
+    // and "10d ago" is a nought to a substring. A fixed date in the fixture turned
+    // into exactly ten days on 25.10 and failed the gate on a day nothing had changed.
+    expect(within(screen.getByTestId("group-uncounted")).queryByText("0")).not.toBeInTheDocument();
     // A selector that does not resolve says why, rather than counting to none.
     const broken = screen.getByTestId("group-broken");
     expect(within(broken).getByText("unresolvable")).toHaveAttribute("title", "the group it names is gone");
