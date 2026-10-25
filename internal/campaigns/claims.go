@@ -17,6 +17,25 @@ var openTargetStates = SQLList(OpenTargetStates)
 // ClaimRunner takes the runner lease of a campaign for the given runner, or
 // renews it when the runner holds it already.
 func (s *Store) ClaimRunner(ctx context.Context, campaignID, runner string) (int64, bool, error) {
+	// A lease this runner holds with more than the term minus the renewal interval
+	// left was renewed less than RunnerLeaseRenewal ago, and the orchestrator asks
+	// on every pass, a few seconds apart: writing it again would only move
+	// runner_until a few seconds, for every campaign that is not finished, for ever.
+	// A laboratory with thirty-five campaigns waiting for an approval made nine
+	// writes a second on a table nothing was happening to. The lease is read, and
+	// written once it is due, which is what the keeper of a long pass already does.
+	var fresh int64
+	err := s.pool.QueryRow(ctx, `
+		select runner_token from campaigns
+		 where id = $1 and runner_id = $2::uuid
+		   and runner_until > now() + make_interval(secs => $3)`,
+		campaignID, runner, (RunnerLeaseTerm - RunnerLeaseRenewal).Seconds()).Scan(&fresh)
+	if err == nil {
+		return fresh, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, err
+	}
 	const query = `
 		with candidate as (
 			select id from campaigns
@@ -32,7 +51,7 @@ func (s *Store) ClaimRunner(ctx context.Context, campaignID, runner string) (int
 		 where c.id = candidate.id
 		returning c.runner_token`
 	var token int64
-	err := s.pool.QueryRow(ctx, query, campaignID, runner, RunnerLeaseTerm.Seconds()).Scan(&token)
+	err = s.pool.QueryRow(ctx, query, campaignID, runner, RunnerLeaseTerm.Seconds()).Scan(&token)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, false, nil
 	}
