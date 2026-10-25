@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
@@ -182,17 +183,27 @@ func (s *Server) applyDocker(ctx context.Context, request *helperv1.HelperReques
 	defer cancel()
 
 	identifier := action.GetContainerId()
-	if needsContainer(action.GetOperation()) {
-		if !containerIdentifier.MatchString(identifier) {
-			return reject(ErrorMalformed, "invalid container identifier")
-		}
-	}
-
 	result := docker.Result{}
 	if needsContainer(action.GetOperation()) {
-		result.Before = client.ContainerByID(actionCtx, identifier)
-		if result.Before == nil {
-			return reject(ErrorUnsupported, "the container does not exist on this host")
+		if identifier == "" && action.GetContainerName() != "" {
+			// The order names the container and the identifier is this host's own:
+			// resolved here, as root, at the moment of the operation, so that what
+			// is acted on is what answers to the name now and not what answered to it
+			// when somebody last looked.
+			resolved, refusal := resolveContainerByName(actionCtx, client, action)
+			if refusal != nil {
+				return refusal
+			}
+			identifier = resolved.ID
+			result.Before = resolved
+		} else {
+			if !containerIdentifier.MatchString(identifier) {
+				return reject(ErrorMalformed, "invalid container identifier")
+			}
+			result.Before = client.ContainerByID(actionCtx, identifier)
+			if result.Before == nil {
+				return reject(ErrorUnsupported, "the container does not exist on this host")
+			}
 		}
 	}
 
@@ -474,4 +485,56 @@ func encodeContainer(container *docker.Container) []byte {
 		return nil
 	}
 	return encoded
+}
+
+// containerNamePattern is the pattern the engine holds a container name to; the
+// panel checked it and the helper, which runs as root, does not take its word.
+var containerNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,127}$`)
+
+// resolveContainerByName finds the container an order names and, for a removal,
+// checks that it is the one the order expects. A nil container comes with the
+// refusal to send back: absence is stated only when the engine was read and has no
+// such container, and an engine that could not be read is said to be unreadable.
+func resolveContainerByName(ctx context.Context, client *docker.Client,
+	action *helperv1.DockerActionRequest) (*docker.Container, *helperv1.HelperResponse) {
+	name := action.GetContainerName()
+	if !containerNamePattern.MatchString(name) {
+		return nil, reject(ErrorMalformed, "invalid container name")
+	}
+	removal := action.GetOperation() == helperv1.DockerActionRequest_OPERATION_REMOVE
+	if removal {
+		if action.GetConfirmName() != name {
+			return nil, reject(ErrorMalformed,
+				"the removal of a container by name has to be confirmed by its name")
+		}
+		if action.GetExpectedImage() == "" {
+			return nil, reject(ErrorMalformed,
+				"the removal of a container by name has to name the image it is expected to run")
+		}
+	} else if action.GetConfirmName() != "" || action.GetExpectedImage() != "" {
+		return nil, reject(ErrorMalformed,
+			"a confirmation and an expected image belong to the removal of a container")
+	}
+	container, err := client.ContainerByName(ctx, name)
+	switch {
+	case errors.Is(err, docker.ErrNotFound):
+		return nil, reject(ErrorContainerNotFound, "no container on this host is named "+name)
+	case err != nil:
+		return nil, reject(ErrorDockerEngineUnreadable, err.Error())
+	}
+	if removal && !runsImage(container, action.GetExpectedImage()) {
+		return nil, reject(ErrorContainerIdentity, fmt.Sprintf(
+			"the container %s runs %s, not the %s the order expects; it was not removed",
+			name, container.Image, action.GetExpectedImage()))
+	}
+	return container, nil
+}
+
+// runsImage says whether the container runs the image the order names: by the
+// reference it was started with, or by the digest of the image.
+func runsImage(container *docker.Container, expected string) bool {
+	if container.Image == expected {
+		return true
+	}
+	return container.ImageDigest != "" && strings.HasSuffix(expected, "@"+container.ImageDigest)
 }

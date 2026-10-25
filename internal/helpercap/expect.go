@@ -660,6 +660,22 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload, prior Pr
 				payload.DockerContainer.ContainerID); err != nil {
 				return err
 			}
+			// A container named and not numbered is resolved by the helper on the
+			// host, so everything that decides which container it is has to be what
+			// the order bound: the name, and for a removal the confirmation and the
+			// image it is expected to run.
+			if err := same("container name", container.GetContainerName(),
+				payload.DockerContainer.Name); err != nil {
+				return err
+			}
+			if err := same("confirmation of the container name", container.GetConfirmName(),
+				payload.DockerContainer.ConfirmName); err != nil {
+				return err
+			}
+			if err := same("expected image of the container", container.GetExpectedImage(),
+				payload.DockerContainer.ExpectedImage); err != nil {
+				return err
+			}
 			// Taking the volumes with the container destroys the data it kept,
 			// and the order decides that, not the request.
 			if container.GetRemoveVolumes() != payload.DockerContainer.RemoveVolumes {

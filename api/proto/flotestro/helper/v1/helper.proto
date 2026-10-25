@@ -577,6 +577,13 @@ message DockerActionRequest {
   repeated string image_ids = 6;
   repeated string volume_names = 7;
   repeated string network_ids = 8;
+  // A container addressed by its exact name, with container_id empty: the helper
+  // resolves the name on the host at the moment of the operation, and a name
+  // that names no container, or names it as another image than expected, is a
+  // refusal and not a guess. confirm_name and expected_image concern removal.
+  string container_name = 9;
+  string confirm_name = 10;
+  string expected_image = 11;
 }
 
 message DockerActionResult {

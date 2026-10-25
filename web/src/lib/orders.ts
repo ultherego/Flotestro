@@ -606,6 +606,20 @@ export function orderPayload(order: Order): Record<string, unknown> | null {
 
 export type Group = { reason: string; count: number; sample: string[] };
 
+/**
+ * What the last full reads of the hosts say of a container the order names. The capability
+ * says a host can run the operation and nothing of whether the container is there; the
+ * rest is settled on each host when the order arrives.
+ */
+export type ContainerEvidence = {
+  name: string;
+  present: { count: number; sample: string[] };
+  absent: { count: number; sample: string[] };
+  unknown: { count: number; sample: string[] };
+  evidence_max_age_seconds: number;
+  oldest_read_at?: string;
+};
+
 export type Preview = {
   count: number;
   limit: number;
@@ -615,6 +629,8 @@ export type Preview = {
   notes?: Group[];
   campaign_mode?: string;
   requires_plan?: boolean;
+  // Present when the order names a container and not its identifier.
+  container?: ContainerEvidence;
   // Every ready host by identifier, for an operation whose order names
   // each host by itself; absent for every other operation.
   hosts?: { id: string; hostname: string }[];

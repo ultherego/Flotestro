@@ -1915,6 +1915,11 @@ message DockerAction {
   // the payload, so it must reach the agent - otherwise the plan hash stops
   // matching and the operation is rejected as swapped.
   string container_name = 9;
+  // The removal of a container addressed by name only (container_id empty): the
+  // name typed again, and the image the container is expected to run. The
+  // helper of the host refuses to remove a container that is not that one.
+  string confirm_name = 10;
+  string expected_image = 11;
 }
 
 // UnitToggle changes what the host does after a reboot: enabling a unit or

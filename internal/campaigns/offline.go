@@ -277,18 +277,18 @@ func (o *Orchestrator) pauseOnConnectivityLoss(ctx context.Context, campaign Cam
 }
 
 // enterGate stops the campaign after the canary for a decision.
-func (o *Orchestrator) enterGate(ctx context.Context, campaign Campaign) error {
+func (o *Orchestrator) enterGate(ctx context.Context, campaign Campaign, reason string) error {
 	if campaign.State == StateManualGate {
 		return nil
 	}
-	if err := o.store.SetState(ctx, &campaign, StateManualGate, ""); err != nil {
+	if err := o.store.SetState(ctx, &campaign, StateManualGate, reason); err != nil {
 		return err
 	}
 	o.audit.Record(ctx, audit.Event{
 		ActorType: audit.ActorSystem, ActorID: "campaign:" + campaign.ID,
 		Action: "campaign.manual_gate", TargetType: "campaign", TargetID: campaign.ID,
 		RequestID: campaign.RequestID, Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{"canary_size": campaign.CanarySize},
+		Detail: map[string]any{"canary_size": campaign.CanarySize, "reason": reason},
 	})
 	o.log.Info("the campaign stops at the manual gate after the canary",
 		"campaign_id", campaign.ID)

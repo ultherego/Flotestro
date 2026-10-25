@@ -6,6 +6,24 @@ day the tag was published.
 
 ## [Unreleased]
 
+### Added
+
+- **A campaign can name a container once and every host settles it by itself.** `docker.container.start`,
+  `stop` and `restart` take the exact name of the container instead of the engine's identifier, which
+  differs on every host. Each host resolves the name at the moment of the operation; a host that has no
+  such container ends `skipped` with `container_not_found`, not `succeeded`, and an engine that cannot be
+  read is `docker_engine_unreadable`, never taken for an absence. A canary that exercised nothing stops at
+  the manual gate. The preview says apart which hosts qualify by capability and on which the container
+  was seen in the last full read. Removal by name needs the name typed again and the image it should run.
+  Addressing by identifier is unchanged. An agent older than this release cannot resolve a name: the
+  order fails on it with `helper_rejected`.
+
+### Fixed
+
+- **The container module works against current Docker engines.** It pinned API v1.41 and a current engine
+  (minimum 1.44) answered 400 to every call, so the container list, the actions and the logs were all
+  unavailable. The client now uses the pinned version unless the engine's oldest supported one is newer.
+
 ### Changed
 
 - **The orchestrator no longer rewrites a runner lease it renewed seconds ago.** It asks for the lease of every

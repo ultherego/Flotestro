@@ -234,6 +234,7 @@ type hostView struct {
 	Environment     string `json:"environment"`
 	OSFamily        string `json:"os_family"`
 	OSVersion       string `json:"os_version"`
+	AgentVersion    string `json:"agent_version"`
 	ConnectionState string `json:"connection_state"`
 	LifecycleState  string `json:"lifecycle_state"`
 	BootID          string `json:"boot_id"`

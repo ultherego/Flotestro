@@ -117,7 +117,7 @@
 
   <main class="content">
 <h1>7. Błędy i odmowy</h1>
-<p class="lede">Każda odmowa, każde niepowodzenie i każde pominięcie, jakie panel, agent i helper mogą przypisać zadaniu, celowi kampanii albo żądaniu, niesie stały kod. Kod odpowiada na dwa pytania: co się stało i co można bezpiecznie zrobić dalej. Ta strona to cały wykaz, 326 pozycji, przepisany z <code>internal/opspec/errors.go</code>; panel udostępnia tę samą listę pod <code>GET /api/v1/errors</code>.</p>
+<p class="lede">Każda odmowa, każde niepowodzenie i każde pominięcie, jakie panel, agent i helper mogą przypisać zadaniu, celowi kampanii albo żądaniu, niesie stały kod. Kod odpowiada na dwa pytania: co się stało i co można bezpiecznie zrobić dalej. Ta strona to cały wykaz, 329 pozycji, przepisany z <code>internal/opspec/errors.go</code>; panel udostępnia tę samą listę pod <code>GET /api/v1/errors</code>.</p>
 <div class="note"><p class="note__title">Brzmienie pochodzi z samego panelu</p><p>Znaczenie i zalecane działanie przytoczono dokładnie tak, jak pokazuje je panel, więc kod wyszukany tutaj brzmi tak samo jak ten na ekranie. Nieznany kod nie dostaje żadnego opisu: panel pokazuje kod w postaci, w jakiej przyszedł, zamiast wymyślać poradę.</p></div>
 <h2 id="retry">Polityka ponowień</h2>
 <p>Każda pozycja niesie politykę ponowień. To odpowiedź na pytanie &bdquo;czy wolno to powtórzyć&rdquo;, gdy wynik jest niepowodzeniem albo pozostaje nieznany.</p>
@@ -171,7 +171,7 @@
 <tr><td><a href="#stage-approval"><code>approval</code></a></td><td>9</td></tr>
 <tr><td><a href="#stage-dispatch"><code>dispatch</code></a></td><td>25</td></tr>
 <tr><td><a href="#stage-agent"><code>agent</code></a></td><td>29</td></tr>
-<tr><td><a href="#stage-helper"><code>helper</code></a></td><td>105</td></tr>
+<tr><td><a href="#stage-helper"><code>helper</code></a></td><td>108</td></tr>
 <tr><td><a href="#stage-verify"><code>verify</code></a></td><td>10</td></tr>
 <tr><td><a href="#stage-reconcile"><code>reconcile</code></a></td><td>18</td></tr>
 <tr><td><a href="#stage-cancel"><code>cancel</code></a></td><td>3</td></tr>
@@ -270,6 +270,9 @@
 <tr><td><a href="#err-docker-object-conflict"><code class="refusal">docker_object_conflict</code></a></td><td>planning</td><td><span class="badge retry-after-change">after_change</span></td><td>tak</td></tr>
 <tr><td><a href="#err-docker-object-in-use"><code class="refusal">docker_object_in_use</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>tak</td></tr>
 <tr><td><a href="#err-docker-object-missing"><code class="refusal">docker_object_missing</code></a></td><td>helper</td><td><span class="badge retry-never">never</span></td><td>tak</td></tr>
+<tr><td><a href="#err-container-not-found"><code class="refusal">container_not_found</code></a></td><td>helper</td><td><span class="badge retry-never">never</span></td><td>nie</td></tr>
+<tr><td><a href="#err-docker-engine-unreadable"><code class="refusal">docker_engine_unreadable</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>tak</td></tr>
+<tr><td><a href="#err-container-identity-mismatch"><code class="refusal">container_identity_mismatch</code></a></td><td>helper</td><td><span class="badge retry-never">never</span></td><td>tak</td></tr>
 <tr><td><a href="#err-effects-partial"><code class="refusal">effects_partial</code></a></td><td>helper</td><td><span class="badge retry-read-state">read_state</span></td><td>tak</td></tr>
 <tr><td><a href="#err-enroll-failed"><code class="refusal">enroll_failed</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>tak</td></tr>
 <tr><td><a href="#err-envelope-rejected"><code class="refusal">envelope_rejected</code></a></td><td>dispatch</td><td><span class="badge retry-after-change">after_change</span></td><td>tak</td></tr>
@@ -788,7 +791,7 @@
 <dd><p>Agent nie zna tej operacji.</p><p><span class="label">Co zrobić</span> Zaktualizuj agenta na hoście.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
 </dl>
 <h2 id="stage-helper">Etap: helper</h2>
-<p>105 kodów.</p>
+<p>108 kodów.</p>
 <dl class="kv">
 <dt id="err-account-exists"><code class="refusal">account_exists</code></dt>
 <dd><p>Konto, które tworzy zlecenie, jest już na hoście. Nic nie zostało zapisane: tworzenie nie przygarnia konta, które zrobił ktoś inny, bo jego grupy, powłoka i klucze nie są tymi, które opisuje zlecenie.</p><p><span class="label">Co zrobić</span> Przeczytaj konto w inwentarzu i zleć zmianę, którą miałeś na myśli - grupy, blokadę, klucze - albo najpierw usuń je na hoście, jeśli ma być utworzone od nowa.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
@@ -852,10 +855,16 @@
 <dd><p>Capability upoważnia do innej operacji, niż zażądał agent.</p><p><span class="label">Co zrobić</span> Agent na hoście prosi o coś, czego panel nie zatwierdził; zbadaj host, zanim zlecisz na nim cokolwiek innego.</p><p><span class="badge retry-never">ponowienie: never</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
 <dt id="err-capability-wrong-host"><code class="refusal">capability_wrong_host</code></dt>
 <dd><p>Capability wskazuje inny host niż ten, który wskazuje własna tożsamość helpera, albo helper nie ma jeszcze tożsamości, bo nie dotarła do niego paczka zaufania panelu.</p><p><span class="label">Co zrobić</span> Sprawdź, czy agent łączy się i przekazuje paczkę (widać to w journalu helpera); host sklonowany albo po ponownym enrollmencie potrzebuje paczki swojej nowej tożsamości.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
+<dt id="err-container-identity-mismatch"><code class="refusal">container_identity_mismatch</code></dt>
+<dd><p>Usunięcie kontenera po nazwie znalazło kontener o tej nazwie, który uruchamia inny obraz, niż oczekuje zlecenie, więc nic nie zostało usunięte: nazwa może należeć do czegoś innego niż w chwili pisania zlecenia.</p><p><span class="label">Co zrobić</span> Odczytaj kontener na hoście. Usuń go po identyfikatorze, jeśli to ten, który ma zniknąć, albo popraw oczekiwany obraz w zleceniu.</p><p><span class="badge retry-never">ponowienie: never</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
+<dt id="err-container-not-found"><code class="refusal">container_not_found</code></dt>
+<dd><p>Zlecenie wskazuje kontener po dokładnej nazwie, a silnik tego hosta, który odpowiedział, nie ma kontenera o takiej nazwie. Host zostaje pominięty, a nie oznaczony jako błąd: kampania na wielu hostach wskazuje kontener raz i nie każdy host go uruchamia.</p><p><span class="label">Co zrobić</span> Nic do zrobienia, gdy kontener nie jest przeznaczony dla tego hosta. W przeciwnym razie sprawdź nazwę na ekranie Kontenery hosta albo uruchom kontener i zleć ponownie.</p><p><span class="badge retry-never">ponowienie: never</span> <span class="badge not-failure">nie jest niepowodzeniem</span></p></dd>
 <dt id="err-disk-changed"><code class="refusal">disk_changed</code></dt>
 <dd><p>Urządzenie pod tą ścieżką nie jest tym, dla którego policzono plan: różni się dowiązanie by-id, WWN, numer seryjny albo UUID systemu plików. Dysk tej samej wielkości z innym WWN to inny dysk.</p><p><span class="label">Co zrobić</span> Odczytaj magazyn hosta ponownie, znajdź po numerze seryjnym albo WWN dysk, o który chodziło operatorowi, i zaplanuj operację jeszcze raz względem niego.</p><p><span class="badge retry-after-replan">ponowienie: after_replan</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
 <dt id="err-disk-in-use"><code class="refusal">disk_in_use</code></dt>
 <dd><p>Urządzenie niesie główny system plików, ma pod sobą zamontowaną partycję albo swap lub trzyma je grupa wolumenów, macierz czy zaszyfrowany kontener. Nic nie zostało zapisane.</p><p><span class="label">Co zrobić</span> Odmontuj to, co stoi na urządzeniu, wyjmij je z grupy wolumenów albo macierzy i zaplanuj ponownie; dysku głównego panel nigdy nie formatuje.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
+<dt id="err-docker-engine-unreadable"><code class="refusal">docker_engine_unreadable</code></dt>
+<dd><p>Silnika kontenerów na hoście nie dało się odczytać, więc nie wiadomo, czy kontener wskazany w zleceniu tam jest. Nigdy nie jest to brane za jego brak.</p><p><span class="label">Co zrobić</span> Sprawdź, czy silnik działa na hoście i odpowiada na swoim gnieździe, a potem zleć ponownie.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
 <dt id="err-docker-object-in-use"><code class="refusal">docker_object_in_use</code></dt>
 <dd><p>Coś na hoście wciąż trzyma ten obiekt: do sieci podłączone są kontenery albo któryś kontener - działający lub zatrzymany - odwołuje się do wolumenu. Nic nie zostało usunięte i nic nie zostało utworzone od nowa.</p><p><span class="label">Co zrobić</span> Przeczytaj, które kontenery wymienia plan. Usuń je albo zadeklaruj na nowo, albo zleć ponownie z wymuszeniem, które odłącza kontenery wskazane w planie i zostawia je działające bez tej sieci.</p><p><span class="badge retry-after-change">ponowienie: after_change</span> <span class="badge counts-failure">liczy się jako niepowodzenie</span></p></dd>
 <dt id="err-docker-object-missing"><code class="refusal">docker_object_missing</code></dt>

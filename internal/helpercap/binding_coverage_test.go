@@ -161,3 +161,38 @@ func TestTheCapabilityBindsWhatBecomesOfTheContainersVolumes(t *testing.T) {
 		t.Error("another container was accepted")
 	}
 }
+
+// A container named and not numbered is resolved by the helper on the host, so the signature
+// has to hold everything that decides which container that is: the name, and for a removal
+// the name typed again and the image the container is expected to run. A request that
+// names another container, or smuggles an identifier into an order that named none, is refused.
+func TestTheCapabilityBindsTheNameAContainerIsResolvedFrom(t *testing.T) {
+	approved := &opspec.DockerContainerPayload{
+		Name: "web", ConfirmName: "web", ExpectedImage: "nginx:alpine", TimeoutSeconds: 10,
+	}
+	bound := &BoundPayload{Payload: opspec.Payload{DockerContainer: approved}}
+	removal := func(change func(*helperv1.DockerActionRequest)) *helperv1.HelperRequest {
+		request := &helperv1.DockerActionRequest{
+			Operation:     helperv1.DockerActionRequest_OPERATION_REMOVE,
+			ContainerName: approved.Name, ConfirmName: approved.ConfirmName,
+			ExpectedImage: approved.ExpectedImage, TimeoutSeconds: approved.TimeoutSeconds,
+		}
+		change(request)
+		return &helperv1.HelperRequest{Action: &helperv1.HelperRequest_DockerAction{DockerAction: request}}
+	}
+	if err := CheckBinding(removal(func(*helperv1.DockerActionRequest) {}), bound, nil); err != nil {
+		t.Fatalf("the removal by name the panel approved was refused: %v", err)
+	}
+	for why, change := range map[string]func(*helperv1.DockerActionRequest){
+		"another name":                  func(r *helperv1.DockerActionRequest) { r.ContainerName = "db" },
+		"another confirmation":          func(r *helperv1.DockerActionRequest) { r.ConfirmName = "db" },
+		"another expected image":        func(r *helperv1.DockerActionRequest) { r.ExpectedImage = "postgres:17" },
+		"the confirmation taken off":    func(r *helperv1.DockerActionRequest) { r.ConfirmName = "" },
+		"the image taken off":           func(r *helperv1.DockerActionRequest) { r.ExpectedImage = "" },
+		"an identifier added to a name": func(r *helperv1.DockerActionRequest) { r.ContainerId = "0011223344ff" },
+	} {
+		if err := CheckBinding(removal(change), bound, nil); err == nil {
+			t.Errorf("a request with %s was accepted", why)
+		}
+	}
+}

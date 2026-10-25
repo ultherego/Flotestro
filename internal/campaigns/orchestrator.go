@@ -316,7 +316,14 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 	// The manual gate: the canary is settled and the campaign asked for a
 	// decision before the waves.
 	if wave > 0 && campaign.ManualGate && campaign.GateAdvancedAt == nil {
-		return o.enterGate(ctx, campaign)
+		return o.enterGate(ctx, campaign, "")
+	}
+	// A canary that exercised nothing is not a canary: every host it was given turned
+	// out not to run the container the order names, so the change has not been tried
+	// anywhere and the waves would go out on its word. The campaign stops at the gate
+	// and an operator decides, whether or not it asked for one.
+	if wave > 0 && campaign.GateAdvancedAt == nil && canaryExercisedNothing(campaign, targets) {
+		return o.enterGate(ctx, campaign, CanaryExercisedNothingReason)
 	}
 
 	desiredState := StateRunning
@@ -980,4 +987,31 @@ func (o *Orchestrator) drain(ctx context.Context, campaign Campaign, targets []T
 	o.log.Info("the canceled campaign drained its last host",
 		"campaign_id", campaign.ID, "totals", fmt.Sprint(counts))
 	return nil
+}
+
+// CanaryExercisedNothingReason is what the campaign says at the gate it enters when its
+// canary hosts turned out not to carry what the order names.
+const CanaryExercisedNothingReason = "the canary exercised nothing: none of its hosts runs the container the order names, so the change has not been tried on any host"
+
+// canaryExercisedNothing says whether the canary wave ended with no host on which the
+// change took place and with at least one that was skipped because the container
+// is not there. A canary that failed is another matter and is handled by the failure
+// threshold; a campaign without a canary has nothing to exercise.
+func canaryExercisedNothing(campaign Campaign, targets []Target) bool {
+	if campaign.CanarySize <= 0 {
+		return false
+	}
+	absent := false
+	for i := range targets {
+		if targets[i].Wave != 0 {
+			continue
+		}
+		switch {
+		case targets[i].State.Succeeded():
+			return false
+		case targets[i].State == TargetSkipped && targets[i].ErrorCode == ContainerNotFoundCode:
+			absent = true
+		}
+	}
+	return absent
 }

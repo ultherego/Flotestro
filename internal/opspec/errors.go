@@ -769,6 +769,15 @@ var reportedGuides = []ErrorGuide{
 	{Code: "docker_object_missing", Stage: "helper", Retry: RetryNever,
 		Meaning: "The object the order names is not on the host. A removal says so rather than reporting success: silence would leave the operator believing they cleaned something up.",
 		Action:  "Read the engine state of the host again; the object is already gone, or it was never on this host.", CountsAsFailure: true},
+	{Code: "container_not_found", Stage: "helper", Retry: RetryNever,
+		Meaning: "The order names a container by its exact name and the engine of this host, which answered, has no container with that name. The host is skipped, not failed: a campaign over many hosts names the container once and not every host runs it.",
+		Action:  "Nothing to do when the container is not meant for this host. Otherwise check the name against the Containers screen of the host, or start the container, and order again.", CountsAsFailure: false},
+	{Code: "docker_engine_unreadable", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The container engine of the host could not be read, so it is not known whether the container the order names is there. This is never taken for its absence.",
+		Action:  "Check that the engine runs on the host and answers its socket, then order again.", CountsAsFailure: true},
+	{Code: "container_identity_mismatch", Stage: "helper", Retry: RetryNever,
+		Meaning: "The removal of a container by name found a container with that name that runs another image than the order expects, so nothing was removed: the name may belong to something else than when the order was written.",
+		Action:  "Read the container on the host. Remove it by its identifier if it is the one to go, or correct the expected image in the order.", CountsAsFailure: true},
 
 	// The inner identity envelope of a session through a relay (security
 	// remediation, chapter 4).

@@ -138,7 +138,7 @@ func (c *Client) Logs(ctx context.Context, reference string, options LogsOptions
 		query.Set("since", strconv.FormatInt(options.Since.Unix(), 10))
 	}
 
-	target := "http://docker/" + apiVersion + "/containers/" + details.ID + "/logs?" + query.Encode()
+	target := c.baseURL(ctx) + "/containers/" + details.ID + "/logs?" + query.Encode()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return result, err
