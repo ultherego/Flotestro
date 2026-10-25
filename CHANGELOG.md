@@ -6,6 +6,15 @@ day the tag was published.
 
 ## [Unreleased]
 
+### Changed
+
+- **The orchestrator no longer rewrites a runner lease it renewed seconds ago.** It asks for the lease of every
+  campaign that is not finished on every pass, five seconds apart, and the lease lasts 45 seconds and is
+  meant to be renewed every 15. A lease held with more than 30 seconds left is now read and not written;
+  one that is due is renewed once, as before, and an expired one still goes to whoever asks. An idle
+  installation with thirty-five campaigns waiting for an approval made about 540 writes a minute to the
+  campaigns table for nothing; it makes about a fifth of that now.
+
 ## [0.64.4] - 2026-10-24
 
 ### Added
