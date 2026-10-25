@@ -55,6 +55,13 @@ view that could not reach every host says so and carries its denominator. A
 host that cannot answer is a host that cannot answer — not a host with nothing
 wrong.
 
+**A test does not depend on the day it is run on.** The screens print how long ago a
+fixture was and the fixtures carry fixed dates, so "10d ago" appears on the day the
+calendar reaches it. A panel test that proves an unknown size is not shown as nought asks
+the cell for the text "0" (`within(row).queryByText("0")`), not the row for the digit as a
+substring; a test fails if a digit is asked of an element that may print an age
+(`internal/release/web_test_dates_test.go`).
+
 **Every refusal carries a stable code.** A new way to refuse means a new code,
 an entry in `internal/opspec/errors.go` giving its meaning and what to do
 about it, and an entry in `docs/site/docs/errors.html`. A test fails if the
