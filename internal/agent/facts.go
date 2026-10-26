@@ -4,6 +4,7 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -161,20 +163,67 @@ type Facts struct {
 	CollectedAt time.Time         `json:"collected_at"`
 }
 
+// volatileKeys are the fields of a report that move without the machine having
+// changed: clocks, counters, free space, what the next run of a timer will be.
+// They stay in the report the panel stores and out of its revision, so that a
+// host whose configuration stands still keeps one revision instead of a new one
+// of tens of kilobytes at every full report. Every module also carries its own
+// revision and is stored apart when it changes.
+var volatileKeys = map[string]bool{
+	"collected_at": true, "uptime_seconds": true, "booted_at": true, "last_entry": true,
+	"root_fs_free_bytes": true, "avail_bytes": true, "fs_avail_bytes": true, "fs_used_bytes": true,
+	"used_percent": true, "inodes_used_percent": true,
+	"packets": true, "bytes": true, "handle": true,
+	"next_run": true, "next_runs": true,
+	"last_rx_seconds": true, "offset_seconds": true, "error_seconds": true, "poll_seconds": true,
+	"root_dispersion_seconds": true, "root_delay_seconds": true, "frequency_ppm": true,
+	"last_sync_at": true, "now": true, "pid": true,
+}
+
+// ruleCounters are the counters a firewall rule prints inside its own text.
+var ruleCounters = regexp.MustCompile(`counter packets \d+ bytes \d+`)
+
+// stableForm returns the report without what moves by itself.
+func stableForm(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		kept := make(map[string]any, len(typed))
+		for key, inner := range typed {
+			if volatileKeys[key] || strings.HasSuffix(key, "observed_at") {
+				continue
+			}
+			kept[key] = stableForm(inner)
+		}
+		return kept
+	case []any:
+		kept := make([]any, len(typed))
+		for i, inner := range typed {
+			kept[i] = stableForm(inner)
+		}
+		return kept
+	case string:
+		return ruleCounters.ReplaceAllString(typed, "counter")
+	}
+	return value
+}
+
 // Revision computes a stable revision from the content of the report.
 func (f Facts) Revision() (string, []byte, error) {
-	// The timestamp must not affect the revision.
-	stable := f
-	stable.CollectedAt = time.Time{}
-	payload, err := json.Marshal(stable)
-	if err != nil {
-		return "", nil, err
-	}
-	sum := sha256.Sum256(payload)
 	full, err := json.Marshal(f)
 	if err != nil {
 		return "", nil, err
 	}
+	decoder := json.NewDecoder(bytes.NewReader(full))
+	decoder.UseNumber()
+	var generic any
+	if err := decoder.Decode(&generic); err != nil {
+		return "", nil, err
+	}
+	stable, err := json.Marshal(stableForm(generic))
+	if err != nil {
+		return "", nil, err
+	}
+	sum := sha256.Sum256(stable)
 	return hex.EncodeToString(sum[:16]), full, nil
 }
 

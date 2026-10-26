@@ -616,6 +616,11 @@
     <code>(host, revision)</code>: rewizja, którą już widział, nie tworzy nowego
     wiersza, przesuwa tylko znacznik świeżości, więc host, który wrócił do
     wcześniejszego obrazu, ma ten obraz jako najnowszy, a nie pozorną nowość.
+    Znacznik liczy się bez tego, co rusza się samo - zegarów, uptime'u, wolnego
+    miejsca, liczników pakietów, kolejnego uruchomienia timera - więc host, który
+    stoi w miejscu, trzyma jedną rewizję, a payload zapisany przy rewizji pochodzi
+    z pierwszego raportu, który ją niósł; bieżące wartości pól zmiennych są we
+    fragmentach modułów.
     Dla każdego modułu trzyma fragment z własną rewizją, źródłem, payloadem
     oraz, tam gdzie modułu nie dało się odczytać, z polem
     <code>unavailable_reason</code>; znacznik czasu fragmentu przesuwa się tylko
