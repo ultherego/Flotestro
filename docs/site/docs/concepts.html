@@ -614,7 +614,11 @@
     <code>(host, revision)</code>: a revision it has seen before does not create
     a new row, it only moves the freshness mark, so a host that went back to an
     earlier picture has that picture as its latest rather than a spurious new
-    one. Per module it keeps a fragment with its own revision, source,
+    one. The tag is computed without what moves by itself - clocks, uptime,
+    free space, packet counters, the next run of a timer - so a host that stands
+    still keeps one revision, and the payload kept with a revision is the one of
+    the first report that carried it; the current values of the volatile
+    fields are in the module fragments. Per module it keeps a fragment with its own revision, source,
     payload and, where the module could not be read, an
     <code>unavailable_reason</code>; a fragment's timestamp moves only when the
     module's revision actually changed, so "fresh" and "unchanged" stay

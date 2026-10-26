@@ -26,6 +26,15 @@ day the tag was published.
 
 ### Changed
 
+- **A host that stands still no longer writes a new inventory revision at every full report.** The
+  revision tag was a hash of the whole report, which carries free disk space, uptime, the nanosecond of the
+  boot, packet counters inside firewall rule text, the next run of every timer and the clock offsets, so
+  nearly every report was a new revision with a payload of 15 to 45 KB. The tag is now computed without those
+  fields. The 20 revisions kept for each of the lab's four hosts held 3 to 10 distinct states
+  once those fields were left out. The payload kept with a revision is the one of the first report that carried it;
+  the current values stay in the module fragments. Measured on the lab over 40 idle minutes: three new revisions
+  on the host that still ran an older agent, none on the three that ran this one.
+
 - **The orchestrator no longer rewrites a runner lease it renewed seconds ago.** It asks for the lease of every
   campaign that is not finished on every pass, five seconds apart, and the lease lasts 45 seconds and is
   meant to be renewed every 15. A lease held with more than 30 seconds left is now read and not written;
