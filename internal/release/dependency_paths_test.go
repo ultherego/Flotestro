@@ -55,7 +55,7 @@ func TestADependencyTreeCannotEnterTheHistory(t *testing.T) {
 		t.Log("no .git beside the sources, so the tracked paths were not read; the rules were")
 		return
 	}
-	listed, err := exec.Command("git", "-C", root, "ls-files", "-z").Output()
+	listed, err := exec.Command("git", "-c", "safe.directory="+root, "-C", root, "ls-files", "-z").Output()
 	if err != nil {
 		t.Fatalf("git ls-files: %v", err)
 	}
