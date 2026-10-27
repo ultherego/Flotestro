@@ -29,3 +29,22 @@ func TestTheDoorsRequestToWaitIsRecognised(t *testing.T) {
 		t.Error("an ordinary failure was taken for a request to wait")
 	}
 }
+
+// The engine and the container sit on the first hosts only, and each holder keeps an
+// identifier of its own for the one name.
+func TestOnlyTheFirstHostsHoldTheContainerWithTheirOwnIdentifier(t *testing.T) {
+	sim := simulation{working: 4, docker: 3, holders: 2, container: "web"}
+	ids := map[string]bool{}
+	for index, want := range []int{1, 1, 0, 0} {
+		host := sim.host(index, fmt.Sprintf("sim-h%04d", index))
+		if len(host.Containers) != want {
+			t.Fatalf("host %d holds %d containers, want %d", index, len(host.Containers), want)
+		}
+		for _, container := range host.Containers {
+			ids[container.ID] = true
+		}
+	}
+	if len(ids) != 2 {
+		t.Fatalf("the holders share an identifier: %v", ids)
+	}
+}

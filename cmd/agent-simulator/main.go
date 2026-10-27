@@ -57,6 +57,10 @@ type simulation struct {
 	// ordered; the rest only keep their sessions. latency is how long a change takes.
 	working int
 	latency time.Duration
+	// docker is how many of the working hosts, from the first, have an engine;
+	// of those the first holders also run the container named container.
+	docker, holders int
+	container       string
 }
 
 // maxThrottledTries bounds how often an agent knocks again after the enrollment
@@ -91,6 +95,20 @@ func enrollWithRetry(ctx context.Context, counters *stats, request agent.Identit
 // works says whether the agent of this index carries out the changes ordered to
 // it: the first of every batch do, so the same hosts work on every run.
 func (s simulation) works(index int) bool { return index < s.working }
+
+// host builds the machine of the agent of this index: the engine only on the
+// first docker hosts, the container only on the first holders, and an
+// identifier of its own on each, as an engine gives.
+func (s simulation) host(index int, hostname string) *agent.SimulatedHost {
+	host := &agent.SimulatedHost{Latency: s.latency}
+	if index < s.holders && index < s.docker {
+		sum := sha256.Sum256([]byte(hostname + "/" + s.container))
+		host.Containers = []agent.SimulatedContainer{{
+			ID: hex.EncodeToString(sum[:6]), Name: s.container, Image: "nginx:1.27", Running: true,
+		}}
+	}
+	return host
+}
 
 // fleet holds the live sessions so a storm can cut all of them at once.
 type fleet struct {
@@ -181,6 +199,11 @@ func run() error {
 			"how many of the agents carry out kernel setting changes ordered to them; the rest only keep sessions")
 		latency = flag.Duration("work-latency", 200*time.Millisecond,
 			"how long one change takes on a working agent")
+		docker = flag.Int("docker", 0,
+			"how many of the working hosts, from the first, have a container engine")
+		holders = flag.Int("container-holders", 0,
+			"how many of the docker hosts, from the first, run the named container")
+		container  = flag.String("container", "flotestro-sim-web", "the name of the container the holders run")
 		metricsURL = flag.String("metrics-url", config.Env("FLOTESTRO_METRICS_URL", ""),
 			"the panel's exposition, read after every storm")
 		metricsToken = flag.String("metrics-token", config.Env("FLOTESTRO_METRICS_TOKEN", ""),
@@ -223,6 +246,7 @@ func run() error {
 		prefix: *prefix, stateDir: *stateDir, enrollmentURL: *enrollmentURL,
 		gatewayURL: *gatewayURL, token: *token, caFile: *caFile, fleet: newFleet(),
 		working: *working, latency: *latency,
+		docker: *docker, holders: *holders, container: *container,
 	}
 	if *stormEvery > 0 {
 		ramp := *stormRamp
@@ -302,11 +326,14 @@ func simulate(ctx context.Context, index int, sim simulation, counters *stats, l
 	counters.enrolled.Add(1)
 
 	facts := agent.SimulatedFacts(hostname, machineID, sim.works(index))
+	if sim.works(index) && index < sim.docker {
+		facts = agent.WithDocker(facts)
+	}
 	var executor *agent.TaskExecutor
 	if sim.works(index) {
 		// A working agent runs the real executor over a machine of its own, and
 		// the changes ordered to the fleet differ from host to host.
-		executor, err = agent.NewSimulatedExecutor(&agent.SimulatedHost{Latency: sim.latency},
+		executor, err = agent.NewSimulatedExecutor(sim.host(index, hostname),
 			sim.stateDir+"/"+hostname+"/journal", func() agent.Facts { return facts }, log)
 		if err != nil {
 			counters.failed.Add(1)
