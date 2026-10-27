@@ -246,6 +246,7 @@ func (s *Server) Routes() http.Handler {
 	// One question across every kind the caller may read.
 	s.route(mux, "GET /api/v1/search", s.handleSearch)
 	s.route(mux, "GET /api/v1/fleet/activity", s.handleFleetActivity)
+	s.route(mux, "GET /api/v1/fleet/capabilities", s.handleFleetCapabilities)
 	s.route(mux, "GET /api/v1/hosts", s.handleListHosts)
 	s.route(mux, "GET /api/v1/hosts/{id}", s.handleGetHost)
 	s.route(mux, "GET /api/v1/hosts/{id}/inventory", s.handleHostInventory)
@@ -1065,11 +1066,18 @@ func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 		Owner:           query.Get("owner"),
 		IdentityDomain:  query.Get("identity_domain"),
 		Capability:      query.Get("capability"),
+		CapabilityState: query.Get("capability_state"),
 		HelperMode:      query.Get("helper_mode"),
 		// The refusal code narrows to the hosts the gateway last turned away for
 		// that reason - the dashboard's expired-certificates tile leads here.
 		ConnectionRefusal: query.Get("connection_refusal"),
 		Scopes:            principal.ScopesFor(authz.PermHostRead),
+	}
+	switch filter.CapabilityState {
+	case "", hosts.CapabilityAvailable, hosts.CapabilityMissing, hosts.CapabilityUnknown:
+	default:
+		problem(w, http.StatusBadRequest, "invalid_filter", "capability_state is available, missing or unknown")
+		return
 	}
 	// A channel that is not a channel is refused rather than matched to
 	// nothing.

@@ -48,3 +48,12 @@ func TestOnlyTheFirstHostsHoldTheContainerWithTheirOwnIdentifier(t *testing.T) {
 		t.Fatalf("the holders share an identifier: %v", ids)
 	}
 }
+
+func TestTheLastDockerHostsRunTheOldAgent(t *testing.T) {
+	sim := simulation{working: 10, docker: 5, oldDocker: 2}
+	for index, want := range []bool{false, false, false, true, true, false, false} {
+		if got := sim.oldAgent(index); got != want {
+			t.Errorf("host %d: old = %v, want %v", index, got, want)
+		}
+	}
+}

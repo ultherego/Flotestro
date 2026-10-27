@@ -1577,6 +1577,7 @@ function reasonName(t: Translate, reason: string): string {
   const names: Record<string, string> = {
     capability_missing: t("no adapter"),
     capability_unknown: t("adapter unknown"),
+    agent_too_old: t("agent too old for names"),
     maintenance: t("in maintenance"),
     quarantined: t("quarantined"),
     out_of_scope: t("out of your scope"),
@@ -2477,6 +2478,7 @@ function blockerName(t: Translate, target: CampaignTarget): ReactNode {
   if (target.error_code === "resource_busy") return t("resource lock");
   if (target.error_code === "capability_missing") return t("capability");
   if (target.error_code === "maintenance") return t("maintenance");
+  if (target.error_code === "agent_too_old") return t("agent too old for names");
   if (target.error_code === "no_hostname_for_host") return t("no new name in the mapping");
   return target.error_code;
 }

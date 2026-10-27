@@ -193,6 +193,7 @@ func (s *Server) openAPI() map[string]any {
 	register("VulnerabilityReport", vulnerabilityReport{})
 	register("ComplianceReport", compliance.Report{})
 	register("FleetActivity", FleetActivity{})
+	register("FleetCapabilities", FleetCapabilities{})
 	register("ServerCapabilities", serverCapabilities{})
 	register("FleetBackups", fleetBackupsView{})
 	register("FleetCertificates", fleetCertificatesView{})
@@ -572,6 +573,7 @@ var queryParameters = map[string][]queryParameter{
 		{"failure_domain", "string", "The failure domain an operator placed the host in."},
 		{"team", "string", "The identifier of a team; keeps its hosts. The word none keeps the hosts nobody has placed in a team."},
 		{"capability", "string", "An adapter the host must have available, such as packages.apt."},
+		{"capability_state", "string", "With capability: available (the default), missing (the host reported the adapter and it is not usable) or unknown (the host never reported it - not the same as not having it)."},
 		{"helper_mode", "string", "The mode the host's root helper runs in: enforce, prefer, observe, " +
 			"or unknown for a host that has not said. A host not on enforce carries out a mutating " +
 			"request that arrives without the panel's signed capability."},
@@ -1439,6 +1441,7 @@ var responseSchemas = map[string]map[string]any{
 	"GET /api/v1/hosts/{id}/metrics":                    ref("HostMetrics"),
 	"GET /api/v1/hosts/{id}/monitoring":                 ref("HostMonitoring"),
 	"GET /api/v1/fleet/activity":                        ref("FleetActivity"),
+	"GET /api/v1/fleet/capabilities":                    ref("FleetCapabilities"),
 	"GET /api/v1/capabilities":                          ref("ServerCapabilities"),
 	"GET /api/v1/backups":                               ref("FleetBackups"),
 	"GET /api/v1/certificates":                          ref("FleetCertificates"),

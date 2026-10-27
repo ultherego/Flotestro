@@ -158,11 +158,12 @@ func (h *SimulatedHost) dockerResponse(action *helperv1.DockerActionRequest) *he
 		Message: "no container on this host is named " + action.GetContainerName()}
 }
 
-// WithDocker gives facts the docker capability of a host that has an engine.
-func WithDocker(facts Facts) Facts {
+// WithDocker gives facts the docker capability of a host that has an engine. An old agent reports
+// the adapter without the ability to resolve a container name, as agents did before it existed.
+func WithDocker(facts Facts, old bool) Facts {
 	facts.Capabilities = append(append(Capabilities{}, facts.Capabilities...),
 		Capability{Name: CapDocker, Version: 1, Available: true,
-			Features: map[string]bool{"read": true, "write": true}})
+			Features: map[string]bool{"read": true, "write": true, "name_addressing": !old}})
 	return facts
 }
 

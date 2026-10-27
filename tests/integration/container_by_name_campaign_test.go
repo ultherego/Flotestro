@@ -109,8 +109,8 @@ func TestACampaignNamesAContainerOnceAndEveryHostSettlesIt(t *testing.T) {
 	h.approveCampaign(campaign)
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "completed_with_issues": true, "failed": true}, 5*time.Minute)
-	// An agent older than the rest of the fleet does not know the name: it refuses the order
-	// and the campaign fails on it. Every other outcome has to be a completed campaign.
+	// An agent older than the rest of the fleet does not resolve a name: the panel leaves it
+	// out of the campaign with its reason instead of sending it an order it would refuse.
 	newest := ""
 	for _, host := range online {
 		newest = max(newest, host.AgentVersion)
@@ -119,12 +119,7 @@ func TestACampaignNamesAContainerOnceAndEveryHostSettlesIt(t *testing.T) {
 	for _, host := range online {
 		older[host.ID] = host.AgentVersion < newest
 	}
-	tolerated := false
-	for _, isOlder := range older {
-		tolerated = tolerated || isOlder
-	}
-	// A host without the container is not a failure of the change.
-	if final.State != "completed" && !(tolerated && final.State == "failed") {
+	if final.State != "completed" {
 		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
 
@@ -139,8 +134,9 @@ func TestACampaignNamesAContainerOnceAndEveryHostSettlesIt(t *testing.T) {
 			continue
 		}
 		if older[host.ID] {
-			if target.State == "succeeded" || target.State == "skipped" {
-				t.Errorf("%s runs an older agent that cannot resolve a name and ended %s", host.Hostname, target.State)
+			if target.State != "ineligible" || target.ErrorCode != "agent_too_old" {
+				t.Errorf("%s runs an older agent that cannot resolve a name and ended %s (%s): it is left out as too old",
+					host.Hostname, target.State, target.ErrorCode)
 			}
 			continue
 		}

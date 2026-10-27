@@ -28,6 +28,13 @@ import (
 // ErrNotFound means there is no host with the given identity.
 var ErrNotFound = errors.New("the host does not exist")
 
+// The states a capability filter can ask for.
+const (
+	CapabilityAvailable = "available"
+	CapabilityMissing   = "missing"
+	CapabilityUnknown   = "unknown"
+)
+
 // Capability describes one adapter discovered on a host. The name says what
 // the host has ('packages.apt'), not what an operation wants ('packages').
 type Capability struct {
@@ -1036,6 +1043,10 @@ type ListFilter struct {
 	// Capability keeps the hosts whose registry has the named adapter
 	// available; 'packages.apt', not 'packages'.
 	Capability string
+	// CapabilityState says which hosts the Capability keeps: "available" (the default), "missing"
+	// (the host reported the adapter and it is not usable) or "unknown" (the host never reported
+	// it, which is not the same as not having it).
+	CapabilityState string
 	// HelperMode keeps the hosts whose root helper runs in the named mode;
 	// 'unknown' keeps the ones that have not said, and they are not the same as
 	// the ones on enforce.
@@ -1363,9 +1374,18 @@ func (f ListFilter) conditions() ([]string, []any, error) {
 	}
 	if f.Capability != "" {
 		args = append(args, f.Capability)
-		conditions = append(conditions, fmt.Sprintf(
-			"exists (select 1 from host_capability_registry r"+
-				" where r.host_id = h.id and r.name = $%d and r.available)", len(args)))
+		var clause string
+		switch f.CapabilityState {
+		case "", CapabilityAvailable:
+			clause = "exists (select 1 from host_capability_registry r where r.host_id = h.id and r.name = $%d and r.available)"
+		case CapabilityMissing:
+			clause = "exists (select 1 from host_capability_registry r where r.host_id = h.id and r.name = $%d and not r.available)"
+		case CapabilityUnknown:
+			clause = "not exists (select 1 from host_capability_registry r where r.host_id = h.id and r.name = $%d)"
+		default:
+			return nil, nil, fmt.Errorf("capability_state %q is not available, missing or unknown", f.CapabilityState)
+		}
+		conditions = append(conditions, fmt.Sprintf(clause, len(args)))
 	}
 	if f.Expression != nil {
 		condition, extra, err := selector.Compile(f.Expression, len(args))

@@ -84,6 +84,8 @@ type HostFilters = {
   owner: string;
   maintenance: string;
   capability: string;
+  /** With a capability: `missing` (reported unusable) or `unknown` (never reported); empty is the hosts that have it. */
+  capability_state: string;
   /** The mode the host's root helper runs in, or `unknown` when it has not said. */
   helper_mode: string;
   channel: string;
@@ -108,7 +110,7 @@ type HostFilters = {
 
 const EMPTY_FILTERS: HostFilters = {
   q: "", site: "", environment: "", os_family: "", connection_state: "", lifecycle_state: "",
-  owner: "", maintenance: "", capability: "", helper_mode: "", channel: "",
+  owner: "", maintenance: "", capability: "", capability_state: "", helper_mode: "", channel: "",
   reboot_required: "", security_updates: "",
   identity_domain: "", connection_refusal: "", tags: "", failed_units: "", package_db_broken: "",
   sssd_offline: "", agent_behind: "", relay: "", failure_domain: "", team: "", sort: "",
@@ -309,7 +311,7 @@ export function Hosts() {
   const chipLabels: Record<Exclude<keyof HostFilters, "sort">, string> = {
     q: t("search"), site: t("site"), environment: t("environment"), os_family: t("OS"),
     connection_state: t("state"), lifecycle_state: t("lifecycle"), owner: t("owner"),
-    maintenance: t("maintenance"), capability: t("capability"),
+    maintenance: t("maintenance"), capability: t("capability"), capability_state: t("technology"),
     helper_mode: t("helper mode"), channel: t("channel"),
     reboot_required: t("reboot required"), security_updates: t("security updates"),
     identity_domain: t("domain"), connection_refusal: t("refused for"), tags: t("tags"),
@@ -326,6 +328,7 @@ export function Hosts() {
       if (value === "none") return t("no team");
       return teams.data?.items.find((one) => one.id === value)?.name ?? value;
     }
+    if (key === "capability_state") return value === "missing" ? t("cannot use it") : t("never reported");
     return value;
   };
   const activeFilters = (Object.keys(EMPTY_FILTERS) as (keyof HostFilters)[])
@@ -1152,6 +1155,13 @@ function MoreFilters({ filters, setFilter, activity, teams, relays, canSeeRelays
           <select value={filters.capability} onChange={(event) => setFilter("capability", event.target.value)} data-testid="filter-capability">
             <option value="">{t("capability: any")}</option>
             {CAPABILITIES.map((name) => <option key={name} value={name}>{name}</option>)}
+          </select>
+        </Field>
+        <Field label={t("Of the capability")}>
+          <select value={filters.capability_state} onChange={(event) => setFilter("capability_state", event.target.value)} data-testid="filter-capability-state">
+            <option value="">{t("hosts that have it")}</option>
+            <option value="missing">{t("hosts that cannot use it")}</option>
+            <option value="unknown">{t("hosts that never reported it")}</option>
           </select>
         </Field>
         {/* What the host's helper does with a request carrying no capability of

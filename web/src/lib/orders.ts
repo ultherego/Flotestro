@@ -68,12 +68,15 @@ export function emptyOrder(): Order {
  */
 export function prefilledOrder(params: URLSearchParams): Draft | null {
   if (!params.has("action") && !params.has("name") && !params.has("reason")
-    && !params.has("group") && !params.has("host_id")) return null;
+    && !params.has("group") && !params.has("host_id") && !params.has("capability")) return null;
   // A group page hands its name over: the order then opens on the group's
   // selector, the way a host list opens on its identifiers.
   const group = params.get("group") ?? "";
   const action = params.get("action") ?? "";
   const payloadText = params.get("payload") ?? "";
+  // A technology page hands one over: the order opens on the hosts that have it, as a selector
+  // that is asked again, not as a list copied at this moment.
+  const capability = params.get("capability") ?? "";
   // A payload another screen composed opens in the fields when the registry
   // can show it: the operator follows a link and lands in a form, not in a
   // box of JSON they have to read before they may change one value.
@@ -92,7 +95,8 @@ export function prefilledOrder(params: URLSearchParams): Draft | null {
       group,
       // The way the targets are named follows what the address carries:
       // a host list from a campaign row, a group from the group page.
-      targetMode: params.has("host_id") ? "hosts" : group ? "expression" : "filters",
+      targetMode: params.has("host_id") ? "hosts" : group || capability ? "expression" : "filters",
+      rules: capability ? [{ field: "capability", value: capability, negated: false }] : emptyOrder().rules,
     },
     step: 0,
   };

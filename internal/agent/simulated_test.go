@@ -163,7 +163,7 @@ func restartByName(id, name string) *agentv1.TaskEnvelope {
 // engine but not the container refuses with container_not_found, and a host without an
 // engine does not accept the order at all.
 func TestSimulatedHostsAnswerAnOrderByNameEachForItself(t *testing.T) {
-	facts := WithDocker(SimulatedFacts("h", "m", true))
+	facts := WithDocker(SimulatedFacts("h", "m", true), false)
 	holder := &SimulatedHost{Containers: []SimulatedContainer{{ID: "a1b2c3d4e5f6", Name: "web", Image: "nginx", Running: true}}}
 	if result := simulatedExecutor(t, holder, facts).Execute(context.Background(), restartByName("t1", "web")); result.GetStatus() != agentv1.TaskResult_STATUS_SUCCEEDED {
 		t.Fatalf("the holder did not restart it: %v %s %s", result.GetStatus(), result.GetErrorCode(), result.GetMessage())
@@ -186,8 +186,19 @@ func TestSimulatedHostsAnswerAnOrderByNameEachForItself(t *testing.T) {
 
 func TestSimulatedFactsWithDockerCarryTheCapabilityAndTheOriginalDoesNot(t *testing.T) {
 	plain := SimulatedFacts("h", "m", true)
-	withDocker := WithDocker(plain)
+	withDocker := WithDocker(plain, false)
 	if !withDocker.Capabilities.Satisfies(CapDocker) || plain.Capabilities.Satisfies(CapDocker) {
 		t.Fatal("the docker capability is not exactly on the host that has an engine")
+	}
+}
+
+func TestAnOldSimulatedAgentReportsDockerWithoutNamingContainers(t *testing.T) {
+	facts := SimulatedFacts("h", "m", true)
+	if !WithDocker(facts, false).Capabilities.Feature(CapDocker, "name_addressing") {
+		t.Fatal("a current agent does not report that it resolves names")
+	}
+	old := WithDocker(facts, true).Capabilities
+	if old.Feature(CapDocker, "name_addressing") || !old.Satisfies(CapDocker) {
+		t.Fatal("an old agent has docker and does not resolve names")
 	}
 }

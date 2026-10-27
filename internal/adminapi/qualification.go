@@ -22,6 +22,9 @@ const (
 	// ReasonCapabilityUnknown means a host that has not reported its adapter
 	// registry yet.
 	ReasonCapabilityUnknown = "capability_unknown"
+	// ReasonAgentTooOld means a host whose agent cannot do what the order needs and has said so:
+	// it does not resolve a container by name, and would refuse the order on the host.
+	ReasonAgentTooOld = "agent_too_old"
 	// ReasonOutOfScope means a host outside the operator's permission
 	// scope.
 	ReasonOutOfScope = "out_of_scope"
@@ -66,6 +69,13 @@ type closedHost struct {
 // matters: the most serious obstacle is reported, not the first one met.
 func assessCandidates(candidates []hosts.Host, action opspec.ActionType,
 	conflicts map[string]string, now time.Time) qualification {
+	return assessCandidatesFor(candidates, action, false, conflicts, now)
+}
+
+// assessCandidatesFor is assessCandidates for an order that may name a container and leave its
+// identifier to each host: an agent that does not resolve names is closed out with the reason.
+func assessCandidatesFor(candidates []hosts.Host, action opspec.ActionType, byName bool,
+	conflicts map[string]string, now time.Time) qualification {
 	result := qualification{}
 	requirement := action.RequiredCapability()
 	offline := hostGroup{Reason: ReasonOffline}
@@ -97,6 +107,14 @@ func assessCandidates(candidates []hosts.Host, action opspec.ActionType,
 		} else if requirement != "" && !host.Capabilities.Satisfies(requirement) {
 			result.close(host, campaigns.TargetIneligible, ReasonCapabilityMissing,
 				"the host lacks the adapter this operation requires: "+requirement)
+			continue
+		}
+
+		// A host that said nothing of its adapters is already noted as unknown; one that did, and
+		// does not name the feature, runs an agent from before it.
+		if byName && len(host.Capabilities) > 0 && !nameAddressingSupported(&host) {
+			result.close(host, campaigns.TargetIneligible, ReasonAgentTooOld,
+				"the agent of this host does not resolve a container by its name; upgrade it")
 			continue
 		}
 

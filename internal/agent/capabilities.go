@@ -503,7 +503,8 @@ func DetectCapabilities() Capabilities {
 			Version:   adapterVersion,
 			Available: docker,
 			// The adapter reads the engine state and runs operations on containers.
-			Features: map[string]bool{"read": docker, "write": docker, "compose": compose},
+			// name_addressing: the helper resolves a container named in the order on the host.
+			Features: map[string]bool{"read": docker, "write": docker, "compose": compose, "name_addressing": docker},
 			Reason:   reason(docker, "this host has no Docker socket"),
 		},
 	}

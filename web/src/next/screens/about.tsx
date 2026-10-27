@@ -139,6 +139,12 @@ export const ABOUT: Record<string, About> = {
     icon: "groups",
     help: "A tag is either a word or a key and a value. It is written by people, so it is the one fact about a host the panel never infers. Renaming one reaches every host carrying it at once, which is why it asks for a reason.",
   },
+  technologies: {
+    title: "Technologies",
+    lead: "Which hosts have a technology, which cannot, and which never said.",
+    icon: "containers",
+    help: "Docker, the firewall, a package manager: each is something a host reports it has. A campaign for one of them reaches the hosts that have it, so this is where to look first. A host that did not report a technology is not counted as a host without it - it is listed apart, because an agent that is too old to say is not an answer. 'Use as campaign targets' hands the campaign the technology as a selector, not a copy of the list, so it follows the fleet.",
+  },
   teams: {
     title: "Teams",
     lead: "The boundary of authority over a set of hosts.",

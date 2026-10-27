@@ -15,8 +15,16 @@ day the tag was published.
   read is `docker_engine_unreadable`, never taken for an absence. A canary that exercised nothing stops at
   the manual gate. The preview says apart which hosts qualify by capability and on which the container
   was seen in the last full read. Removal by name needs the name typed again and the image it should run.
-  Addressing by identifier is unchanged. An agent older than this release cannot resolve a name: the
-  order fails on it with `helper_rejected`.
+  Addressing by identifier is unchanged. An agent older than this release cannot resolve a name, and says
+  so in its docker adapter (`name_addressing`): the panel leaves it out of the campaign as `agent_too_old`
+  and refuses a single order to it with `container_name_unsupported`, instead of sending an order it would
+  refuse on the host.
+- **A Technologies screen: who has Docker, who cannot, who never said.** For each technology a host
+  reports it lists the hosts that have it, the hosts that reported it unusable (with the reasons they
+  give) and the hosts that never reported it, which is not the same as not having it. "Use as campaign
+  targets" opens the campaign wizard on the technology as a selector, so the campaign follows the fleet.
+  `GET /api/v1/fleet/capabilities` gives the counts; the host list takes `capability_state` (`available`,
+  `missing`, `unknown`) beside `capability`, and the list of hosts has the same filter.
 
 ### Fixed
 
