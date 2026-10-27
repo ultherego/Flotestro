@@ -1135,16 +1135,19 @@ export function Pager({ page, size, total, onPage, onSize, sizes = PAGE_SIZES }:
   const pages = Math.max(1, Math.ceil(total / Math.max(1, size)));
   return (
     <>
-      <label className="fl-rows">
-        {t("Rows per page")}
-        <select
-          value={size}
-          onChange={(event) => { onSize(Number(event.target.value)); onPage(1); }}
-          data-testid="page-size"
-        >
-          {sizes.map((one) => <option key={one} value={one}>{one}</option>)}
-        </select>
-      </label>
+      {/* One size is not a choice: the list is drawn at that size and says so in the count. */}
+      {sizes.length > 1 && (
+        <label className="fl-rows">
+          {t("Rows per page")}
+          <select
+            value={size}
+            onChange={(event) => { onSize(Number(event.target.value)); onPage(1); }}
+            data-testid="page-size"
+          >
+            {sizes.map((one) => <option key={one} value={one}>{one}</option>)}
+          </select>
+        </label>
+      )}
       <span className="fl-note" data-testid="page-of">
         {total > 0
           ? t("{n} of {total}", { n: `${(page - 1) * size + 1}-${Math.min(page * size, total)}`, total })

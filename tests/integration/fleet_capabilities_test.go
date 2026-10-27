@@ -43,5 +43,19 @@ func TestTheFleetDividesByATechnologyIntoHasHasNotAndUnknown(t *testing.T) {
 		}
 	}
 
+	// A page by number is the same rows as the list walked from its start.
+	var whole, second struct {
+		Items []hostView `json:"items"`
+	}
+	h.get("/api/v1/hosts?limit=4", &whole)
+	h.get("/api/v1/hosts?limit=2&offset=2", &second)
+	if len(whole.Items) == 4 {
+		for i, host := range second.Items {
+			if host.ID != whole.Items[2+i].ID {
+				t.Errorf("row %d of the page at offset 2 is %s, the list has %s there", i, host.Hostname, whole.Items[2+i].Hostname)
+			}
+		}
+	}
+
 	h.do(http.MethodGet, "/api/v1/hosts?capability=docker&capability_state=sometimes", nil, nil, http.StatusBadRequest)
 }

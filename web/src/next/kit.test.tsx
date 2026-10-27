@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 import type { ReactElement } from "react";
-import { Actions, Band, Bars, Button, Card, Chart, Diff, Fact, Facts, Find, Flow, Form, Head, Kpi, Menu, MenuItem, Needs, pageNumbers, Pie, Pill, Readout, Reasons, Ring, Section, Squares, stacked, Table, Tile, Toolbar } from "./kit";
+import { Actions, Band, Bars, Button, Card, Chart, Diff, Fact, Facts, Find, Flow, Form, Head, Kpi, Menu, MenuItem, Needs, Pager, pageNumbers, Pie, Pill, Readout, Reasons, Ring, Section, Squares, stacked, Table, Tile, Toolbar } from "./kit";
 
 /**
  * The kit decides what the panel looks like, so the rules a screen must
@@ -560,5 +560,19 @@ describe("a form is not a card", () => {
     draw(<Section testId="s" title="Mounts" note="As the host reports them.">rows</Section>);
     expect(screen.getByTestId("s").tagName).toBe("SECTION");
     expect(screen.getByTestId("s").querySelector(".fl-card")).toBeNull();
+  });
+});
+
+describe("Pager", () => {
+  const noop = () => undefined;
+  it("offers a choice of page size only when there is more than one size", () => {
+    render(<Pager page={1} size={10} total={95} onPage={noop} onSize={noop} sizes={[10]} />);
+    expect(screen.queryByTestId("page-size")).toBeNull();
+    // Without the choice the pages are still numbered and the count still says which rows are drawn.
+    expect(screen.getByTestId("page-10")).toBeInTheDocument();
+    expect(screen.getByTestId("page-of")).toHaveTextContent("1-10 of 95");
+    cleanup();
+    render(<Pager page={1} size={10} total={95} onPage={noop} onSize={noop} sizes={[10, 25]} />);
+    expect(screen.getByTestId("page-size")).toBeInTheDocument();
   });
 });

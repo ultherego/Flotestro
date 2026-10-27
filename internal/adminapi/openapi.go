@@ -573,6 +573,7 @@ var queryParameters = map[string][]queryParameter{
 		{"failure_domain", "string", "The failure domain an operator placed the host in."},
 		{"team", "string", "The identifier of a team; keeps its hosts. The word none keeps the hosts nobody has placed in a team."},
 		{"capability", "string", "An adapter the host must have available, such as packages.apt."},
+		{"offset", "integer", "Rows to skip, for a page by number; the cursor wins when both are given."},
 		{"capability_state", "string", "With capability: available (the default), missing (the host reported the adapter and it is not usable) or unknown (the host never reported it - not the same as not having it)."},
 		{"helper_mode", "string", "The mode the host's root helper runs in: enforce, prefer, observe, " +
 			"or unknown for a host that has not said. A host not on enforce carries out a mutating " +

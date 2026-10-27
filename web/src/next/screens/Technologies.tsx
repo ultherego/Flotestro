@@ -1,11 +1,12 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { api, ApiError, type Collection } from "../../lib/api";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useDebounced } from "../../lib/debounce";
+import { api, ApiError, type Page } from "../../lib/api";
 import type { Host } from "../../lib/types";
 import { useT } from "../../i18n";
 import {
-  Button, C, Card, Download, Empty, Grid, Kpi, Kpis, Note, Pill, Problem, Table,
+  Button, C, Card, Download, Empty, Find, Grid, Kpi, Kpis, Note, Pager, Pill, Problem, Table, Toolbar,
 } from "../kit";
 
 /**
@@ -34,17 +35,9 @@ export const TECHNOLOGIES = [
   "packages.dnf", "packages.pacman", "schedules", "storage", "sshd", "kernel", "files.managed",
 ];
 
-/** How many hosts of one answer the screen draws; the rest is behind the host list. */
-export const LIST_LIMIT = 100;
-
 /** The campaign wizard, opened on the hosts that have a technology (a selector, not a list). */
 export function campaignFor(technology: string): string {
   return `/bulk?capability=${encodeURIComponent(technology)}`;
-}
-
-/** The host list narrowed to one answer about one technology. */
-export function hostsWhere(technology: string, state: "available" | "missing" | "unknown"): string {
-  return `/hosts?capability=${encodeURIComponent(technology)}&capability_state=${state}`;
 }
 
 /**
@@ -190,28 +183,52 @@ function Chosen({ technology, total }: { technology: FleetCapability; total: num
   );
 }
 
-/** The first hosts of one answer; the host list holds the rest. */
+/** The rows a list of hosts shows at a time: ten, and no choice about it. */
+export const ROWS_PER_PAGE = 10;
+const ROW_SIZES = [ROWS_PER_PAGE] as const;
+
+/** The address of one numbered, searched page of one answer about one technology. */
+export function pageAddress(technology: string, state: string, size: number, page: number, search: string): string {
+  const query = new URLSearchParams({
+    limit: String(size), offset: String((page - 1) * size),
+    capability: technology, capability_state: state,
+  });
+  if (search) query.set("q", search);
+  return `/api/v1/hosts?${query}`;
+}
+
+/** One answer's hosts, ten at a time, numbered and searchable. */
 function HostsOf({ technology, state, count }: {
   technology: string;
   state: "available" | "missing" | "unknown";
   count: number;
 }) {
   const t = useT();
+  const [page, setPage] = useState(1);
+  const size = ROWS_PER_PAGE;
+  const [search, setSearch] = useState("");
+  const asked = useDebounced(search.trim(), 300);
   const list = useQuery({
-    queryKey: ["fleet-capability-hosts", technology, state],
-    queryFn: () => api.get<Collection<Host>>(
-      `/api/v1/hosts?limit=${LIST_LIMIT}&capability=${encodeURIComponent(technology)}&capability_state=${state}`),
+    queryKey: ["fleet-capability-hosts", technology, state, size, page, asked],
+    queryFn: () => api.get<Page<Host>>(pageAddress(technology, state, size, page, asked)),
     enabled: count > 0,
+    placeholderData: keepPreviousData,
   });
+  // A search or a technology that changes sends the reader back to the first page.
+  useEffect(() => setPage(1), [technology, asked]);
   const items = list.data?.items ?? [];
+  const total = list.data?.total ?? count;
   if (count === 0) return <Empty>{t("No host.")}</Empty>;
   return (
     <>
+      <Toolbar end={<Pager page={page} size={size} total={total} onPage={setPage} onSize={() => undefined} sizes={ROW_SIZES} />}>
+        <Find value={search} onChange={setSearch} placeholder={t("Find a host")} testId={`find-${state}`} />
+      </Toolbar>
       <Table
         rows={items}
         keyOf={(one) => one.id}
         rowTestId={(one) => `host-${state}-${one.hostname}`}
-        empty={list.isLoading ? t("Reading the hosts…") : t("No host.")}
+        empty={list.isLoading ? t("Reading the hosts…") : t("No host matches this.")}
         columns={[
           { key: "host", head: t("Host"), tight: true, cell: (one) => <Link to={`/hosts/${one.id}`}>{one.hostname}</Link> },
           { key: "site", head: t("Site"), tight: true, minor: true, cell: (one) => one.site || "—" },
@@ -221,13 +238,6 @@ function HostsOf({ technology, state, count }: {
           ) },
         ]}
       />
-      {count > items.length && items.length > 0 && (
-        <Note>
-          {t("{shown} of {n} hosts are drawn.", { shown: items.length, n: count })}{" "}
-          <Link to={hostsWhere(technology, state)}>{t("All of them in the host list")}</Link>
-        </Note>
-      )}
     </>
   );
 }
-

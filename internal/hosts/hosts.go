@@ -999,6 +999,9 @@ func (s *Store) Get(ctx context.Context, hostID string) (*Host, error) {
 
 // ListFilter describes the filters applied on the server's side.
 type ListFilter struct {
+	// Offset skips that many rows of the page; it is read only when there is no cursor.
+	Offset int
+
 	Site            string
 	Environment     string
 	OSFamily        string
@@ -1577,6 +1580,10 @@ func (s *Store) ListPaged(ctx context.Context, filter ListFilter, cursor Cursor,
 		clause = "where " + strings.Join(conditions, " and ")
 	}
 	clause += fmt.Sprintf(" order by %s %s, h.id %s limit $%d", column.expression, direction, direction, len(args))
+	if filter.Offset > 0 && !cursor.Set {
+		args = append(args, filter.Offset)
+		clause += fmt.Sprintf(" offset $%d", len(args))
+	}
 
 	items, err := s.query(ctx, clause, args...)
 	if err != nil {

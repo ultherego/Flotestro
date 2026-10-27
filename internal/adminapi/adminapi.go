@@ -1156,6 +1156,10 @@ func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, _ := strconv.Atoi(query.Get("limit"))
+	// A numbered page is asked for by the rows to skip; a cursor, when there is one, wins.
+	if offset, err := strconv.Atoi(query.Get("offset")); err == nil && offset > 0 {
+		filter.Offset = offset
+	}
 	page, err := s.hosts.ListPaged(r.Context(), filter, cursor,
 		paging.Limit(limit, defaultListPage, maxListPage))
 	if err != nil {
