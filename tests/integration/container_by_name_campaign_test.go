@@ -65,6 +65,18 @@ func TestACampaignNamesAContainerOnceAndEveryHostSettlesIt(t *testing.T) {
 		absent(t, "no container runs on some of the docker hosts and not on others")
 	}
 
+	// An agent older than the rest of the fleet does not resolve a name: the panel leaves it out of
+	// the preview and of the campaign with its reason, instead of sending it an order it would refuse.
+	// The gate holds one host a release behind on purpose, so this is the ordinary state of the lab.
+	newest := ""
+	for _, host := range online {
+		newest = max(newest, host.AgentVersion)
+	}
+	older := map[string]bool{}
+	for _, host := range online {
+		older[host.ID] = host.AgentVersion < newest
+	}
+
 	// The capability is what makes a host eligible; what the panel has seen of the container is said apart.
 	// The evidence is the last full read the panel stored for each host, and a read the test has just
 	// taken reaches it a moment later, so the preview is asked until it agrees or the wait is over.
@@ -93,8 +105,20 @@ func TestACampaignNamesAContainerOnceAndEveryHostSettlesIt(t *testing.T) {
 		for _, host := range preview.Container.Absent.Sample {
 			notSeenOn[host] = true
 		}
+		tooOld := map[string]bool{}
+		for _, group := range preview.Excluded {
+			if group.Reason == "agent_too_old" {
+				for _, host := range group.Sample {
+					tooOld[host] = true
+				}
+			}
+		}
 		for _, host := range online {
 			switch {
+			case older[host.ID]:
+				if !tooOld[host.Hostname] || seenOn[host.Hostname] {
+					problems = append(problems, fmt.Sprintf("%s runs an older agent that cannot resolve a name and the preview does not leave it out as too old", host.Hostname))
+				}
 			case has[host.ID][name] && !seenOn[host.Hostname]:
 				problems = append(problems, fmt.Sprintf("the preview does not say the container %q was seen on %s", name, host.Hostname))
 			case !has[host.ID][name] && !notSeenOn[host.Hostname]:
@@ -133,16 +157,6 @@ func TestACampaignNamesAContainerOnceAndEveryHostSettlesIt(t *testing.T) {
 	h.approveCampaign(campaign)
 	final := h.awaitCampaign(campaign.ID,
 		map[string]bool{"completed": true, "completed_with_issues": true, "failed": true}, 5*time.Minute)
-	// An agent older than the rest of the fleet does not resolve a name: the panel leaves it
-	// out of the campaign with its reason instead of sending it an order it would refuse.
-	newest := ""
-	for _, host := range online {
-		newest = max(newest, host.AgentVersion)
-	}
-	older := map[string]bool{}
-	for _, host := range online {
-		older[host.ID] = host.AgentVersion < newest
-	}
 	if final.State != "completed" {
 		t.Fatalf("the campaign ended in state %s (%s)", final.State, h.whyItEnded(final))
 	}
