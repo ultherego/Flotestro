@@ -20,6 +20,7 @@ const Hosts = screen(() => import("./screens/Hosts"), "Hosts");
 const Access = screen(() => import("./screens/Access"), "Access");
 const Teams = screen(() => import("./screens/Teams"), "Teams");
 const Tags = screen(() => import("./screens/Tags"), "Tags");
+const Technologies = screen(() => import("./screens/Technologies"), "Technologies");
 const Groups = screen(() => import("./screens/Groups"), "Groups");
 const Relays = screen(() => import("./screens/Relays"), "Relays");
 const Audit = screen(() => import("./screens/Audit"), "Audit");
@@ -183,6 +184,7 @@ export function NextPanel({ look }: { look: Look }) {
         <Route path="/relays" element={<Relays />} />
         <Route path="/groups" element={<Groups />} />
         <Route path="/tags" element={<Tags />} />
+        <Route path="/technologies" element={<Technologies />} />
         <Route path="/teams" element={<Teams />} />
         <Route path="/access" element={<Access />} />
         <Route path="*" element={<NotFound />} />

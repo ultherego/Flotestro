@@ -862,6 +862,9 @@
 
 .fl-app .fl-flush .fl-card-body { padding: var(--s3) 0 0; }
 .fl-app .fl-flush .fl-card-head { padding-bottom: var(--s1); }
+/* A card whose body is a table has no gutter of its own, so what stands above the table keeps the card's. */
+.fl-app .fl-flush .fl-card-body > .fl-toolbar { padding: var(--s3) var(--s5) 0; margin-bottom: var(--s3); }
+.fl-app .fl-flush .fl-card-body > .fl-note { display: block; padding: var(--s3) var(--s5) 0; }
 
 /* What the card lets you do stands at its foot, outside the part that
    scrolls: a button left among the facts floated two lines under the

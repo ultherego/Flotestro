@@ -237,7 +237,8 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 
 	// The qualification decides which hosts really move.
 	kept, excluded := excludeHosts(candidates, chosen, principal.Subject)
-	assessment := assessCandidates(kept, action, s.activeConflicts(r.Context()), time.Now().UTC())
+	assessment := assessCandidatesFor(kept, action, containerOrderName(action, payload) != "",
+		s.activeConflicts(r.Context()), time.Now().UTC())
 	assessment.Closed = append(assessment.Closed, excluded...)
 	if len(assessment.Ready) == 0 {
 		problem(w, http.StatusBadRequest, "no_eligible_targets",
@@ -979,7 +980,10 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kept, excluded := excludeHosts(candidates, chosen, principal.Subject)
-	assessment := assessCandidates(kept, action, s.activeConflicts(r.Context()), time.Now().UTC())
+	previewName := query.Get("container_name")
+	byName := previewName != "" && containerOrderName(action,
+		opspec.Payload{DockerContainer: &opspec.DockerContainerPayload{Name: previewName}}) != ""
+	assessment := assessCandidatesFor(kept, action, byName, s.activeConflicts(r.Context()), time.Now().UTC())
 	assessment.Closed = append(assessment.Closed, excluded...)
 
 	response["sample"] = hostNames(assessment.Ready[:min(len(assessment.Ready), previewSampleSize)])

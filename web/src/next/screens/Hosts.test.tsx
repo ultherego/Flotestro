@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
-import { Hosts } from "./Hosts";
+import { Hosts, filterParams, readFilters } from "./Hosts";
 
 /**
  * The list is read for two things: which machines answer, and which of
@@ -612,5 +612,14 @@ describe("the chrome of the list", () => {
     draw();
     await waitFor(() => expect(screen.getByText("No host matches the filters.")).toBeInTheDocument());
     expect(screen.getAllByRole("link", { name: "Add host" })[0]).toHaveAttribute("href", "/hosts/new");
+  });
+});
+
+describe("the state of a capability in the host list", () => {
+  it("travels from the address to the server, and an empty one is not sent", () => {
+    const filters = readFilters(new URLSearchParams("capability=docker&capability_state=unknown"));
+    expect(filters.capability_state).toBe("unknown");
+    expect(filterParams(filters).toString()).toBe("capability=docker&capability_state=unknown");
+    expect(filterParams(readFilters(new URLSearchParams("capability=docker"))).has("capability_state")).toBe(false);
   });
 });

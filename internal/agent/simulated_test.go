@@ -149,3 +149,56 @@ func TestSubstitutedFactsAreNotRefreshedFromTheMachine(t *testing.T) {
 		t.Fatalf("a real agent lost its partial refresh: hostname %q, err %v", facts.Hostname, err)
 	}
 }
+
+func restartByName(id, name string) *agentv1.TaskEnvelope {
+	return &agentv1.TaskEnvelope{
+		TaskId: id, IdempotencyKey: id,
+		Action: &agentv1.TaskEnvelope_DockerAction{DockerAction: &agentv1.DockerAction{
+			Operation: agentv1.DockerAction_OPERATION_RESTART, ContainerName: name,
+		}},
+	}
+}
+
+// One order names a container; the host that has it restarts it, the host that has an
+// engine but not the container refuses with container_not_found, and a host without an
+// engine does not accept the order at all.
+func TestSimulatedHostsAnswerAnOrderByNameEachForItself(t *testing.T) {
+	facts := WithDocker(SimulatedFacts("h", "m", true), false)
+	holder := &SimulatedHost{Containers: []SimulatedContainer{{ID: "a1b2c3d4e5f6", Name: "web", Image: "nginx", Running: true}}}
+	if result := simulatedExecutor(t, holder, facts).Execute(context.Background(), restartByName("t1", "web")); result.GetStatus() != agentv1.TaskResult_STATUS_SUCCEEDED {
+		t.Fatalf("the holder did not restart it: %v %s %s", result.GetStatus(), result.GetErrorCode(), result.GetMessage())
+	}
+	if container, _ := holder.Container("web"); !container.Running {
+		t.Fatal("the container is not running after the restart")
+	}
+
+	empty := &SimulatedHost{}
+	result := simulatedExecutor(t, empty, facts).Execute(context.Background(), restartByName("t2", "web"))
+	if result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED || result.GetErrorCode() != "container_not_found" {
+		t.Fatalf("a host without the container: %v %q", result.GetStatus(), result.GetErrorCode())
+	}
+
+	none := simulatedExecutor(t, &SimulatedHost{}, SimulatedFacts("h", "m", true)).Execute(context.Background(), restartByName("t3", "web"))
+	if none.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED {
+		t.Fatal("a host without an engine carried out a container order")
+	}
+}
+
+func TestSimulatedFactsWithDockerCarryTheCapabilityAndTheOriginalDoesNot(t *testing.T) {
+	plain := SimulatedFacts("h", "m", true)
+	withDocker := WithDocker(plain, false)
+	if !withDocker.Capabilities.Satisfies(CapDocker) || plain.Capabilities.Satisfies(CapDocker) {
+		t.Fatal("the docker capability is not exactly on the host that has an engine")
+	}
+}
+
+func TestAnOldSimulatedAgentReportsDockerWithoutNamingContainers(t *testing.T) {
+	facts := SimulatedFacts("h", "m", true)
+	if !WithDocker(facts, false).Capabilities.Feature(CapDocker, "name_addressing") {
+		t.Fatal("a current agent does not report that it resolves names")
+	}
+	old := WithDocker(facts, true).Capabilities
+	if old.Feature(CapDocker, "name_addressing") || !old.Satisfies(CapDocker) {
+		t.Fatal("an old agent has docker and does not resolve names")
+	}
+}

@@ -100,6 +100,8 @@ export function fleetNavigation(permissions: Set<string>, capabilities: Capabili
         // that use it.
         { to: "/groups", label: "Groups", icon: "groups" },
         { to: "/tags", label: "Tags", icon: "groups" },
+        // The same question asked of a technology: who has Docker, who cannot, who never said.
+        { to: "/technologies", label: "Technologies", icon: "containers" },
         // A relay is a piece of the fleet's plumbing rather than a host: it
         // stands with the fleet, because a silent one is a site cut off.
         ...(v.seesRelays ? [{ to: "/relays", label: "Relays", icon: "relays" as const }] : []),

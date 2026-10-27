@@ -178,6 +178,13 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 			"the agent of this host does not filter the journal by boot; read without the boot filter or upgrade the agent")
 		return
 	}
+	// An agent from before the names would refuse the order on the host, with a reason that sounds
+	// like a fault of the order; it is refused here, with the real one.
+	if containerOrderName(action, payload) != "" && !nameAddressingSupported(host) {
+		problem(w, http.StatusConflict, "container_name_unsupported",
+			"the agent of this host does not resolve a container by its name; address the container by its identifier or upgrade the agent")
+		return
+	}
 	// A managed timer is written only by an agent that says it writes one.
 	if payload.Schedule != nil && payload.Schedule.Kind == opspec.ScheduleKindTimer &&
 		!host.Capabilities.Feature(hosts.CapSchedules, "managed_timers") {
@@ -895,6 +902,12 @@ func (s *Server) handleListErrors(w http.ResponseWriter, r *http.Request) {
 // boot_filter feature as present.
 func bootFilterSupported(host *hosts.Host) bool {
 	return host.Capabilities.Feature(hosts.CapJournald, "boot_filter")
+}
+
+// nameAddressingSupported says whether the agent of the host resolves a container by its name:
+// the docker adapter has to name the name_addressing feature as present.
+func nameAddressingSupported(host *hosts.Host) bool {
+	return host.Capabilities.Feature(hosts.CapDocker, "name_addressing")
 }
 
 // hostHasCapability resolves the operation requirement against the host's

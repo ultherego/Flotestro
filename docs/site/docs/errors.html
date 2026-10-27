@@ -122,7 +122,7 @@
 
   <main class="content">
 <h1>7. Errors and refusals</h1>
-<p class="lede">Every refusal, failure and skip the panel, the agent and the helper can put on a task, a campaign target or a request carries a stable code. A code answers two questions: what happened, and what can safely be done next. This page is the whole guide, 329 entries, transcribed from <code>internal/opspec/errors.go</code>; the panel serves the same list at <code>GET /api/v1/errors</code>.</p>
+<p class="lede">Every refusal, failure and skip the panel, the agent and the helper can put on a task, a campaign target or a request carries a stable code. A code answers two questions: what happened, and what can safely be done next. This page is the whole guide, 331 entries, transcribed from <code>internal/opspec/errors.go</code>; the panel serves the same list at <code>GET /api/v1/errors</code>.</p>
 <div class="note"><p class="note__title">The wording is the panel&rsquo;s own</p><p>The meaning and the action are quoted exactly as the panel shows them, so a code searched for here reads the same as the one on the screen. An unknown code gets no guide at all: the panel shows the code as it came rather than inventing advice.</p></div>
 <h2 id="retry">The retry policy</h2>
 <p>Every entry carries a retry policy. It is the answer to &ldquo;may this be repeated&rdquo; when the outcome is a failure or unknown.</p>
@@ -171,7 +171,7 @@
 <tbody>
 <tr><td><a href="#stage-planning"><code>planning</code></a></td><td>11</td></tr>
 <tr><td><a href="#stage-materialize"><code>materialize</code></a></td><td>5</td></tr>
-<tr><td><a href="#stage-preflight"><code>preflight</code></a></td><td>13</td></tr>
+<tr><td><a href="#stage-preflight"><code>preflight</code></a></td><td>15</td></tr>
 <tr><td><a href="#stage-admission"><code>admission</code></a></td><td>43</td></tr>
 <tr><td><a href="#stage-approval"><code>approval</code></a></td><td>9</td></tr>
 <tr><td><a href="#stage-dispatch"><code>dispatch</code></a></td><td>25</td></tr>
@@ -220,6 +220,8 @@
 <tr><td><a href="#err-array-unknown"><code class="refusal">array_unknown</code></a></td><td>helper</td><td><span class="badge retry-after-change">after_change</span></td><td>yes</td></tr>
 <tr><td><a href="#err-blocked-upgrade-required"><code class="refusal">blocked_upgrade_required</code></a></td><td>admission</td><td><span class="badge retry-after-change">after_change</span></td><td>no</td></tr>
 <tr><td><a href="#err-bond-needs-two-members"><code class="refusal">bond_needs_two_members</code></a></td><td>admission</td><td><span class="badge retry-after-change">after_change</span></td><td>no</td></tr>
+<tr><td><a href="#err-agent-too-old"><code class="refusal">agent_too_old</code></a></td><td>preflight</td><td><span class="badge retry-after-change">after_change</span></td><td>no</td></tr>
+<tr><td><a href="#err-container-name-unsupported"><code class="refusal">container_name_unsupported</code></a></td><td>preflight</td><td><span class="badge retry-after-change">after_change</span></td><td>no</td></tr>
 <tr><td><a href="#err-boot-filter-unsupported"><code class="refusal">boot_filter_unsupported</code></a></td><td>preflight</td><td><span class="badge retry-after-change">after_change</span></td><td>no</td></tr>
 <tr><td><a href="#err-budget-capacity"><code class="refusal">budget_capacity</code></a></td><td>admission</td><td><span class="badge retry-automatic">automatic</span></td><td>no</td></tr>
 <tr><td><a href="#err-budget-fair-share"><code class="refusal">budget_fair_share</code></a></td><td>admission</td><td><span class="badge retry-automatic">automatic</span></td><td>no</td></tr>
@@ -538,8 +540,12 @@
 <dd><p>The explicit host list of the order names a host it cannot carry; the answer names each one with its reason: unknown_host, out_of_scope, excluded_and_listed or invalid_host_id.</p><p><span class="label">What to do</span> Take the named hosts out of the list, or ask for the right over their site; the list is never trimmed quietly.</p><p><span class="badge retry-never">retry: never</span> <span class="badge not-failure">not a failure</span></p></dd>
 </dl>
 <h2 id="stage-preflight">Stage: preflight</h2>
-<p>13 codes.</p>
+<p>15 codes.</p>
 <dl class="kv">
+<dt id="err-agent-too-old"><code class="refusal">agent_too_old</code></dt>
+<dd><p>The order names a container by its name and leaves the identifier to each host, and the agent of this host reported its docker adapter without the ability to resolve a name. The host is left out of the campaign rather than sent an order it would refuse.</p><p><span class="label">What to do</span> Upgrade the agent on the host, or address the container by its identifier on this host; not a failure.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge not-failure">not a failure</span></p></dd>
+<dt id="err-container-name-unsupported"><code class="refusal">container_name_unsupported</code></dt>
+<dd><p>A single order names a container by its name and the agent of the host does not resolve names, so the order was not sent: the host would have refused it with a reason that reads like a fault of the order.</p><p><span class="label">What to do</span> Upgrade the agent on the host, or order again with the container's identifier; not a failure.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge not-failure">not a failure</span></p></dd>
 <dt id="err-boot-filter-unsupported"><code class="refusal">boot_filter_unsupported</code></dt>
 <dd><p>The read asked for one boot of the host and the agent of the host does not apply a boot filter: an older agent would ignore it and answer with every boot under the name of one, so the read was not sent.</p><p><span class="label">What to do</span> Read the journal without the boot filter and narrow it by time, or upgrade the agent on the host; not a failure.</p><p><span class="badge retry-after-change">retry: after_change</span> <span class="badge not-failure">not a failure</span></p></dd>
 <dt id="err-capability-missing"><code class="refusal">capability_missing</code></dt>

@@ -125,7 +125,7 @@
 
   <main class="content">
 <h1>8. API</h1>
-<p class="lede">Everything the panel does, a program can do. The API is the same surface the web panel runs on: 246 routes under <code>/api/v1</code>, answered in JSON, authorised by the same permissions and written to the same audit trail. This page is the route table as <code>internal/adminapi/adminapi.go</code> registers it and the conventions as <code>internal/adminapi/openapi.go</code> describes them; the panel serves its own OpenAPI document at <code>GET /api/v1/openapi.json</code>. For calls to paste into a terminal, with the answers they gave, see <a href="examples.html">11. Worked examples</a>.</p>
+<p class="lede">Everything the panel does, a program can do. The API is the same surface the web panel runs on: 247 routes under <code>/api/v1</code>, answered in JSON, authorised by the same permissions and written to the same audit trail. This page is the route table as <code>internal/adminapi/adminapi.go</code> registers it and the conventions as <code>internal/adminapi/openapi.go</code> describes them; the panel serves its own OpenAPI document at <code>GET /api/v1/openapi.json</code>. For calls to paste into a terminal, with the answers they gave, see <a href="examples.html">11. Worked examples</a>.</p>
 <h2 id="basics">The shape of the interface</h2>
 <ul><li>Reads use <code>GET</code>. Plans, operations and campaigns are created with <code>POST</code> and have explicit <code>approve</code>, <code>cancel</code>, <code>pause</code> and <code>resume</code> endpoints of their own.</li><li>Every list is paged on the server.</li><li>Errors are problem objects with a stable code.</li><li>The document describes itself: <code>GET /api/v1/openapi.json</code> is generated from the registered routes, so it can never drift from them.</li><li>The panel listens on <code>FLOTESTRO_ADMIN_ADDR</code>, <code>127.0.0.1:8080</code> by default, in plain HTTP; it is meant to sit behind a reverse proxy that terminates TLS.</li></ul>
 <h2 id="authentication">Authentication</h2>
@@ -188,7 +188,7 @@
 <tbody>
 <tr><td><a href="#routes-service">Service endpoints</a></td><td>21</td></tr>
 <tr><td><a href="#routes-caller">Signing in, and the caller's own records</a></td><td>8</td></tr>
-<tr><td><a href="#routes-fleet">The fleet at a glance</a></td><td>10</td></tr>
+<tr><td><a href="#routes-fleet">The fleet at a glance</a></td><td>11</td></tr>
 <tr><td><a href="#routes-hosts">Hosts</a></td><td>59</td></tr>
 <tr><td><a href="#routes-enrollment">Enrollment, relays and the fleet CA</a></td><td>14</td></tr>
 <tr><td><a href="#routes-work">Operations, reads and campaigns</a></td><td>40</td></tr>
@@ -250,6 +250,7 @@
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/access/review</code><br><span class="caption">The access review: every identity with what it can do, when it was last used and what the reviewer should look at.</span></td><td><code>principal.manage</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/events</code><br><span class="caption">The event stream of the whole visible fleet. One connection per tab is enough for all the operations in progress.</span></td><td><code>job.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/fleet/activity</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/fleet/capabilities</code></td><td><code>host.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/fleet/summary</code></td><td><code>host.read</code>, <code>audit.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/fleet/readiness</code><br><span class="caption">Whether the fleet is ready for what the panel is about to be asked: the steps that are measured and the ones that are not.</span></td><td><code>host.read</code></td></tr>
 <tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/maintenance/calendar</code></td><td><code>campaign.read</code>, <code>host.read</code></td></tr>

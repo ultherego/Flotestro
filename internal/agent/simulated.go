@@ -12,6 +12,7 @@ import (
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/helper"
+	"github.com/ultherego/flotestro/internal/modules/docker"
 )
 
 // SimulatedHost is the machine a simulated agent works on: the kernel
@@ -22,8 +23,19 @@ type SimulatedHost struct {
 	// Latency is how long a change takes; zero means no delay.
 	Latency time.Duration
 
+	// Containers are the containers of the host's engine; a host without any
+	// still answers for a name, with the refusal a real engine gives.
+	Containers []SimulatedContainer
+
 	mu     sync.Mutex
 	sysctl map[string]string
+}
+
+// SimulatedContainer is one container of a simulated engine. Its ID is the
+// host's own, as on a real engine.
+type SimulatedContainer struct {
+	ID, Name, Image string
+	Running         bool
 }
 
 // NewSimulatedExecutor builds the executor of a simulated agent over host.
@@ -39,7 +51,7 @@ func NewSimulatedExecutor(host *SimulatedHost, stateDir string, facts func() Fac
 		return near, nil
 	})
 	executor := NewTaskExecutor(client, journal, facts, log)
-	executor.verifyReaders = &hostReaders{sysctl: host.readSysctl}
+	executor.verifyReaders = &hostReaders{sysctl: host.readSysctl, docker: host.readEngine}
 	return executor, nil
 }
 
@@ -66,6 +78,10 @@ func (h *SimulatedHost) serve(conn net.Conn) {
 		return
 	}
 	response := &helperv1.HelperResponse{Accepted: true, Final: true}
+	if docker := request.GetDockerAction(); docker != nil {
+		_ = helper.WriteMessage(conn, h.dockerResponse(docker))
+		return
+	}
 	if kernel := request.GetKernel(); kernel != nil &&
 		kernel.GetOperation() == helperv1.KernelRequest_OPERATION_SYSCTL_ENSURE {
 		if h.Latency > 0 {
@@ -84,6 +100,71 @@ func (h *SimulatedHost) serve(conn net.Conn) {
 		response.KernelResult = &helperv1.KernelResult{Message: "simulated", AppliedRuntime: applied}
 	}
 	_ = helper.WriteMessage(conn, response)
+}
+
+// readEngine is the engine as the verification reads it back after a change.
+func (h *SimulatedHost) readEngine(context.Context) (docker.Snapshot, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	snapshot := docker.Snapshot{}
+	for _, container := range h.Containers {
+		state := "exited"
+		if container.Running {
+			state = "running"
+		}
+		snapshot.Containers = append(snapshot.Containers, docker.Container{
+			ID: container.ID, Name: container.Name, Image: container.Image, State: state})
+	}
+	return snapshot, nil
+}
+
+// Container returns the container of the host with the name, if there is one.
+func (h *SimulatedHost) Container(name string) (SimulatedContainer, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, container := range h.Containers {
+		if container.Name == name {
+			return container, true
+		}
+	}
+	return SimulatedContainer{}, false
+}
+
+// dockerResponse answers an operation on a container the way the helper does:
+// a name is resolved on this host, and a name that names nothing is the refusal
+// container_not_found, not a guess.
+func (h *SimulatedHost) dockerResponse(action *helperv1.DockerActionRequest) *helperv1.HelperResponse {
+	switch action.GetOperation() {
+	case helperv1.DockerActionRequest_OPERATION_START, helperv1.DockerActionRequest_OPERATION_STOP,
+		helperv1.DockerActionRequest_OPERATION_RESTART:
+	default:
+		return &helperv1.HelperResponse{Accepted: true, Final: true}
+	}
+	if h.Latency > 0 {
+		time.Sleep(h.Latency)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i := range h.Containers {
+		container := &h.Containers[i]
+		if container.Name != action.GetContainerName() && (action.GetContainerId() == "" || container.ID != action.GetContainerId()) {
+			continue
+		}
+		container.Running = action.GetOperation() != helperv1.DockerActionRequest_OPERATION_STOP
+		return &helperv1.HelperResponse{Accepted: true, Final: true,
+			DockerActionResult: &helperv1.DockerActionResult{}}
+	}
+	return &helperv1.HelperResponse{Final: true, ErrorCode: helper.ErrorContainerNotFound,
+		Message: "no container on this host is named " + action.GetContainerName()}
+}
+
+// WithDocker gives facts the docker capability of a host that has an engine. An old agent reports
+// the adapter without the ability to resolve a container name, as agents did before it existed.
+func WithDocker(facts Facts, old bool) Facts {
+	facts.Capabilities = append(append(Capabilities{}, facts.Capabilities...),
+		Capability{Name: CapDocker, Version: 1, Available: true,
+			Features: map[string]bool{"read": true, "write": true, "name_addressing": !old}})
+	return facts
 }
 
 // SimulatedFacts builds believable but different facts for every agent; a working
