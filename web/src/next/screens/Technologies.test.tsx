@@ -80,7 +80,8 @@ describe("the technologies of the fleet", () => {
       expect(asked).toContain(`/api/v1/hosts?limit=100&capability=docker&capability_state=${state}`);
     }
     // The reason the hosts give is drawn, and "never said" is not worded as "without".
-    expect(screen.getByText("this host has no Docker socket")).toBeInTheDocument();
+    // The reason is a row of a table that wraps it, not a bar label that outgrows its column.
+    expect(screen.getByTestId("reason-this host has no Docker socket")).toHaveTextContent("this host has no Docker socket");
     expect(screen.getByText(/not the same as hosts without it/)).toBeInTheDocument();
   });
 

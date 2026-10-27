@@ -5,7 +5,7 @@ import { api, ApiError, type Collection } from "../../lib/api";
 import type { Host } from "../../lib/types";
 import { useT } from "../../i18n";
 import {
-  Bars, Button, C, Card, Download, Empty, Grid, Kpi, Kpis, Note, Pill, Problem, Table,
+  Button, C, Card, Download, Empty, Grid, Kpi, Kpis, Note, Pill, Problem, Table,
 } from "../kit";
 
 /**
@@ -159,10 +159,15 @@ function Chosen({ technology, total }: { technology: FleetCapability; total: num
           flush
         >
           {technology.reasons.length > 0 && (
-            <Bars items={technology.reasons.map((one) => ({
-              label: one.key === "-" ? t("no reason given") : one.key,
-              value: one.count,
-            }))} />
+            <Table
+              rows={technology.reasons}
+              keyOf={(one) => one.key}
+              rowTestId={(one) => `reason-${one.key}`}
+              columns={[
+                { key: "reason", head: t("Reason given"), cell: (one) => (one.key === "-" ? t("no reason given") : one.key) },
+                { key: "hosts", head: t("Hosts"), num: true, cell: (one) => one.count },
+              ]}
+            />
           )}
           <HostsOf technology={name} state="missing" count={technology.missing} />
         </Card>

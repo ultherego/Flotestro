@@ -3373,6 +3373,7 @@ export const pl: Record<string, string> = {
   "Table": "Tablica",
   "Tag": "Tag",
   "Tags": "Tagi",
+  "Reason given": "Podany powód",
   "agent too old for names": "agent za stary na nazwy",
   "technology": "technologia",
   "cannot use it": "nie może jej użyć",
