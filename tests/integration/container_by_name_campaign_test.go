@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"fmt"
 	"net/url"
 	"testing"
 	"time"
@@ -65,33 +66,56 @@ func TestACampaignNamesAContainerOnceAndEveryHostSettlesIt(t *testing.T) {
 	}
 
 	// The capability is what makes a host eligible; what the panel has seen of the container is said apart.
+	// The evidence is the last full read the panel stored for each host, and a read the test has just
+	// taken reaches it a moment later, so the preview is asked until it agrees or the wait is over.
+	type group struct {
+		Count  int      `json:"count"`
+		Sample []string `json:"sample"`
+	}
 	var preview struct {
-		Eligible  int `json:"eligible"`
+		Eligible int `json:"eligible"`
+		Excluded []struct {
+			Reason string   `json:"reason"`
+			Sample []string `json:"sample"`
+		} `json:"excluded"`
 		Container struct {
-			Present struct {
-				Sample []string `json:"sample"`
-			} `json:"present"`
-			Absent struct {
-				Sample []string `json:"sample"`
-			} `json:"absent"`
+			Present group `json:"present"`
+			Absent  group `json:"absent"`
+			Unknown group `json:"unknown"`
 		} `json:"container"`
 	}
 	query := url.Values{"action": {"docker.container.restart"}, "site": {"lab"}, "container_name": {name}}
-	h.get("/api/v1/campaigns/preview?"+query.Encode(), &preview)
-	seenOn, notSeenOn := map[string]bool{}, map[string]bool{}
-	for _, host := range preview.Container.Present.Sample {
-		seenOn[host] = true
-	}
-	for _, host := range preview.Container.Absent.Sample {
-		notSeenOn[host] = true
-	}
-	for _, host := range online {
-		switch {
-		case has[host.ID][name] && !seenOn[host.Hostname]:
-			t.Errorf("the preview does not say the container %q was seen on %s", name, host.Hostname)
-		case !has[host.ID][name] && !notSeenOn[host.Hostname]:
-			t.Errorf("the preview does not say the container %q was not seen on %s", name, host.Hostname)
+	judge := func() (problems []string) {
+		seenOn, notSeenOn := map[string]bool{}, map[string]bool{}
+		for _, host := range preview.Container.Present.Sample {
+			seenOn[host] = true
 		}
+		for _, host := range preview.Container.Absent.Sample {
+			notSeenOn[host] = true
+		}
+		for _, host := range online {
+			switch {
+			case has[host.ID][name] && !seenOn[host.Hostname]:
+				problems = append(problems, fmt.Sprintf("the preview does not say the container %q was seen on %s", name, host.Hostname))
+			case !has[host.ID][name] && !notSeenOn[host.Hostname]:
+				problems = append(problems, fmt.Sprintf("the preview does not say the container %q was not seen on %s", name, host.Hostname))
+			}
+		}
+		return problems
+	}
+	var problems []string
+	for deadline := time.Now().Add(time.Minute); ; time.Sleep(2 * time.Second) {
+		h.get("/api/v1/campaigns/preview?"+query.Encode(), &preview)
+		if problems = judge(); len(problems) == 0 || time.Now().After(deadline) {
+			break
+		}
+	}
+	for _, problem := range problems {
+		// What the preview said is part of the answer: a host left out of it as too old for names,
+		// or one whose read has not arrived, is a different fault from a preview that is wrong.
+		t.Errorf("%s (present %v, absent %v, unknown %v, excluded %+v)", problem,
+			preview.Container.Present.Sample, preview.Container.Absent.Sample,
+			preview.Container.Unknown.Sample, preview.Excluded)
 	}
 
 	campaign := h.createCampaign(map[string]any{
