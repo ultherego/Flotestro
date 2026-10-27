@@ -85,6 +85,16 @@ describe("the technologies of the fleet", () => {
     expect(screen.getByText(/not the same as hosts without it/)).toBeInTheDocument();
   });
 
+  it("draws a long reason in a table row that can wrap it, never as a bar label", async () => {
+    fleet();
+    const long = "this host has no Docker socket at /var/run/docker.sock and the rootless one is not running either";
+    (answers["/api/v1/fleet/capabilities"] as { items: { reasons: unknown[] }[] }).items[0].reasons = [{ key: long, count: 5 }];
+    const { container } = draw();
+    const row = await screen.findByTestId(`reason-${long}`);
+    expect(row).toHaveTextContent(long);
+    expect(container.querySelector(".fl-bars")).toBeNull();
+  });
+
   it("hands the campaign the technology as a selector, not as a list", async () => {
     fleet();
     draw();
