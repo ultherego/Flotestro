@@ -6,6 +6,8 @@ day the tag was published.
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-10-28
+
 ### Added
 
 - **A campaign can name a container once and every host settles it by itself.** `docker.container.start`,
@@ -24,7 +26,8 @@ day the tag was published.
   give) and the hosts that never reported it, which is not the same as not having it. "Use as campaign
   targets" opens the campaign wizard on the technology as a selector, so the campaign follows the fleet.
   `GET /api/v1/fleet/capabilities` gives the counts; the host list takes `capability_state` (`available`,
-  `missing`, `unknown`) beside `capability`, and the list of hosts has the same filter.
+  `missing`, `unknown`) beside `capability`, and the list of hosts has the same filter. The host list also takes
+  `offset` for a page by number (a cursor still wins when both are given).
 
 ### Fixed
 
@@ -1359,7 +1362,8 @@ across those five tags.
 
 The first tag. It did not build.
 
-[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.64.4...HEAD
+[Unreleased]: https://github.com/ultherego/Flotestro/compare/v0.65.0...HEAD
+[0.65.0]: https://github.com/ultherego/Flotestro/compare/v0.64.4...v0.65.0
 [0.64.4]: https://github.com/ultherego/Flotestro/compare/v0.64.3...v0.64.4
 [0.64.3]: https://github.com/ultherego/Flotestro/compare/v0.64.2...v0.64.3
 [0.64.2]: https://github.com/ultherego/Flotestro/compare/v0.64.1...v0.64.2
